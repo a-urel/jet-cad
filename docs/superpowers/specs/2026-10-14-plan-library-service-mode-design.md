@@ -1,11 +1,13 @@
 # The plan library, service mode (sub-project 2b) — design
 
-**Date:** 2026-10-14. **Status:** revision 3. Revision 1 was written after
+**Date:** 2026-10-14. **Status:** revision 4. Revision 1 was written after
 the human approved the design section by section in chat. Revision 2
 applies an independent Opus review (3 blocking, 11 important, 13 minor
 findings, each checked against the code), on the human's *"evet devam
 et"*; revision 3 applies that reviewer's re-review of revision 2 (N1-N10).
-Awaiting the human's review of this file.
+Revision 4 applies a second, independent Opus review (4 blocking, 8
+important, 13 minor) on the human's *"evet yap"*. Awaiting the human's
+review of this file.
 
 **Binds:** the umbrella spec
 [2026-10-13-kit-architecture-design.md](2026-10-13-kit-architecture-design.md)
@@ -59,12 +61,35 @@ otherwise.
      served and locked (S2);
    - `restoreService` replaces the host's groups (S3);
    - a write on a unit under a locked object answers `false` (S3).
+8. **The independent review's recommendations were taken** (*"evet yap"*):
+   - **E5 is additive** (S1): `Generated` stays as it is; a new hook,
+     `ParametricType.instances`, returns `GeneratedInstance`s beside
+     `generate`. The human approved this change of E5's form; approach 1
+     (decision 2) is unchanged in substance.
+   - **Today's rules, read from the code** (S2): duplicate labels stay
+     label-keyed, a bad label is served by its text, and a locked unit is
+     tapped and grouped but never selected. Decision 7's first bullet stands
+     and now matches the code.
+   - The design's click and band map a generated unit to its object (S2);
+     the copy gets its own lock expander and failure boundary (S3).
 
-**Open for the human (A14):** 2a's `selectTool` answers true with no view
-mounted, where today's answered false (2a results note, RV6). The mapping
-table (S5) carries 2a's behaviour until the human says otherwise.
+**Open for the human (A14):**
+1. 2a's `selectTool` answers true with no view mounted, where today's
+   answered false (2a results note, RV6). The mapping table (S5) carries
+   2a's behaviour until the human says otherwise.
+2. **A window band over a seats-only row** (S2, "In design"). The ruling
+   places the mapping in 2a's select gates, with `jet_cad_2d_flutter`
+   unchanged. The pick hook can map (`pick` answers the whole pick). The
+   band hook cannot: `bandAccepts` only filters the keys the tool built
+   (`jet_cad_2d_flutter/lib/src/select_tool.dart:601-606`). The tool takes
+   a group by a window only when the group owns a leaf and every one passes
+   (`:582-596`, `:621-645`), and a seats-only row owns none. So a window
+   band over it selects nothing. The ruling's test "a window band over a
+   seats-only row selects the row" needs either a mapping seam in
+   `jet_cad_2d_flutter` (A12's "where a seam is missing") or a 2a-side
+   mapping of the band's result. The test is held until the human rules.
 
-## Facts (at `651e3d0`, read from the code; checked by the review)
+## Facts (at `651e3d0`, read from the code; checked by two reviews)
 
 Paths are relative to `packages/`.
 
@@ -72,177 +97,300 @@ Paths are relative to `packages/`.
 - **`Generated` makes entities only.** It is a `final class` with a
   non-null `kind` and `payload`. Its three forms are plain geometry,
   `Generated.region` (a fill and its boundary) and `Generated.text`
-  (`jet_cad_2d/lib/src/parametric/parametric_system.dart:223-370`). It
+  (`jet_cad_2d/lib/src/parametric/parametric_system.dart:223-336`). It
   throws for `EntityKind.fill`, and for `text` and `attrib` through the
-  plain constructor. The ATTRIB refusal's reason is the rooms spec's D12
-  (`docs/superpowers/specs/2026-09-26-rooms-design.md:1076-1085`, R-15):
-  "an ATTRIB needs a tag nobody generates".
+  plain constructor (`:243-252`). The ATTRIB refusal's reason is the rooms
+  spec's D12 (`docs/superpowers/specs/2026-09-26-rooms-design.md:1076-1085`,
+  R-15): "an ATTRIB needs a tag nobody generates".
+- **`ParametricType` is an abstract class with default hooks**
+  (`parametric_system.dart:26`; `pageKey` `:77`, `dissolves` `:91`,
+  `readsPlaces` `:162`). In the workspace only 2a's `GuardedType`
+  implements it (`jet_cad_2d_plan/lib/src/kits/guard.dart:42`); it wraps
+  each hook, `generate` at `:76-84`.
 - **`generate` reads only its own parameters and its neighbours'**
-  (`parametric_system.dart:34-38`); the regeneration closure is seeds,
-  neighbours, references and referrers (`regeneration.dart:430-447`). The
+  (`parametric_system.dart:36-38`); the regeneration closure is seeds,
+  neighbours, references and referrers (`regeneration.dart:429-445`). The
   view gives an object's world transform: `ParametricView.toWorld(h)`
   (`parametric_system.dart:434`). It has no access to definitions or
   entities.
 - **Generated children are entities owned by the object's group, not tree
   nodes.** `_survey` builds `children` and `owned` from live entity slots
-  grouped by owner (`regeneration.dart:226-300`). `_plan`, `_storedBox` and
+  grouped by owner (`regeneration.dart:226-303`). `_plan`, `_storedBox` and
   `_subtreeRemoval` read `t.entities.slotOf(c)!` for every entry of
-  `children` (`:582-590`, `:342-353`, `:868-893`). An object is a
-  root-level `GroupNode` (`_naming`, `:20-28`), and `GroupNode.children`
+  `children` (`:579-590`, `:325-337`, `:867-886`). An object is a
+  root-level `GroupNode` (`_naming`, `:20-30`), and `GroupNode.children`
   holds child nodes only (`document/node.dart:55-69`).
 - **Matching is by kind, then by position**, and plans a command only on an
-  exact-`==` difference (12b R-15, `regeneration.dart:493-498`). The i-th
-  output of a kind meets the i-th existing child of that kind, ascending by
-  handle (`:582-660`). Outputs are in the group's local space
+  exact-`==` difference (12b R-15, the stamps' doc,
+  `regeneration.dart:482-507`). The i-th output of a kind meets the i-th
+  existing child of that kind, ascending by handle (`:265-267`,
+  `:621-660`). Outputs are in the group's local space
   (`parametric_system.dart:36`).
 - **The edit guard sees handles only.** `_refused` reads `r0.touched`, a set
-  of handles (`regeneration.dart:678-695`). `SetComponentCommand`,
+  of handles (`regeneration.dart:678-695`). Its owned branch refuses a
+  touched owned handle that still has an entity slot, and one that has none
+  while its owner lives (`:681-686`). `SetComponentCommand`,
   `TransformNodeCommand`, `SetInstanceDefinitionCommand` and
   `SetInstanceLayerCommand` each touch just the node's handle
-  (`document/commands.dart:316-319`, `:660-670`;
-  `document/layer_commands.dart:541-545`). A component write cannot be told
+  (`document/commands.dart:661`, `:316`, `:355`;
+  `document/layer_commands.dart:545`). A component write cannot be told
   from a move by `touched` or by capability.
-- **A touched node rebuilds the spatial index** (`index/spatial_index.dart:2786-2805`);
-  a components-only edit with an empty plan keeps the capability
-  `components` and the index skips it (`parametric_system.dart:893-897`,
-  `spatial_index.dart:2716`).
+- **An owned handle seeds its object** (`regeneration.dart:1019`). A seeded
+  object pays `_checkDangling` (`:1023`, `:919-938`) and regenerates its
+  whole closure.
+- **A hook throwing in the before-survey runs before the edit applies.**
+  `_run` surveys at `regeneration.dart:970` and applies the edit at `:971`.
+  Its `try` opens at `:1008`; a failure inside it undoes the edit
+  (`:1046-1048`).
+- **A touched node rebuilds the spatial index**
+  (`index/spatial_index.dart:2784-2805`); a components-only edit with an
+  empty plan keeps the capability `components` and the index skips it
+  (`parametric_system.dart:888-891`, `spatial_index.dart:2716`).
 - **A dissolved group leaves its instances' ATTRIBs behind.**
   `_subtreeRemoval` removes nested `InstanceNode`s (`regeneration.dart:903`)
-  and the entities owned by the group and its nested groups (`:864-880`),
+  and the entities owned by the group and its nested groups (`:867-886`),
   not those owned by a removed instance. `RemoveNodeCommand` removes no
-  owned entity (`commands.dart:478-490`); the select tool already removes an
+  owned entity (`commands.dart:477-491`); the select tool already removes an
   instance's owned leaves first (`jet_cad_2d_flutter/lib/src/select_tool.dart:795-803`,
   `:838-843`).
 - **An ATTRIB is an entity owned by its instance**
-  (`document/node.dart:148-152`): kind `attrib`, a `tag`, a `text`, a text
-  payload.
-- **Handles and undo:** `AddNodeCommand` raises the handle seed, so the
-  planner's `++reserved` works for nodes (`commands.dart:443-448`); a
-  `RemoveNodeCommand` inverse carries the node's components
-  (`commands.dart:480-487`).
-- **A definition in use cannot be removed** (`commands.dart:575-615`).
+  (`document/node.dart:141-148`): kind `attrib`, a `tag`, a `text`, a text
+  payload. Its coordinates are in the instance's local space: the index
+  composes the owner instance's transform into the leaf
+  (`spatial_index.dart:2963-2968`, `:3056-3075`).
+- **`SetEntityTextCommand(handle, text, tag)` writes the tag too**
+  (`commands.dart:236-268`). The planner's one call, for a TEXT, passes
+  `''` (`regeneration.dart:638`).
+- **Handles and undo:** `AddNodeCommand` raises the handle seed
+  (`commands.dart:427`), so the planner's `++reserved`
+  (`regeneration.dart:569`) works for nodes; a `RemoveNodeCommand` inverse
+  carries the node's components (`commands.dart:483-488`).
+- **A definition in use cannot be removed** (`commands.dart:596-602`).
 - **The commands E5 needs exist:** `AddNodeCommand` (`commands.dart:390`),
   `RemoveNodeCommand` (`:461`), `TransformNodeCommand` (`:286`),
   `SetInstanceDefinitionCommand` (`:326`), `SetInstanceLayerCommand`
-  (`layer_commands.dart:514`), `AddEntityCommand` (`commands.dart:36`),
-  `RemoveEntityCommand` (`:125`), `SetEntityTextCommand` (`:236`),
-  `SetEntityGeometryCommand` (`:676`).
+  (`layer_commands.dart:514`; `.restore`, `:523`), `AddEntityCommand`
+  (`commands.dart:36`), `RemoveEntityCommand` (`:125`),
+  `SetEntityTextCommand` (`:236`), `SetEntityGeometryCommand` (`:676`).
 
 **Selection**
-- **Hits map to root-level nodes**, through `resolveHit`
-  (`jet_cad_2d_flutter/lib/src/selection.dart:50-98`).
+- **The spatial index flattens groups.** `HitPath.chain` holds instances
+  only, root end first (`jet_cad_2d/lib/src/index/hit.dart:31`), filled
+  from `_instancePath`, written only for `InstanceNode`s
+  (`spatial_index.dart:952-994`, `:1406-1449`).
+- **`resolveHit` maps a hit to a root-level key**
+  (`jet_cad_2d_flutter/lib/src/selection.dart:54-73`). With a non-empty
+  chain it returns `SelectionKey.root(chain[0])` (`:56`); its topmost-group
+  rule runs for chainless leaves only (`:57-72`). So a hit on a seat's
+  definition geometry gives `root(seat)`, and a hit on the seat's ATTRIB
+  gives `root(row)`. The select tool reaches it through `_pick`
+  (`select_tool.dart:160-171`).
+- **A band adds every instance it meets.** `forEachInstanceInBand` walks
+  the flattened instance list (`spatial_index.dart:445-488`), and
+  `_bandKeys` adds each as `SelectionKey.root(h)` (`select_tool.dart:597-598`).
+  A group is taken by a crossing when a leaf of it passes, by a window only
+  when it owns a leaf and every one passes (`:582-596`, `:621-645`).
+- **The select gates override the pick and filter the band**
+  (`select_gates.dart:28-42`): `restrictsPick` and `pick` replace the
+  tool's whole pick, for presses and hovers; `bandAccepts` keeps or drops
+  each key the band built (`select_tool.dart:601-606`). 2a's
+  `PlanSelectGates` overrides neither yet
+  (`jet_cad_2d_plan/lib/src/tools/plan_select_gates.dart:15-40`).
 - **`SelectionController` holds any node.** It accepts
   `SelectionKey.root(h)` for a nested instance, prunes it and checks its
-  layer (`selection.dart:202-260`); `OutlineCache` draws it through
-  `accumulatedTransform` (`outline_cache.dart:303-319`). A seat can be the
-  engine's selection when a tool other than `resolveHit` puts it there.
+  layer (`selection.dart:168-260`); `OutlineCache` draws it through
+  `accumulatedTransform` (`outline_cache.dart:303-319`).
 
 **Today's service mode (`jet_cad_floor_plan`)**
 
 The inventory behind these lines, and behind S5's table, was read from
-`jet_cad_floor_plan/lib` and `docs/host-guide.md` at `651e3d0`.
+`jet_cad_floor_plan/lib` and `docs/host-guide.md` at `651e3d0`. Below, `C`
+is `host/floor_plan_controller.dart`, `T` is
+`service/table_select_tool.dart` and `HG` is `docs/host-guide.md`.
 - **One view, two modes.** `FloorPlanView` renders both; `FloorPlanMode` is
   `design` or `selection` (service). The service mode works on a *service
   copy* decoded from the design with `DraftPermissions.runtime`
-  (`host/floor_plan_controller.dart:1305-1319`), which allows `transform`
-  and `components` (`jet_cad_2d/lib/src/document/command.dart:57-58`).
-  Nothing done there reaches `designJson` or `dirty`. Leaving the mode
-  discards the copy and every service edit (`:1260`).
+  (`C:1305-1311`), which allows `transform` and `components`
+  (`jet_cad_2d/lib/src/document/command.dart:58-59`). Nothing done there
+  reaches `designJson` or `dirty`. Leaving the mode discards the copy and
+  every service edit (`C:1268-1270`). Only `activeDocument` and
+  `activeSelection` switch with the mode (`C:805-810`).
 - **The copy has its own systems.** The service view acquires the copy's
   parametric system and table label system: "a 14c move regenerates and
   re-stamps as in the design mode" (`host/service_view.dart:242-245`). It
   uses an engine `SelectionController` and `OutlineCache` over the copy
-  (`:125-131`).
+  (`:124-130`).
 - **A table is a live root-level instance of a symbol with seats**, and its
   identity is its number: the text of its lowest-handle ATTRIB tagged
-  `TABLE` (`tables/table_index.dart:55-160`, `tables/table_label.dart:14`).
-  The label is anchored at the definition's base point, its height from the
-  first leaf, upright and unmirrored in the world (`tableLabelStamp`,
-  `table_label.dart:55-152`); `TableLabelSystem` restamps it in the same
-  undo step as the edit that turned the table
-  (`tables/table_label_system.dart:21-63`). `nextTableNumber` gives
-  `max + 1` over the numbers of one to eight digits
+  `TABLE` (`tables/table_index.dart:49-58`, `:91-124`;
+  `tables/table_label.dart:14`). The label is anchored at the definition's
+  base point, its height from the first leaf (`table_label.dart:22-44`),
+  upright and unmirrored in the world (`tableLabelStamp`, `:55-64`), its
+  payload in definition space (`tableLabelPayload`, `:73-82`);
+  `TableLabelSystem` restamps it in the same undo step as the edit that
+  turned the table (`tables/table_label_system.dart:21-63`).
+  `nextTableNumber` gives `max + 1` over the numbers of one to eight digits
   (`tables/table_numbers.dart:58-73`).
-- **Unnumbered and duplicate tables are served for input.** An unnumbered
-  table is tapped, selected, banded and dragged, and reported by
-  `onTablesMoved`, but by no number-keyed callback
-  (`docs/host-guide.md:600-603`, `:1185-1187`, `:1201-1204`). Two tables
-  sharing a number are both selected and each gets an overlay (`:982-983`,
-  `:1040`). A layout entry may have a null number
-  (`host/service_layout.dart:107-108`).
+- **Unnumbered tables are served for input.** An unnumbered table is
+  tapped, selected, banded and dragged, and reported by `onTablesMoved`,
+  but by no number-keyed callback (`HG:601-602`, `:1185-1187`, `:1199`,
+  `:1206-1207`). A layout entry may have a null number
+  (`host/service_layout.dart:29`, `:121-122`).
+- **Duplicate numbers are number-keyed.** A status draws "on every live,
+  visible table carrying the number" (`C:576-578`). A tap reports any
+  non-null number, a shared one included (`T:479-492`). The guide's
+  double-tap example carries a shared number (`HG:1298-1303`). A group lists
+  a shared number once (`C:765-776`), `fitToTables` frames both tables
+  (`C:2062-2068`) and `select` takes both (`C:1844-1849`). Each gets an
+  overlay (`HG:963-965`, `:1045-1046`).
+- **A "bad" number is still a number.** The survey takes any non-empty
+  trimmed text (`table_index.dart:91-96`, `:120-124`).
+- **A locked table is never selected.** "A locked table selects nothing;
+  its tap is reported" (`T:449-450`, guarded at `:468`). A band never takes
+  it (`T:396-397`, `HG:600`), `select()` skips locked layers
+  (`C:1844-1870`), a context gesture on it changes nothing (`T:83-96`), a
+  long press under toggle ignores it (`T:609`) and a drag on it is a tap
+  (`T:280-281`). `HG:806-807` says a locked table "can be tapped and
+  selected"; the code is the oracle (A12).
 - **Statuses, groups, group statuses and focus are controller state**, keyed
   by number or group id, kept across mode switches, `load`, `newPlan` and
-  `resetLayout`; never saved, exported or printed
-  (`host/floor_plan_controller.dart:579-660`). A host sets groups
-  (`setTableGroups`); the service bar's Merge and Split only ask it.
+  `resetLayout`; never saved, exported or printed (`C:576-660`). A host sets
+  groups (`setTableGroups`, `C:598-603`: a member number with no live table
+  is kept, a shared number allowed); the service bar's Merge and Split only
+  ask it.
+- **The selection** is cleared by `load` and `newPlan` (`C:1188-1191`); a
+  mode switch, `resetLayout` and a restore re-select by number
+  (`C:1257-1259`, `:1288-1289`, `:1156`).
+- **`serviceEdited` is a layout, not an undo depth:** some table stands
+  away from its design place (`C:1092-1101`). `serviceLayoutChanges` fires
+  on a move, an Undo or Redo (before they return), `resetLayout` and a
+  restore, never on `setMode`, `load` or `newPlan` (`C:1103-1110`,
+  `HG:372-375`).
 - **The service layout records moves only**: `jet_cad.service_layout` v1,
   per moved table its handle, number, `from` and `to`; a strict match on
-  restore (`host/service_layout.dart:14-170`). Restoring clears the copy's
-  history, so Undo does not remove restored places
-  (`floor_plan_controller.dart:1146-1156`). Groups live only in the host's
-  memory.
+  restore (`host/service_layout.dart:14-170`). A handle twice is a
+  `FormatException` (`:120`); a missing layer counts as visible (`:157`).
+  Bad JSON throws and changes nothing (`C:1124-1126`, `:1137`). Restoring
+  clears the copy's history, so Undo does not remove restored places
+  (`C:1143-1153`); it moves `revision`, notifies and re-selects
+  (`:1154-1160`). `ServiceLayoutRestore` holds `List<String?>`s in layout
+  order, nulls and repeats included (`host/floor_plan_types.dart:156-166`).
+  `resetLayout` is a silent no-op in the design mode (`C:1290-1292`).
+  Groups live only in the host's memory.
 - **Host data and colour are design state on the instance**:
   `jetcad.table_data` (32 keys, key `[a-z0-9_.-]{1,64}`, value up to 1024
   UTF-16 units) and `jetcad.table_color` (one of eight hues by name), each
   set by an undoable edit, refused in service mode; a table on a hidden or
-  locked layer still takes them (`docs/host-guide.md:493-494`,
-  `:1307-1308`).
+  locked layer still takes them (`HG:490-491`, `:1305-1306`). The export
+  colour opacity defaults to 0.35 and is an `ArgumentError` outside
+  [0, 1] (`C:1374-1383`; `host/floor_plan_theme.dart:14`).
 - **Service input is one tool and one picker.** `TableSelectTool` taps,
   bands, long-presses, drags root tables (one undo step on the copy) and
-  reports hover (`service/table_select_tool.dart:101-660`). `TablePicker`
-  hits a table's top, then its symbol box, then, for touch, the nearest box
-  within 24 px (`service/table_picker.dart:190-306`). Both write the engine
-  selection (`table_select_tool.dart:316-336`, `:461-477`).
-- **Three painters** draw statuses and colours (under the drafting), group
-  frames and chips, and the focus veil (`service/*_painter.dart`).
-  `band_allocation_test.dart` and `pick_allocation_test.dart` guard
-  hover-rate picking (`jet_cad_floor_plan/test/invariants/`).
-- **The host guide's §6 and §7** (`docs/host-guide.md:331-1406`) describe
-  this API; S5 maps it member by member.
+  reports hover (`T:101-693`). A drag moves every root-level selected
+  table, each group taken whole (`T:310-342`). `TablePicker` hits a table's
+  top, then its symbol box, then, for touch, the nearest box within 24 px
+  (`service/table_picker.dart:190-371`; the order, `:306-360`). Both write
+  the engine selection (`T:334`, `:468-478`).
+- **Three painters** draw statuses and colours, group frames and chips,
+  and the focus veil (`service/*_painter.dart`). The underlay is the group
+  frames, then the statuses; the overlay is the focus veil, then the chips
+  (`host/service_view.dart:558-597`). `band_allocation_test.dart` and
+  `pick_allocation_test.dart` guard hover-rate picking
+  (`jet_cad_floor_plan/test/invariants/`).
+- **Service is governed by the view's own parameters**, not the editor
+  capabilities (`host/editor_capabilities.dart:133-134`). `tablesOnly`
+  filters the gallery to symbols that seat (`:209-211`) and hides the Layer
+  and Page panels (`:170-187`).
+- **The events** (`host/floor_plan_view.dart`): `onTableContextMenu(number,
+  globalPosition)` (`:92`), `onGroupTap(groupId, number)` after
+  `onTableTap` (`:108-111`), `onTablesMoved` ascending, unnumbered tables
+  included, once per drag after `onLayoutChanged`, never on Undo, Redo, a
+  reset or a restore (`:159-170`), `onFloorTap(world)` (`:184-188`),
+  `onTableHover(number?)` (`:190-200`). The inspector shows for exactly one
+  numbered root table whose number no other table has, not in a group,
+  nothing else selected (`:268-278`). `FloorPlanTableOverlay` carries
+  `detail`, `selected`, `focused`, `status` (the group's over the table's)
+  and `detailLevel`, built for numbered tables with geometry only
+  (`host/table_overlay.dart:25-58`). `designChanges` matches tables by
+  instance (`host/design_changes.dart:1-6`).
+- **The host guide's §6 and §7** (`HG:331-1406`) describe this API; S5 maps
+  it member by member.
 
-**2a's library (`jet_cad_2d_plan`)**
+**2a's library (`jet_cad_2d_plan`)** (below, `PC` is
+`controller/plan_controller.dart`)
 - `PlanController` holds one document; P2 leaves room for the copy. A
-  `DocumentSession` always builds a parametric system and a lock expander
-  (`controller/session.dart:125-129`). `PlanCanvasView` requires a
-  `SelectionController` and an `OutlineCache`
-  (`canvas/plan_canvas_view.dart:30-31`, `:66-71`, `:200-206`) and has the
-  `underlay`, `overlay` and `tableOverlays` slots that `PlanCanvas` does not
-  pass yet (`:129-160`).
+  `DocumentSession` builds a lock set (`controller/session.dart:48`), a
+  parametric system (`:86-87`) and a lock expander (`:88`); its frozen set
+  is a plain `Set<Handle>` (`:101`). `PlanCanvasView` requires a
+  `ToolController`, an index and a page besides a `SelectionController`
+  and an `OutlineCache` (`canvas/plan_canvas_view.dart:23-36`, `:68`,
+  `:72`, `:192-198`) and has the `underlay`, `overlay` and `tableOverlays`
+  slots that `PlanCanvas` does not pass yet (`:129-140`).
+- **`PlanController` reads `_session` for its document's members:**
+  `document` (`PC:383`), the export's document (`:187`), `isLocked`
+  (`:527`), `_refreshFlags` (`:750-755`), `undo` and `redo` (`:768-803`),
+  `selection`, `index`, `page`, `outlines` (`:932-940`). It has no `mode`,
+  `activeDocument`, `activeSelection` or `revision`.
 - **The lock refuses every touch under a locked object**
-  (`kits/locks.dart:367-380`), so a write on a frozen object or a missing
-  kit's object is refused. It also covers a placed instance whose symbol
-  key names a missing kit (`:41-60`; `LockSet.covers`, `:112`).
-- The placer copies `jetcad.symbol` and `jetcad.unit` and writes no label;
-  `definitionForEntry` takes a handle from `handleSeed.next()`
-  (`symbols/symbol_placer.dart:96-121`). `isServableInstance` exists
-  (`panels/symbol_section.dart:29`).
+  (`kits/locks.dart:312-326`; a frozen object's own write, `:256-265`), so a
+  write on a frozen object or a missing kit's object is refused.
+  `LockSet.scan` locks a node carrying an unknown kit-namespaced component,
+  parametric or not, and every instance of a definition whose symbol's kit
+  is missing (`:33-64`, `:66-80`). `isLockedObject` names a held object
+  (`:106`); `covers` walks whatever target it is given (`:112-113`,
+  `:140-158`). The set changes only through `addBroken` (`:116-119`).
+- **2a's recovery lives inside the lock expander.** `_LockCheck._first`
+  catches a `KitHookFailure`, lets the boundary probe and freeze, and
+  retries once (`locks.dart:279-301`), wired through `onHookFailure`
+  (`PC:677-681`). A `FailureBoundary` is bound to one document and one
+  system (`kits/guard.dart:574-597`); its probes run that system
+  (`:613-633`). Its `lock` is the controller's `lockBroken`, which clears
+  the design's history (`PC:533-544`, `:536`). `clearHistory` does not move
+  the state id (`jet_cad_2d/lib/src/document/undo.dart:179-185`, `:277`).
+- The placer copies `jetcad.symbol` and `jetcad.unit` and writes no label.
+  `definitionForEntry` reuses only a definition already in the document,
+  and takes a handle from `handleSeed.next()` for a new definition and for
+  each of its leaves (`symbols/symbol_placer.dart:84-134`, `:105`, `:127`).
+  `isServableInstance` checks the definition's `UnitComponent` only, with
+  no root or liveness rule (`panels/symbol_section.dart:29-33`).
+- `symbolsState` is a `ValueListenable<PlanSymbolsState>`, `loading`,
+  `ready` or `failed` (`PC:1038`, `symbols/plan_symbols_state.dart:4`).
+- Each kit gets its own `KitNamesWords` (`PC:192-196`).
 - `PlanTheme` has four fields, `PlanPermissions` the twelve design flags,
   `PlanStrings` no table word; the canvas and the exporters leave table
   colours to 2b (`canvas/plan_canvas.dart:247`,
-  `export/builtin_exporters.dart`). The paint invariant is
+  `export/builtin_exporters.dart`). `PlanEditor` takes `onExport`,
+  `onExportDialog`, `onPageFlowError`, `printer`, `exportName` and `theme`
+  (`editor/plan_editor.dart:79-86`); Export shows only with `onExport`
+  (`editor/plan_editor_bar.dart:21`). The paint invariant is
   `test/invariants/canvas_paint_allocation_test.dart`.
 
 **The contract (`jet_cad_2d_kit`)**
 - `UnitComponent` (`jetcad.unit`) sits on a definition: `kind`, `capacity`
   ≥ 1, `labelling` (`numbered` or `assigned`, "a kit's type sets the
-  label") (`model/unit_component.dart:16-60`).
-- `PlanGate` has nine values (`kit/properties.dart:10-20`).
+  label") (`model/unit_component.dart:14-51`).
+- `PlanGate` has nine values (`kit/properties.dart:10-20`), switched on
+  exhaustively by `PlanPermissions.allows`
+  (`jet_cad_2d_plan/lib/src/controller/permissions.dart:72-82`).
 - `KitNames` is one word map per locale with an English fallback;
-  `merge` lets the earlier map win (`model/kit_names.dart:45-50`).
-  `KitWords.word` returns the id when no word exists
-  (`kit/plan_services.dart:15-17`). `PlanKit.validate` refuses an unknown
-  namespace (`kit/plan_kit.dart:88-91`).
-- The kit pins `jet_cad_2d: ^0.7.2`; `check_kit_deps` forbids a kit from
-  naming the plan library.
+  `merge` lets the earlier map win (`model/kit_names.dart:46-51`).
+  `KitWords.word` returns the id when no word exists, `maybe` null
+  (`kit/plan_services.dart:15-20`). `PlanKit.validate` checks a slash id in
+  its `category` branch (`kit/plan_kit.dart:80-82`), a dot id in the
+  `symbol`/`tool`/`type`/`property` branch (`:83-85`), and refuses an
+  unknown namespace (`:86-88`).
+- The kit pins `jet_cad_2d: ^0.7.2`, as every package of the workspace
+  does; `check_kit_deps` forbids a kit from naming the plan library.
 
 ## S1. E5: a parametric type generates instances
 
-**The output.** `Generated` becomes a sealed class with two subtypes:
+**The output.** `Generated` stays exactly as it is: entities only. E5 adds,
+beside it:
 
 ```dart
-sealed class Generated { ... }
-final class GeneratedEntity extends Generated { ... }   // today's fields
-final class GeneratedInstance extends Generated {
+final class GeneratedInstance {
+  GeneratedInstance(Handle definition, Transform2 transform,
+      {List<GeneratedAttrib> attributes = const []});
   final Handle definition;
   final Transform2 transform;            // in the group's local space
   final List<GeneratedAttrib> attributes;
@@ -250,46 +398,58 @@ final class GeneratedInstance extends Generated {
 
 final class GeneratedAttrib {
   GeneratedAttrib(String tag, String text, GeometryPayload payload,
-      {int textAttrs = 0});
+      {int textAttrs = 0});              // payload: the instance's local space
 }
+
+// A new hook on ParametricType<T>, beside generate:
+List<GeneratedInstance> instances(ParametricView view, Handle self) =>
+    const [];
 ```
 
-- Today's constructors (`Generated(...)`, `Generated.region`,
-  `Generated.text`) stay as factories returning a `GeneratedEntity`, so a
-  type's `generate` compiles unchanged. `kind`, `payload` and the other
-  fields move to `GeneratedEntity`; code that reads them switches on the
-  subtype or casts. One engine test reads them off a constructed value
-  (`jet_cad_2d/test/parametric/regions_test.dart:334-339`); it gains a cast
-  to `GeneratedEntity`, its assertions unchanged. `Generated.instance(definition, transform,
-  {attributes})` returns a `GeneratedInstance`.
+- `instances` follows `generate`'s rules: it reads only its own
+  parameters and its neighbours', in the group's local space. A type that
+  does not override it generates no instance, so every type compiles and
+  behaves unchanged.
+- The planner calls `instances` beside `generate` for each object of the
+  closure that does not dissolve. `probe` calls both (through `_plan`), and
+  so does `drift`.
+- 2a's `GuardedType` wraps `instances` as it wraps `generate`
+  (`guard.dart:76-84`): a throw becomes a `KitHookFailure` naming the hook
+  `instances`.
 - `GeneratedAttrib` throws `ArgumentError` for an empty tag;
-  `Generated.instance` throws for two attributes with one tag.
+  `GeneratedInstance` throws for two attributes with one tag.
+- **`GeneratedAttrib.payload` is in the instance's local (definition)
+  space**, as an ATTRIB's coordinates are (Facts), and as today's label
+  payload is (`tableLabelPayload`).
 - The instance becomes a child node of the object's group, on the object's
   layer. Its style fields are `InstanceNode`'s defaults, fixed when it is
   added. Its ATTRIBs are entities owned by the instance, on layer 0 with
   BYBLOCK style, the shape of today's table label; they are left out of
   12b D2's layer stamp and PC-3a's style stamp.
 - The rooms spec's D12 ruling on ATTRIBs ("a tag nobody generates") no
-  longer holds: the type names the tag. The rooms spec gets an amendment
-  line pointing here when E5 lands. A TEXT still needs `Generated.text`.
+  longer holds for instances: the type names the tag. The rooms spec gets an
+  amendment line pointing here when E5 lands. `Generated` itself still
+  refuses `attrib`, and a TEXT still needs `Generated.text`.
 
 **The definition.** The type does not make definitions. The object's
 component holds the definition's handle, its base point and its top box
 (S2, `PlanServices.symbolDefinition`). An output naming a handle that is
 not a live definition makes `_plan` throw
 `GeneratedDefinitionError(object, definition)` while planning, before any
-command, so `probe()` and `drift()` report it and 2a's boundary freezes the
-object (P4, E2). It is deliberately not one of `_isRefusal`'s errors.
+command: `probe` returns it; `drift` throws it. 2a's boundary then freezes
+the object (P4, E2). It is deliberately not one of `_isRefusal`'s errors.
 
 **The survey.** `_Survey` gains an `instances` map: each live object to its
 generated instances (the `InstanceNode` children of its group), ascending
-by handle. `children` stays entity-only.
-- `owned` maps each generated instance, and each of its ATTRIBs, to the
-  **object**, so an edit of either seeds the object.
-- The survey keeps each generated instance's `Node` value (nodes are
-  immutable: a reference, not a copy).
-- A nested group or a non-instance node inside an object stays what it is
-  today.
+by handle, each with its `Node` value (nodes are immutable: a reference,
+not a copy). `children` stays entity-only.
+- `owned` (entities) gains each generated instance's ATTRIBs, mapped to the
+  **object**: today's entity branch of the guard then covers them, and an
+  edit of one seeds the object, as an owned entity's does today.
+- A generated instance is not in `owned`. Its edits go through the node
+  branch below, and it seeds nothing.
+- A nested group already inside an object (a loaded file) stays what it is
+  today: its leaves are not `children`, its instances not generated.
 
 **Matching.** The i-th instance output meets the i-th existing instance,
 ascending by handle (the rule of every other kind). Every command below is
@@ -300,8 +460,14 @@ planned only on an exact-`==` difference of the stored value (12b R-15);
 - A matched instance keeps its handle: `SetInstanceDefinitionCommand` for a
   new definition, `TransformNodeCommand` for a new transform,
   `SetInstanceLayerCommand.restore` for a new layer.
-- Its ATTRIBs are matched by tag: `SetEntityTextCommand` for a new text,
-  `SetEntityGeometryCommand` for a new payload; a new tag is added, a
+- Its ATTRIBs are matched by tag. When several existing ATTRIBs of one
+  instance carry one tag (a loaded file), the lowest handle is matched and
+  the rest are surplus, removed.
+- A matched ATTRIB gets `SetEntityTextCommand(h, text, tag)` for a new
+  text, **passing its own tag**: the planner's TEXT call passes `''`
+  (`regeneration.dart:638`), which here would blank the tag, and the next
+  regeneration would match nothing and add a duplicate. It gets
+  `SetEntityGeometryCommand` for a new payload. A new tag is added, a
   missing one removed.
 - An unmatched output is added under reserved handles: `AddNodeCommand`,
   then its ATTRIBs.
@@ -312,16 +478,23 @@ planned only on an exact-`==` difference of the stored value (12b R-15);
   with everything a handle carries (S2's per-unit data); undo of the shrink
   brings seats 11-12 back with their components.
 
-**The guard.** For a generated instance `_refused` refuses an edit when,
-after it:
-- the instance is gone while its object's group lives; or
-- `tree[h]` differs from the survey's node value in any field (transform,
-  definition, layer, parent, style), compared exactly.
-
-It lets an edit pass when the node is unchanged: only its components moved.
-That is how per-unit data and colour (S2) reach a seat. Its ATTRIBs stay
-under the entity rule (refused). An instance or entity added into a live
-object by anything but the planner is refused, as an entity is today.
+**The guard.** `_refused` becomes two disjoint branches, by what the
+touched handle was in the before-survey.
+- **Entities** (today's branch, unchanged, `regeneration.dart:681-693`): an
+  owned entity, a generated instance's ATTRIB included, is refused while it
+  exists, and when removed while its object's group lives.
+- **Generated instances** (the node branch): an edit is refused when, after
+  it, the instance is gone while its object's group lives, or `tree[h]`
+  differs from the survey's node value by `InstanceNode.==` (exact, every
+  field: `node.dart:287-303`).
+- A components-only write on a generated instance passes. It does **not**
+  seed the object: the planner reads no unit component, so there is no
+  regeneration and no `_checkDangling`. That is how per-unit data and
+  colour (S2) reach a seat. ATTRIB edits stay refused.
+- Any node or entity added into a live object by anything but the planner
+  is refused, a `GroupNode` included, and so is an entity added onto one of
+  its generated instances. Today a group added into an object passes; the
+  change is intended.
 
 **The dissolve gap closes.** `_subtreeRemoval` removes the entities owned by
 every instance it removes, so a dissolved object leaves no orphan ATTRIB;
@@ -331,10 +504,13 @@ the same holds for a plain group's instances.
 type's business. Draw order stays ascending by handle. The frame path is
 untouched; a survey stays O(entities + nodes) per edit.
 
-**Version.** `Generated` turning sealed is a breaking change of
-`jet_cad_2d`'s API. E5 goes into the engine's CHANGELOG with E1-E4 under
-the version the wave publishes, and `jet_cad_2d_kit`'s and
-`jet_cad_2d_flutter`'s constraints follow it (R5).
+**Version.** E5 is additive. `Generated` is unchanged, `instances` has a
+default, and `GeneratedInstance` and `GeneratedAttrib` are new names. A
+class that implements `ParametricType` must add the hook; in the workspace
+only 2a's `GuardedType` does, and 2b wraps it (above). E5 goes into the
+engine's CHANGELOG as a feature, under Unreleased beside E1-E4, with the
+refused group add noted. No package constraint changes, and
+`jet_cad_floor_plan` is untouched (A12).
 
 ## S2. The unit model
 
@@ -343,22 +519,55 @@ the version the wave publishes, and `jet_cad_2d_kit`'s and
 - **placed:** a child of the plan's root; or
 - **generated:** a child of a root-level group that is an object of a
   registered type (`ParametricCatalog.typeIdOf(document, group) != null`),
-  or an object 2a's lock set holds for a missing kit. A frozen object is
-  still of its type, so its seats are units.
+  or that 2a's lock set holds (`LockSet.isLockedObject`,
+  `locks.dart:106`). A frozen object is still of its type, so its seats are
+  units.
 
 An instance with a unit definition anywhere else is not a unit and raises
-`unit.nested` (today's rule for nested tables).
+`unit.nested` (today's rule for nested tables). `isServableInstance` is not
+the unit predicate (it checks the definition only); `UnitIndex`'s rule
+above is.
 
-**Locked units.** One predicate, `isLockedUnit`, used by the service drag,
-`unitDetails.locked`, the record's strict match and the design writes: a
-unit is locked when its layer is locked (today), or when 2a's lock set
-covers its instance (`LockSet.covers`: a placed unit of a missing kit's
-symbol, a frozen object's or a missing kit's object's seat). A locked unit
-is picked, tapped, selected and grouped, and never moved (today's locked
-table).
-- The service copy has no lock set of its own: its `UnitIndex` reads the
-  design's lock set and frozen set. The handles are the same in both
-  documents.
+**A held object flips with its kit.** A root-level group that the lock set
+holds for a missing kit, parametric or not, has its unit instances
+generated, served and locked while the kit is missing. Once a
+non-parametric holder's kit loads, the group is no object, and its unit
+instances become `unit.nested`. Accepted.
+
+**Locked units.** One predicate, `isLockedUnit(h)`, used by the service
+tool, `unitDetails.locked`, the record's strict match and the design
+writes: a unit is locked when its layer is locked (today), or when
+`LockSet.covers(activeDocument, h)` holds (a placed unit of a missing kit's
+symbol, a frozen object's or a missing kit's object's seat).
+- **A locked unit is tapped and grouped, never selected** (today's locked
+  table). Its tap is reported, a member's with its group; its group's
+  status paints on it. A band never takes it, `select()` skips it, a
+  context gesture on it changes nothing, a long press under toggle ignores
+  it, and it is never dragged.
+- The service copy reads the design's lock set and frozen set. The handles
+  are the same in both documents.
+- **A seat whose definition's kit is missing, in a row whose kit is
+  loaded,** is covered by the lock (`LockSet.scan` locks every instance of
+  such a definition). Any regeneration of the row touches it, so the row's
+  edits are refused with `PlanLocked`: the row is effectively locked.
+
+**In design, a generated unit stands for its object** (2a's select gates,
+`tools/plan_select_gates.dart`; `jet_cad_2d_flutter` unchanged).
+- A key whose target is an instance (or a leaf) under a root-level group
+  that is a parametric object (`typeIdOf != null`) or a lock-set object
+  maps to that object, for picks and bands alike.
+- **The pick:** `PlanSelectGates.restrictsPick` answers true in design. Its
+  `pick` runs the tool's own pick (the precise radius, then the touch
+  reach, `select_tool.dart:160-171`), resolves it with `resolveHit`, then
+  maps. A press and a hover on a seat's geometry name the row.
+- **The band:** `bandAccepts` refuses a key under such an object. A
+  crossing band takes the row through the tool's own group rule (its seats'
+  ATTRIBs resolve to it). A window band over a seats-only row takes nothing
+  (open for the human, item 2).
+- A table inside a plain user group keeps today's behaviour: the hit and
+  the band give the table.
+- In service, the service tool writes seats into the copy's selection
+  itself (S4).
 
 **`UnitIndex`** (plan library, pure Dart over the engine) replaces
 `TableSurvey`. One pass over the document gives, ascending by handle:
@@ -379,19 +588,20 @@ final class UnitInfo {
 }
 ```
 
-It is rebuilt when the document's state id or layer revision moves, and
-caches each unit's world transform and top, so picking and painting
-allocate nothing per unit (the ported `pick_allocation_test` and
+It is rebuilt when the document's state id or layer revision moves, or when
+the controller's `locked` set changes (a freeze moves no state id), in both
+documents. It caches each unit's world transform and top, so picking and
+painting allocate nothing per unit (the ported `pick_allocation_test` and
 `band_allocation_test`). Everything in service reads it.
 
 **The label** is the instance's ATTRIB tagged `UNIT` (today's `TABLE`,
-renamed; no compatibility, decision of the wave).
+renamed; no compatibility, the umbrella's decision 9).
 - **Placed, `numbered`:** the placer writes the next free number as the
   label, in the same command as the instance. `nextUnitNumber`: `max + 1`
   over the counted labels (one to eight digits) of placed `numbered` units,
   then up by one while that text is any unit's label; when that would pass
-  `99999999`, the smallest unused positive number (today's fallback). 2a's "the table
-  number goes to 2b" is closed here.
+  `99999999`, the smallest unused positive number (today's fallback). 2a's
+  "the table number goes to 2b" is closed here.
 - **Placed, `assigned`:** no label at placement; the property panel or
   `setUnitLabel` gives one.
 - **Generated:** the type gives it as a `GeneratedAttrib` tagged `UNIT`,
@@ -405,7 +615,8 @@ renamed; no compatibility, decision of the wave).
   ```
 
   which applies today's stamp (anchor, height rule, upright and unmirrored
-  in the world), so a kit never re-derives it.
+  in the world) and returns the payload in the instance's local
+  (definition) space, so a kit never re-derives it.
 - **The text rule:** one to eight UTF-16 units, no control character
   (today's number rule).
 - **Uniqueness across objects is the placing tool's and the host's job,
@@ -417,11 +628,11 @@ renamed; no compatibility, decision of the wave).
 
 **The label system.** `UnitLabelSystem` (today's `TableLabelSystem`)
 restamps a placed unit's label in the same undo step as the edit that
-turned or mirrored it. The design document's expander stack becomes:
-parametric system (with the guard) → unit label system → lock expander, so
-the lock sees the stamps too. Generated labels are the type's, restamped by
-regeneration. **No `PlanKit.systems`**: no kit needs a per-edit hook
-(2a P6's open row, closed).
+turned or mirrored it. Each document's expander stack becomes: parametric
+system (with the guard) → unit label system → lock expander, so the lock
+sees the stamps too. Generated labels are the type's, restamped by
+regeneration. **No `PlanKit.systems`**: no kit needs a per-edit hook (2a
+P6's open row, closed).
 
 **Diagnostics** (the plan library's `UnitProblem`, settled before 0.1.0
 with R4): `unit.duplicate_label`, `unit.unlabelled`, `unit.bad_label` (a
@@ -429,12 +640,17 @@ label outside the text rule, a generated one included), and today's
 `unit.extra_label`, `unit.nested`, `unit.invalid_data`,
 `unit.invalid_colour`.
 
-**Unlabelled and duplicate units keep today's rules** (decision 7). A unit
-with no label, a bad label, or a label it shares is picked, tapped,
-selected, banded and (if placed) dragged, and reported by `onUnitsMoved`;
-it is in no label-keyed API: no status, group, focus, tap or hover callback,
-no host data by label. Two units sharing a label are both selected by it
-and each gets an overlay. The host sees them in `labelWarnings`.
+**Unlabelled, duplicate and bad labels keep today's rules** (decision 7).
+- **An unlabelled unit** is served for input: a tap selects it, a band
+  takes it, a placed one is dragged, and `onUnitsMoved` reports it. It is
+  absent from every label-keyed callback and API.
+- **A label two units share stays label-keyed.** A status paints on each
+  unit carrying it; taps, double taps and the context menu report it; a
+  group lists it once; `fitToUnits` frames all of them; `select` takes all
+  of them. Each gets an overlay.
+- **A bad label** (outside the text rule) is still a label, served by its
+  text. Its only effect is the `unit.bad_label` diagnostic.
+- The host sees all three in `labelWarnings`.
 
 **Per-unit data.** The plan library registers two components, on the
 instance's handle, placed or generated:
@@ -452,16 +668,25 @@ four or six) generates instances of different definitions.
 
 **The contract gains, before 0.1.0:**
 - `PlanServices.symbolDefinition(String key)` → `SymbolDefinitionRef?`,
-  with `Handle handle`, `DraftCommand? add` (adds the definition when the
-  document lacks it, through 2a's placer path), `Vector2 basePoint` and
-  `Aabb2 top`. `key` is a full versioned key (`kit.kind.variant@N`). It
-  answers null for a key no loaded library has; `PlanServices.symbolsReady`,
-  a `ValueListenable<bool>`, tells that apart from libraries still loading,
-  and a tool can wait on it. `top` is the definition's first leaf's box when
-  that leaf is a closed polyline or a circle (today's served top), else the
-  definition's box. A call that returns `add`
-  takes a handle from the seed, so a tool calls it once per placement,
-  never per preview.
+  with `Handle handle`, `DraftCommand? add`, `Vector2 basePoint` and
+  `Aabb2 top`. `key` is a full versioned key (`kit.kind.variant@N`).
+  - `add` adds the definition when the document lacks it, through 2a's
+    placer path, as one `CompoundCommand`.
+  - It answers null for a key no loaded library has.
+    `PlanServices.symbolsState`, a `ValueListenable<SymbolsState>`
+    (`loading`, `ready`, `failed`), tells that apart from libraries still
+    loading or failed, and a tool can wait on it. `SymbolsState` moves into
+    `jet_cad_2d_kit`; 2a's `PlanSymbolsState` becomes it, and
+    `PlanController.symbolsState` returns the same listenable.
+  - `top` is the definition's first leaf's box when that leaf is a closed
+    polyline or a circle (today's served top), else the definition's box.
+  - A call that returns `add` takes handles from the seed (one per
+    definition and per leaf), so a tool calls it once per placement, never
+    per preview.
+  - A second call for the same key before the first `add` executes returns
+    the same ref, `add` included: the services keep pending refs by key
+    until the document holds the definition or the next `execute`. A tool
+    executes that `add` once.
 - `unitLabelAttrib` and `kUnitLabelTag = 'UNIT'`.
 - `PlanGate.relabel`.
 - `UnitLabelling.assigned`'s doc: the label comes from a kit's type, the
@@ -473,26 +698,52 @@ four or six) generates instances of different definitions.
 - `PlanController.mode` (`ValueListenable<PlanMode>`, `design` or
   `service`) and `setMode(PlanMode)`.
 - Entering service decodes a **service copy** of the design into a
-  `ServiceSession`, a separate type beside 2a's `DocumentSession`. Its
-  components are registered as the design's are (the contract's four, the
-  catalog's types, the unit components), so `typeIdOf` holds. It has its own
-  parametric system over the same guarded catalog, with the design's frozen
-  set, and its own unit label system, as today's copy acquires both. It has
-  no lock expander and no kit tools: its only writer is the service tool,
-  and `restoreService`. Permissions are `DraftPermissions.runtime`.
+  `ServiceSession`, a separate type beside 2a's `DocumentSession`. It
+  carries: the copy (its document), its parametric system, its unit label
+  system, its lock expander, its failure boundary, its spatial index, its
+  page, its selection, its outlines, its tool controller (the service
+  tool), and its history flags.
+  - Its components are registered as the design's are (the contract's
+    four, the catalog's types, the unit components), so `typeIdOf` holds.
+  - Its parametric system runs over the same guarded catalog, with the
+    design's frozen set; its unit label system is its own, as today's copy
+    acquires both.
+  - It has no kit tools: its only writers are the service tool and
+    `restoreService`. Permissions are `DraftPermissions.runtime`.
+- **The copy's lock expander** is a `LockExpander` over the design's
+  `LockSet`: `covers` walks whatever target it is given, and the handles
+  are equal. The lock is therefore enforced in the copy too. It stacks as
+  in the design (S2).
+- **The copy's failure boundary** is a `FailureBoundary` of its own:
+  `document` = the copy, `system` = the copy's, `frozen` = the shared set,
+  `log` = the controller's `DiagnosticsLog`. It is wired to the copy's lock
+  expander as the design's is (`PC:677-681`).
+  - Its `lock` callback adds the objects to the shared lock set, as
+    `lockBroken` does, clears the **copy's** history only, and refreshes
+    `locked`. It never touches the design's history.
+  - **Retry:** the copy retries once after freezing, as the design does
+    (`_LockCheck._first`).
 - **A kit hook failing in the copy** (a `reach` or `references` call during
-  a service edit's survey) refuses that edit: the engine rolls it back, the
-  service tool's commit changes nothing, the failure goes to the design's
-  `DiagnosticsLog`, and the failing object joins the shared frozen set, so
-  it is frozen in both documents (2a P4's rule, applied to the copy).
-- Leaving it discards the copy (today).
+  a service edit's survey, or a hook in its plan): a hook throwing in the
+  before-survey runs before the edit applies, so nothing applied; one
+  throwing later is rolled back. The copy's boundary logs the failure,
+  probes the copy, and freezes the failing object in the shared set, so it
+  is frozen in both documents (2a P4's rule, applied to the copy). The edit
+  is then retried once; it is refused only when the retry fails too.
+- Leaving service discards the copy (today).
 - **2a's members in service:** `document`, `parametric`, `frozen`,
-  `locked`, `changes` and `PlanServices.document` stay on the design.
-  `activeDocument` and `activeSelection` are the copy's. `execute()`
+  `locked`, `changes` and `PlanServices.document` stay on the design, and
+  so do `selection`, `index`, `page` and `outlines` (the editor's canvas;
+  today only `activeDocument` and `activeSelection` switch). `execute()`
   answers `false` (the design is not edited in service). `save()` always
   encodes the design; `dirty` never moves in service.
-- `undo`, `redo`, `canUndo`, `canRedo`, export and print act on the active
-  document (the copy in service), as today.
+- **The members that switch on `mode`:** `undo`, `redo`, `canUndo`,
+  `canRedo`, `export`, `print`, `activeDocument`, `activeSelection`,
+  `revision`, `units`, `unitDetails`, `unitAt`, `select`, `selectedUnits`.
+  Each acts on the active document (the copy in service). Today's
+  `PlanController` reads `_session` in those places (Facts), and they are
+  re-pointed. `isLockedUnit` calls `LockSet.covers(activeDocument, h)`,
+  plus the layer check.
 
 **The service record** (decision 4): `jet_cad.service`, version 1.
 
@@ -509,42 +760,56 @@ four or six) generates instances of different definitions.
 - **Moves:** today's layout entries, keyed by handle and label (null for an
   unlabelled unit), under today's strict match: same handle, same label,
   exactly at `from`, a translation only, finite, on a visible unlocked
-  layer. Only placed units move.
+  layer (a missing layer counts as visible), and not a unit for which
+  `isLockedUnit` holds. Only placed units move.
 - **Groups:** the controller's groups, by id, member labels and label.
 - `serviceJson()` → `String?` (null in design).
-- `restoreService(String)` → `ServiceRestore` (applied and dropped moves,
-  applied and dropped group ids):
-  - `StateError` outside service; `FormatException` for text that is not a
-    version-1 `jet_cad.service` record, today's `jet_cad.service_layout`
-    included (a difference, S5);
-  - it rebuilds the copy, applies the moves, and clears the copy's history
-    (today: Undo does not remove restored places);
-  - it **replaces** the controller's groups with the record's applied ones;
-  - a group is applied whole or dropped: a member label that does not name
-    exactly one unit of the design drops it, reported, never shrunk;
-  - groups breaking `setUnitGroups`' validation (a blank id, two ids equal
+- `restoreService(String)` → `ServiceRestore`:
+  - `StateError` outside service. A `FormatException`, with nothing
+    changed, for bad JSON, a handle twice, or text that is not a version-1
+    `jet_cad.service` record, today's `jet_cad.service_layout` included (a
+    difference, S5).
+  - It rebuilds the copy, applies the moves, and clears the copy's history
+    (today: Undo does not remove restored places). It moves `revision`,
+    notifies listeners, keeps the focus and re-selects by label (today).
+  - It **replaces** the controller's groups with the record's applied ones.
+  - A group is applied whole or dropped: a member label that names no unit
+    of the design drops it, reported, never shrunk. A label shared by
+    several units is kept, as `setUnitGroups` keeps it.
+  - Groups breaking `setUnitGroups`' validation (a blank id, two ids equal
     after trimming, an empty group) are dropped and reported, not a
-    `FormatException`; a label in two groups drops the later group;
-  - the groups a host set in design are replaced too: a host that wants to
+    `FormatException`; a label in two groups drops the later group.
+  - The groups a host set in design are replaced too: a host that wants to
     keep them restores before setting them, or merges them into the
     record itself. Sub-project 4's guide says so.
-- `serviceEdited`: the copy has a move, or a group is set.
-- `serviceChanges` fires on a move, an undo or redo of one,
-  `resetService`, `restoreService`, and `setUnitGroups` in service. In
-  design, `setUnitGroups` notifies `unitGroups` only.
+- `ServiceRestore`: `appliedMoves` and `droppedMoves` are `List<String?>`,
+  the moves' labels in record order, repeats and nulls as today;
+  `appliedGroups` and `droppedGroups` are `List<String>`, group ids.
+- `serviceEdited`: the copy has a move, or the groups differ from those
+  held when service was entered.
+- `serviceChanges` fires on a move, an undo or redo of one (before
+  `undo`/`redo` return), `resetService`, `restoreService`, and
+  `setUnitGroups` in service. It never fires on `setMode`, `load` or
+  `newPlan` (today). In design, `setUnitGroups` notifies `unitGroups` only.
 - `resetService()`: the copy rebuilt from the design and the groups
-  cleared. Today's `resetLayout` kept the groups (a difference, S5).
+  cleared. Today's `resetLayout` kept the groups (a difference, S5). In
+  design it is a silent no-op (today).
 - Statuses, group statuses, focus and selection are not in the record.
 
-**Service state** (controller state, by label; kept across mode switches,
-`load` and `newPlan`, as today):
+**Service state** (controller state, by label):
 - `unitStatuses` / `setUnitStatus(Map<String, UnitStatus>)`;
 - `unitGroups` / `setUnitGroups(Map<String, UnitGroup>)`, with today's
-  validation (blank id, two ids equal after trimming, an empty group, a
-  label in two groups); a group may mix kinds;
+  validation (a blank id, two ids equal after trimming, an empty group, a
+  label in two groups throw); a member naming no live unit is kept, a
+  shared label allowed (today); a group may mix kinds;
 - `groupStatuses` / `setGroupStatus`; `unitFocus` / `setUnitFocus`;
 - `selectedUnits`, `editorSelectedUnits`, `selectedGroup`,
   `mergeCandidate`, `selectableMembers`.
+
+Statuses, groups, group statuses and focus are kept across mode switches,
+`resetService`, `restoreService`, `load` and `newPlan` (today). The
+selection is cleared by `load` and `newPlan`, and kept by label across a
+mode switch, `resetService` and `restoreService` (today).
 
 **The unit API:**
 - `units` → `List<PlanUnit>` (`label`, `kind`, `capacity`, `symbolKey`,
@@ -553,24 +818,30 @@ four or six) generates instances of different definitions.
   size, rotation, mirrored, corners, layer, locked, data, colour; plus the
   unit). A generated unit is on its object's layer.
 - `unitAt(Offset canvasPoint, {PointerDeviceKind kind})`.
-- `select(Set<String> labels)`: in service, every unit with one of the
-  labels; in design, placed units only (the design's selection holds root
-  objects).
-- `fitToUnits(Set<String> labels)` (today's `fitToTables` margins).
+- `select(Set<String> labels)`, today's rules: every unit carrying one of
+  the labels that the selection can hold, replacing the selection. Hidden
+  and locked units are skipped; an unknown label is ignored. In service a
+  label in a group stands for the group's selectable members. In design,
+  placed units only (the design's selection holds root objects).
+- `fitToUnits(Set<String> labels)` (today's `fitToTables` margins and
+  rules).
 - **Design writes**, undoable, refused in service with `StateError`,
   today's rules: `setUnitData`/`setUnitsData`,
   `setUnitColour`/`setUnitsColour`, and the new
   `setUnitLabel`/`setUnitsLabel` (the text rule; `false` for a label another
   unit already holds, as today's panel refuses a used number; a generated
-  unit's label is its type's, so `false`). Each answers `false` for a label naming no unit
-  or several, and **for a unit under a locked object** (2a's lock; a
-  difference, S5). A unit on a hidden or locked layer still takes data and
-  colour (today).
+  unit's label is its type's, so `false`). Each answers `false` for a label
+  naming no unit or several, and **for a unit under a locked object** (2a's
+  lock; a difference, S5). A unit on a hidden or locked layer still takes
+  data and colour (today).
 - `labelWarnings` (today's `numberingWarnings`).
 - `unitChanges` (`Stream<PlanUnitChange>`: `PlanUnitAdded`,
   `PlanUnitChanged`, `PlanUnitRemoved`, `PlanUnitsReplaced`; today's
   `designChanges`, beside 2a's object-level `changes`; 2a's P7 gets an
-  amendment line).
+  amendment line). Units are matched by instance (today). A row edit
+  reports one `PlanUnitChanged` per matched seat whose detail changed, and
+  `PlanUnitAdded` or `PlanUnitRemoved` for each seat grown or shrunk; a
+  relabel is a change.
 - `revision`, `cameraValue` (today's `FloorPlanCamera`, as `PlanCamera`),
   `worldToGlobal`, `globalToWorld`.
 
@@ -579,42 +850,60 @@ four or six) generates instances of different definitions.
 **Widgets.**
 - `PlanServiceView`: the service bar over the canvas, with the service tool.
   `PlanEditor` shows it when the mode is `service`, so a host with one
-  widget keeps today's single view; a host may also mount
-  `PlanServiceView` alone.
+  widget keeps today's single view. A host may also mount `PlanServiceView`
+  alone; it then takes `onExport`, `printer`, `exportName`, `theme`,
+  `onExportDialog` and `onPageFlowError` as `PlanEditor` does, and Export
+  shows only with `onExport`.
 - **The service tool** (today's `TableSelectTool`): tap, band, long press,
   secondary click, drag, hover and keys, as today. It writes the copy's
   engine `SelectionController` with `SelectionKey.root(unit)` for placed and
   generated units alike, so 2a's outlines, pruning, Escape and the
-  overlays' `selected` flag work unchanged.
-  - It drags placed units only. A group with a generated or locked member
-    is never dragged (today's rule for a locked member).
+  overlays' `selected` flag work unchanged. It never selects a locked unit
+  (S2).
+  - **A drag** moves every selected placed unit, each group taken whole;
+    selected seats stay where they are. A group with a generated or locked
+    member is never dragged (today's rule for a locked member).
 - **The unit picker** (today's `TablePicker`): top, then box, then the
   touch reach, over `UnitIndex`'s cached world transforms.
 - **The service bar** `PlanServiceBar` (`visible`, `actions`, `leading`,
   `trailing`; actions undo, redo, merge, split, export, print), today's
   rules.
-- **Unit overlays:** `unitOverlayBuilder`, `unitOverlayLayout`,
-  `unitOverlayModes` (default `{PlanMode.service}`), through
-  `PlanCanvasView`'s overlay slot (renamed `unitOverlays`).
+- **Unit overlays:** `unitOverlayBuilder` (a `PlanUnitOverlayBuilder`),
+  `unitOverlayLayout`, `unitOverlayModes` (default `{PlanMode.service}`),
+  through `PlanCanvasView`'s overlay slot (renamed `unitOverlays`).
+  `PlanUnitOverlay` carries `detail`, `selected`, `focused`, `status` (the
+  group's status overrides the unit's) and `detailLevel`. It is built only
+  for labelled units with geometry (today).
 - **Events** on `PlanServiceView` (and passed through `PlanEditor`):
-  `onUnitTap`, `onUnitDoubleTap`, `onUnitContextMenu`, `onUnitHover`,
-  `onGroupTap`, `onMergeRequested`, `onSplitRequested`, `onUnitsMoved`,
-  `onFloorTap`, `onLayoutChanged`; options `longPress`, `floorDrag`,
-  `userCamera`, `shortcuts`, `autofocus`.
-- **The unit inspector** (today's `tableInspectorBuilder`) and a **unit
-  section** in the property panel for one placed unit: the kind's title,
-  the label field (gated by `relabel`; titled "Number" for `numbered`,
-  "Label" for `assigned`), the capacity, the colour row, and today's ±90
-  buttons (gated by `rotate`, `rotateUnitCommand`).
+  - `onUnitTap(String label)`, `onUnitDoubleTap(String label)`;
+  - `onUnitContextMenu(String label, Offset globalPosition)`;
+  - `onGroupTap(String groupId, String label)`, after `onUnitTap`;
+  - `onUnitHover(String? label)`;
+  - `onMergeRequested`, `onSplitRequested`, `onLayoutChanged`;
+  - `onUnitsMoved(List<PlanUnitDetail>)`: ascending by handle, unlabelled
+    units included, after `onLayoutChanged`; not on undo, redo, reset or
+    restore;
+  - `onFloorTap(Offset world)`.
+  - Options: `longPress`, `floorDrag`, `userCamera`, `shortcuts`,
+    `autofocus`.
+- **The unit inspector** (today's `tableInspectorBuilder`) shows for
+  exactly one labelled placed unit whose label is unique, not in a group,
+  with nothing else selected (today's rule). A **unit section** in the
+  property panel shows for one placed unit: the kind's title, the label
+  field (gated by `relabel`; titled "Number" for `numbered`, "Label" for
+  `assigned`), the capacity, the colour row, and today's ±90 buttons (gated
+  by `rotate`, `rotateUnitCommand`).
 
 **Painting.**
-- Four layers, today's order: unit colours and statuses (`underlay`),
-  group frames (`underlay`), group chips (`overlay`), the focus veil.
+- Today's order: the underlay is the group frames, then the unit colours
+  and statuses; the overlay is the focus veil, then the group chips.
 - `PlanCanvas` passes the slots; 2a's "less the table fills" and "without
   the table colours" close: the canvas fills unit colours at
   `PlanTheme.unitColourOpacity`. `PlanExportRequest` gains
   `unitColourOpacity`, which `export` and `print` take, so every exporter,
   a host's included, receives it; the built-in PDF and PNG fill with it.
+  Its default is 0.35 (`kUnitColourOpacity`); a value outside [0, 1] is an
+  `ArgumentError` (today).
 - **Invariants:** `canvas_paint_allocation_test` gains the service scene
   (statuses, groups, focus, a placed and a generated unit); today's
   `band_allocation_test` and `pick_allocation_test` are ported.
@@ -627,7 +916,10 @@ renamed for units: `statusCaptionStyle`, `statusFillOpacity`,
 `focusVeilOpacity`, `serviceBarHeight`.
 
 **Permissions.** `PlanPermissions` gains:
-- `relabel` (today's `renumber`), a `PlanGate`;
+- `relabel` (today's `renumber`), a `PlanGate`. `PlanGate.relabel` breaks
+  the exhaustive switch in `PlanPermissions.allows`
+  (`controller/permissions.dart:72-82`); fine before 0.1.0, it lands with
+  the gate.
 - `selectUnitsOnly` (today's `selectTablesOnly`): the design's click and
   band pick placed units only;
 - `serviceMove` (today's view parameter `serviceMoves`) and `serviceMerge`
@@ -635,10 +927,16 @@ renamed for units: `statusCaptionStyle`, `statusFillOpacity`,
 - the profile `unitsOnly` (today's `tablesOnly`: tools `plan.select` and
   `plan.symbol`, no layer or page editing, no mirror, reshape or layer
   change, `selectUnitsOnly`), with the gallery filter `isUnitSymbol` that
-  `PlanSymbolGallery(filter:)` takes.
+  `PlanSymbolGallery(filter:)` takes. `isUnitSymbol` admits any symbol
+  whose definition carries `jetcad.unit`, seats included. `unitsOnly` is a
+  permissions profile only: hiding the Layer and Page panels is
+  `PlanEditor`'s options (2a P7).
 
-They are enforced where 2a's are (gates, palette, panels, the service
-tool); host calls are not gated.
+The design flags are enforced where 2a's are (gates, palette, panels);
+host calls are not gated. **Service is governed by `PlanServiceView`'s
+options plus exactly two permission flags:** `serviceMove` (drags) and
+`serviceMerge` (Merge and Split). The design flags (`undo`, `export`,
+`print`, `move` and the rest) do not gate service, as today.
 
 **Words.**
 - `PlanStrings` gains the service and unit words: `merge`, `split`,
@@ -656,12 +954,15 @@ tool); host calls are not gated.
   `validateHostWords(KitNames)` → `List<KitProblem>`: every id must be in a
   known namespace (`symbol:`, `category:`, `tool:`, `type:`, `property:`,
   `unit:`) and name a kit, any kit. The constructor throws `ArgumentError`
-  naming the first problem. The plan's words are `hostWords.merge(kitWords)`: the host's come first, per
-  locale, so a host can add a language a kit lacks or override a word.
-- `PlanKit.validate` accepts the `unit:` namespace; `conformance()` (R3)
-  requires an English word for every kind a kit's libraries carry that the
-  contract does not name (`KitProblemCode.unitKindWord`, landed before
-  0.1.0 with R4).
+  naming the first problem.
+- **Host words merge per kit:** each kit's `KitNamesWords` reads
+  `hostWords.merge(kit.names)`. The host's come first, per locale, so a
+  host can add a language a kit lacks or override a word.
+- `PlanKit.validate` accepts the `unit:` namespace and checks
+  `unit:<kit>/<kind>` in its slash (category) branch: the part before the
+  slash must be the kit's id. `conformance()` (R3) requires an English word
+  for every kind a kit's libraries carry that the contract does not name
+  (`KitProblemCode.unitKindWord`, landed before 0.1.0 with R4).
 
 ## S5. Today's service API, mapped (A14)
 
@@ -675,33 +976,40 @@ parity table takes these rows over.
 | Today | 2b |
 |---|---|
 | `mode`, `setMode` (`FloorPlanMode.design`/`selection`) | `mode`, `setMode` (`PlanMode.design`/`service`) |
-| The copy with its own parametric and label systems | `ServiceSession`, the same systems, no lock expander |
-| `serviceEdited`, `serviceLayoutChanges` | `serviceEdited`, `serviceChanges` (also counting groups) |
+| The copy with its own parametric and label systems | `ServiceSession`, the same systems, plus a lock expander and a failure boundary of its own (S3) |
+| `serviceEdited`: a table away from its design place | `serviceEdited`: a move, or groups changed since entering. **Difference:** groups count (decision 4) |
+| `serviceLayoutChanges`: never for `setTableGroups` | `serviceChanges`, today's timing. **Difference:** also on `setUnitGroups` in service (decision 4) |
 | `serviceLayoutJson()` | `serviceJson()`: moves and groups (decision 4) |
-| `restoreServiceLayout(json)` → `ServiceLayoutRestore`; history cleared | `restoreService(json)` → `ServiceRestore`; history cleared; groups replaced |
+| `restoreServiceLayout(json)` → `ServiceLayoutRestore` (`applied`, `dropped`: `List<String?>`); history cleared | `restoreService(json)` → `ServiceRestore` (`appliedMoves`, `droppedMoves`: `List<String?>`; `appliedGroups`, `droppedGroups`: `List<String>`); history cleared; groups replaced |
+| A restore keeps the focus, re-selects, moves `revision`; bad JSON or a handle twice: `FormatException` | the same |
 | A `jet_cad.service_layout` v1 text | **difference:** `FormatException` (no compatibility) |
-| `resetLayout()` | `resetService()`: **difference**, also clears the groups (decision 4) |
+| `setTableGroups` keeps a member with no live table | `setUnitGroups` the same; **difference:** `restoreService` drops a group whose member label names no unit of the design (decision 4, "dropped whole, never shrunk") |
+| `resetLayout()`; a silent no-op in design | `resetService()`: **difference**, also clears the groups (decision 4); a no-op in design |
 | `tableStatuses`, `setTableStatus`; `TableStatus` (`maxCaption` 12) | `unitStatuses`, `setUnitStatus`; `UnitStatus` |
 | `tableGroups`, `setTableGroups`; `TableGroup` (`maxLabel` 24) | `unitGroups`, `setUnitGroups`; `UnitGroup` |
 | `groupStatuses`, `setGroupStatus` | renamed |
 | `tableFocus`, `setTableFocus` | `unitFocus`, `setUnitFocus` |
+| Statuses, groups and focus kept across `load` and `newPlan`; the selection cleared by them, kept by number across a mode switch, reset and restore | the same, by label |
 | `selectedGroup`, `mergeCandidate`, `selectableMembers` | renamed (labels) |
 | `selectedTables`, `editorSelectedTables` | `selectedUnits`, `editorSelectedUnits` |
-| `select(numbers)`, `tableAt(point, {kind})` | `select(labels)`, `unitAt(point, {kind})` |
+| `select(numbers)`: a group's number expands to its members; hidden and locked skipped | `select(labels)`, the same rules |
+| `tableAt(point, {kind})` | `unitAt(point, {kind})` |
 | `tables` → `FloorPlanTable` | `units` → `PlanUnit` (+ `kind`, `capacity`, `generatedBy`) |
 | `tableDetails` → `FloorPlanTableDetail` | `unitDetails` → `PlanUnitDetail` |
-| Unnumbered and duplicate tables served for input | renamed: unlabelled and duplicate units, the same rules |
-| `numberingWarnings`: `DuplicateNumber`, `Unnumbered` | `labelWarnings`: `DuplicateLabel`, `Unlabelled`, `BadLabel` |
+| Unnumbered tables served for input; duplicate numbers number-keyed; a bad number served | renamed: unlabelled units, duplicate and bad labels, the same rules |
+| A locked table tapped and grouped, never selected | the same, for every unit `isLockedUnit` names |
+| `numberingWarnings`: sealed `NumberingWarning` (`DuplicateNumber`, `Unnumbered`) | `labelWarnings`: `UnitLabelWarning`, sealed as today (`DuplicateLabel`, `Unlabelled`, `BadLabel`) |
+| `TableNumberProblem` | `UnitLabelProblem` |
 | `setTableData`, `setTablesData` | `setUnitData`, `setUnitsData` |
 | `setTableColor`, `setTablesColor` (`FloorPlanColor`) | `setUnitColour`, `setUnitsColour` (`PlanSwatch`) |
 | (no host API for a number) | new: `setUnitLabel`, `setUnitsLabel` |
 | Data and colour on a table of any layer | the same; **difference:** `false` under a locked object (2a's lock) |
-| `designChanges` (`FloorPlanTableAdded`/`Changed`/`Removed`, `FloorPlanPlanReplaced`) | `unitChanges` (`PlanUnitAdded`/`Changed`/`Removed`, `PlanUnitsReplaced`) |
+| `designChanges` (`FloorPlanDesignChange`: `FloorPlanTableAdded`/`Changed`/`Removed`, `FloorPlanPlanReplaced`), by instance | `unitChanges` (`PlanUnitChange`: `PlanUnitAdded`/`Changed`/`Removed`, `PlanUnitsReplaced`), by instance |
 | `fitToTables(numbers)` | `fitToUnits(labels)` |
 | `revision` | `revision` |
 | `camera` (`FloorPlanCamera`), `worldToGlobal`, `globalToWorld` | `cameraValue` (`PlanCamera`), `worldToGlobal`, `globalToWorld` |
 | `canvasRect` | 2a already |
-| `exportPlan`/`printPlan(tableColorOpacity:)`, the active plan in service | `export`/`print(unitColourOpacity:)`, the active document |
+| `exportPlan`/`printPlan(tableColorOpacity:)` (0.35; `ArgumentError` outside [0, 1]), the active plan in service | `export`/`print(unitColourOpacity:)`, the same default and check, the active document |
 | `undo`, `redo`, `canUndo`, `canRedo` on the active plan | the active document |
 | `selectTool` false with no view mounted | 2a: true (open for the human, A14) |
 
@@ -709,14 +1017,16 @@ parity table takes these rows over.
 
 | Today (`FloorPlanView`) | 2b |
 |---|---|
-| `onTableTap`, `onTableDoubleTap`, `onTableContextMenu`, `onTableHover` | `onUnitTap`, `onUnitDoubleTap`, `onUnitContextMenu`, `onUnitHover` |
-| `onGroupTap`, `onMergeRequested`, `onSplitRequested` | renamed (labels) |
-| `onTablesMoved`, `onLayoutChanged`, `onFloorTap` | `onUnitsMoved`, `onLayoutChanged`, `onFloorTap` |
+| `onTableTap`, `onTableDoubleTap`, `onTableContextMenu(number, globalPosition)`, `onTableHover(number?)` | `onUnitTap`, `onUnitDoubleTap`, `onUnitContextMenu(label, globalPosition)`, `onUnitHover(label?)` |
+| `onGroupTap(groupId, number)`, `onMergeRequested`, `onSplitRequested` | renamed (labels) |
+| `onTablesMoved`, `onLayoutChanged`, `onFloorTap(world)` | `onUnitsMoved`, `onLayoutChanged`, `onFloorTap(world)`, today's order and payloads |
+| Service governed by the view's parameters, not the editor capabilities | `PlanServiceView`'s options plus `serviceMove` and `serviceMerge` only |
 | `serviceMoves` | `PlanPermissions.serviceMove` |
 | `longPress` (`FloorPlanLongPress`), `floorDrag` (`FloorPlanFloorDrag`), `userCamera` | `PlanServiceView` options (`PlanLongPress`, `PlanFloorDrag`) |
-| `tableOverlayBuilder`, `tableOverlayLayout`, `tableOverlayModes`; `FloorPlanTableOverlay`, `FloorPlanOverlayLayout`, `FloorPlanOverlaySize` | `unitOverlayBuilder`, `unitOverlayLayout`, `unitOverlayModes`; `PlanUnitOverlay`, `PlanOverlayLayout`, `PlanOverlaySize` |
+| `tableOverlayBuilder` (`FloorPlanTableOverlayBuilder`), `tableOverlayLayout`, `tableOverlayModes`; `FloorPlanTableOverlay`, `FloorPlanOverlayLayout`, `FloorPlanOverlaySize` | `unitOverlayBuilder` (`PlanUnitOverlayBuilder`), `unitOverlayLayout`, `unitOverlayModes`; `PlanUnitOverlay`, `PlanOverlayLayout`, `PlanOverlaySize` |
 | `serviceBar` (`FloorPlanServiceBar`, `FloorPlanServiceAction`) | `PlanServiceBar`, `PlanServiceAction` |
-| `tableInspectorBuilder` | `PlanEditor(unitInspectorBuilder:)` |
+| The painters: frames then statuses under the drafting; veil then chips above | the same order |
+| `tableInspectorBuilder` | `PlanEditor(unitInspectorBuilder:)`, today's eligibility |
 | `shortcuts`, `autofocus` in service | `PlanServiceView` options |
 | The web's context menu (`BrowserContextMenu.disableContextMenu`) | unchanged |
 
@@ -724,10 +1034,13 @@ parity table takes these rows over.
 
 | Today | 2b |
 |---|---|
-| Profile `tablesOnly`, `selectTablesOnly`, `renumber`, `symbolFilter` on seats | `unitsOnly`, `selectUnitsOnly`, `relabel`, `isUnitSymbol` |
+| Profile `tablesOnly`, also hiding the Layer and Page panels | `unitsOnly`, a permissions profile only. **Difference:** the profile alone no longer hides the two panels; `PlanEditor`'s options do (2a P7) |
+| `symbolFilter` on seats (`FloorPlanSymbol.seats`) | `isUnitSymbol` over `PlanSymbol.unit` (kind and capacity). **Difference:** a widening; any unit symbol, seats included, where every servable symbol was a table |
+| `selectTablesOnly`, `renumber` | `selectUnitsOnly`, `relabel` |
 | `FloorPlanTheme`'s 13 service and colour fields | `PlanTheme`, renamed for units (S4) |
 | `merge`, `split`, `tableTitle`, `number`, `seats`, `rotateLeft`, `rotateRight`, `tableNumberProblem`, `tableNumberUsed`, `numberingWarning` | `merge`, `split`, `unitKind`, `number`/`label`, `capacity`, `rotateLeft`, `rotateRight`, `labelProblem`, `labelUsed`, `labelWarning` |
-| `jetcad.table_data`, `jetcad.table_color`, the `TABLE` label, `nextTableNumber`, `TableLabelSystem`, `rotateTableCommand` (the ±90 buttons) | `jetcad.unit_data`, `jetcad.unit_colour`, the `UNIT` label, `nextUnitNumber`, `UnitLabelSystem`, `rotateUnitCommand` |
+| `jetcad.table_data`, `jetcad.table_color`, the `TABLE` label | `jetcad.unit_data`, `jetcad.unit_colour`, the `UNIT` label. **Difference:** every saved plan's numbers, data and colours are dropped (the umbrella's decision 9, no compatibility) |
+| `nextTableNumber`, `TableLabelSystem`, `rotateTableCommand` (the ±90 buttons) | `nextUnitNumber`, `UnitLabelSystem`, `rotateUnitCommand` |
 | `table.*` diagnostics | `unit.*` (S2) |
 | The host guide's §6 and §7 | rewritten for units in sub-project 4's guide, from this table |
 
@@ -737,20 +1050,22 @@ parity table takes these rows over.
 - **R4:** 2b's codes are `KitProblemCode.unitKindWord` and
   `PlanGate.relabel`; the plan library's `UnitProblem` codes are its own
   (S2). All land before 0.1.0.
-- **R5:** `Generated` turns sealed and gains `GeneratedInstance` and
-  `GeneratedAttrib` (S1); `unitLabelAttrib` returns an engine type. The
-  engine's CHANGELOG records it and the kit's constraint follows the
-  engine version the wave publishes.
+- **R5:** E5 is additive: `GeneratedInstance`, `GeneratedAttrib` and
+  `ParametricType.instances` (S1); `unitLabelAttrib` returns an engine
+  type. The engine's CHANGELOG records it as a feature; no package
+  constraint changes.
 - **2a P6's per-edit hook:** no `PlanKit.systems` (S2).
-- **New for 0.1.0:** `PlanServices.symbolDefinition` and `symbolsReady`,
-  `SymbolDefinitionRef`, `unitLabelAttrib`, `kUnitLabelTag`, the `unit:`
-  word namespace, `validateHostWords`, the `assigned` doc (S2, S4).
+- **New for 0.1.0:** `PlanServices.symbolDefinition` and `symbolsState`,
+  `SymbolsState`, `SymbolDefinitionRef`, `unitLabelAttrib`,
+  `kUnitLabelTag`, the `unit:` word namespace, `validateHostWords`, the
+  `assigned` doc (S2, S4).
 
 ## Package layout
 
 ```
-packages/jet_cad_2d/lib/src/parametric/   sealed Generated, GeneratedInstance, GeneratedAttrib, the planner (E5)
-packages/jet_cad_2d_kit/lib/src/kit/      symbolDefinition on PlanServices, unitLabelAttrib, PlanGate.relabel
+packages/jet_cad_2d/lib/src/parametric/   GeneratedInstance, GeneratedAttrib, ParametricType.instances, the planner (E5)
+packages/jet_cad_2d_kit/lib/src/kit/      symbolDefinition and symbolsState on PlanServices, SymbolsState,
+                                          unitLabelAttrib, PlanGate.relabel, validateHostWords
 packages/jet_cad_2d_plan/lib/src/
   units/          UnitIndex, the label, numbering, label system, unit components, diagnostics
   service/        ServiceSession, the record, service state, groups, the tool, the picker
@@ -759,16 +1074,19 @@ packages/jet_cad_2d_plan/lib/src/
 ```
 
 `controller/`, `editor/`, `panels/`, `theme/`, `l10n/` and `export/` gain
-the parts S3 and S4 name.
+the parts S3 and S4 name; `kits/guard.dart` gains `GuardedType.instances`;
+`tools/plan_select_gates.dart` gains the design mapping (S2);
+`symbols/plan_symbols_state.dart` gives way to the kit's `SymbolsState`.
 
 ## Tests
 
 **The test kit** (`jet_cad_2d_plan/test/support/`, unpublished) gains:
 - `test.table`: a placed `numbered` unit, capacity 4;
 - `test.row`: a parametric row generating N seats of a `test.seat`
-  definition (`assigned`, capacity 1), labelled `<prefix>1`…`<prefix>N`;
-  prefix, N, spacing and a curve are its properties; its tool places it
-  through `symbolDefinition` and picks the first free prefix;
+  definition (`assigned`, capacity 1) through `instances`, labelled
+  `<prefix>1`…`<prefix>N`; prefix, N, spacing and a curve are its
+  properties; its tool places it through `symbolDefinition` and picks the
+  first free prefix;
 - a unit kind of its own, `booth`, with an English word only.
 
 **Fixtures are not degenerate:** the table is turned and mirrored; two rows
@@ -780,32 +1098,80 @@ standing at the identity alone does not count.
   - matching keeps handles (12 → 10 seats keeps seats 1-10 and their data;
     undo brings 11-12 back with theirs);
   - an unchanged row plans nothing (mutant: the `==` guard removed);
-  - ATTRIBs matched by tag;
-  - a missing definition freezes the object, through `probe`;
+  - ATTRIBs matched by tag; two regenerations leave one ATTRIB per seat
+    (mutant: the text rewrite passing tag `''`);
+  - two existing ATTRIBs with one tag on a seat (a loaded file): the lowest
+    handle matched, the other removed;
+  - a missing definition freezes the object: `probe` returns
+    `GeneratedDefinitionError`, `drift` throws it;
   - the guard refuses a move, a removal, a definition and a layer change of
     a seat, and an ATTRIB edit, and lets a component write through (mutant:
     the node-value comparison removed);
+  - a data write on a seat runs zero `generate` and `instances` calls
+    (mutant: the seed added);
+  - a node added into a live object is refused, a `GroupNode` included, and
+    so is an ATTRIB added onto a seat;
+  - `GuardedType` wraps `instances`: a throwing `instances` is a
+    `KitHookFailure` and freezes the object;
+  - a type that does not override `instances` regenerates as before;
   - the dissolve leaves no ATTRIB;
   - draw order and the engine's standing hash tests hold.
 - **Units:** placed and generated units in one index; a frozen row's and a
   missing kit's row's seats served and locked; a placed table of a missing
-  kit's symbol locked (never dragged, its stored move dropped); `nested`,
-  `duplicate_label`, `unlabelled`, `bad_label`; `nextUnitNumber` skipping a
-  seat's label and falling back past `99999999`; the label system's stamp in the same undo step; data and
-  colour across regeneration; a relabelled unit leaving its group.
-- **Service:** a seat is picked, selected, given a status and grouped; a
-  group mixing a table and seats; a group with a seat never dragged; the
-  band over two rows; an unlabelled table tapped and dragged but not
-  reported by label.
+  kit's symbol locked (never dragged, its stored move dropped); a row frozen
+  with no edit after it: its seats read `locked`; a seat whose definition's
+  kit is missing, in a loaded kit's row: covered, and a row edit refused
+  with `PlanLocked`; a non-parametric root group held for a missing kit:
+  its unit instances served and locked, then `unit.nested` once the kit
+  loads; `nested`, `duplicate_label`, `unlabelled`, `bad_label`;
+  `nextUnitNumber` skipping a seat's label and falling back past
+  `99999999`; the label system's stamp in the same undo step; data and
+  colour across regeneration; a relabelled unit leaving its group;
+  `unitChanges` for a row edit (one change per changed seat, adds and
+  removes for grown and shrunk seats, a relabel a change).
+- **The contract:** `symbolDefinition` called twice for one key before
+  `add` executes returns one ref; `symbolsState` reaching `failed`;
+  `unit:<kit>/<kind>` under another kit refused by `PlanKit.validate`.
+- **Design selection:**
+  - a click on a seat's geometry selects the row (mutant: the mapping
+    removed), and so does a click on its ATTRIB;
+  - a crossing band over a seats-only row selects the row and no seat;
+  - a window band over a seats-only row selects the row (held: open for
+    the human, item 2);
+  - a table inside a plain group: today's selection, unchanged.
+- **Service:**
+  - a seat is picked, selected, given a status and grouped; a group mixing
+    a table and seats; a group with a seat never dragged; the band over two
+    rows;
+  - a mixed drag moves the selected placed units and leaves the seats;
+  - an unlabelled table tapped and dragged but not reported by label;
+  - two units sharing a label: a status on each, a tap reporting the
+    label, a group listing it once, `fitToUnits` framing both, `select`
+    taking both;
+  - a bad label served by its text;
+  - a locked unit tapped and reported, its group's status painted, never
+    selected by a tap, a band, `select`, a context gesture or a long press,
+    never dragged;
+  - `select(labels)` in service expanding a group and skipping hidden and
+    locked members;
+  - `onUnitsMoved` ascending by handle, unlabelled units included, after
+    `onLayoutChanged`; `serviceChanges` not on `setMode`, `load` or
+    `newPlan`.
 - **The record:** round trip; invalid groups in a record dropped and
-  reported; a moved table restored and its history
-  cleared; restore replacing the host's groups; a group dropped whole when a
-  member's label changed in the design; `resetService` clears moves and
-  groups; today's layout text refused; `StateError` outside service.
+  reported; a moved table restored and its history cleared; a locked unit's
+  move dropped; bad JSON and a handle twice refused with nothing changed;
+  `ServiceRestore`'s lists in record order; restore replacing the host's
+  groups; a group dropped whole when a member's label names no unit, kept
+  when a label is shared; `serviceEdited` false right after entering with
+  groups set in design; `resetService` clears moves and groups, and is a
+  no-op in design; today's layout text refused; `StateError` outside
+  service.
 - **Writes:** data and colour on a seat; `false` under a frozen object;
   `setUnitLabel` refused for a seat and for a used label.
 - **The copy's boundary:** a kit hook throwing during a service move: the
-  move refused, the object frozen in both documents, the diagnostic logged.
+  object frozen in both documents, **the design's `canUndo` unchanged**,
+  the diagnostic logged, and the move applied by the retry; with a second
+  type's hook throwing on the retry, the move refused.
 - **Host words:** a word in an unknown namespace refused by the
   constructor.
 - **Words:** a kit's word in Turkish, the English fallback, a host's word
@@ -824,7 +1190,7 @@ standing at the identity alone does not count.
   for `jet_cad_2d_kit` and `jet_cad_2d_plan`; `cd tool/ci && dart test`;
   `dart run tool/ci/check_kit_deps.dart`.
 - Dry-runs of the publishable packages with 0 warnings; the engine's
-  CHANGELOG records E5.
+  CHANGELOG records E5 as a feature.
 - One Opus review of the whole branch and its fix wave; STATUS and the
   results note updated; the ledger archived onto the branch as its last
   commit.
@@ -841,12 +1207,18 @@ standing at the identity alone does not count.
 ## Risks
 
 - **E5 is the largest engine change of the wave.** The planner gains a
-  second kind of child and `Generated` turns sealed. Mitigation: the
-  engine's ported parametric tests, the standing hash tests, and E5's own
-  mutants.
-- **A seat in the engine's selection** is new for the select gates and the
-  outlines. The service copy has no kit tools and its gates refuse moves of
-  generated units; the ported selection tests are the oracle.
+  second kind of child, a new hook and a second guard branch. Mitigation:
+  the engine's ported parametric tests, the standing hash tests, and E5's
+  own mutants.
+- **A seat near the engine's selection** is new for the select gates and
+  the outlines. In design the gates map it to its object (S2), with the
+  window band open; in service the copy's selection holds seats, and the
+  service tool never drags one. The ported selection tests are the oracle.
+- **The design's history survives a freeze made in the copy** (S3), where
+  2a's `lockBroken` clears it so that no earlier edit can be undone onto a
+  locked object. The dispatcher expands `execute` only
+  (`jet_cad_2d/lib/src/document/undo.dart:190`), so a design undo after
+  leaving service replays without the lock. Ruled so (B3).
 - **The test kit stands in for the cinema kit.** A field a real seat kit
   needs goes into this spec as an amendment before 0.1.0.
 
@@ -888,3 +1260,36 @@ standing at the identity alone does not count.
     invalid record groups dropped. **N8:** restore replaces design-set
     groups, said for the guide. **N9:** `symbolsReady`'s type, `top`'s
     rule. **N10:** `validateHostWords`.
+- **Revision 4:** a second, independent Opus review, applied by the
+  human's rulings (*"evet yap"*).
+  - **B1:** in design, a seat's pick and band map to its object, in 2a's
+    select gates; the window band over a seats-only row is open for the
+    human. **B2:** E5 additive: `Generated` unchanged, a new `instances`
+    hook, `GeneratedInstance` and `GeneratedAttrib`; no sealed base, no
+    cast, no breaking version. **B3:** the copy's own lock expander and
+    failure boundary; its freeze clears the copy's history only; one
+    retry. **B4:** today's rules from the code: duplicates label-keyed, a
+    bad label served, a locked unit never selected.
+  - **I1:** `GeneratedAttrib.payload` in definition space; a text rewrite
+    keeps its tag. **I2:** two disjoint guard branches; a data write seeds
+    nothing. **I3:** `UnitIndex` rebuilt on a `locked` change. **I4:** nine
+    differences marked or corrected (paint order, groups as edits, `select`,
+    group members on restore, selection on `load`, the rename's data loss,
+    `isUnitSymbol`, `unitsOnly`'s panels, what gates service). **I5:**
+    `serviceChanges`' timing, `restoreService`'s errors, `ServiceRestore`'s
+    types, `resetService` in design, the events' payloads,
+    `PlanUnitOverlay`, the inspector, the mixed drag, the colour default,
+    `PlanServiceView` alone, the exported types. **I6:** what
+    `ServiceSession` carries and which members switch on `mode`. **I7:** a
+    three-state `symbolsState` replaces `symbolsReady`; one `add`, one ref
+    per key. **I8:** a held object's units flip with its kit;
+    `LockSet.isLockedObject` named.
+  - **M1:** citations rechecked. **M2:** `probe` returns, `drift` throws.
+    **M3:** the before-survey's throw applies nothing. **M4:**
+    `InstanceNode.==`. **M5:** several ATTRIBs with one tag. **M6:** any
+    node added into an object refused. **M7:** `serviceEdited` against the
+    groups held on entering. **M8:** a missing kit's seat locks its row.
+    **M9:** `unitChanges` for generated units. **M10:** `unit:` in the
+    slash branch. **M11:** host words merged per kit. **M12:**
+    `PlanGate.relabel` and the exhaustive switch. **M13:**
+    `isServableInstance` is not the unit predicate.
