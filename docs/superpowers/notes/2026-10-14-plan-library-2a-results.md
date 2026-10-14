@@ -38,13 +38,13 @@ No skip (`~`) in the line: the one skip Task 13 once carried was retired by ruli
 (see "Ported tests"). `flutter analyze`: `No issues found! (ran in 5.2s)` (exit 0).
 Format: `Formatted 177 files (0 changed) in 0.61 seconds.` (exit 0).
 
-The plan library's paint-allocation invariant ran inside this suite and passed:
+The plan library's paint-allocation invariant, run on its own
+(`cd packages/jet_cad_2d_plan && flutter test test/invariants/canvas_paint_allocation_test.dart`, exit 0),
+last line:
 
 ```
-00:13 +304: jet_cad_2d_plan/test/invariants/canvas_paint_allocation_test.dart: CV-alloc a rebuilt steady-state PlanCanvas frame allocates O(1) per flush, not O(entities) (M-CV-alloc-1, M-CV-alloc-2)
+00:01 +1: All tests passed!
 ```
-
-(the absolute path prefix before `jet_cad_2d_plan/` is cut here).
 
 ### 3. Tools
 
@@ -66,9 +66,9 @@ Failing tests:
 ```
 
 Compared with `tool/ci/standing_failures.txt`, line by line: exactly its two
-`packages/jet_cad_2d` lines, nothing else. `test/invariants/query_allocation_test.dart`
-ran in this suite with no `[E]` line (its last test, `pickInto stays local: …`, passed at
-`+1321`). `dart analyze`: `No issues found!` (exit 0). Format: `Formatted 184 files (0 changed) in 0.59 seconds.` (exit 0).
+`packages/jet_cad_2d` lines, nothing else. `test/invariants/query_allocation_test.dart`,
+run on its own (`cd packages/jet_cad_2d && dart test test/invariants/query_allocation_test.dart`,
+exit 0), last line: `00:05 +6: All tests passed!`. `dart analyze`: `No issues found!` (exit 0). Format: `Formatted 184 files (0 changed) in 0.59 seconds.` (exit 0).
 
 `packages/jet_cad_2d_flutter` (`flutter test`, exit 1):
 
@@ -88,8 +88,9 @@ its seven `packages/jet_cad_2d_flutter` lines (`text ladder rung 1..5`). Its oth
 `text lod ladder rung 1` and `rung 2 (RenderBackend.canvas)`, passed on this machine; Tasks 1
 and 2 recorded the same local outcome (`+1450 ~1 -5`, report). No failure outside the list.
 The `~1` is the one line of `tool/ci/standing_skips.txt` (`test/rig/paint_microbench_test.dart`,
-the rig run by hand). `test/invariants/paint_allocation_test.dart` ran with no `[E]` line
-(last seen at `00:13 +664 -5: …paint_allocation_test.dart: load-time triangulation cost, recorded`).
+the rig run by hand). `test/invariants/paint_allocation_test.dart`, run on its own
+(`cd packages/jet_cad_2d_flutter && flutter test test/invariants/paint_allocation_test.dart`,
+exit 0), last line: `00:00 +3: All tests passed!`.
 `flutter analyze`: `No issues found! (ran in 5.2s)` (exit 0). Format: `Formatted 234 files (0 changed) in 0.53 seconds.` (exit 0).
 
 `packages/jet_cad_2d_gpu`: `00:00 +20: All tests passed!` (exit 0), `No issues found! (ran in 3.6s)` (exit 0),
@@ -162,8 +163,9 @@ printed nothing, exit 0 each. Neither package was published; only `--dry-run` ra
   ```
   `## Unreleased` in the engine's CHANGELOG: `3:## Unreleased` (one line).
 - Draw order and the frame path: `packages/jet_cad_2d_plan/test/invariants/` holds
-  `canvas_paint_allocation_test.dart` (and `theme_colours_test.dart`); it passed in gate 2.
-  `packages/jet_cad_2d_flutter/test/invariants/paint_allocation_test.dart` passed in gate 4.
+  `canvas_paint_allocation_test.dart` (and `theme_colours_test.dart`); its own run is quoted
+  in gate 2. `packages/jet_cad_2d_flutter/test/invariants/paint_allocation_test.dart`'s own
+  run is quoted in gate 4.
 - Sample kit regenerated: `cd packages/jet_cad_2d_kit && dart run test/fixtures/sample_kit/generate.dart`
   printed `sample kit: 4 symbols written` (exit 0); then
   `git diff --quiet -- packages/jet_cad_2d_kit/test/fixtures/sample_kit/sample.jetlib packages/jet_cad_2d_kit/test/fixtures/sample_kit/sample_snapshot.json`: exit 0.
