@@ -51,6 +51,15 @@ import 'vm_allocation_meter.dart';
 /// What a per-table regression makes: a boxed double, a point.
 const _watched = {'_Double', 'Vector2'};
 
+/// The hall's watch (2b Task 14): [_watched] and the transform a per-seat
+/// inverse would make (M-PA-hall: `Transform2` holds its doubles unboxed,
+/// so [_watched] alone misses it). The hall's live transforms (its
+/// candidates' inverses, its nodes') read in every epoch, picks or none
+/// (the meter's failure mode 1: some 3,500 measured), so the hall's
+/// picks are held to their excess over an epoch with none, as RB16's
+/// frames are.
+const _hallWatched = {..._watched, 'Transform2'};
+
 /// Instances per pick admitted: the meter's own noise (0.055 measured) but
 /// not one object per pick, let alone one per table.
 const double _perPickBudget = 0.5;
@@ -196,16 +205,19 @@ void main() {
         hallPicker.pick(world, reach: reach);
       }
       await m.reset();
+      final baseline = await m.accumulatedInstances(_hallWatched);
+      await m.reset();
       const picks = 1000;
       for (var i = 0; i < picks; i++) {
         hallPicker.pick(world, reach: reach);
       }
-      final accumulated = await m.accumulatedInstances(_watched);
+      final accumulated = await m.accumulatedInstances(_hallWatched);
       expect(identical(hallPicker.candidates, hallList), isTrue,
           reason: 'premise: the candidates were not rebuilt');
       for (final MapEntry(key: name, value: count) in accumulated.entries) {
-        expect(count / picks, lessThan(_perPickBudget),
-            reason: '$name: $count over $picks picks of 500 seats');
+        expect((count - baseline[name]!) / picks, lessThan(_perPickBudget),
+            reason: '$name: $count over $picks picks of 500 seats, '
+                '${baseline[name]} with none');
       }
     }
 
