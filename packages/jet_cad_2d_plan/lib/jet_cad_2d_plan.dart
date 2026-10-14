@@ -36,6 +36,7 @@ export 'src/l10n/strings.dart';
 export 'src/l10n/strings_de.dart';
 export 'src/l10n/strings_en.dart';
 export 'src/l10n/strings_tr.dart';
+export 'src/panels/plan_property_panel.dart' show PlanPropertyPanel;
 export 'src/panels/plan_symbol_gallery.dart';
 export 'src/shortcuts/plan_shortcut_guard.dart' show PlanShortcutGuard;
 export 'src/shortcuts/plan_shortcuts.dart';
