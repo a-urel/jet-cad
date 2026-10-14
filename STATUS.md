@@ -422,9 +422,10 @@ with 0.7.0 (below).
   (21 tasks), results
   [2026-10-14-plan-library-2a-results.md](docs/superpowers/notes/2026-10-14-plan-library-2a-results.md),
   ledger [docs/superpowers/ledgers/2026-10-14-plan-library-2a/](docs/superpowers/ledgers/2026-10-14-plan-library-2a/).
-  Complete on `feat/plan-library-2a` (worktree
-  `.claude/worktrees/plan-library-2a`), every task reviewed, whole-branch Opus
-  review with one fix wave, re-review clean; **not merged, not pushed**. One
+  Every task reviewed, whole-branch Opus review with one fix wave, re-review
+  clean; **merged into `main` at `4130ebc`** on the human's *"1"* (local merge;
+  on the merged tree `jet_cad_2d_plan` +735, `jet_cad_2d_kit` +314, analyze
+  clean); not pushed. One
   host-API difference awaits the human's word (A14): `selectTool` works with
   no view mounted (today it answers false). Next: 2b, the service mode, from
   a brainstorm. The human asked to be told when
@@ -561,9 +562,9 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 
 **In flight: the kit architecture. Sub-project 1 (`jet_cad_2d_kit`) is
 merged (PR #11 `bc705be`, PR #12 `27244bf`). Sub-project 2a (the plan library
-in design mode) is complete on `feat/plan-library-2a`, not merged, not
-pushed; its merge waits for the human's word. Next: 2b (the service mode),
-from a brainstorm** (In flight).
+in design mode) is merged at `4130ebc`, not pushed. Next: 2b (the service
+mode), from a brainstorm** (In flight). Open for the human: A14's
+`selectTool`-without-a-view difference.
 
 **Done 2026-10-13: 0.7.2 of the three packages**, published by the human in
 order (spec D11): `jet_cad_2d`, `jet_cad_2d_flutter`, `jet_cad_floor_plan`,
