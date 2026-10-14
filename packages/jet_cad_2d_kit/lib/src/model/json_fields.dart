@@ -16,6 +16,13 @@ T field<T>(Map<String, Object?> json, String key, String type) {
   return value;
 }
 
+/// [json]'s value at [key], or [absent] when [json] has no [key]: a field
+/// added after a format was first written, so that what was saved before it
+/// still reads (contract R2). A present value must be a [T].
+T optionalField<T>(
+        Map<String, Object?> json, String key, String type, T absent) =>
+    json.containsKey(key) ? field<T>(json, key, type) : absent;
+
 /// [json]'s list of strings at [key].
 List<String> stringList(Map<String, Object?> json, String key, String type) {
   final list = field<List<Object?>>(json, key, type);

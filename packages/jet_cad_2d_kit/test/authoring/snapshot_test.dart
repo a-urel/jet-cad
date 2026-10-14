@@ -100,4 +100,27 @@ void main() {
     });
     expect(merged.keys.toList(), ['a.b.c@1', 'b.c.d@1', 'c.d.e@1']);
   });
+
+  test('R2-6 retiring a symbol changes no snapshot entry', () {
+    const retired = CatalogSymbol(
+      key: 'sample.x.y',
+      version: 3,
+      name: 'X',
+      category: 'C',
+      unit: CatalogUnit(
+          kind: UnitKinds.seat, capacity: 1, labelling: UnitLabelling.assigned),
+      base: (120.5, -40),
+      shapes: [
+        CatalogLine((10, 20), (30, 40)),
+        CatalogPolyline([(1, 2), (3, 4), (5, 6)], closed: true),
+        CatalogCircle((7, 8), 9),
+        CatalogArc((1, 1), 2, 0.5, -1.25),
+      ],
+      retired: true,
+    );
+    // M-R2f: write `retired` into the entry; a retired key@N would read as
+    // changed geometry.
+    expect(geometrySnapshot(const Catalog(kit: 'sample', symbols: [retired])),
+        geometrySnapshot(const Catalog(kit: 'sample', symbols: [every])));
+  });
 }

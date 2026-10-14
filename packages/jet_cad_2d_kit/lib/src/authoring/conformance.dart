@@ -20,6 +20,13 @@ import 'snapshot.dart';
 /// [locales]. [sameAsEnglish] lists, per locale, the word ids whose right
 /// word is the English one. Empty when the kit conforms.
 ///
+/// The code side (contract R3): [typeIds], [toolIds] and [propertyIds] (a
+/// `PlanKit`'s `propertyIds`, without the `property:` prefix) must be under
+/// the kit's id, and each one's word (`type:<id>`, `tool:<id>`,
+/// `property:<id>`) must have English and a word in every declared locale.
+/// A code-side word that names none of them is not reported: a kit may pass
+/// a part of its ids.
+///
 /// Throws [ArgumentError] when [locales] lists English: English is always
 /// required, by stored text or by words.
 List<KitProblem> conformance({
@@ -29,6 +36,9 @@ List<KitProblem> conformance({
   required KitNames names,
   required List<String> locales,
   Map<String, Set<String>> sameAsEnglish = const {},
+  Iterable<String> typeIds = const [],
+  Iterable<String> toolIds = const [],
+  Iterable<String> propertyIds = const [],
 }) {
   if (locales.contains(KitNames.english)) {
     throw ArgumentError.value(locales, 'locales',
@@ -61,10 +71,40 @@ List<KitProblem> conformance({
     problems.add(KitProblem(KitProblemCode.libraryInvalid,
         'the committed library is refused, rule ${e.rule}: ${e.message}'));
   }
+  final code = _codeIds(catalog.kit, typeIds, toolIds, propertyIds);
   problems
     ..addAll(_snapshotProblems(catalog, committedSnapshot))
-    ..addAll(_wordProblems(catalog, names, locales, sameAsEnglish));
+    ..addAll(code.problems)
+    ..addAll(_wordProblems(catalog, names, locales, sameAsEnglish, code.words));
   return problems;
+}
+
+/// Contract R3: type and tool ids are `<kit>.<name>` (spec 2a P1), a
+/// property id is under the kit. The words of those that are.
+({List<KitProblem> problems, Set<String> words}) _codeIds(
+    String kit,
+    Iterable<String> typeIds,
+    Iterable<String> toolIds,
+    Iterable<String> propertyIds) {
+  final problems = <KitProblem>[];
+  final words = <String>{};
+  void check(String what, Iterable<String> ids, KitProblemCode outside,
+      bool Function(String) wellFormed) {
+    for (final id in ids) {
+      if (!wellFormed(id) || kitOfKey(id) != kit) {
+        problems.add(KitProblem(
+            outside, 'the $what id "$id" is not under the kit "$kit"'));
+      } else {
+        words.add('$what:$id');
+      }
+    }
+  }
+
+  check('type', typeIds, KitProblemCode.typeOutsideKit, isCodeId);
+  check('tool', toolIds, KitProblemCode.toolOutsideKit, isCodeId);
+  check('property', propertyIds, KitProblemCode.foreignWordId,
+      (id) => id.contains('.'));
+  return (problems: problems, words: words);
 }
 
 /// Checks 3 and 6, on the catalog itself: keys under the kit, lower case.
@@ -135,9 +175,14 @@ List<KitProblem> _snapshotProblems(Catalog catalog, String text) {
 }
 
 /// Check 5: every declared locale complete, no word the catalog lacks, no
-/// undeclared locale.
-List<KitProblem> _wordProblems(Catalog catalog, KitNames names,
-    List<String> locales, Map<String, Set<String>> sameAsEnglish) {
+/// undeclared locale; and R3: every code-side word in [codeWords] has
+/// English, and is then held to the declared locales like the others.
+List<KitProblem> _wordProblems(
+    Catalog catalog,
+    KitNames names,
+    List<String> locales,
+    Map<String, Set<String>> sameAsEnglish,
+    Set<String> codeWords) {
   // The English of each word id: a key's newest version's name, a
   // category's own text.
   final newest = <String, int>{};
@@ -166,6 +211,16 @@ List<KitProblem> _wordProblems(Catalog catalog, KitNames names,
         problems.add(KitProblem(KitProblemCode.wordOrphan,
             '$locale: "$id" names nothing in the catalog'));
       }
+    }
+  }
+  final stored = names.words[KitNames.english] ?? const <String, String>{};
+  for (final id in codeWords) {
+    final en = stored[id];
+    if (en == null) {
+      problems.add(KitProblem(
+          KitProblemCode.missingEnglish, '"$id" has no English word'));
+    } else {
+      english[id] = en;
     }
   }
   for (final locale in locales) {

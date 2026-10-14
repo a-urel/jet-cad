@@ -19,3 +19,6 @@
   `PlanKit` gains `types`, `tools`, `attachments` and `propertyIds`, and
   `validate` checks them; seven `KitProblemCode`s for the code side and the
   kit set; `isCodeId`. The contract depends on `jet_cad_2d_flutter`.
+- `retired` on `jetcad.symbol` and `CatalogSymbol`, written only when true;
+  `conformance` takes `typeIds`, `toolIds` and `propertyIds`; rule 11
+  refuses a unit outline by its width, 2·area/perimeter, not by its area.

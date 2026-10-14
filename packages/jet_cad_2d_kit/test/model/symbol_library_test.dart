@@ -445,8 +445,9 @@ void main() {
       expectRefused(bytesOfJson(j), 11, ['sample.sofa.three@3', hex(sofaLine)]);
     });
 
-    // Amended by the final review: an outline must enclose more than
-    // Tolerance.standard.linear squared, either winding.
+    // Amended by the final review, then by contract R7: an outline must be
+    // wider than Tolerance.standard.linear, its width 2·area/perimeter,
+    // either winding.
     void outline(String name, List<double> coords, List<String> parts) {
       test(name, () {
         final j = validLibraryJson();
@@ -456,26 +457,46 @@ void main() {
       });
     }
 
-    // M-V11c: drop the area check.
+    void loads(String name, List<double> coords) {
+      test(name, () {
+        final j = validLibraryJson();
+        geometryJson(j, tableTop)['coords'] = coords;
+        final lib = SymbolLibrary.decode(bytesOfJson(j));
+        expect(lib.entries[1].leaves.first.payload.coords, coords);
+      });
+    }
+
+    // M-V11c: drop the width check.
     outline(
         'V11c a closed outline on one diagonal, off the origin',
         [950.0, 560.0, 1250.0, 860.0, 1550.0, 1160.0, 950.0, 560.0],
-        ['encloses no area (0.0)']);
-    // Area 5e-19, under linear² (1e-18), and not zero: near the origin, the
-    // only place a double can hold so thin a triangle. M-V11d: `area == 0`.
+        ['is too thin (width 0.0)']);
+    // R7's own case: 600 mm long, 1e-9 mm wide, off the origin. Its area
+    // (6e-7) is far above linear² (1e-18): the area test let it load.
+    // M-R7a: the area test back (`area <= linear * linear`).
+    outline('R7-1 a 600 mm by 1e-9 mm sliver is refused', [
+      950.0, 560.0, 1550.0, 560.0, 1550.0, 560.000000001, 950.0, //
+      560.000000001, 950.0, 560.0
+    ], [
+      'is too thin'
+    ]);
+    // V11e's triangle, of area 2 * linear², loaded under the area test; it
+    // is about 2e-15 mm wide. M-R7a turns this red too.
     outline(
-        'V11d an outline of area linear² / 2',
-        [1e-3, 2e-3, 2e-3, 2e-3, 1e-3, 2e-3 + 1e-15, 1e-3, 2e-3],
-        ['encloses no area']);
-    test('V11e an outline of area 2 * linear² loads', () {
-      // Positive control. M-V11e: `area <= linear` (not squared).
-      final j = validLibraryJson();
-      geometryJson(j, tableTop)['coords'] = [
-        1e-3, 2e-3, 2e-3, 2e-3, 1e-3, 2e-3 + 4e-15, 1e-3, 2e-3, //
-      ];
-      final lib = SymbolLibrary.decode(bytesOfJson(j));
-      expect(lib.entries[1].leaves.first.payload.coords[5], 2e-3 + 4e-15);
-    });
+        'R7-2 a triangle of area 2 * linear² is refused',
+        [1e-3, 2e-3, 2e-3, 2e-3, 1e-3, 2e-3 + 4e-15, 1e-3, 2e-3],
+        ['is too thin']);
+    // Twice the tolerance wide. M-R7c: drop the factor 2 (area/perimeter is
+    // then just under linear).
+    loads('R7-3 a 600 mm by 2e-9 mm outline loads', [
+      950.0, 560.0, 1550.0, 560.0, 1550.0, 560.000000002, 950.0, //
+      560.000000002, 950.0, 560.0,
+    ]);
+    // A healthy thin unit, a positive control: a 600 mm by 1 mm bar.
+    loads('R7-4 a 600 mm by 1 mm outline loads', [
+      950.0, 560.0, 1550.0, 560.0, 1550.0, 561.0, 950.0, 561.0, 950.0, //
+      560.0,
+    ]);
     test('V11f a clockwise outline loads', () {
       // The table's top, its winding reversed. M-V11f: drop `.abs()`.
       final j = validLibraryJson();

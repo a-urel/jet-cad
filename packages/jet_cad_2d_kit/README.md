@@ -1,17 +1,19 @@
 # jet_cad_2d_kit
 
 The kit contract of jet_cad_2d plans. A kit — restaurant, architecture,
-cinema — ships its symbols (and, later, its parametric types and tools) on
-this contract, and the plan library loads any kit without knowing its
-domain. No kit depends on the plan library, and no kit depends on another.
+cinema — ships its symbols, its parametric types and its tools on this
+contract, and the plan library loads any kit without knowing its domain.
+No kit depends on the plan library, and no kit depends on another.
 
 Two libraries:
 
 - `package:jet_cad_2d_kit/jet_cad_2d_kit.dart`, the contract (Flutter): the
   components a plan stores (`jetcad.symbol`, `jetcad.unit`,
   `jetcad.manifest`, `jetcad.library`), the `.jetlib` library format and its
-  validator, `KitNames`, `SymbolLibrarySource`, `bundledLibrary` and the
-  `PlanKit` descriptor.
+  validator, `KitNames`, `SymbolLibrarySource`, `bundledLibrary`, the code
+  side (`PlanType`, `PlanTool`, the property specs, `ColourTarget`,
+  attachment providers, `PlanServices`, `KitDiagnostic`) and the `PlanKit`
+  descriptor.
 - `package:jet_cad_2d_kit/authoring.dart`, the authoring toolkit (pure Dart,
   runs under `dart run`): the catalog language, the library builder, shape
   helpers, the geometry snapshot and the conformance test.
@@ -42,5 +44,5 @@ is the built one, every published `key@N` keeps its geometry, and every
 declared locale is complete.
 
 The kit author's contract — naming, components, the format's rules, words,
-versions and the new-kit checklist — is
+versions, the new-kit checklist and the code side — is
 [docs/kits.md](https://github.com/a-urel/jet-cad/blob/main/docs/kits.md).
