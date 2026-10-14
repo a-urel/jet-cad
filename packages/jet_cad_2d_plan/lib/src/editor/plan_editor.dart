@@ -205,7 +205,20 @@ class _PlanEditorState extends State<PlanEditor> {
           exportDialog: widget.onExportDialog,
           onError: widget.onPageFlowError,
         ),
+        unitColourOpacity: _unitColourOpacity,
       );
+
+  /// The opacity an export or a print fills the units' colours at: the
+  /// ambient extension with the editor's `theme` over it, else the
+  /// editor's, else 0.35 (floor_plan_view.dart:540-546). A state gone
+  /// meanwhile reads its own theme.
+  double _unitColourOpacity() {
+    final theme = mounted
+        ? (Theme.of(context).extension<PlanTheme>()?.merge(widget.theme) ??
+            widget.theme)
+        : widget.theme;
+    return theme?.unitColourOpacity ?? kUnitColourOpacity;
+  }
 
   @override
   void initState() {

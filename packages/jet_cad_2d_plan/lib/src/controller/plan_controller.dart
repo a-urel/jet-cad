@@ -26,6 +26,7 @@ import '../l10n/strings.dart';
 import '../export/page_flows.dart';
 import '../export/page_printer.dart';
 import '../export/registries.dart';
+import '../export/unit_colour_underlay.dart' show checkedUnitColourOpacity;
 import '../service/service_record.dart';
 import '../service/service_session.dart';
 import '../service/service_state.dart';
@@ -291,6 +292,8 @@ class PlanController extends ChangeNotifier {
       catalog: () => catalog,
       settle: settlePendingInput,
       load: load,
+      // The active document's units (Task 9): the built-ins' fills.
+      units: () => unitIndex,
     );
     _services = {
       for (final kit in kits.kits)
@@ -374,19 +377,35 @@ class PlanController extends ChangeNotifier {
   /// plan made then. The dialog's remembered answer is left as it is. An
   /// error completes the `Future` with it; an unknown [exporterId] is an
   /// [ArgumentError] at once. Not gated by [permissions] (a host call).
+  ///
+  /// The coloured units are filled under the drawing at
+  /// [unitColourOpacity] when given, else at 0.35: with no view there is
+  /// no theme to read. A given opacity not finite or outside `[0, 1]`
+  /// throws an [ArgumentError] at once, before any flow runs.
   Future<PlanExport?> export(String exporterId, PlanExportChoice choice,
-          {String? name}) =>
-      pageFlows.export(exporterId, choice, name: name ?? 'plan');
+      {String? name, double? unitColourOpacity}) {
+    final opacity = checkedUnitColourOpacity(unitColourOpacity);
+    return pageFlows.export(exporterId, choice,
+        name: name ?? 'plan', unitColourOpacity: opacity);
+  }
 
   /// The plan's page as a PDF to [printer] (the platform's print dialog
   /// when null), named [name] (`plan` when null). True once the printer
   /// is done; false under [export]'s rules for null. Not gated by
   /// [permissions].
+  ///
+  /// The coloured units are filled under the drawing at
+  /// [unitColourOpacity] when given, else at 0.35: with no view there is
+  /// no theme to read. A given opacity not finite or outside `[0, 1]`
+  /// throws an [ArgumentError] at once, before any flow runs.
   Future<bool> print(PlanExportChoice choice,
-          {PagePrinter? printer, String? name}) =>
-      pageFlows.print(choice,
-          printer: printer ?? const PrintingPagePrinter(),
-          name: name ?? 'plan');
+      {PagePrinter? printer, String? name, double? unitColourOpacity}) {
+    final opacity = checkedUnitColourOpacity(unitColourOpacity);
+    return pageFlows.print(choice,
+        printer: printer ?? const PrintingPagePrinter(),
+        name: name ?? 'plan',
+        unitColourOpacity: opacity);
+  }
 
   /// Reads [bytes] with [importerId]'s importer and loads the plan's
   /// text, an empty manifest added when it has none (spec P5). An
@@ -800,6 +819,11 @@ class PlanController extends ChangeNotifier {
       throw StateError('$who needs the design mode (P-5)');
     }
   }
+
+  /// The design session's unit index cache (Task 6): the design canvas's
+  /// colours read it, whatever the mode.
+  @internal
+  UnitIndexCache get documentUnits => _session.units;
 
   /// The active document's unit index (`@internal`): the panels, the
   /// inspector and the tests read it.

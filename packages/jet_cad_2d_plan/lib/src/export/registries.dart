@@ -6,6 +6,8 @@ import 'dart:typed_data';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:meta/meta.dart';
 
+import '../theme/plan_theme.dart' show kUnitColourOpacity;
+
 /// What makes an export's bytes. Its [id] names the format in the dialog's
 /// answer and in `PlanController.export`: the built-ins are `plan.pdf` and
 /// `plan.png`, a host's its own (`acme.dxf`).
@@ -125,6 +127,7 @@ final class PlanExportRequest {
     required this.choice,
     required Set<Handle> omitted,
     required this.fonts,
+    this.unitColourOpacity = kUnitColourOpacity,
   }) : omitted = Set.unmodifiable(omitted);
 
   /// A copy of the plan made when the export started, so edits made while
@@ -143,6 +146,10 @@ final class PlanExportRequest {
   final Set<Handle> omitted;
 
   final PlanExportFonts fonts;
+
+  /// The alpha the units' colours are filled at under the drawing (2b spec
+  /// S4): the exporting editor's theme, or the host's argument, or 0.35.
+  final double unitColourOpacity;
 }
 
 /// An export's bytes, its file name and its MIME type.

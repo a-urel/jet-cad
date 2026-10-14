@@ -44,7 +44,7 @@ class PlanCanvasView extends StatefulWidget {
     this.framing,
     this.underlay,
     this.overlay,
-    this.tableOverlays,
+    this.unitOverlays,
     this.rulers = true,
     this.grid = true,
     this.cameraEpoch,
@@ -124,20 +124,20 @@ class PlanCanvasView extends StatefulWidget {
   /// page as before.
   final ViewportTransform? Function(Size size)? framing;
 
-  /// Painted between the page chrome and the drafting (spec 14c S7): the
-  /// selection mode's status fills, under the lines.
+  /// Painted between the page chrome and the drafting: the unit colours in
+  /// design, the group frames and the statuses in service (2b S4).
   final Widget? underlay;
 
-  /// Painted above the drafting and below the selection overlay
-  /// (table-groups spec G3, F-11): the selection mode's group label chips,
-  /// which a chair's lines must not paint over. Null draws nothing there.
+  /// Painted above the drafting and below the selection overlay: the focus
+  /// veil and the group chips in service (2b S4).
   final Widget? overlay;
 
   /// Painted above everything else on the canvas, the selection overlay
   /// included, and inside the canvas's input listeners, clipped to the
-  /// canvas (host embedding API spec G-5): the host's widgets on the
-  /// tables. Null draws nothing there.
-  final Widget? tableOverlays;
+  /// canvas (host embedding API spec G-5): the host's widgets on the units
+  /// (`PlanServiceView.unitOverlayBuilder`, Task 16). Null draws nothing
+  /// there.
+  final Widget? unitOverlays;
 
   /// The rulers around the drawing area; false in the selection mode,
   /// which shows the plan, not the drafting aids.
@@ -451,7 +451,7 @@ class _PlanCanvasViewState extends State<PlanCanvasView> {
                           ),
                         ),
                       ),
-                      if (widget.tableOverlays case final layer?)
+                      if (widget.unitOverlays case final layer?)
                         Positioned.fill(child: ClipRect(child: layer)),
                     ],
                   ),

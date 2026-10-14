@@ -28,7 +28,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d/testing.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show PlanSwatch;
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+import 'package:jet_cad_2d_plan/src/service/paint/unit_status_painter.dart';
+
+import '../support/service_fixture.dart';
+import '../support/service_paint.dart';
+import '../support/test_kit.dart' show unitKit;
 
 void main() {
   testWidgets(
@@ -110,5 +116,112 @@ void main() {
         reason: 'the buffer grew in a steady-state frame: O(entities)');
     expect(identical(sink.debugPaint, paint), isTrue,
         reason: 'flush() must reuse the one Paint of the sink\'s life');
+  });
+
+  testWidgets(
+      'CV-alloc-colour the design canvas\'s unit colours: ten rebuilt '
+      'frames, the camera moving, keep the painter and build and rebuild '
+      'nothing (M-CV-colour-a, M-CV-colour-b)', (tester) async {
+    final f = serviceFixture();
+    final c = PlanController(kits: [unitKit()], json: f.json);
+    addTearDown(c.dispose);
+    final table = c.unitIndex[f.table]!.text!;
+    expect(c.setUnitColour(table, PlanSwatch.teal), isTrue);
+    expect(c.setUnitColour('A1', PlanSwatch.purple), isTrue);
+    await tester.binding.setSurfaceSize(const Size(1440, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+        MaterialApp(home: Scaffold(body: PlanCanvas(controller: c))));
+    await tester.pump();
+    await tester.pump();
+    UnitStatusPainter painter() => tester
+        .widget<CustomPaint>(find.byKey(const Key('unit-colour-layer')))
+        .painter! as UnitStatusPainter;
+    final p = painter();
+    final made = p.debugAllocations;
+    final rebuilds = p.debugRebuilds;
+    expect(made, greaterThanOrEqualTo(3),
+        reason: 'premise: two paths and a paint at least');
+    final size = tester.getSize(find.byType(InteractionLayer));
+    final a = ViewportTransform.fit(c.document.extents, size);
+    for (var i = 0; i < 10; i++) {
+      c.camera.value = ViewportTransform(
+          worldToScreenMatrix: Transform2.translation(1.0 + i, -1.0 - i)
+              .multiply(a.worldToScreenMatrix));
+      tester.element(find.byType(PlanCanvas)).markNeedsBuild();
+      await tester.pump();
+    }
+    expect(identical(painter(), p), isTrue, reason: 'the painter is kept');
+    expect(p.debugAllocations, made, reason: 'nothing per frame');
+    expect(p.debugRebuilds, rebuilds, reason: 'no rebuild per frame');
+  });
+
+  testWidgets(
+      'CV-alloc-service the service scene: statuses, a group, a group '
+      'status and a focus over the table and the seats; ten frames, the '
+      'camera moving, build and rebuild nothing in any painter '
+      '(M-CV-service)', (tester) async {
+    final f = serviceFixture();
+    final c = PlanController(kits: [unitKit()], json: f.json);
+    addTearDown(c.dispose);
+    final table = c.unitIndex[f.table]!.text!;
+    c.setMode(PlanMode.service);
+    c.setUnitStatus({
+      table: UnitStatus(color: const Color(0xFFE53935), caption: 'Bill'),
+      'A1': UnitStatus(color: const Color(0xFF43A047)),
+    });
+    c.setUnitGroups({
+      'g': UnitGroup(members: {'A2', 'A3'})
+    });
+    c.setGroupStatus({'g': UnitStatus(color: const Color(0xFF3949AB))});
+    c.setUnitFocus({'A1', 'B1'});
+    final layers = ServicePaintLayers(
+        controller: c, session: c.serviceSession!, darkCanvas: () => false);
+    addTearDown(layers.dispose);
+    await tester.binding.setSurfaceSize(const Size(1440, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(Directionality(
+        textDirection: TextDirection.ltr,
+        child: Stack(fit: StackFit.expand, children: [
+          Positioned.fill(child: layers.underlay),
+          Positioned.fill(child: layers.overlay),
+        ])));
+    final base = ViewportTransform.fit(
+        c.serviceSession!.document.extents, const Size(1440, 900));
+    Future<void> frames(int n) async {
+      for (var i = 0; i < n; i++) {
+        c.camera.value = ViewportTransform(
+            worldToScreenMatrix: Transform2.translation(1.0 + i, -1.0 - i)
+                .multiply(base.worldToScreenMatrix));
+        await tester.pump();
+      }
+    }
+
+    await frames(3);
+    List<int> made() => [
+          layers.statuses.debugAllocations,
+          layers.frames.debugAllocations,
+          layers.chips.debugAllocations,
+          layers.focus.debugAllocations,
+        ];
+    List<int> rebuilt() => [
+          layers.statuses.debugRebuilds,
+          layers.frames.debugRebuilds,
+          layers.chips.debugRebuilds,
+          layers.focus.debugRebuilds,
+        ];
+    final made0 = made(), rebuilt0 = rebuilt();
+    expect(layers.statuses.debugAllocations, greaterThan(0),
+        reason: 'premise: the fills built');
+    // Each group painter counts its two paints and its matrix at birth.
+    expect(layers.frames.debugAllocations, greaterThan(3),
+        reason: 'premise: the frame built');
+    expect(layers.chips.debugAllocations, greaterThan(3),
+        reason: 'premise: the chip built');
+    expect(layers.focus.debugAllocations, greaterThan(2),
+        reason: 'premise: the veil built');
+    await frames(10);
+    expect(made(), made0, reason: 'nothing per frame');
+    expect(rebuilt(), rebuilt0, reason: 'no rebuild per frame');
   });
 }

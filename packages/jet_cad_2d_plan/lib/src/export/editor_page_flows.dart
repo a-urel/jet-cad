@@ -10,6 +10,7 @@ import 'package:flutter/widgets.dart' show BuildContext;
 import 'package:jet_cad_2d/jet_cad_2d.dart' show DraftDocument;
 
 import '../controller/plan_controller.dart';
+import '../theme/plan_theme.dart' show kUnitColourOpacity;
 import 'builtin_exporters.dart' show exportPageOf;
 import 'export_dialog.dart';
 import 'page_flows.dart';
@@ -56,7 +57,10 @@ class EditorPageFlows {
   EditorPageFlows(
       {required this.controller,
       required this.settings,
-      this.hooks = _noHooks});
+      this.hooks = _noHooks,
+      this.unitColourOpacity = _defaultOpacity});
+
+  static double _defaultOpacity() => kUnitColourOpacity;
 
   final PlanController controller;
 
@@ -65,6 +69,11 @@ class EditorPageFlows {
 
   /// The view's current hooks, read at each call.
   final PageFlowHooks Function() hooks;
+
+  /// The opacity the units' colours are filled at: the view's theme as it
+  /// is at the call, else 0.35
+  /// (floor_plan/lib/src/host/page_flows.dart:153-158).
+  final double Function() unitColourOpacity;
 
   bool _disposed = false;
 
@@ -102,7 +111,8 @@ class EditorPageFlows {
         final export = await flows.exportOnce(
             answer.exporter, answer.choice, settings().exportName,
             document: document,
-            cancelled: () => _disposed || !_exportAllowed());
+            cancelled: () => _disposed || !_exportAllowed(),
+            unitColourOpacity: unitColourOpacity());
         if (export != null) sink(export);
       });
 
@@ -110,7 +120,8 @@ class EditorPageFlows {
         final s = settings();
         await _flows.printOnce(s.printer, s.exportName,
             choice: _flows.dialogAnswer.choice,
-            cancelled: () => _disposed || !_printAllowed());
+            cancelled: () => _disposed || !_printAllowed(),
+            unitColourOpacity: unitColourOpacity());
       });
 
   Future<void> _run(Future<void> Function() flow) async {
