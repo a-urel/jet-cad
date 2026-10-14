@@ -2,6 +2,16 @@
 /// composable widgets of design mode, over the kits a host loads.
 library;
 
+export 'src/controller/camera_bounds.dart' show kPlanMaxScale, kPlanMinScale;
+export 'src/controller/plan_change.dart'
+    show
+        PlanChange,
+        PlanObjectAdded,
+        PlanObjectChanged,
+        PlanObjectRemoved,
+        PlanReplaced;
+export 'src/controller/plan_controller.dart';
+export 'src/export/registries.dart';
 export 'src/file/manifest.dart'
     show
         ManifestCheck,
@@ -14,3 +24,4 @@ export 'src/file/manifest.dart'
 export 'src/file/plan_file.dart';
 export 'src/file/plan_format_exception.dart';
 export 'src/kits/kit_set.dart';
+export 'src/symbols/plan_symbols_state.dart';
