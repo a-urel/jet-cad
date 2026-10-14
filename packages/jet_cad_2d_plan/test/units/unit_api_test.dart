@@ -4,7 +4,7 @@
 // unitChanges for a row edit. Over Task 5's service fixture (a turned,
 // mirrored table off the origin; two seats-only rows, one turned, one
 // curved) and Task 8's editor fixture (the units 1 and 2 placed).
-import 'package:flutter/painting.dart' show Size;
+import 'package:flutter/painting.dart' show Offset, Size;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
@@ -149,6 +149,39 @@ void main() {
     expect(c.document.commands.undoDepth, depth);
     // The placed table is not under the frozen row: it takes data.
     expect(c.setUnitData(tableLabel(c), const {'id': 't'}), isTrue);
+  });
+
+  test(
+      'UA-locked-label the kit missing, the placed table is held by the lock '
+      'set: setUnitLabel is false, no step, no lock hint (final review M-3, '
+      'M-UA-lock-label)', () {
+    final c = controllerFor(kits: const [], json: serviceFixture().json);
+    final table = c.unitIndex.units.singleWhere((u) => !u.generated);
+    expect(table.locked, isTrue, reason: 'premise: under the lock set');
+    final label = table.text!;
+    final depth = c.document.commands.undoDepth;
+    expect(c.setUnitLabel(label, '77'), isFalse);
+    expect(c.lockHint.value, isFalse, reason: 'a host call raises no hint');
+    expect(c.document.commands.undoDepth, depth);
+    expect(c.unitIndex.withLabel(label), hasLength(1));
+  });
+
+  test(
+      'UA-unitAt-seat unitAt finds a seat at its centre, in design and in '
+      'service (final review M-2, M-UA-at-seat)', () {
+    final c = design();
+    Offset at(String label) {
+      final centre = detailOf(c, label).center!;
+      final p = c.camera.value.worldToScreen(Vector2(centre.dx, centre.dy));
+      return Offset(p.x, p.y);
+    }
+
+    expect(c.unitIndex.withLabel('A3').single.generated, isTrue,
+        reason: 'premise: a seat');
+    expect(c.unitAt(at('A3')), 'A3');
+    c.setMode(PlanMode.service);
+    expect(c.unitAt(at('B2')), 'B2');
+    expect(c.unitAt(at('A3')), 'A3');
   });
 
   test(

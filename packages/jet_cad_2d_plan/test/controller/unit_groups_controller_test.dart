@@ -566,6 +566,8 @@ void main() {
     c.setUnitStatus({table: bill});
     c.setUnitFocus({table});
     expect(c.selectableMembers('g'), {table, a1}, reason: 'premise');
+    expect(c.statusOf(c.unitIndex[h.table]!), bill,
+        reason: 'premise: the status holds before the relabel');
 
     expect(c.setUnitLabel(table, '99'), isTrue);
     expect(labelOf(d, h.table), '99', reason: 'premise: relabelled');

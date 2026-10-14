@@ -234,6 +234,17 @@ void main() {
         reason: 'premise: the press is on the floor');
     expect(s.picker.candidates.where((c) => c.unit.generated), hasLength(500),
         reason: 'premise: the hall');
+    // Premise (Review Focus 5): the band covers seats, so a per-frame pick
+    // would have units to find.
+    final band = ui.Rect.fromPoints(press, const ui.Offset(1100, 300));
+    final covered = [
+      for (final d in hall.unitDetails)
+        if (d.unit.generatedBy != null && d.center != null)
+          if (camera.value.worldToScreen(Vector2(d.center!.dx, d.center!.dy))
+              case final p when band.contains(ui.Offset(p.x, p.y)))
+            d.unit.label,
+    ];
+    expect(covered, isNotEmpty, reason: 'premise: the band covers a seat');
     s.tool.onPointerDown(ev(press), ctx);
     s.tool.onPointerMove(ev(const ui.Offset(1100, 300)), ctx);
     expect(s.tool.phase, ToolPhase.dragging, reason: 'premise: a live band');

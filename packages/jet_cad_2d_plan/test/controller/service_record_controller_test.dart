@@ -164,6 +164,32 @@ void main() {
   });
 
   testWidgets(
+      'SR-restore-revision a restore moves revision once and notifies the '
+      'listeners once; a reset notifies them once (spec S3; final review '
+      'I-3, M-SR-restore-rev, M-SR-restore-notify, M-SR-reset-notify)',
+      (tester) async {
+    final c = controllerFor(kits: [testKit()], json: servicePlanText());
+    c.setMode(PlanMode.service);
+    move(c, '1', 750.25, -250.5);
+    final json = c.serviceJson()!;
+    await tester.pump();
+    var notified = 0;
+    void count() => notified++;
+    c.addListener(count);
+    final r = c.revision.value;
+
+    c.restoreService(json);
+    expect(c.revision.value - r, 1);
+    expect(notified, 1);
+
+    notified = 0;
+    c.resetService();
+    expect(notified, 1);
+    c.removeListener(count);
+    await tester.pump();
+  });
+
+  testWidgets(
       'SR-C16 the service record: null in design; a restore puts the moves '
       'back as the copy\'s floor, re-selects by label, and no Undo removes '
       'it (spec 14d S1-S3, M-14d-m, M-14d-t)', (tester) async {

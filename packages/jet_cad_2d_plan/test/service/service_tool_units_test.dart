@@ -247,4 +247,27 @@ void main() {
     r.drag(r.inside(t), Vector2(600, -300));
     expect(r.layouts, 1, reason: 'read again at the next press');
   });
+
+  testWidgets(
+      'ST-seat-drag with the table selected, a drag from an unselected seat '
+      '(no group) is spent: the selection stays the table, nothing moves, no '
+      'step, neither callback fires (M-ST-empty)', (tester) async {
+    final f = serviceFixture();
+    final r = rig(f.json);
+    final t = f.table, a3 = f.seatsA[2];
+    expect(r.c.unitIndex[a3]!.generated, isTrue, reason: 'premise: a seat');
+    r.tap(r.inside(t));
+    expect(r.keys, {r.key(t)}, reason: 'premise: the table alone');
+    final table0 = parts(r.node(t).transform);
+    final seat0 = parts(r.node(a3).transform);
+    final depth = r.c.activeDocument.commands.undoDepth;
+
+    r.drag(r.inside(a3), Vector2(600, -300));
+    expect(r.keys, {r.key(t)}, reason: 'the seat did not replace it');
+    expect(parts(r.node(t).transform), table0);
+    expect(parts(r.node(a3).transform), seat0);
+    expect(r.c.activeDocument.commands.undoDepth, depth, reason: 'no step');
+    expect(r.layouts, 0);
+    expect(r.moved, isEmpty);
+  });
 }

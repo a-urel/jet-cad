@@ -11,6 +11,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
     show InteractionLayer;
+import 'package:jet_cad_2d_plan/src/canvas/plan_canvas_view.dart';
 import 'package:jet_cad_2d_plan/src/controller/permissions.dart';
 import 'package:jet_cad_2d_plan/src/controller/plan_controller.dart';
 import 'package:jet_cad_2d_plan/src/export/export_dialog.dart'
@@ -271,5 +272,46 @@ void main() {
         kind: PointerDeviceKind.mouse);
     await tester.pump(const Duration(milliseconds: 400));
     expect(taps, [seat, table, seat]);
+  });
+
+  testWidgets(
+      'SV-restore after restoreService the view is on the new copy: its '
+      'canvas shows the new activeDocument, and a tap at the restored '
+      'table\'s place reaches onUnitTap (final review I-3, '
+      'M-SR-restore-notify)', (tester) async {
+    final c = rowsController();
+    final taps = <String>[];
+    await pumpService(
+        tester, c, PlanServiceView(controller: c, onUnitTap: taps.add));
+    c.fitToView();
+    await tester.pump();
+    await tester.pump();
+    final table =
+        c.unitDetails.firstWhere((d) => d.unit.generatedBy == null).unit.label!;
+    final designed = unitCentre(c, table);
+    // Down and left of the plan, onto the floor: under the rows' seats
+    // nothing is there.
+    move(c, table, -1500, -1500);
+    final restored = unitCentre(c, table);
+    final json = c.serviceJson()!;
+    c.resetService();
+    await tester.pump();
+    await tester.pump();
+    expect(unitCentre(c, table).x, closeTo(designed.x, 1e-6),
+        reason: 'premise: the reset put the table back');
+    await tester.tapAt(globalOfWorld(tester, c, restored),
+        kind: PointerDeviceKind.mouse);
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(taps, isEmpty, reason: 'premise: the floor before the restore');
+
+    c.restoreService(json);
+    await tester.pump();
+    await tester.pump();
+    final canvas = tester.widget<PlanCanvasView>(find.byType(PlanCanvasView));
+    expect(identical(canvas.document, c.activeDocument), isTrue);
+    await tester.tapAt(globalOfWorld(tester, c, restored),
+        kind: PointerDeviceKind.mouse);
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(taps, [table]);
   });
 }
