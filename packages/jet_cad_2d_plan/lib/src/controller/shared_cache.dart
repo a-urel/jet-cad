@@ -5,7 +5,7 @@ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
 
 final class SharedCache {
   final Map<(String, Type), Object> _values = {};
-  final List<Object> _made = [];
+  final List<(String, Object)> _made = [];
   final Set<(String, Type)> _making = {};
   bool _disposed = false;
 
@@ -23,17 +23,29 @@ final class SharedCache {
     try {
       final made = create(services);
       _values[key] = made;
-      _made.add(made);
+      _made.add((kitId, made));
       return made;
     } finally {
       _making.remove(key);
     }
   }
 
-  void dispose() {
+  /// Disposes every [Disposable] value, last made first. With [onError], a
+  /// value whose `dispose` throws is reported there (its kit's id) and the
+  /// rest are still disposed (spec 2a P4: a swap completes).
+  void dispose({void Function(String kitId, Object error)? onError}) {
     _disposed = true;
-    for (final value in _made.reversed) {
-      if (value is Disposable) value.dispose();
+    for (final (kitId, value) in _made.reversed) {
+      if (value is! Disposable) continue;
+      if (onError == null) {
+        value.dispose();
+        continue;
+      }
+      try {
+        value.dispose();
+      } catch (error) {
+        onError(kitId, error);
+      }
     }
     _made.clear();
     _values.clear();

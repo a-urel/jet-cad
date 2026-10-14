@@ -25,6 +25,7 @@ export 'src/file/plan_file.dart';
 export 'src/file/plan_format_exception.dart';
 export 'src/fonts/plan_fonts.dart'
     show ensurePlanFonts, kPlanFontFamily, registerFontLicences;
+export 'src/kits/guard.dart' show KitHookFailure;
 export 'src/kits/kit_set.dart';
 export 'src/kits/locks.dart' show PlanLocked;
 export 'src/l10n/localizations.dart';

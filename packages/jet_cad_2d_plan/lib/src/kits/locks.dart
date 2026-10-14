@@ -13,6 +13,8 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
+import 'guard.dart' show KitHookFailure;
+
 /// The refusal of a command that would change a locked object. A refusal,
 /// not a kit diagnostic: the canvas shows a short hint.
 final class PlanLocked implements Exception {
@@ -192,9 +194,19 @@ final class LockExpander {
   DraftCommand expandInner(DraftCommand command) =>
       _previous?.call(command) ?? command;
 
+  /// Called when the applied command threw a [KitHookFailure]: true when
+  /// it froze something, so the edit is worth one retry (Task 11).
+  bool Function(KitHookFailure failure)? onHookFailure;
+
+  /// Called when the applied command left the target partially mutated
+  /// (E3), before the error goes on to the caller (Task 11).
+  void Function(PartialMutationError error)? onPartialMutation;
+
   DraftCommand _expand(DraftCommand command) {
     final inner = expandInner(command);
-    if (locks.isEmpty) return inner;
+    if (locks.isEmpty && onHookFailure == null && onPartialMutation == null) {
+      return inner;
+    }
     return _LockCheck(this, command, inner);
   }
 }
@@ -210,8 +222,9 @@ final class _LockCheck extends DraftCommand {
   /// The command the caller executed, before any expansion.
   final DraftCommand original;
 
-  /// The expanded command this check applies.
-  final DraftCommand _applied;
+  /// The expanded command this check applies; the retry's, after a
+  /// recovered failure (Task 11).
+  DraftCommand _applied;
 
   @override
   String get label => _applied.label;
@@ -224,8 +237,29 @@ final class _LockCheck extends DraftCommand {
   Capability get capability => _applied.capability;
 
   @override
-  CommandResult apply(CommandTarget target) =>
-      _check(target, _applied.apply(target));
+  CommandResult apply(CommandTarget target) {
+    try {
+      return _check(target, _first(target));
+    } on PartialMutationError catch (error) {
+      _expander.onPartialMutation?.call(error);
+      rethrow;
+    }
+  }
+
+  /// [_applied] applied; on a kit's hook failure that the boundary
+  /// recovers from (it froze the failing objects), [original] expanded
+  /// afresh (a ParametricEdit applies once) and applied once more. A second
+  /// failure goes on: the command is refused.
+  CommandResult _first(CommandTarget target) {
+    try {
+      return _applied.apply(target);
+    } on KitHookFailure catch (failure) {
+      final recover = _expander.onHookFailure;
+      if (recover == null || !recover(failure)) rethrow;
+      _applied = _expander.expandInner(original);
+      return _applied.apply(target);
+    }
+  }
 
   CommandResult _check(CommandTarget target, CommandResult result) {
     final locks = _expander.locks;

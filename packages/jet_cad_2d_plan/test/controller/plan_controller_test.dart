@@ -285,8 +285,14 @@ void main() {
     final c = controllerFor(kits: [testKit()]);
     c.load(jsonEncode(json));
     expect(c.missingKits, {'gone'});
-    expect([for (final d in c.diagnostics.value) (d.kitId, d.code)],
-        [('gone', KitDiagnosticCode.kitMissing)]);
+    // Task 11 (spec P4, E4): the unreadable slab is its kit's diagnostic
+    // too, after the manifest's.
+    expect([
+      for (final d in c.diagnostics.value) (d.kitId, d.code)
+    ], [
+      ('gone', KitDiagnosticCode.kitMissing),
+      ('test', KitDiagnosticCode.componentUnreadable),
+    ]);
     expect(c.loadDiagnostics.single.code, 'component.unreadable');
     expect(
         c.loadDiagnostics.single.handles, [Handle.checked(int.parse(damaged))]);

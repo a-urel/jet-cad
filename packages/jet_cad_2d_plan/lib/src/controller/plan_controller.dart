@@ -16,6 +16,8 @@ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
 
 import '../file/manifest.dart';
 import '../file/plan_file.dart';
+import '../file/plan_format_exception.dart';
+import '../kits/guard.dart';
 import '../kits/kit_set.dart';
 import '../kits/locks.dart';
 import '../l10n/document_separator.dart';
@@ -23,7 +25,6 @@ import '../l10n/strings.dart';
 import '../export/registries.dart';
 import '../symbols/plan_symbols_state.dart';
 import 'camera_bounds.dart';
-import 'diagnostics_log.dart';
 import 'new_plan.dart';
 import 'plan_change.dart';
 import 'services.dart';
@@ -102,7 +103,7 @@ class PlanController extends ChangeNotifier {
     }
     final catalog = ParametricCatalog();
     for (final type in set.types) {
-      type.registerInto(catalog);
+      type.registerInto(catalog, guard: const PlanTypeGuard());
     }
     final measurer = FlutterTextMeasurer();
     final diagnostics = <Diagnostic>[];
@@ -270,11 +271,38 @@ class PlanController extends ChangeNotifier {
   /// The plan's text: the engine's JSON with the manifest of the kits it
   /// uses (Task 7). [markSaved] marks the state encoded here. An empty plan
   /// read here is settled as it is.
+  ///
+  /// A damaged plan (E3) is first read back; if it does not encode or does
+  /// not decode, nothing is returned: a [PlanFormatException]
+  /// (`damagedUnsavable`), and a diagnostic.
   String save() {
+    if (!_damaged.value) return _saveUnchecked();
+    final String text;
+    try {
+      text = _saveUnchecked();
+      unawaited(decodePlan(text,
+          register: _registerComponents,
+          diagnostics: <Diagnostic>[]).dispose());
+    } catch (error) {
+      _diagnostics.add(KitDiagnostic(
+          kitId: 'plan',
+          code: KitDiagnosticCode.damagedUnsavable,
+          message: '$error',
+          error: error));
+      throw PlanFormatException(PlanFormatCode.damagedUnsavable,
+          'the damaged plan does not read back: $error');
+    }
+    return text;
+  }
+
+  /// Task 8's save: the state is marked encoded only once it encoded.
+  String _saveUnchecked() {
     settlePendingInput();
     _unsettled = null;
-    _encodedState = document.commands.stateId;
-    return encodePlan(document, kits);
+    final state = document.commands.stateId;
+    final text = encodePlan(document, kits);
+    _encodedState = state;
+    return text;
   }
 
   /// The host stored the last [save]: that state is the save point; an
@@ -366,25 +394,76 @@ class PlanController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Set when an edit is refused because it would change a locked object;
+  /// the canvas shows a short hint and clears it (Task 15).
+  final ValueNotifier<bool> lockHint = ValueNotifier(false);
+
+  final ValueNotifier<bool> _damaged = ValueNotifier(false);
+
+  /// Whether a rollback threw in this document (E3): the plan was rebuilt
+  /// from what it holds, and saving reads it back first. Listenable: the
+  /// editor's bar shows a warning while it holds (Task 20).
+  ValueListenable<bool> get damaged => _damaged;
+
+  final Set<String> _disabledTools = {};
+
+  /// Whether [toolId]'s factory threw for the current document (spec P4):
+  /// the palette greys it, and [selectTool] leaves `plan.select` armed.
+  bool isToolDisabled(String toolId) => _disabledTools.contains(toolId);
+
   /// Executes [command] on the current document: the commit path of every
   /// widget and panel (controller ruling R-b; no widget calls
   /// `document.commands.execute`). True when it applied; false when it was
-  /// refused, the refusal caught here: [PlanLocked], `DanglingReferenceError`
-  /// (E2's refusal of a frozen object's referrer) and `ArgumentError`.
-  /// `StateError` (`PartialMutationError` included) goes on to the caller.
-  /// Task 11 adds the lock hint and a kit's hook failure.
+  /// refused, the refusal caught here: [PlanLocked] (and [lockHint] set),
+  /// `DanglingReferenceError` (E2's refusal of a frozen object's
+  /// referrer), `ArgumentError`, and a kit's hook failure the retry did not
+  /// cure (one diagnostic). `StateError` (`PartialMutationError` included,
+  /// after the damage is handled) goes on to the caller.
   bool execute(DraftCommand command) {
     try {
       document.commands.execute(command);
       return true;
     } on PlanLocked {
+      lockHint.value = true;
       return false;
     } on DanglingReferenceError {
       return false;
     } on ArgumentError {
       return false;
+    } on KitHookFailure catch (failure) {
+      _reportFailure(failure);
+      return false;
     }
   }
+
+  void _reportFailure(KitHookFailure failure) => _diagnostics.add(KitDiagnostic(
+      kitId: failure.kitId,
+      subject: failure.typeId,
+      code: KitDiagnosticCode.hookFailed,
+      message: '${failure.hook}: ${failure.error}',
+      error: failure.error));
+
+  /// E3: a rollback threw. The plan is rebuilt from what it holds (the
+  /// history cleared, every view told the document was loaded), the locks
+  /// refreshed over it, and it is marked damaged.
+  void _damage(PartialMutationError error) {
+    _damaged.value = true;
+    document.commands.notifyLoaded();
+    _session.locks.addBroken(document, const []);
+    _refreshFlags();
+    notifyListeners();
+  }
+
+  /// The decorator every tool of a document's map wears (spec P4).
+  Tool _guardTool(String kitId, String toolId, Tool tool) => GuardedTool(
+      inner: tool,
+      kitId: kitId,
+      toolId: toolId,
+      log: _diagnostics,
+      lockHint: lockHint,
+      onFailed: () {
+        if (!_disposed) selectTool(planSelectToolId);
+      });
 
   /// The type of [object] (E1), or null for anything that is not a live
   /// object of a loaded kit's type.
@@ -398,6 +477,8 @@ class PlanController extends ChangeNotifier {
 
   void _open(DraftDocument document, FlutterTextMeasurer measurer,
       List<Diagnostic> loadDiagnostics) {
+    _damaged.value = false;
+    _disabledTools.clear();
     final session = DocumentSession(
         document: document,
         measurer: measurer,
@@ -405,10 +486,23 @@ class PlanController extends ChangeNotifier {
         camera: camera,
         snap: _snap,
         kitLoaded: (kitId) => kits.kitOf(kitId) != null,
-        locked: _locked);
+        locked: _locked,
+        log: _diagnostics,
+        guard: _guardTool);
     _session = session;
     _locked.value = session.locks.objects;
-    session.runKitFactories(kits, _services);
+    session.boundary = FailureBoundary(
+        document: document,
+        catalog: catalog,
+        system: session.parametric,
+        frozen: session.frozen,
+        log: _diagnostics,
+        lock: lockBroken,
+        damage: _damage);
+    session.lockExpander
+      ..onHookFailure = session.boundary.recover
+      ..onPartialMutation = session.boundary.partialMutation;
+    session.runKitFactories(kits, _services, _disabledTools);
     session.tools.addListener(_onTools);
     session.history = document.commands.changes.listen((_) {
       if (!_disposed) _refreshFlags();
@@ -416,6 +510,11 @@ class PlanController extends ChangeNotifier {
     _loadDiagnostics = List.unmodifiable(loadDiagnostics);
     _readManifest();
     _tracker.attach(document);
+    // The load's checks (spec P4), once the views, the kit products and the
+    // manifest's diagnostics are in place: E4's unreadable components, then
+    // one dry run of the plan.
+    session.boundary.reportUnreadable(_loadDiagnostics);
+    session.boundary.probeLoaded();
   }
 
   /// What the plan's manifest says against the loaded kits (Task 7).
@@ -439,7 +538,7 @@ class PlanController extends ChangeNotifier {
   void _replace(DraftDocument document, FlutterTextMeasurer measurer,
       {required bool unsettled, List<Diagnostic> loadDiagnostics = const []}) {
     final old = _session;
-    old.tools.activate(old.select);
+    old.tools.activate(old.toolById(planSelectToolId)!);
     old.tools.removeListener(_onTools);
     _tracker.detach();
     old.disposeKitProducts();
@@ -521,7 +620,7 @@ class PlanController extends ChangeNotifier {
     final session = _session;
     final tool = session.toolById(id);
     if (tool == null || !_allowsTool(id)) return false;
-    final drawing = !identical(tool, session.select);
+    final drawing = id != planSelectToolId;
     if (drawing && !document.commands.permissions.allows(Capability.geometry)) {
       return false;
     }
@@ -536,12 +635,24 @@ class PlanController extends ChangeNotifier {
   /// Deletes the selection as the select tool's Delete does, one undo step
   /// (spec P2), after settling pending input. False with nothing selected,
   /// while a shape is part-way, and when every selected object is refused.
-  /// Tasks 10 and 12 add the lock and `delete: false`.
+  /// Tasks 10 and 12 add the lock and `delete: false`. A delete a lock
+  /// refuses (a locked object inside a selected group, Task 11) answers
+  /// false and sets [lockHint], as [execute] does.
   bool deleteSelection() {
     if (_midShape) return false;
     settlePendingInput();
     final session = _session;
-    return session.select.deleteSelection(session.toolContext);
+    try {
+      return session.select.deleteSelection(session.toolContext);
+    } on PlanLocked {
+      lockHint.value = true;
+      return false;
+    } on DanglingReferenceError {
+      return false;
+    } on KitHookFailure catch (failure) {
+      _reportFailure(failure);
+      return false;
+    }
   }
 
   @internal
@@ -571,9 +682,13 @@ class PlanController extends ChangeNotifier {
   @internal
   DiagnosticsLog get diagnosticsLog => _diagnostics;
 
-  /// The tool [id] of the current document, or null.
+  /// The tool [id] of the current document, or null: the tool its factory
+  /// made, without the guard the tool controller holds it in.
   @internal
-  Tool? toolFor(String id) => _session.toolById(id);
+  Tool? toolFor(String id) {
+    final tool = _session.toolById(id);
+    return tool is GuardedTool ? tool.inner : tool;
+  }
 
   /// The kit [kitId]'s services.
   @internal
@@ -851,6 +966,8 @@ class PlanController extends ChangeNotifier {
     _canRedo.dispose();
     _activeTool.dispose();
     _locked.dispose();
+    lockHint.dispose();
+    _damaged.dispose();
     _canvasRect.dispose();
     _fits.dispose();
     _snap.dispose();

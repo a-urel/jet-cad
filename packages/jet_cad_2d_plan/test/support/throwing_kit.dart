@@ -20,11 +20,16 @@ const Set<String> boomHooks = {
   'dissolves', 'generate', 'diagnose',
   // The component's factory.
   'fromJson',
-  // The grip provider: its factory, then each call.
+  // The grip provider: its factory, then each call; Task 11 adds its
+  // dispose.
   'gripsCreate', 'gripsOf', 'gripsDrag', 'gripsPreview', 'gripsMovable',
-  // The tool: its factory, its events, its painting.
+  'gripsDispose',
+  // The tool's shared cache (Task 11): its dispose.
+  'cacheDispose',
+  // The tool: its factory, its events, its painting; Task 11 adds a getter
+  // (isMidShape) and its dispose.
   'toolCreate', 'toolDown', 'toolMove', 'toolUp', 'toolExit', 'toolKey',
-  'toolCancel', 'toolPaint',
+  'toolCancel', 'toolPaint', 'toolMidShape', 'toolDispose',
   // The attachment provider: its factory, then attach.
   'attachCreate', 'attach',
   // Properties, the section (its builder, then the widget it returns), the
@@ -147,6 +152,7 @@ final class ThrowingKit {
         },
         create: (services) {
           check('toolCreate');
+          services.shared<BoomCache>((_) => BoomCache(this));
           return BoomTool(this);
         },
       ),
@@ -376,11 +382,24 @@ final class BoomType<T extends BoomComponent> extends ParametricType<T> {
   }
 }
 
+/// A per-document cache the tool asks for; only its dispose is switched.
+final class BoomCache implements Disposable {
+  BoomCache(this.kit);
+
+  final ThrowingKit kit;
+
+  @override
+  void dispose() => kit.check('cacheDispose');
+}
+
 /// One stretch grip at the block's right edge; a drag sets the size.
-final class BoomGrips implements ObjectGripProvider {
+final class BoomGrips implements ObjectGripProvider, Disposable {
   BoomGrips(this.kit);
 
   final ThrowingKit kit;
+
+  @override
+  void dispose() => kit.check('gripsDispose');
 
   @override
   List<Grip> gripsOf(DraftDocument d, Handle group) {
@@ -429,6 +448,18 @@ final class BoomTool extends Tool {
 
   @override
   ToolPhase get phase => ToolPhase.idle;
+
+  @override
+  bool get isMidShape {
+    kit.check('toolMidShape');
+    return false;
+  }
+
+  @override
+  void dispose() {
+    kit.check('toolDispose');
+    super.dispose();
+  }
 
   @override
   void onPointerDown(ToolPointerEvent e, ToolContext ctx) {
