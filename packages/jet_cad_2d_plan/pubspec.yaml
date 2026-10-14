@@ -27,6 +27,8 @@ dependencies:
   jet_cad_2d_flutter: ^0.7.2
   jet_cad_2d_kit: ^0.1.0
   meta: ^1.18.0
+  pdf: ^3.13.1
+  printing: ^5.15.1
   vector_math: ^2.2.0
 
 dev_dependencies:

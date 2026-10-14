@@ -319,7 +319,7 @@ void main() {
   testWidgets('C13 the exporters and importers given are kept, in order',
       (tester) async {
     final c = controllerFor(kits: [testKit()]);
-    expect(c.exporters, isEmpty);
+    expect([for (final e in c.exporters) e.id], ['plan.pdf', 'plan.png']);
     expect(c.importers, isEmpty);
     final exporters = [_Exporter('acme.dxf'), _Exporter('acme.svg')];
     final importers = [_Importer('acme.dxf')];
@@ -327,10 +327,11 @@ void main() {
         kits: [testKit()], exporters: exporters, importers: importers);
     addTearDown(d.dispose);
     // M-C13: the lists not stored (`const []`).
-    expect([for (final e in d.exporters) e.id], ['acme.dxf', 'acme.svg']);
+    expect([for (final e in d.exporters) e.id],
+        ['plan.pdf', 'plan.png', 'acme.dxf', 'acme.svg']);
     expect(d.importers.single, same(importers.single));
     exporters.clear();
-    expect(d.exporters, hasLength(2), reason: 'copied');
+    expect(d.exporters, hasLength(4), reason: 'copied');
   });
 }
 

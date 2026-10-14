@@ -14,7 +14,19 @@ export 'src/controller/plan_change.dart'
         PlanReplaced;
 export 'src/controller/plan_controller.dart';
 export 'src/editor/plan_tool_palette.dart' show PlanToolPalette;
-export 'src/export/registries.dart';
+export 'src/export/export_dialog.dart' show PlanExportDialog;
+export 'src/export/page_printer.dart' show PagePrinter, PrintingPagePrinter;
+export 'src/export/registries.dart'
+    show
+        PlanExport,
+        PlanExportAnswer,
+        PlanExportChoice,
+        PlanExportDpi,
+        PlanExportFonts,
+        PlanExportRequest,
+        PlanExporter,
+        PlanImporter,
+        PlanPageExporter;
 export 'src/file/manifest.dart'
     show
         ManifestCheck,

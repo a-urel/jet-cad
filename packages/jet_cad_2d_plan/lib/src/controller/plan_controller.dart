@@ -22,6 +22,8 @@ import '../kits/kit_set.dart';
 import '../kits/locks.dart';
 import '../l10n/document_separator.dart';
 import '../l10n/strings.dart';
+import '../export/page_flows.dart';
+import '../export/page_printer.dart';
 import '../export/registries.dart';
 import '../shortcuts/tool_letters.dart';
 import '../symbols/plan_symbol.dart';
@@ -108,6 +110,7 @@ class PlanController extends ChangeNotifier {
     PlanPermissions permissions = PlanPermissions.full,
   }) {
     final set = validateKitSet(kits);
+    PlanPageFlows.checkRegistry(exporters: exporters, importers: importers);
     if (!minScale.isFinite || minScale < _minScaleFloor) {
       throw ArgumentError.value(
           minScale, 'minScale', 'must be finite and at least 1e-6');
@@ -158,8 +161,6 @@ class PlanController extends ChangeNotifier {
       required double maxScale,
       required PlanPermissions permissions})
       : _permissions = permissions,
-        exporters = List.unmodifiable(exporters),
-        importers = List.unmodifiable(importers),
         _minScale = minScale,
         _maxScale = maxScale,
         _symbolLoader = symbols ?? PlanSymbolLoader(),
@@ -173,6 +174,21 @@ class PlanController extends ChangeNotifier {
             minScale: minScale,
             maxScale: maxScale),
         toolSettings = ToolSettingsStore(kits) {
+    pageFlows = PlanPageFlows(
+      exporters: exporters,
+      importers: importers,
+      unexported: {
+        for (final kit in kits.kits)
+          for (final type in kit.types)
+            if (!type.exported) type.id,
+      },
+      // `this.`: the constructor's own `document` parameter is the first
+      // plan, never the current one.
+      document: () => this.document,
+      catalog: () => catalog,
+      settle: settlePendingInput,
+      load: load,
+    );
     _services = {
       for (final kit in kits.kits)
         kit.id: KitServices(
@@ -230,12 +246,51 @@ class PlanController extends ChangeNotifier {
   Map<String, PlanSymbol> _symbolsById = const {};
   int _symbolRun = 0;
 
-  /// The host's exporters and importers, in order (spec P5); Task 19 adds
-  /// the built-in ones and the flows.
+  /// The export, print and import flows (spec P2, P5): the registries,
+  /// the one-flow guard every view of this controller shares, the
+  /// remembered dialog answer and the font.
   @internal
-  final List<PlanExporter> exporters;
-  @internal
-  final List<PlanImporter> importers;
+  late final PlanPageFlows pageFlows;
+
+  /// `plan.pdf`, `plan.png`, then the host's exporters, in order.
+  List<PlanExporter> get exporters => pageFlows.exporters;
+
+  /// The host's importers, in order.
+  List<PlanImporter> get importers => pageFlows.importers;
+
+  /// [exporterId]'s bytes of the plan as [choice] says, named
+  /// `<name>.<extension>` (`name` defaults to `plan`), with no view
+  /// mounted (spec P2).
+  ///
+  /// Null when an export or a print already runs for this controller
+  /// (one at a time, its views' included), when the exporter plots the
+  /// page and the plan has none, when the plan is replaced (`load`,
+  /// `newPlan`, `import`) before the bytes are made, or after [dispose].
+  /// Pending input is settled first; the exporter is handed a copy of the
+  /// plan made then. The dialog's remembered answer is left as it is. An
+  /// error completes the `Future` with it; an unknown [exporterId] is an
+  /// [ArgumentError] at once. Not gated by [permissions] (a host call).
+  Future<PlanExport?> export(String exporterId, PlanExportChoice choice,
+          {String? name}) =>
+      pageFlows.export(exporterId, choice, name: name ?? 'plan');
+
+  /// The plan's page as a PDF to [printer] (the platform's print dialog
+  /// when null), named [name] (`plan` when null). True once the printer
+  /// is done; false under [export]'s rules for null. Not gated by
+  /// [permissions].
+  Future<bool> print(PlanExportChoice choice,
+          {PagePrinter? printer, String? name}) =>
+      pageFlows.print(choice,
+          printer: printer ?? const PrintingPagePrinter(),
+          name: name ?? 'plan');
+
+  /// Reads [bytes] with [importerId]'s importer and loads the plan's
+  /// text, an empty manifest added when it has none (spec P5). An
+  /// importer's error, or a load that refuses ([PlanFormatException]),
+  /// completes the `Future` with it and changes nothing; an unknown
+  /// [importerId] is an [ArgumentError] at once.
+  Future<void> import(String importerId, Uint8List bytes) =>
+      pageFlows.import(importerId, bytes);
 
   final double _minScale, _maxScale;
 
@@ -1254,6 +1309,7 @@ class PlanController extends ChangeNotifier {
     _userSnap.dispose();
     camera.dispose();
     _settles.clear();
+    pageFlows.dispose();
     unawaited(_out.close());
     super.dispose();
   }
