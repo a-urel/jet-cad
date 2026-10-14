@@ -727,12 +727,14 @@ Component? _heldBefore(_Survey s, _Registration<Component> r, Handle h) =>
 }
 
 /// Undoes [r] after a failure; if that fails too, the target is in an
-/// unknown state and the caller must know it.
+/// unknown state and the caller must know it. That failure is a
+/// [PartialMutationError] (spec 2a E3).
 void _undoInner(CommandTarget t, String label, CommandResult r, Object cause) {
   try {
     r.inverse.apply(t);
   } catch (rollbackError) {
-    throw StateError('"$label": $cause, and undoing the edit then threw '
+    throw PartialMutationError(
+        '"$label": $cause, and undoing the edit then threw '
         '($rollbackError); the target is partially mutated and nothing was '
         'recorded in history');
   }
@@ -754,10 +756,10 @@ void _undoInner(CommandTarget t, String label, CommandResult r, Object cause) {
 /// Everything, deciding each command as well as applying it, every round,
 /// runs under one rollback: a failure undoes what the cascade applied, then
 /// [r0], and rethrows, so the target is as it was before the edit; a failed
-/// rollback throws 06's "partially mutated" `StateError` and undoes nothing
-/// more. The commands are applied one at a time, like `_run`'s regeneration
-/// loop and for the same reason (06 debt): a child's refusal and a failed
-/// rollback stay apart.
+/// rollback throws 06's "partially mutated" error, a [PartialMutationError]
+/// since spec 2a E3, and undoes nothing more. The commands are applied one
+/// at a time, like `_run`'s regeneration loop and for the same reason (06
+/// debt): a child's refusal and a failed rollback stay apart.
 CommandResult _cascade(CommandTarget t, List<_Registration<Component>> types,
     _Survey before, CommandResult r0, String label) {
   if (before.referrers.isEmpty) return r0;
@@ -790,7 +792,8 @@ CommandResult _cascade(CommandTarget t, List<_Registration<Component>> types,
         i.apply(t);
       }
     } catch (rollbackError) {
-      throw StateError('"$label": the reference cascade threw ($error) and '
+      throw PartialMutationError(
+          '"$label": the reference cascade threw ($error) and '
           'its rollback threw ($rollbackError); the target is partially '
           'mutated and nothing was recorded in history');
     }
@@ -1037,7 +1040,8 @@ CommandResult _run(ParametricEdit edit, CommandTarget t) {
           i.apply(t);
         }
       } catch (rollbackError) {
-        throw StateError('"${edit.label}": regeneration threw ($error) and '
+        throw PartialMutationError(
+            '"${edit.label}": regeneration threw ($error) and '
             'its rollback threw ($rollbackError); the target is partially '
             'mutated and nothing was recorded in history');
       }

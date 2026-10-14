@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+- `ParametricCatalog.typeIds` and `ParametricCatalog.typeIdOf(target,
+  group)`: the registered type ids in registration order, and the type id
+  that names a group's live object by the engine's own rule (null when it
+  is none).
+- `PartialMutationError`, a `StateError` with the same message, is what a
+  failed rollback now throws: `CompoundCommand.apply`, and a
+  `ParametricEdit` undoing its edit, its reference cascade or its
+  regeneration. A caller catching `StateError` is unaffected.
+- `ComponentRegistry.loadJson(json, diagnostics: list)` and
+  `DraftDocumentCodec.decode(…, keepUnreadableComponents: true)`: a
+  component whose factory throws is kept raw, as an unknown type is, and
+  reported as a `component.unreadable` diagnostic naming its handle,
+  instead of failing the load. Off by default. A value of the type
+  attached to that handle later is the one a save writes.
+
 ## 0.7.2
 
 Documentation and funding only; no code change. Plans are stored as in

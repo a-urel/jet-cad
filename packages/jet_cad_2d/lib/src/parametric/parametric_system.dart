@@ -3,6 +3,7 @@ import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../core/diagnostic.dart';
 import '../core/handle.dart';
+import '../core/partial_mutation_error.dart';
 import '../core/tolerance.dart';
 import '../document/command.dart';
 import '../document/commands.dart';
@@ -541,6 +542,26 @@ class ParametricCatalog {
         for (final h in t.components.withComponent<T>())
           if (names<T>(t, h)) h,
       ];
+
+  /// The type id of every registration, in registration order, each once
+  /// (spec 2a E1): a type id registered again keeps the place of its first
+  /// registration. A fresh iterable each call; reads the catalog only.
+  Iterable<String> get typeIds => {for (final t in _types) t.typeId};
+
+  /// The type id of the registration that names [group]'s object in
+  /// [target], by the engine's own rule (the one [names] reads: a
+  /// root-level `GroupNode`, named by the last registered type whose
+  /// component it carries), or null when [group] is not a live parametric
+  /// object: a nested or deleted group, an entity, the root, a handle that
+  /// names nothing, or a group carrying no registered component. A
+  /// component `ComponentRegistry.loadJson` kept raw is not a registered
+  /// one (spec 2a E4).
+  ///
+  /// Spec 2a E1: a host dispatches grips, panels and layer pickers by this
+  /// instead of re-spelling the rule. Cost: O(registered types), like
+  /// [names]; no client code runs.
+  String? typeIdOf(CommandTarget target, Handle group) =>
+      _naming(target, _types, group)?.typeId;
 }
 
 /// Regenerates parametric objects inside the edit that changes them (spec
