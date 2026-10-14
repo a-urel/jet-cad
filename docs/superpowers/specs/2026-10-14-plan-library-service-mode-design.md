@@ -804,7 +804,9 @@ four or six) generates instances of different definitions.
   `mergeCandidate`, `selectableMembers`.
 
 Statuses, groups, group statuses and focus are kept across mode switches,
-`resetService`, `restoreService`, `load` and `newPlan` (today). The
+`resetService`, `restoreService`, `load` and `newPlan` (today), except
+the groups themselves: `restoreService` replaces them with the record's
+and `resetService` clears them (decision 4; both differences, S5). The
 selection is cleared by `load` and `newPlan`, and kept by label across a
 mode switch, `resetService` and `restoreService` (today).
 
