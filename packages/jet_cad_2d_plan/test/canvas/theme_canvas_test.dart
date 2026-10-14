@@ -163,7 +163,8 @@ void main() {
         (blueprint, onDark, PaperPalette.dark),
       ]) {
         final v = controllerOn(paper);
-        await pumpView(tester, v, ThemeMode.light, theme: theme);
+        await pumpView(tester, v, ThemeMode.light,
+            viewMode: viewMode, theme: theme);
         final shot = await shoot(tester);
         expectSelectionRgb(shot, tester, want, hex(paper));
         expect(tester.widget<PlanCanvasView>(find.byType(PlanCanvasView)).paper,
@@ -192,7 +193,8 @@ void main() {
         '0xFF7FB2FF, White takes the theme\'s (per paper)', (tester) async {
       const theme = PlanTheme(selectionOnLight: onLight);
       var v = controllerOn(blueprint);
-      await pumpView(tester, v, ThemeMode.light, theme: theme);
+      await pumpView(tester, v, ThemeMode.light,
+          viewMode: viewMode, theme: theme);
       var shot = await shoot(tester);
       expectSelectionRgb(shot, tester, const Color(0xFF7FB2FF), 'Blueprint');
       expect(
@@ -203,7 +205,8 @@ void main() {
       await tester.pumpWidget(const SizedBox());
 
       v = controllerOn(white);
-      await pumpView(tester, v, ThemeMode.light, theme: theme);
+      await pumpView(tester, v, ThemeMode.light,
+          viewMode: viewMode, theme: theme);
       shot = await shoot(tester);
       expectSelectionRgb(shot, tester, onLight, 'White');
     });
