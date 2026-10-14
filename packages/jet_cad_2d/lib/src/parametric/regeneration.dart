@@ -701,7 +701,8 @@ Component? _heldBefore(_Survey s, _Registration<Component> r, Handle h) =>
 /// registered parametric component although the handle is not a live
 /// root-level group after the edit (spec D5, as amended by fix/post-11,
 /// post-11 found item (d)), with the registration it wrote; null when
-/// there is none. `_run` then undoes `inner` and throws `StateError`.
+/// there is none. `_run` then undoes `inner` and throws
+/// [NonLiveWriteError].
 ///
 /// "Wrote" means: the component is non-null now and not `==` to what the
 /// before-survey held for the same type on the same handle ([_heldBefore];
@@ -979,10 +980,14 @@ CommandResult _run(ParametricEdit edit, CommandTarget t) {
   // root-level group would never be regenerated. A client bug, like the
   // plan's malformed-boundary refusal (`_ownBoundaryOf`), so a
   // `StateError`: `GeneratedGeometryError` names a generated child, which
-  // this is not. Refused like 06 D6's guard: `inner` undone, nothing
-  // planned, nothing in history.
+  // this is not. Typed (spec 2a E2, amended in the final review): a
+  // `NonLiveWriteError` naming the handle. Refused like 06 D6's guard:
+  // `inner` undone, nothing planned, nothing in history.
   if (_written(t, types, before, r0.touched, frozen) case (final h, final r)?) {
-    final error = StateError('"${edit.label}": ${r.typeId} written on '
+    final error = NonLiveWriteError(
+        h,
+        r.typeId,
+        '"${edit.label}": ${r.typeId} written on '
         '${h.toHex()}, which is not a live root-level group after the edit, '
         'would never be regenerated (spec 06 D5); the edit is refused');
     _undoInner(t, edit.label, r0, error);

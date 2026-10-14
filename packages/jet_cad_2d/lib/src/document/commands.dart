@@ -955,8 +955,8 @@ class RemoveRegionCommand extends DraftCommand {
 /// [PartialMutationError] (a [StateError]) naming both failures replaces the
 /// original error, because the target is then partially mutated with
 /// nothing in history to describe it and the caller must know that rather
-/// than see the child's own exception and conclude nothing happened. The dispatcher pushes no history and emits no
-/// [DocChange] on either path.
+/// than see the child's own exception and conclude nothing happened. The
+/// dispatcher pushes no history and emits no [DocChange] on either path.
 ///
 /// [capabilities] is the union of the children's, so a runtime document
 /// refuses a compound that removes geometry even when its first child is a

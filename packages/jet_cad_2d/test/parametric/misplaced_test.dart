@@ -103,11 +103,17 @@ String noSeed(DraftDocument d) {
   return jsonEncode(j);
 }
 
-Matcher refusedAt(Handle h) => throwsA(isA<StateError>().having(
-    (e) => e.message,
-    'message',
-    allOf(contains(Hinge.id), contains(h.toHex()),
-        contains('not a live root-level group'))));
+/// The typed refusal (spec 2a E2, amended in the final review): a
+/// [NonLiveWriteError], still a [StateError] with its message, naming [h]
+/// and the type.
+Matcher refusedAt(Handle h) => throwsA(isA<NonLiveWriteError>()
+    .having((e) => e.handle, 'handle', h)
+    .having((e) => e.typeId, 'typeId', Hinge.id)
+    .having(
+        (e) => e.message,
+        'message',
+        allOf(contains(Hinge.id), contains(h.toHex()),
+            contains('not a live root-level group'))));
 
 void main() {
   test(

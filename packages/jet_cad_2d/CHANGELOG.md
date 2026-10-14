@@ -21,6 +21,11 @@
   `diagnostics()`, as a plain group, and calls none of its type's hooks
   for it. `ParametricSystem.probe(handle)` runs one live object's hooks in
   isolation, changing nothing, and returns the first error, or null.
+- `NonLiveWriteError`, a `StateError` with the same message, is what an
+  edit now throws when it writes a registered parametric type's component
+  on a handle that is not a live root-level group (a frozen object
+  included). It names the `handle` and the `typeId`. A caller catching
+  `StateError` is unaffected.
 
 ## 0.7.2
 

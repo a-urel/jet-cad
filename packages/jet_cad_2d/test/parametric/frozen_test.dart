@@ -94,11 +94,16 @@ void main() {
     final before = encoded(s.doc);
     final depth = s.doc.commands.undoDepth;
     // M-E2e: the write lands, and would never be regenerated.
+    // M-E2i (final review): the refusal thrown as a plain StateError, so a
+    // caller cannot tell it apart without matching the message.
     expect(
         () => s.doc.commands.execute(
             SetComponentCommand<Tile>(hF, const Tile('F', 2600, 1000))),
-        throwsA(isA<StateError>().having((e) => e.message, 'message',
-            contains('would never be regenerated'))));
+        throwsA(isA<NonLiveWriteError>()
+            .having((e) => e.handle, 'handle', hF)
+            .having((e) => e.typeId, 'typeId', Tile.id)
+            .having((e) => e.message, 'message',
+                contains('would never be regenerated'))));
     expect(encoded(s.doc), before);
     expect(s.doc.commands.undoDepth, depth);
   });
