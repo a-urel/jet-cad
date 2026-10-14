@@ -73,21 +73,17 @@ otherwise.
    - The design's click and band map a generated unit to its object (S2);
      the copy gets its own lock expander and failure boundary (S3).
 
-**Open for the human (A14):**
-1. 2a's `selectTool` answers true with no view mounted, where today's
-   answered false (2a results note, RV6). The mapping table (S5) carries
-   2a's behaviour until the human says otherwise.
-2. **A window band over a seats-only row** (S2, "In design"). The ruling
-   places the mapping in 2a's select gates, with `jet_cad_2d_flutter`
-   unchanged. The pick hook can map (`pick` answers the whole pick). The
-   band hook cannot: `bandAccepts` only filters the keys the tool built
-   (`jet_cad_2d_flutter/lib/src/select_tool.dart:601-606`). The tool takes
-   a group by a window only when the group owns a leaf and every one passes
-   (`:582-596`, `:621-645`), and a seats-only row owns none. So a window
-   band over it selects nothing. The ruling's test "a window band over a
-   seats-only row selects the row" needs either a mapping seam in
-   `jet_cad_2d_flutter` (A12's "where a seam is missing") or a 2a-side
-   mapping of the band's result. The test is held until the human rules.
+9. **Two open points, settled by the human** (2026-10-14):
+   - **A14, `selectTool` with no view** (*"true kalsın"*): 2a's behaviour
+     stays. `selectTool` answers true with no view mounted, where today's
+     answered false (2a results note, RV6): a deliberate difference, S5.
+   - **A window band over a seats-only row selects nothing** (*"Bant sırayı
+     seçmesin"*). `jet_cad_2d_flutter` stays unchanged: 2a's band hook
+     `bandAccepts` only filters the keys the tool built
+     (`jet_cad_2d_flutter/lib/src/select_tool.dart:601-606`), and the tool
+     takes a group by a window only when the group owns a leaf and every
+     one passes (`:582-596`, `:621-645`). A click and a crossing band select
+     the row. A known limit, not a defect.
 
 ## Facts (at `651e3d0`, read from the code; checked by two reviews)
 
@@ -563,7 +559,7 @@ symbol, a frozen object's or a missing kit's object's seat).
 - **The band:** `bandAccepts` refuses a key under such an object. A
   crossing band takes the row through the tool's own group rule (its seats'
   ATTRIBs resolve to it). A window band over a seats-only row takes nothing
-  (open for the human, item 2).
+  (decision 9, a known limit).
 - A table inside a plain user group keeps today's behaviour: the hit and
   the band give the table.
 - In service, the service tool writes seats into the copy's selection
@@ -1011,7 +1007,7 @@ parity table takes these rows over.
 | `canvasRect` | 2a already |
 | `exportPlan`/`printPlan(tableColorOpacity:)` (0.35; `ArgumentError` outside [0, 1]), the active plan in service | `export`/`print(unitColourOpacity:)`, the same default and check, the active document |
 | `undo`, `redo`, `canUndo`, `canRedo` on the active plan | the active document |
-| `selectTool` false with no view mounted | 2a: true (open for the human, A14) |
+| `selectTool` false with no view mounted | **difference:** 2a's true kept (decision 9) |
 
 **The view**
 
@@ -1136,8 +1132,8 @@ standing at the identity alone does not count.
   - a click on a seat's geometry selects the row (mutant: the mapping
     removed), and so does a click on its ATTRIB;
   - a crossing band over a seats-only row selects the row and no seat;
-  - a window band over a seats-only row selects the row (held: open for
-    the human, item 2);
+  - a window band over a seats-only row selects nothing, no seat included
+    (decision 9; mutant: `bandAccepts` letting a seat key through);
   - a table inside a plain group: today's selection, unchanged.
 - **Service:**
   - a seat is picked, selected, given a status and grouped; a group mixing
