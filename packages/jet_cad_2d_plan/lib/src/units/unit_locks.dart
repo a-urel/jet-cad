@@ -4,7 +4,6 @@
 // object's seat, a seat of a missing kit's definition). Used by the service
 // tool, unitDetails.locked, the record's strict match and the design writes.
 import 'package:jet_cad_2d/jet_cad_2d.dart';
-import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show isKitId;
 
 import '../kits/locks.dart';
 
@@ -18,18 +17,8 @@ bool isLockedUnit(CommandTarget document, LockSet locks, Handle instance) {
   return locks.covers(document, instance);
 }
 
-/// The type id of the first unknown kit-namespaced component on [group] (a
-/// kit id, then a dot; not `jetcad`, not `plan`): what a group the lock set
-/// holds for a missing kit was, by the rule `LockSet` reads
-/// (`locks.dart:67-77`). Null when it carries none.
-String? heldTypeOf(CommandTarget document, Handle group) {
-  for (final payload in document.components.unknownOf(group)) {
-    final typeId = payload['typeId'];
-    if (typeId is! String) continue;
-    final dot = typeId.indexOf('.');
-    if (dot <= 0) continue;
-    final kit = typeId.substring(0, dot);
-    if (isKitId(kit) && kit != 'jetcad' && kit != 'plan') return typeId;
-  }
-  return null;
-}
+/// The type id of the first unknown kit-namespaced component on [group]:
+/// what a group the lock set holds for a missing kit was, by the rule
+/// `LockSet` reads ([unknownKitTypeIdOf]). Null when it carries none.
+String? heldTypeOf(CommandTarget document, Handle group) =>
+    unknownKitTypeIdOf(document, group);

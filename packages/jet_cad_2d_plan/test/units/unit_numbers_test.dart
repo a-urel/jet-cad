@@ -60,7 +60,7 @@ void main() {
         ' 4 ',
         'ÇİĞ',
         ' 12345678 ',
-        'a b',
+        'a\u00A0b',
       ]) {
         expect(unitLabelError(n), isNull, reason: n);
       }

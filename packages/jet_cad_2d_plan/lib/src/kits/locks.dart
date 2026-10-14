@@ -24,6 +24,23 @@ final class PlanLocked implements Exception {
   String toString() => 'PlanLocked: the edit would change a locked object';
 }
 
+/// The type id of the first unknown component on [h] whose type id is
+/// kit-namespaced (a kit id, then a dot; not `jetcad`, not `plan`), or
+/// null: the component that locks [h] (spec P4), and what a held group was
+/// (spec 2b S2, `heldTypeOf`). The one reading of the rule.
+@internal
+String? unknownKitTypeIdOf(CommandTarget document, Handle h) {
+  for (final payload in document.components.unknownOf(h)) {
+    final typeId = payload['typeId'];
+    if (typeId is! String) continue;
+    final dot = typeId.indexOf('.');
+    if (dot <= 0) continue;
+    final kit = typeId.substring(0, dot);
+    if (isKitId(kit) && kit != 'jetcad' && kit != 'plan') return typeId;
+  }
+  return null;
+}
+
 /// The locked objects of one document, and what they contain.
 final class LockSet {
   LockSet._(this._missing, this._definitions, CommandTarget target) {
@@ -62,18 +79,11 @@ final class LockSet {
     return LockSet._(missing, definitions, document);
   }
 
-  /// The kit id of an unknown, kit-namespaced component on [h] (a kit id,
-  /// then a dot; not `jetcad`, not `plan`), or null.
+  /// The kit id of an unknown, kit-namespaced component on [h]
+  /// ([unknownKitTypeIdOf]), or null.
   static String? _unknownKit(DraftDocument d, Handle h) {
-    for (final payload in d.components.unknownOf(h)) {
-      final typeId = payload['typeId'];
-      if (typeId is! String) continue;
-      final dot = typeId.indexOf('.');
-      if (dot <= 0) continue;
-      final kit = typeId.substring(0, dot);
-      if (isKitId(kit) && kit != 'jetcad' && kit != 'plan') return kit;
-    }
-    return null;
+    final typeId = unknownKitTypeIdOf(d, h);
+    return typeId?.substring(0, typeId.indexOf('.'));
   }
 
   /// Whether an unknown component of [kit] locks its holder: always (plan

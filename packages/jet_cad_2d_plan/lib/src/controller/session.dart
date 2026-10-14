@@ -47,10 +47,6 @@ final class DocumentSession {
         index = SpatialIndex(document),
         dispatch = GripDispatch(catalog) {
     locks = LockSet.scan(document, kitLoaded);
-    // Spec 2b S2: the document's units, rebuilt on its state id, its
-    // layers' revision and the controller's locked set.
-    units = UnitIndexCache(document,
-        catalog: catalog, locks: locks, locked: locked);
     // planner_shell.dart:625-671, the order load-bearing: the selection
     // prunes a dead key before the outline cache walks it; the gates
     // listen to the selection before the outline and grip caches do; the
@@ -91,6 +87,11 @@ final class DocumentSession {
     parametric = ParametricSystem(document, catalog, isFrozen: frozen.contains)
       ..install();
     lockExpander = LockExpander(document, locks)..install();
+    // Spec 2b S2: the document's units, rebuilt on its state id, its
+    // layers' revision and the controller's locked set. Last: it listens to
+    // [locked], so no later step can throw and leak the listener.
+    units = UnitIndexCache(document,
+        catalog: catalog, locks: locks, locked: locked);
   }
 
   final DraftDocument document;

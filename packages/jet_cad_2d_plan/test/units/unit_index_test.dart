@@ -1,4 +1,5 @@
-// Ported from jet_cad_floor_plan/test/tables/table_index_test.dart; assertions unchanged.
+// Ported from jet_cad_floor_plan/test/tables/table_index_test.dart;
+// assertions unchanged.
 //
 // Spec 14a T1, T2, T6, T15 (spec 2b S2 "A unit", "UnitIndex",
 // "Diagnostics"): which instances are units, the label each carries, and

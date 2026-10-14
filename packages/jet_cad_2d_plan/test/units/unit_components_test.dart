@@ -1,4 +1,5 @@
-// Ported from jet_cad_floor_plan/test/tables/table_data_test.dart and test/host/table_color_test.dart; assertions unchanged.
+// Ported from jet_cad_floor_plan/test/tables/table_data_test.dart and
+// test/host/table_color_test.dart; assertions unchanged.
 //
 // Spec 2b S2 "Per-unit data" (host embedding API spec E-6, plan colours
 // spec PC-4): the host's data on a unit -- the component, its limits, its
@@ -74,7 +75,7 @@ void main() {
       expect(unitDataProblem(hostData()), isNull);
       expect(unitDataProblem(const {}), isNull,
           reason: 'empty is within the limits: it removes the data');
-      expect(unitDataProblem({'a': ' ¡ é'}), isNull,
+      expect(unitDataProblem({'a': '\u00A0¡ é'}), isNull,
           reason: 'U+00A0 is past the C1 range');
       expect(unitDataProblem({'a': 'a~b'}), isNull,
           reason: 'U+007E is below the DEL and C1 range');
