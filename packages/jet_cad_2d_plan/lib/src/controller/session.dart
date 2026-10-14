@@ -14,7 +14,10 @@ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
 import '../kits/guard.dart';
 import '../kits/kit_set.dart';
 import '../kits/locks.dart';
+import '../tools/generic_tools.dart';
+import '../tools/plan_select_gates.dart';
 import 'grip_dispatch.dart';
+import 'permissions.dart';
 import 'services.dart';
 import 'shared_cache.dart';
 
@@ -31,6 +34,8 @@ final class DocumentSession {
       required bool Function(String kitId) kitLoaded,
       required ValueListenable<Set<Handle>> locked,
       required DiagnosticsLog log,
+      required PlanPermissions Function() permissions,
+      required ValueListenable<bool> fill,
       required Tool Function(String kitId, String toolId, Tool tool) guard})
       : _log = log,
         _guard = guard,
@@ -43,12 +48,13 @@ final class DocumentSession {
     // listen to the selection before the outline and grip caches do; the
     // grip cache rebuilds after the outlines.
     selection = SelectionController(document);
-    lockGates = LockGates(selection: selection, locked: locked);
+    gates = PlanSelectGates(
+        permissions: permissions, selection: selection, locked: locked);
     outlines = OutlineCache(document, selection);
     grips = GripCache(document, selection, outlines,
         objects: LockedGrips(locks,
             GuardedGrips(dispatch, typeIdOf: catalog.typeIdOf, log: log)),
-        gates: lockGates);
+        gates: gates);
     toolContext = ToolContext(
         document: document,
         index: index,
@@ -57,12 +63,20 @@ final class DocumentSession {
         page: page,
         snap: snap,
         grips: grips);
-    select = SelectTool(gates: lockGates);
+    // The session's one plan.select: the generic set's, gated (spec P2
+    // permissions, P4 locks).
+    generic = buildGenericTools(gates: gates, fill: fill);
+    select = generic.select;
     // Every tool in the map is guarded (spec P4), the plan's own under the
     // kit id `plan`; the tool controller knows the guarded one.
     final guardedSelect = guard('plan', planSelectToolId, select);
     _entries.add((id: planSelectToolId, tool: guardedSelect, kit: false));
     tools = ToolController(initial: guardedSelect, context: toolContext);
+    // The other generic tools, before any kit's (runKitFactories runs
+    // later, from the controller's _open). The map owns and disposes them.
+    for (final e in generic.byId.entries) {
+      if (e.key != planSelectToolId) addTool(e.key, e.value);
+    }
     // :1050-1057: the document arrives built; the system installs last,
     // and the lock expander stacks after it.
     parametric = ParametricSystem(document, catalog, isFrozen: frozen.contains)
@@ -96,24 +110,33 @@ final class DocumentSession {
   late final ToolController tools;
   late final ParametricSystem parametric;
 
-  /// The document's lock set, expander and select gates (spec P4).
+  /// The document's lock set and expander (spec P4).
   late final LockSet locks;
   late final LockExpander lockExpander;
-  late final LockGates lockGates;
+
+  /// The select tool's and the grip cache's gates: the permissions and the
+  /// locks (spec P2, P4).
+  late final PlanSelectGates gates;
+
+  /// The generic tools (Task 12). The map holds each of them, guarded, and
+  /// disposes them: never [GenericToolSet.dispose] here (a second dispose
+  /// of a tool asserts).
+  late final GenericToolSet generic;
   final SharedCache shared = SharedCache();
 
   /// The registry until Task 14 runs the providers' factories.
   AttachmentRegistry attachments = const NoAttachments();
 
-  /// The tools by id: select, then each kit's in load order (Task 12 adds
-  /// the generic tools after select).
+  /// The tools by id: select, the other generic tools, then each kit's in
+  /// load order.
   final List<({String id, Tool tool, bool kit})> _entries = [];
   final List<({String kitId, String typeId, Object provider})> _providers = [];
 
   /// The document's change subscription, for the history flags.
   StreamSubscription<DocChange>? history;
 
-  /// Registers a tool that is not a kit's (Task 12's generic tools).
+  /// Registers a tool that is not a kit's (the generic tools; Task 14's
+  /// plan.symbol).
   void addTool(String id, Tool tool) =>
       _entries.add((id: id, tool: _guard('plan', id, tool), kit: false));
 
@@ -219,7 +242,7 @@ final class DocumentSession {
     outlines.dispose();
     selection.dispose();
     page.dispose();
-    lockGates.dispose();
+    gates.dispose();
     lockExpander.dispose();
     parametric.dispose();
     index.dispose();

@@ -24,8 +24,11 @@ import '../l10n/document_separator.dart';
 import '../l10n/strings.dart';
 import '../export/registries.dart';
 import '../symbols/plan_symbols_state.dart';
+import '../tools/generic_tools.dart';
+import '../tools/plan_select_gates.dart';
 import 'camera_bounds.dart';
 import 'new_plan.dart';
+import 'permissions.dart';
 import 'plan_change.dart';
 import 'services.dart';
 import 'session.dart';
@@ -91,6 +94,7 @@ class PlanController extends ChangeNotifier {
     List<PlanImporter> importers = const [],
     double minScale = kPlanMinScale,
     double maxScale = kPlanMaxScale,
+    PlanPermissions permissions = PlanPermissions.full,
   }) {
     final set = validateKitSet(kits);
     if (!minScale.isFinite || minScale < _minScaleFloor) {
@@ -126,7 +130,8 @@ class PlanController extends ChangeNotifier {
         exporters: exporters,
         importers: importers,
         minScale: minScale,
-        maxScale: maxScale);
+        maxScale: maxScale,
+        permissions: permissions);
   }
 
   PlanController._(this.kits, this.catalog, DraftDocument document,
@@ -137,8 +142,10 @@ class PlanController extends ChangeNotifier {
       required List<PlanExporter> exporters,
       required List<PlanImporter> importers,
       required double minScale,
-      required double maxScale})
-      : exporters = List.unmodifiable(exporters),
+      required double maxScale,
+      required PlanPermissions permissions})
+      : _permissions = permissions,
+        exporters = List.unmodifiable(exporters),
         importers = List.unmodifiable(importers),
         _minScale = minScale,
         _maxScale = maxScale,
@@ -237,6 +244,12 @@ class PlanController extends ChangeNotifier {
       _out.stream.where((_) => !_disposed);
 
   final List<VoidCallback> _settles = [];
+
+  /// The editor's permissions (spec P2); the Fill toggle; each known tool
+  /// id's needs. Kept across document swaps.
+  PlanPermissions _permissions;
+  final ValueNotifier<bool> _fill = ValueNotifier<bool>(false);
+  final Map<String, Set<Capability>> _toolNeeds = <String, Set<Capability>>{};
 
   // ---------------------------------------------------------------------
   // The plan.
@@ -479,6 +492,17 @@ class PlanController extends ChangeNotifier {
       List<Diagnostic> loadDiagnostics) {
     _damaged.value = false;
     _disabledTools.clear();
+    // The engine's permissions follow the profile, before any system is
+    // installed over the document (spec P2).
+    document.commands.permissions = _permissions.draft;
+    for (final t in genericTools) {
+      _toolNeeds[t.id] = t.needs;
+    }
+    for (final kit in kits.kits) {
+      for (final planTool in kit.tools) {
+        _toolNeeds[planTool.id] = planTool.needs;
+      }
+    }
     final session = DocumentSession(
         document: document,
         measurer: measurer,
@@ -488,6 +512,8 @@ class PlanController extends ChangeNotifier {
         kitLoaded: (kitId) => kits.kitOf(kitId) != null,
         locked: _locked,
         log: _diagnostics,
+        permissions: () => _permissions,
+        fill: _fill,
         guard: _guardTool);
     _session = session;
     _locked.value = session.locks.objects;
@@ -594,9 +620,23 @@ class PlanController extends ChangeNotifier {
     final commands = document.commands;
     if (!commands.canUndo) return;
     try {
-      commands.undo();
+      _unrestricted(commands.undo);
     } on PartialMutationError catch (error) {
       _session.boundary.partialMutation(error);
+    }
+  }
+
+  /// Runs [step] with the document's engine permissions lifted, then puts
+  /// them back: a host's undo or redo is not gated (spec P2), and the
+  /// dispatcher checks permissions on undo and redo too (undo.dart:213).
+  void _unrestricted(void Function() step) {
+    final commands = document.commands;
+    final saved = commands.permissions;
+    commands.permissions = DraftPermissions.all;
+    try {
+      step();
+    } finally {
+      commands.permissions = saved;
     }
   }
 
@@ -607,7 +647,7 @@ class PlanController extends ChangeNotifier {
     final commands = document.commands;
     if (!commands.canRedo) return;
     try {
-      commands.redo();
+      _unrestricted(commands.redo);
     } on PartialMutationError catch (error) {
       _session.boundary.partialMutation(error);
     }
@@ -625,31 +665,82 @@ class PlanController extends ChangeNotifier {
 
   /// Arms the tool [id] (spec P2), as a palette tap would, and answers
   /// whether it is now active: false for an unknown id, a tool the
-  /// permissions refuse (Task 12), and a drawing tool while the plan's
-  /// permissions deny geometry. A drawing tool clears the selection
-  /// (planner_shell.dart:926-933).
+  /// permissions' ids refuse, and a tool whose needs the document's engine
+  /// permissions deny (a drawing tool while geometry is denied,
+  /// planner_shell.dart:926-933). A drawing tool clears the selection.
   bool selectTool(String id) {
     final session = _session;
     final tool = session.toolById(id);
     if (tool == null || !_allowsTool(id)) return false;
-    final drawing = id != planSelectToolId;
-    if (drawing && !document.commands.permissions.allows(Capability.geometry)) {
-      return false;
-    }
-    if (drawing) session.selection.clear();
+    if (id != planSelectToolId) session.selection.clear();
     session.tools.activate(tool);
     return true;
   }
 
-  /// The permissions' say on a tool; Task 12 fills it.
-  bool _allowsTool(String id) => true;
+  /// Whether [id] may be armed: offered by the permissions' ids, a tool
+  /// this controller knows, and every capability its commits need allowed
+  /// by the document's engine permissions (spec P2).
+  bool _allowsTool(String id) {
+    if (!_permissions.allowsTool(id)) return false;
+    final needs = _toolNeeds[id];
+    if (needs == null) return false;
+    final engine = document.commands.permissions;
+    for (final c in needs) {
+      if (!engine.allows(c)) return false;
+    }
+    return true;
+  }
+
+  /// [id]'s needs, or null for an id this controller does not know.
+  @internal
+  Set<Capability>? needsOf(String id) => _toolNeeds[id];
+
+  /// For Task 14's plan.symbol, which is built outside the generic set.
+  @internal
+  void registerToolNeeds(String id, Set<Capability> needs) =>
+      _toolNeeds[id] = needs;
+
+  /// The editor's permissions. Settable at runtime: the widgets rebuild
+  /// (this notifies), the document's engine permissions follow
+  /// ([PlanPermissions.draft]), a drag whose gate closes is cancelled now,
+  /// and an active tool no longer allowed is cancelled and plan.select
+  /// armed.
+  PlanPermissions get permissions => _permissions;
+  set permissions(PlanPermissions value) {
+    if (value == _permissions) return;
+    final old = _permissions;
+    _permissions = value;
+    document.commands.permissions = value.draft;
+    final select = _session.select;
+    final stale = switch (select.dragKind) {
+      DragKind.move => old.move && !value.move,
+      DragKind.rotate => old.rotate && !value.rotate,
+      DragKind.reshape => old.reshape && !value.reshape,
+      DragKind.band || null => false,
+    };
+    if (stale) select.cancel(toolController.context);
+    grips.gatesChanged();
+    if (!_allowsTool(activeTool.value)) selectTool(PlanToolIds.select);
+    notifyListeners();
+  }
+
+  @internal
+  PlanSelectGates get selectGates => _session.gates;
+
+  @internal
+  SelectTool get planSelect => _session.select;
+
+  /// The Fill toggle (Task 16's palette row and F key).
+  @internal
+  ValueNotifier<bool> get fill => _fill;
 
   /// Deletes the selection as the select tool's Delete does, one undo step
-  /// (spec P2), after settling pending input. False with nothing selected,
-  /// while a shape is part-way, and when every selected object is refused.
-  /// Tasks 10 and 12 add the lock and `delete: false`. A delete a lock
-  /// refuses (a locked object inside a selected group, Task 11) answers
-  /// false and sets [lockHint], as [execute] does.
+  /// (spec P2), after settling pending input: through the select tool's
+  /// gates (the permissions' `delete`, the locks). False with nothing
+  /// selected, while a shape is part-way, under `delete: false`, with a
+  /// locked object selected, and when every selected object is refused. A
+  /// delete a lock refuses on commit (a locked object inside a selected
+  /// group, Task 11) answers false and sets [lockHint], as [execute] does.
   bool deleteSelection() {
     if (_midShape) return false;
     settlePendingInput();
@@ -764,8 +855,9 @@ class PlanController extends ChangeNotifier {
     final page = d.components.get<PageComponent>(d.rootHandle)!;
     final separator = _separatorOf(locale);
     if (page.decimalSeparator == separator) return;
-    d.commands.execute(SetComponentCommand<PageComponent>(
-        d.rootHandle, page.copyWith(decimalSeparator: separator)));
+    // The controller's own settling, not an edit: not gated (spec P2).
+    _unrestricted(() => d.commands.execute(SetComponentCommand<PageComponent>(
+        d.rootHandle, page.copyWith(decimalSeparator: separator))));
     d.commands.clearHistory();
     _savedState = d.commands.stateId;
   }
@@ -977,6 +1069,7 @@ class PlanController extends ChangeNotifier {
     _canUndo.dispose();
     _canRedo.dispose();
     _activeTool.dispose();
+    _fill.dispose();
     _locked.dispose();
     lockHint.dispose();
     _damaged.dispose();

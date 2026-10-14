@@ -3,6 +3,7 @@
 library;
 
 export 'src/controller/camera_bounds.dart' show kPlanMaxScale, kPlanMinScale;
+export 'src/controller/permissions.dart';
 export 'src/controller/plan_change.dart'
     show
         PlanChange,
