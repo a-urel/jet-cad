@@ -6,11 +6,13 @@
 // (floor_plan_controller.dart:67-99).
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
 
 import '../kits/kit_set.dart';
+import '../kits/locks.dart';
 import 'grip_dispatch.dart';
 import 'services.dart';
 import 'shared_cache.dart';
@@ -24,16 +26,22 @@ final class DocumentSession {
       required this.measurer,
       required ParametricCatalog catalog,
       required CameraController camera,
-      required SnapSettings snap})
+      required SnapSettings snap,
+      required bool Function(String kitId) kitLoaded,
+      required ValueListenable<Set<Handle>> locked})
       : page = PageNotifier(document),
         index = SpatialIndex(document),
         dispatch = GripDispatch(catalog) {
+    locks = LockSet.scan(document, kitLoaded);
     // planner_shell.dart:625-671, the order load-bearing: the selection
-    // prunes a dead key before the outline cache walks it; the grip cache
-    // rebuilds after the outlines.
+    // prunes a dead key before the outline cache walks it; the gates
+    // listen to the selection before the outline and grip caches do; the
+    // grip cache rebuilds after the outlines.
     selection = SelectionController(document);
+    lockGates = LockGates(selection: selection, locked: locked);
     outlines = OutlineCache(document, selection);
-    grips = GripCache(document, selection, outlines, objects: dispatch);
+    grips = GripCache(document, selection, outlines,
+        objects: LockedGrips(locks, dispatch), gates: lockGates);
     toolContext = ToolContext(
         document: document,
         index: index,
@@ -42,11 +50,14 @@ final class DocumentSession {
         page: page,
         snap: snap,
         grips: grips);
+    select = SelectTool(gates: lockGates);
     tools = ToolController(initial: select, context: toolContext);
     _entries.add((id: planSelectToolId, tool: select, kit: false));
-    // :1050-1057: the document arrives built; the system installs last.
+    // :1050-1057: the document arrives built; the system installs last,
+    // and the lock expander stacks after it.
     parametric = ParametricSystem(document, catalog, isFrozen: frozen.contains)
       ..install();
+    lockExpander = LockExpander(document, locks)..install();
   }
 
   final DraftDocument document;
@@ -62,9 +73,14 @@ final class DocumentSession {
   late final OutlineCache outlines;
   late final GripCache grips;
   late final ToolContext toolContext;
-  final SelectTool select = SelectTool();
+  late final SelectTool select;
   late final ToolController tools;
   late final ParametricSystem parametric;
+
+  /// The document's lock set, expander and select gates (spec P4).
+  late final LockSet locks;
+  late final LockExpander lockExpander;
+  late final LockGates lockGates;
   final SharedCache shared = SharedCache();
 
   /// The registry until Task 14 runs the providers' factories.
@@ -151,6 +167,8 @@ final class DocumentSession {
     outlines.dispose();
     selection.dispose();
     page.dispose();
+    lockGates.dispose();
+    lockExpander.dispose();
     parametric.dispose();
     index.dispose();
     unawaited(document.dispose());

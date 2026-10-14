@@ -17,6 +17,7 @@ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
 import '../file/manifest.dart';
 import '../file/plan_file.dart';
 import '../kits/kit_set.dart';
+import '../kits/locks.dart';
 import '../l10n/document_separator.dart';
 import '../l10n/strings.dart';
 import '../export/registries.dart';
@@ -335,6 +336,56 @@ class PlanController extends ChangeNotifier {
   @internal
   List<Diagnostic> get loadDiagnostics => _loadDiagnostics;
 
+  // ---------------------------------------------------------------------
+  // Locks (spec P4).
+
+  /// The locked objects of the current document (spec P4).
+  final ValueNotifier<Set<Handle>> _locked = ValueNotifier(const {});
+
+  /// The locked objects: a missing kit's, an unknown type's, a broken
+  /// one's. Never the root.
+  ValueListenable<Set<Handle>> get locked => _locked;
+
+  /// Whether [handle] is locked: a locked object, inside one, or inside a
+  /// locked symbol's definition. The property panel shows no section for
+  /// it; the pickers refuse it.
+  bool isLocked(Handle handle) => _session.locks.covers(document, handle);
+
+  /// Locks [objects] in the middle of a session (spec P4: a type's code
+  /// failed, Task 11): adds them to the lock set, clears the undo history
+  /// so no earlier edit can be undone onto them, and tells the listeners.
+  @internal
+  void lockBroken(Set<Handle> objects) {
+    if (objects.isEmpty) return;
+    _session.locks.addBroken(document, objects);
+    document.commands.clearHistory();
+    _locked.value = _session.locks.objects;
+    // clearHistory emits no change: refresh the undo listenables here.
+    _refreshFlags();
+    grips.gatesChanged();
+    notifyListeners();
+  }
+
+  /// Executes [command] on the current document: the commit path of every
+  /// widget and panel (controller ruling R-b; no widget calls
+  /// `document.commands.execute`). True when it applied; false when it was
+  /// refused, the refusal caught here: [PlanLocked], `DanglingReferenceError`
+  /// (E2's refusal of a frozen object's referrer) and `ArgumentError`.
+  /// `StateError` (`PartialMutationError` included) goes on to the caller.
+  /// Task 11 adds the lock hint and a kit's hook failure.
+  bool execute(DraftCommand command) {
+    try {
+      document.commands.execute(command);
+      return true;
+    } on PlanLocked {
+      return false;
+    } on DanglingReferenceError {
+      return false;
+    } on ArgumentError {
+      return false;
+    }
+  }
+
   /// The type of [object] (E1), or null for anything that is not a live
   /// object of a loaded kit's type.
   PlanType<Component>? typeOf(Handle object) {
@@ -352,8 +403,11 @@ class PlanController extends ChangeNotifier {
         measurer: measurer,
         catalog: catalog,
         camera: camera,
-        snap: _snap);
+        snap: _snap,
+        kitLoaded: (kitId) => kits.kitOf(kitId) != null,
+        locked: _locked);
     _session = session;
+    _locked.value = session.locks.objects;
     session.runKitFactories(kits, _services);
     session.tools.addListener(_onTools);
     session.history = document.commands.changes.listen((_) {
@@ -796,6 +850,7 @@ class PlanController extends ChangeNotifier {
     _canUndo.dispose();
     _canRedo.dispose();
     _activeTool.dispose();
+    _locked.dispose();
     _canvasRect.dispose();
     _fits.dispose();
     _snap.dispose();
