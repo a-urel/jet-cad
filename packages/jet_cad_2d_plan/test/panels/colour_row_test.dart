@@ -182,6 +182,7 @@ void main() {
     await rig.select([r.a]);
 
     expect(picker, findsOneWidget, reason: 'box A');
+    expect(find.byKey(const Key('layer-picker')), findsOneWidget);
     expect(swatch('none'), findsOneWidget);
     for (final c in PlanSwatch.values) {
       expect(swatch(c.name), findsOneWidget, reason: c.name);

@@ -219,6 +219,10 @@ abstract class PlanStrings {
   /// "A plain group has no layer: it cannot be moved".
   String get plainGroupNoLayer;
 
+  /// The layer picker's reason when a locked object is in the selection
+  /// (2a spec P4: a lock loses a layer change).
+  String get lockedNoLayer;
+
   /// "Layer".
   String get layer;
 

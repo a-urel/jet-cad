@@ -207,6 +207,10 @@ class PlanStringsDe extends PlanStrings {
       'Eine einfache Gruppe hat keine Ebene: Sie kann nicht verschoben werden';
 
   @override
+  String get lockedNoLayer =>
+      'Gesperrte Objekte können die Ebene nicht wechseln';
+
+  @override
   String get layer => 'Ebene';
 
   @override

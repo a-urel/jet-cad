@@ -203,6 +203,9 @@ class PlanStringsTr extends PlanStrings {
   String get plainGroupNoLayer => 'Düz bir grubun katmanı yok: taşınamaz';
 
   @override
+  String get lockedNoLayer => 'Kilitli nesnelerin katmanı değiştirilemez';
+
+  @override
   String get layer => 'Katman';
 
   @override

@@ -205,6 +205,9 @@ class PlanStringsEn extends PlanStrings {
       'A plain group has no layer: it cannot be moved';
 
   @override
+  String get lockedNoLayer => 'Locked objects cannot change layer';
+
+  @override
   String get layer => 'Layer';
 
   @override

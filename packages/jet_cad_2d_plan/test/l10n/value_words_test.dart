@@ -72,4 +72,10 @@ void main() {
     }
     expectWorded((s) => s.colorName(PlanSwatch.teal), english: 'Teal');
   });
+
+  test('LP-W the layer picker\'s lock word in each language', () {
+    // M-LP-W: a language that returns the English text for the new word.
+    expectWorded((s) => s.lockedNoLayer,
+        english: 'Locked objects cannot change layer');
+  });
 }

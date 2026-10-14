@@ -33,6 +33,7 @@ import '../symbols/symbol_box.dart';
 import 'colour_row.dart';
 import 'frame_safe_relay.dart';
 import 'kit_lookup.dart';
+import 'layer_picker.dart';
 import 'panel_focus.dart';
 import 'symbol_section.dart';
 
@@ -47,11 +48,12 @@ class PlanPropertyPanel extends StatefulWidget {
   State<PlanPropertyPanel> createState() => _PlanPropertyPanelState();
 }
 
-/// The layer field's slot (spec P2, "The layer field"): Task 18 sets this
-/// initializer to its `LayerPicker`. Null shows none.
+/// The layer field's slot (spec P2, "The layer field"): the layer picker
+/// (Task 18). Null shows none.
 @internal
 Widget? Function(BuildContext context, PlanController controller)?
-    propertyPanelLayerField;
+    propertyPanelLayerField =
+    (context, controller) => LayerPicker(controller: controller);
 
 /// What a field edits: one object of a type, one tool's settings, or one
 /// placed symbol's rotation.
