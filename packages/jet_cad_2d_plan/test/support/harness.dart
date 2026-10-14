@@ -29,8 +29,8 @@ ParametricCatalog catalogOf(List<PlanKit> kits) {
 }
 
 /// The page, the contract's four components, the unit components and
-/// [catalog]'s: what a plan document registers. Once per registry (`PageComponent.register` wipes
-/// a live page).
+/// [catalog]'s: what a plan document registers. Once per registry
+/// (`PageComponent.register` wipes a live page).
 void registerPlanComponents(
     ComponentRegistry registry, ParametricCatalog catalog) {
   PageComponent.register(registry);
