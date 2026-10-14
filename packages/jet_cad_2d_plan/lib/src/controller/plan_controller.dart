@@ -644,15 +644,25 @@ class PlanController extends ChangeNotifier {
   ///
   /// A lock is no edit (it moves no state id): by itself it moves neither
   /// [revision] nor [unitChanges], though [unitDetails] reads the new
-  /// `locked` at once (spec 2b S3 names edits, undo, redo, a mode switch,
-  /// [load] and [newPlan] for both). When the edit that froze the objects
-  /// applies on its retry, that edit reports the lock with it; when the
-  /// retry is refused, the lock is reported with the next design change.
+  /// `locked` at once. Neither member names a lock: [unitChanges] reports
+  /// design edits, undos and redos, [load] and [newPlan] (spec 2b S3), and
+  /// [revision] is today's (spec S5), whose doc names an edit, an undo or a
+  /// redo, a mode switch, `load`, `newPlan` and `resetLayout`
+  /// (jet_cad_floor_plan's floor_plan_controller.dart:570-573). When the
+  /// edit that froze the objects applies on its retry, that edit reports
+  /// the lock with it; when the retry is refused, the lock is reported with
+  /// the next design change.
   @internal
-  void lockBroken(Set<Handle> objects) {
+  void lockBroken(Set<Handle> objects) => _lock(objects, document.commands);
+
+  /// [objects] join the design's lock set (refreshed over the design, whose
+  /// handles a service copy shares), [history]'s undo history is cleared
+  /// so no earlier step is undone onto them, and the listeners are told:
+  /// [lockBroken] clears the design's, the copy's boundary the copy's.
+  void _lock(Set<Handle> objects, CommandDispatcher history) {
     if (objects.isEmpty) return;
     _session.locks.addBroken(document, objects);
-    document.commands.clearHistory();
+    history.clearHistory();
     _locked.value = _session.locks.objects;
     // clearHistory emits no change: refresh the undo listenables here.
     _refreshFlags();
@@ -1418,17 +1428,24 @@ class PlanController extends ChangeNotifier {
       measurer.clear();
       rethrow;
     }
-    return ServiceSession(
-        document: copy,
-        measurer: measurer,
-        catalog: catalog,
-        camera: camera,
-        locks: design.locks,
-        frozen: design.frozen,
-        locked: _locked,
-        log: _diagnostics,
-        lock: _lockFromCopy,
-        damage: _damageCopy);
+    try {
+      return ServiceSession(
+          document: copy,
+          measurer: measurer,
+          catalog: catalog,
+          camera: camera,
+          locks: design.locks,
+          frozen: design.frozen,
+          locked: _locked,
+          log: _diagnostics,
+          lock: _lockFromCopy,
+          damage: _damageCopy);
+    } catch (_) {
+      // The decoded copy is let go as the decode failure's measurer is.
+      unawaited(copy.dispose());
+      measurer.clear();
+      rethrow;
+    }
   }
 
   /// The controller listens to [s]: its changes and its selection.
@@ -1470,15 +1487,8 @@ class PlanController extends ChangeNotifier {
   /// onto them, and the listeners are told. The design's history is never
   /// touched (Risks, B3). As [lockBroken], it moves neither [revision] nor
   /// [unitChanges] by itself.
-  void _lockFromCopy(ServiceSession s, Set<Handle> objects) {
-    if (objects.isEmpty) return;
-    _session.locks.addBroken(document, objects);
-    s.document.commands.clearHistory();
-    _locked.value = _session.locks.objects;
-    _refreshFlags();
-    grips.gatesChanged();
-    notifyListeners();
-  }
+  void _lockFromCopy(ServiceSession s, Set<Handle> objects) =>
+      _lock(objects, s.document.commands);
 
   /// E3 in the copy: a rollback threw there. The copy is rebuilt from
   /// what it holds (its history cleared); the design is not touched.

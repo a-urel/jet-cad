@@ -3,7 +3,9 @@
 // failure boundary (its freeze clears the copy's history only, then
 // retries once); which members stay on the design and which switch on
 // `mode`; execute and the design writes refused in service; the copy's
-// lifetime.
+// lifetime; E3 in the copy (its rollback failing) the copy's alone; the
+// design's tool back to plan.select on entering service; a component the
+// design keeps raw (E4) kept raw in the copy.
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
@@ -23,8 +25,9 @@ import '../support/box_kit.dart'
         ringKit,
         addObject,
         atSquare,
+        componentsText,
         nearSquare;
-import '../support/harness.dart' show controllerFor;
+import '../support/harness.dart' show controllerFor, pointerAt;
 import '../support/recording_exporters.dart';
 import '../support/service_plans.dart';
 import '../support/test_kit.dart' show testKit, unitKit;
@@ -39,6 +42,121 @@ Transform2 transformOf(DraftDocument d, Handle h) => switch (d.tree[h]) {
       final GroupNode n => n.transform,
       _ => throw StateError('no node ${h.toHex()}'),
     };
+
+List<KitDiagnostic> rollbacksOf(PlanController c) => [
+      for (final d in c.diagnostics.value)
+        if (d.code == KitDiagnosticCode.rollbackFailed) d
+    ];
+
+// The E3 commands of 2a's failure_flow_test.dart (F-6, F-14, F-14b).
+
+/// Applies [inner], then hands back an inverse that throws: the engine's
+/// rollback of a failed edit throws, E3's PartialMutationError.
+final class _Sabotage extends DraftCommand {
+  _Sabotage(this.inner);
+  final DraftCommand inner;
+  @override
+  Capability get capability => inner.capability;
+  @override
+  Set<Capability> get capabilities => inner.capabilities;
+  @override
+  String get label => 'Sabotage';
+  @override
+  CommandResult apply(CommandTarget target) {
+    final r = inner.apply(target);
+    return CommandResult(inverse: _Throwing(), touched: r.touched);
+  }
+}
+
+final class _Throwing extends DraftCommand {
+  @override
+  Capability get capability => Capability.components;
+  @override
+  String get label => 'Throwing';
+  @override
+  CommandResult apply(CommandTarget target) =>
+      throw StateError('this inverse refuses');
+}
+
+/// Applies [inner]; its undo applies [inner]'s inverse and then throws
+/// E3's error.
+final class _HalfUndone extends DraftCommand {
+  _HalfUndone(this.inner);
+  final DraftCommand inner;
+  @override
+  Capability get capability => inner.capability;
+  @override
+  Set<Capability> get capabilities => inner.capabilities;
+  @override
+  String get label => 'Half undone';
+  @override
+  CommandResult apply(CommandTarget target) {
+    final r = inner.apply(target);
+    return CommandResult(inverse: _ThenThrow(r.inverse), touched: r.touched);
+  }
+}
+
+/// [inner] applied, then E3's error.
+final class _ThenThrow extends DraftCommand {
+  _ThenThrow(this.inner);
+  final DraftCommand inner;
+  @override
+  Capability get capability => inner.capability;
+  @override
+  Set<Capability> get capabilities => inner.capabilities;
+  @override
+  String get label => 'Then throw';
+  @override
+  CommandResult apply(CommandTarget target) {
+    inner.apply(target);
+    throw PartialMutationError('forced: the step applied, then failed');
+  }
+}
+
+/// Applies [inner]; its undo is [inner]'s inverse, whose own inverse (the
+/// redo) applies and then throws E3's error.
+final class _HalfRedone extends DraftCommand {
+  _HalfRedone(this.inner);
+  final DraftCommand inner;
+  @override
+  Capability get capability => inner.capability;
+  @override
+  Set<Capability> get capabilities => inner.capabilities;
+  @override
+  String get label => 'Half redone';
+  @override
+  CommandResult apply(CommandTarget target) {
+    final r = inner.apply(target);
+    return CommandResult(inverse: _UndoThen(r.inverse), touched: r.touched);
+  }
+}
+
+/// [inner] applied; its own inverse (the redo) throws after applying.
+final class _UndoThen extends DraftCommand {
+  _UndoThen(this.inner);
+  final DraftCommand inner;
+  @override
+  Capability get capability => inner.capability;
+  @override
+  Set<Capability> get capabilities => inner.capabilities;
+  @override
+  String get label => 'Undo then';
+  @override
+  CommandResult apply(CommandTarget target) {
+    final r = inner.apply(target);
+    return CommandResult(inverse: _ThenThrow(r.inverse), touched: r.touched);
+  }
+}
+
+/// A design over the box kit with a square off the origin, turned, and one
+/// step in its history, in service: the controller and the square.
+({PlanController c, Handle square}) boxInService(Switches sw) {
+  final c = controllerFor(kits: [boxKit(sw)]);
+  final square =
+      addObject(c.document, atSquare, const SquareParams(side: 1200));
+  c.setMode(PlanMode.service);
+  return (c: c, square: square);
+}
 
 void main() {
   testWidgets(
@@ -345,6 +463,8 @@ void main() {
         label: '1');
     c2.setMode(PlanMode.service);
     final copy2 = c2.activeDocument;
+    final designDepth = c2.document.commands.undoDepth;
+    expect(designDepth, greaterThan(0), reason: 'premise: design steps');
     final before = DraftDocumentCodec.encodeToString(copy2);
     sw2.failing.add('reach');
     expect(
@@ -358,6 +478,121 @@ void main() {
     expect(c2.frozen, {square2},
         reason: 'the first type froze; the second failed on the retry');
     expect(copy2.commands.canUndo, isFalse);
+    expect(c2.document.commands.undoDepth, designDepth,
+        reason: 'the design\'s history is kept');
+    final failures2 = failuresOf(c2);
+    expect(failures2, hasLength(1),
+        reason: 'the first failure is reported; the retry\'s is rethrown');
+    expect((failures2.single.kitId, failures2.single.subject),
+        ('box', SquareParams.id));
+    await tester.pump();
+  });
+
+  testWidgets(
+      'SM-copy-damage a rollback that throws in the copy (E3) is the copy\'s '
+      'alone, on an edit, an undo and a redo: one rollbackFailed '
+      'diagnostic, the copy\'s history cleared, the design neither damaged '
+      'nor its history touched', (tester) async {
+    // An edit whose rollback throws (2a's F-6 in the copy).
+    final sw = Switches();
+    final a = boxInService(sw);
+    final copy = a.c.activeDocument;
+    final depth = a.c.document.commands.undoDepth;
+    expect(depth, greaterThan(0), reason: 'premise: a design step');
+    final at = transformOf(copy, a.square);
+    copy.commands.execute(TransformNodeCommand(
+        a.square, Transform2.translation(310.5, -45.25).multiply(at)));
+    expect(copy.commands.canUndo, isTrue, reason: 'premise: a service step');
+    sw.failing.add('reach');
+    expect(
+        () => copy.commands.execute(_Sabotage(SetComponentCommand<SquareParams>(
+            a.square, const SquareParams(side: 1300, poisoned: true)))),
+        throwsA(isA<PartialMutationError>()));
+    expect(rollbacksOf(a.c), hasLength(1));
+    // M-SM19: `_damageCopy` rebuilds the design instead of the copy.
+    expect(copy.commands.canUndo, isFalse, reason: 'the copy rebuilt');
+    expect(a.c.canUndo.value, isFalse);
+    expect(a.c.document.commands.undoDepth, depth,
+        reason: 'the design\'s history is never touched');
+    expect(a.c.damaged.value, isFalse, reason: 'the design is not damaged');
+
+    // An undo that half-applies in the copy (2a's F-14 in the copy).
+    final b = boxInService(Switches());
+    final copyB = b.c.activeDocument;
+    final depthB = b.c.document.commands.undoDepth;
+    final atB = transformOf(copyB, b.square);
+    copyB.commands.execute(_HalfUndone(TransformNodeCommand(
+        b.square, Transform2.translation(-220.75, 130.5).multiply(atB))));
+    expect(copyB.commands.canUndo, isTrue, reason: 'premise: a service step');
+    // M-SM20: undo routes the copy's E3 to the design's boundary.
+    expect(b.c.undo, returnsNormally);
+    expect(rollbacksOf(b.c), hasLength(1));
+    expect(b.c.damaged.value, isFalse);
+    expect(b.c.document.commands.undoDepth, depthB);
+    expect(copyB.commands.canUndo, isFalse);
+    expect(copyB.commands.canRedo, isFalse);
+    expect(b.c.canUndo.value, isFalse);
+
+    // A redo that half-applies in the copy (2a's F-14b in the copy).
+    final r = boxInService(Switches());
+    final copyR = r.c.activeDocument;
+    final depthR = r.c.document.commands.undoDepth;
+    final atR = transformOf(copyR, r.square);
+    copyR.commands.execute(_HalfRedone(TransformNodeCommand(
+        r.square, Transform2.translation(95.25, 405.5).multiply(atR))));
+    r.c.undo();
+    expect(copyR.commands.canRedo, isTrue, reason: 'premise');
+    // M-SM21: redo routes the copy's E3 to the design's boundary.
+    expect(r.c.redo, returnsNormally);
+    expect(rollbacksOf(r.c), hasLength(1));
+    expect(r.c.damaged.value, isFalse);
+    expect(r.c.document.commands.undoDepth, depthR);
+    expect(copyR.commands.canRedo, isFalse);
+    expect(r.c.canRedo.value, isFalse);
+    await tester.pump();
+  });
+
+  testWidgets(
+      'SM-tool-reset entering service cancels a design tool part-way through '
+      'a shape and arms plan.select', (tester) async {
+    final c = controllerFor(kits: [testKit()], json: servicePlanText());
+    expect(c.selectTool('test.slab'), isTrue);
+    final tool = c.toolFor('test.slab')!;
+    tool.onPointerDown(pointerAt(Vector2(1250.5, -730.25)), c.toolContext);
+    expect(tool.isMidShape, isTrue, reason: 'premise');
+    c.setMode(PlanMode.service);
+    // M-SM22: setMode does not activate plan.select.
+    expect(c.activeTool.value, 'plan.select');
+    expect(tool.isMidShape, isFalse, reason: 'the shape cancelled');
+    c.setMode(PlanMode.design);
+    expect(c.activeTool.value, 'plan.select');
+    await tester.pump();
+  });
+
+  testWidgets(
+      'SM-copy-unreadable a component the design keeps raw (E4) is kept raw '
+      'in the copy, written back as read', (tester) async {
+    final sw = Switches();
+    final a = controllerFor(kits: [boxKit(sw)]);
+    final broken = addObject(
+        a.document, atSquare, const SquareParams(side: 1200, poisoned: true));
+    addObject(a.document, nearSquare(4000.5, -500.25, 0.25),
+        const SquareParams(side: 500));
+    final json = a.save();
+    sw.failing.add('fromJson');
+    final c = controllerFor(kits: [boxKit(sw)], json: json);
+    final kept = c.document.components.unknownOf(broken);
+    expect(kept, isNotEmpty, reason: 'premise: E4 kept it raw');
+    // M-SM23: the copy decoded without keepUnreadableComponents.
+    expect(() => c.setMode(PlanMode.service), returnsNormally);
+    final copy = c.activeDocument;
+    expect(copy, isNot(same(c.document)));
+    expect(copy.components.unknownOf(broken), kept);
+    expect(
+        componentsText(
+            DraftDocumentCodec.encodeToString(copy), SquareParams.id),
+        componentsText(
+            DraftDocumentCodec.encodeToString(c.document), SquareParams.id));
     await tester.pump();
   });
 }

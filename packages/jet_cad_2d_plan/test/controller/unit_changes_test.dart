@@ -1,8 +1,8 @@
 // Ported from jet_cad_floor_plan test/host/design_changes_test.dart (2b
 // Task 9, spec S3 `unitChanges`, S5): the design's unit changes. DC10 and
-// DC16 (the service mode) are Task 11's; DC7 and DC15 read Task 13's
-// `serviceEdited` (DC7 also its record and reset, and a service drag), so
-// they wait for it. DC8, DC9,
+// DC16 (the service mode) are Task 11's; DC15 reads Task 13's
+// `serviceEdited`, so Task 13 ports it; DC7 also reads Task 13's record and
+// reset and drags with the service tool, so Task 14 ports it. DC8, DC9,
 // DC11, DC12, DC13 and DC17 were ported by 2a for the object-level
 // `changes` stream (plan_change_test.dart); they are ported again here for
 // `unitChanges`, whose code is its own (controller ruling R-13, F-T9c).
@@ -314,8 +314,9 @@ void main() {
       }
     });
 
-    // DC7 (service moves report nothing) reads Task 13's serviceEdited,
-    // record and reset, and drags with the service tool: not ported here.
+    // DC7 (service moves report nothing): Task 14 ports it (it reads Task
+    // 13's serviceEdited, record and reset, and drags with the service
+    // tool).
 
     testWidgets(
         'DC8 newPlan: exactly [PlanUnitsReplaced()], no Removed per '
@@ -553,8 +554,8 @@ void main() {
     expect(diffUnitDetails(const [], const [], const [], const []), isEmpty);
   });
 
-  // DC15 (a listen in service after a service move) reads Task 13's
-  // serviceEdited as a premise: not ported here.
+  // DC15 (a listen in service after a service move): Task 13 ports it (it
+  // reads Task 13's serviceEdited as a premise).
 
   testWidgets(
       'DC16 M-H29(service moves), the trigger alone: an edit then '
