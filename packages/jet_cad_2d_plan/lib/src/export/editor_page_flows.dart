@@ -4,12 +4,16 @@
 // one-flow guard; the host's hooks and settings are read at each call;
 // `permissions.export` and `.print` are read again after the dialog and
 // after the bytes, so a flow started before the host refused it does not
-// run to its end. Ported from jet_cad_floor_plan/lib/src/host/page_flows.dart.
+// run to its end. 2b: the flows act on the active document (the service
+// copy in service), and the design permissions gate them only in design
+// (spec S4 "Permissions"). Ported from
+// jet_cad_floor_plan/lib/src/host/page_flows.dart.
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/widgets.dart' show BuildContext;
 import 'package:jet_cad_2d/jet_cad_2d.dart' show DraftDocument;
 
 import '../controller/plan_controller.dart';
+import '../service/service_session.dart' show PlanMode;
 import '../theme/plan_theme.dart' show kUnitColourOpacity;
 import 'builtin_exporters.dart' show exportPageOf;
 import 'export_dialog.dart';
@@ -48,9 +52,10 @@ List<PlanExporter> exportersFor(
 /// Whether an Export can run on [controller]'s plan now: it has a page, or
 /// one of its exporters needs none (spec P2: a page exporter answers null
 /// for a plan with no page). With only the built-in exporters this is
-/// today's rule (spec 13 D8): Export needs the page.
+/// today's rule (spec 13 D8): Export needs the page. The plan is the
+/// active document (2b spec S3: export acts on it).
 bool exportRunnable(PlanController controller) =>
-    exportersFor(controller.document, controller.exporters).isNotEmpty;
+    exportersFor(controller.activeDocument, controller.exporters).isNotEmpty;
 
 /// The two flows of one editor view, for its controller.
 class EditorPageFlows {
@@ -86,14 +91,20 @@ class EditorPageFlows {
   /// Export is offered only with an `onExport`.
   bool get canExport => settings().onExport != null;
 
-  bool _exportAllowed() => controller.permissions.export;
-  bool _printAllowed() => controller.permissions.print;
+  // 2b spec S4: the design flags never gate service (today's
+  // floor_plan_view.dart:526-529).
+  bool _exportAllowed() =>
+      controller.mode.value == PlanMode.service ||
+      controller.permissions.export;
+  bool _printAllowed() =>
+      controller.mode.value == PlanMode.service || controller.permissions.print;
 
   Future<void> export(BuildContext context) => _run(() async {
         final sink = settings().onExport;
         if (sink == null) return;
         final flows = _flows;
-        final document = controller.document;
+        // The active document (2b spec S3: export acts on it).
+        final document = controller.activeDocument;
         // Only the exporters that can run: a plan with no page is offered
         // none that plots the page (picking one would export nothing).
         final offered = exportersFor(document, flows.exporters);

@@ -49,6 +49,7 @@ class PlanCanvas extends StatefulWidget {
     this.grid = true,
     this.snapping = true,
     this.autofocus = true,
+    this.unitOverlays,
   });
 
   final PlanController controller;
@@ -56,6 +57,12 @@ class PlanCanvas extends StatefulWidget {
   final bool grid;
   final bool snapping;
   final bool autofocus;
+
+  /// Above everything on the canvas, inside its input listeners, clipped
+  /// (2b spec S4 "Unit overlays"): `PlanEditor`'s unit overlays for
+  /// `PlanMode.design`. Handed down as given, so a rebuild of this canvas
+  /// alone builds no overlay. Null: none.
+  final Widget? unitOverlays;
 
   @override
   State<PlanCanvas> createState() => _PlanCanvasState();
@@ -398,6 +405,7 @@ class _PlanCanvasState extends State<PlanCanvas> {
             rulers: widget.rulers,
             grid: widget.grid,
             autofocus: widget.autofocus,
+            unitOverlays: widget.unitOverlays,
           ),
           ValueListenableBuilder<bool>(
             valueListenable: c.lockHint,
