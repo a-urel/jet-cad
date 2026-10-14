@@ -1,12 +1,15 @@
 // Spec 14d L5, L6 (revision 2): the values the engine and the planner hand
 // out instead of sentences, worded in each language (M-14d-t). Ported from
 // jet_cad_floor_plan (2a Task 9): VW1 (the layer-name problems); VW2-VW4
-// (tables, numbering, rooms) are 2b's. W-VW5, W-VW6: the plan library's
+// (tables, numbering, rooms) are 2b's: VW4 here (2b Task 9). W-VW5, W-VW6: the plan library's
 // own words.
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show PlanSwatch;
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+import 'package:vector_math/vector_math_64.dart' show Vector2;
+
+import '../support/unit_fixtures.dart';
 
 const languages = <PlanStrings>[
   PlanStringsEn(),
@@ -85,5 +88,32 @@ void main() {
     expectWorded((s) => s.open, english: 'Open…');
     expectWorded((s) => s.save, english: 'Save');
     expectWorded((s) => s.saveAs, english: 'Save As…');
+  });
+
+  testWidgets(
+      'VW4 the controller\'s numbering warnings are values: duplicates by '
+      'first appearance, then the unnumbered tables (L6)', (tester) async {
+    // 2b Task 9: today's three numbered placements, the third renumbered
+    // 1 and the second emptied, are placed here unlabelled and labelled by
+    // hand (the first and the third 1, the second none); a fourth labelled
+    // 4.
+    final doc = unitPlan();
+    final placed = [
+      for (final (x, turns) in const [(-2600.5, 1), (2300.25, 0), (900.75, 2)])
+        placeAt(doc, tableSymbol(seats: 4), Vector2(x, 1400.5),
+            quarterTurns: turns),
+    ];
+    addUnitLabel(doc, placed[0], '1');
+    addUnitLabel(doc, placed[2], '1');
+    // A fourth table, numbered once: no warning.
+    addUnitLabel(doc,
+        placeAt(doc, tableSymbol(seats: 4), Vector2(4100.25, -900.5)), '4');
+    final c = PlanController(
+        kits: [fxKit()], json: encodePlan(doc, validateKitSet([fxKit()])));
+    addTearDown(c.dispose);
+    expect(c.labelWarnings, const [
+      DuplicateLabel(label: '1', count: 2),
+      Unlabelled(kind: 'table', capacity: 4, symbolKey: 'fx.table.two'),
+    ]);
   });
 }

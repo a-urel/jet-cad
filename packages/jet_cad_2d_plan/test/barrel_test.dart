@@ -61,6 +61,10 @@ void main() {
       'PlanEditor', 'PlanEditorBar', 'PlanEditorAction', 'PlanFileCallback',
       // 2b Task 8
       'isUnitSymbol',
+      // 2b Task 9
+      'BadLabel', 'DuplicateLabel', 'PlanCamera', 'PlanUnit', 'PlanUnitAdded',
+      'PlanUnitChange', 'PlanUnitChanged', 'PlanUnitDetail', 'PlanUnitRemoved',
+      'PlanUnitsReplaced', 'Unlabelled', 'UnitLabelProblem', 'UnitLabelWarning',
     });
   });
 

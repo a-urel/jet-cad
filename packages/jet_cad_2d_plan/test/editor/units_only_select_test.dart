@@ -395,4 +395,64 @@ void main() {
       expect(selected(c), {keyOf(c, '1')}, reason: 'the control');
     });
   });
+
+  // 2b Task 9: editor_select_test.dart's T5-c and T5-d, over the unit API
+  // (setUnitData, unitDetails, editorSelectedUnits).
+  group('delete (T5-c)', () {
+    testWidgets(
+        'T5-c readOnly: Delete removes nothing; tablesOnly: Delete removes '
+        '1 and its data, and Undo restores both', (tester) async {
+      final c = await mountUnitEditor(tester, permissions: P.readOnly);
+      expect(c.setUnitData('1', const {'pos': 'a1'}), isTrue,
+          reason: 'a host call under readOnly (V-5)');
+      Map<String, String>? dataOf1() =>
+          c.unitDetails.where((d) => d.unit.label == '1').firstOrNull?.data;
+      expect(dataOf1(), const {'pos': 'a1'});
+      await click(tester, screenOf(tester, c, edgeOf(c, '1')));
+      expect(selected(c), {keyOf(c, '1')});
+      final before = encoded(c);
+      await press(tester, LogicalKeyboardKey.delete);
+      await press(tester, LogicalKeyboardKey.backspace);
+      expect(encoded(c), before);
+      await setPermissions(tester, c, P.unitsOnly);
+      await click(tester, screenOf(tester, c, topOf(c, '1')));
+      expect(selected(c), {keyOf(c, '1')});
+      await press(tester, LogicalKeyboardKey.delete);
+      expect(unitsIn(c).withLabel('1'), isEmpty);
+      expect(dataOf1(), isNull);
+      c.undo();
+      await tester.pump();
+      expect(unitsIn(c).withLabel('1'), hasLength(1));
+      expect(dataOf1(), const {'pos': 'a1'});
+    });
+  });
+
+  group('a change across a selection (S-9 g, T5-d)', () {
+    testWidgets(
+        'T5-d full, a wall and 1 selected, then tablesOnly: the selection '
+        'holds 1 alone, and Delete removes 1 only', (tester) async {
+      final c = await mountUnitEditor(tester);
+      final d = c.document;
+      // The north wall's stand-in: the root-level line from
+      // editorNorthWall's first point (today's first WallParams object).
+      final north = [
+        for (final slot in d.entities.liveSlots)
+          if (d.entities.kindAt(slot) == EntityKind.line &&
+              d.entities.ownerAt(slot) == d.rootHandle &&
+              startOf(d, d.entities.handleAt(slot)) == editorNorthWall.$1)
+            d.entities.handleAt(slot),
+      ].single;
+      final wall = SelectionKey.root(north);
+      c.selection.replace([wall, keyOf(c, '1')]);
+      await tester.pump();
+      final tables = c.editorSelectedUnits.value;
+      await setPermissions(tester, c, P.unitsOnly);
+      expect(selected(c), {keyOf(c, '1')});
+      expect(c.editorSelectedUnits.value, tables, reason: 'no table left it');
+      // The canvas has the focus; Delete reaches the select tool.
+      await press(tester, LogicalKeyboardKey.delete);
+      expect(unitsIn(c).withLabel('1'), isEmpty);
+      expect(isLine(d, wall.target), isTrue);
+    });
+  });
 }

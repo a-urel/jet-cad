@@ -10,6 +10,7 @@ export 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show SymbolsState;
 export 'src/canvas/plan_canvas.dart' show PlanCanvas, kLockHintDuration;
 export 'src/controller/camera_bounds.dart' show kPlanMaxScale, kPlanMinScale;
 export 'src/controller/permissions.dart' show PlanPermissions, isUnitSymbol;
+export 'src/controller/plan_camera.dart' show PlanCamera;
 export 'src/controller/plan_change.dart'
     show
         PlanChange,
@@ -69,3 +70,15 @@ export 'src/symbols/plan_symbol.dart' show PlanSymbol;
 export 'src/symbols/plan_symbol_loader.dart'
     show PlanSymbolLoad, PlanSymbolLoader;
 export 'src/theme/plan_theme.dart' show PlanTheme;
+export 'src/units/unit_detail.dart'
+    show
+        PlanUnit,
+        PlanUnitAdded,
+        PlanUnitChange,
+        PlanUnitChanged,
+        PlanUnitDetail,
+        PlanUnitRemoved,
+        PlanUnitsReplaced;
+export 'src/units/unit_label.dart' show UnitLabelProblem;
+export 'src/units/unit_problems.dart'
+    show BadLabel, DuplicateLabel, Unlabelled, UnitLabelWarning;
