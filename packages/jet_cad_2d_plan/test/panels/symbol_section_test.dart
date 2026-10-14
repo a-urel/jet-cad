@@ -392,11 +392,11 @@ void main() {
     /// gallery's tests do.
     Future<void> settle(WidgetTester tester, PlanController c) async {
       for (var i = 0;
-          i < 10 && c.symbolsState.value == PlanSymbolsState.loading;
+          i < 10 && c.symbolsState.value == SymbolsState.loading;
           i++) {
         await tester.pump();
       }
-      expect(c.symbolsState.value, PlanSymbolsState.ready,
+      expect(c.symbolsState.value, SymbolsState.ready,
           reason: 'premise: the library loaded');
       await tester.pump();
     }

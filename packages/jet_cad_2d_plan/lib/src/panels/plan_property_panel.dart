@@ -763,7 +763,7 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
               t.handle,
               (command) => _guarded(
                   t, 'the section\'s commit', () => c.execute(command)),
-              KitNamesWords(c.kits.kitOf(kit)!.names, () => c.locale.value)),
+              c.servicesOf(kit).words),
         ),
     ];
   }
@@ -786,10 +786,9 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
         engine.allows(Capability.geometry) &&
         engine.allows(Capability.components) &&
         turnable;
-    final name = c.kits
-            .kitOf(kitOfKey(component.key))
-            ?.names
-            .symbolName(_strings.languageCode, component) ??
+    final name = c
+            .namesOf(kitOfKey(component.key))
+            ?.symbolName(_strings.languageCode, component) ??
         component.name;
     return [
       Text(_strings.toolSymbol, key: const Key('symbol-section'), style: title),

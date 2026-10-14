@@ -37,7 +37,7 @@ void main() {
       // Task 8
       'kPlanMinScale', 'kPlanMaxScale', 'kPlanThumbnailCapacity',
       'PlanController', 'PlanChange', 'PlanObjectAdded', 'PlanObjectChanged',
-      'PlanObjectRemoved', 'PlanReplaced', 'PlanSymbolsState',
+      'PlanObjectRemoved', 'PlanReplaced', 'SymbolsState',
       // Task 9
       'PlanStrings', 'PlanStringsEn', 'PlanStringsDe', 'PlanStringsTr',
       'PlanLocalizations', 'planSupportedLocales',

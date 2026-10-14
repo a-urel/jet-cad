@@ -8,7 +8,6 @@ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
 
 import '../kits/kit_set.dart';
 import 'plan_symbol.dart';
-import 'plan_symbols_state.dart';
 
 /// One assembly of a kit set's libraries: the symbols in load order, the
 /// problems met, and the state they leave.
@@ -20,7 +19,7 @@ final class PlanSymbolLoad {
 
   final List<PlanSymbol> symbols;
   final List<KitDiagnostic> diagnostics;
-  final PlanSymbolsState state;
+  final SymbolsState state;
 }
 
 /// The kits' symbol libraries, read once per source.
@@ -109,8 +108,8 @@ class PlanSymbolLoader {
       }
     }
     final state = reads.isNotEmpty && failed == reads.length
-        ? PlanSymbolsState.failed
-        : PlanSymbolsState.ready;
+        ? SymbolsState.failed
+        : SymbolsState.ready;
     return PlanSymbolLoad._(symbols, diagnostics, state);
   }
 

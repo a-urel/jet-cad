@@ -15,6 +15,7 @@ import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
+import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show SymbolsState;
 import 'package:jet_cad_2d_plan/src/controller/plan_controller.dart';
 import 'package:jet_cad_2d_plan/src/editor/plan_editor.dart';
 import 'package:jet_cad_2d_plan/src/l10n/localizations.dart';
@@ -22,7 +23,6 @@ import 'package:jet_cad_2d_plan/src/l10n/strings.dart';
 import 'package:jet_cad_2d_plan/src/l10n/strings_tr.dart';
 import 'package:jet_cad_2d_plan/src/symbols/gallery_model.dart'
     show PlanSymbolWords;
-import 'package:jet_cad_2d_plan/src/symbols/plan_symbols_state.dart';
 
 import '../support/editor_host.dart';
 import '../support/mark_kit.dart';
@@ -294,7 +294,7 @@ void main() {
     await tester.tap(find.byKey(const Key('tab-symbols')));
     await tester.pump();
     await tester.runAsync(() async {
-      while (c.symbolsState.value != PlanSymbolsState.ready) {
+      while (c.symbolsState.value != SymbolsState.ready) {
         await Future<void>.delayed(const Duration(milliseconds: 20));
       }
     });

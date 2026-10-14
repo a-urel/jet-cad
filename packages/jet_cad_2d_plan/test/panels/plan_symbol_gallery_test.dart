@@ -96,7 +96,7 @@ final class Host {
     await tester.pumpWidget(build(query: query));
     if (load) {
       for (var i = 0;
-          i < 10 && controller.symbolsState.value == PlanSymbolsState.loading;
+          i < 10 && controller.symbolsState.value == SymbolsState.loading;
           i++) {
         await tester.pump();
       }

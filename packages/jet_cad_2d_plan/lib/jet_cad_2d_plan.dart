@@ -5,6 +5,8 @@ library;
 export 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
     show SymbolThumbnails;
 
+export 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show SymbolsState;
+
 export 'src/canvas/plan_canvas.dart' show PlanCanvas, kLockHintDuration;
 export 'src/controller/camera_bounds.dart' show kPlanMaxScale, kPlanMinScale;
 export 'src/controller/permissions.dart' show PlanPermissions;
@@ -66,5 +68,4 @@ export 'src/shortcuts/plan_shortcuts.dart' show PlanShortcuts;
 export 'src/symbols/plan_symbol.dart' show PlanSymbol;
 export 'src/symbols/plan_symbol_loader.dart'
     show PlanSymbolLoad, PlanSymbolLoader;
-export 'src/symbols/plan_symbols_state.dart' show PlanSymbolsState;
 export 'src/theme/plan_theme.dart' show PlanTheme;

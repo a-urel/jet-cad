@@ -28,7 +28,6 @@ import '../export/registries.dart';
 import '../shortcuts/tool_letters.dart';
 import '../symbols/plan_symbol.dart';
 import '../symbols/plan_symbol_loader.dart';
-import '../symbols/plan_symbols_state.dart';
 import '../tools/generic_tools.dart';
 import '../tools/move_resolver.dart';
 import '../tools/plan_select_gates.dart';
@@ -78,6 +77,16 @@ final class _Host implements ServicesHost {
 
   @override
   ToolSettingsStore get toolSettings => _c.toolSettings;
+
+  @override
+  PlanSymbol? symbolById(String id) => _c.symbolById(id);
+
+  @override
+  ValueListenable<SymbolsState> get symbolsState => _c._symbolsState;
+
+  @override
+  Map<String, SymbolDefinitionRef> get pendingDefinitions =>
+      _c._pendingDefinitions;
 }
 
 /// One plan and everything over it (spec P2). A controller is shown in one
@@ -98,6 +107,10 @@ class PlanController extends ChangeNotifier {
   /// host's own); a controller never disposes one it was given, and makes
   /// and disposes its own otherwise. The symbol libraries start loading
   /// here and never block an edit ([symbolsState]).
+  ///
+  /// [words] are the host's words (spec 2b S4): each kit reads them before
+  /// its own, per locale; an id in no known namespace or naming no kit is an
+  /// [ArgumentError] naming the first problem (`validateHostWords`).
   factory PlanController({
     required List<PlanKit> kits,
     String? json,
@@ -108,8 +121,13 @@ class PlanController extends ChangeNotifier {
     double minScale = kPlanMinScale,
     double maxScale = kPlanMaxScale,
     PlanPermissions permissions = PlanPermissions.full,
+    KitNames words = KitNames.empty,
   }) {
     final set = validateKitSet(kits);
+    final wordProblems = validateHostWords(words);
+    if (wordProblems.isNotEmpty) {
+      throw ArgumentError.value(words, 'words', '${wordProblems.first}');
+    }
     PlanPageFlows.checkRegistry(exporters: exporters, importers: importers);
     if (!minScale.isFinite || minScale < _minScaleFloor) {
       throw ArgumentError.value(
@@ -146,7 +164,8 @@ class PlanController extends ChangeNotifier {
         importers: importers,
         minScale: minScale,
         maxScale: maxScale,
-        permissions: permissions);
+        permissions: permissions,
+        words: words);
   }
 
   PlanController._(this.kits, this.catalog, DraftDocument document,
@@ -159,8 +178,10 @@ class PlanController extends ChangeNotifier {
       required List<PlanImporter> importers,
       required double minScale,
       required double maxScale,
-      required PlanPermissions permissions})
+      required PlanPermissions permissions,
+      required KitNames words})
       : _permissions = permissions,
+        _hostWords = words,
         _minScale = minScale,
         _maxScale = maxScale,
         _symbolLoader = symbols ?? PlanSymbolLoader(),
@@ -192,7 +213,7 @@ class PlanController extends ChangeNotifier {
     _services = {
       for (final kit in kits.kits)
         kit.id: KitServices(
-            kit, _host, KitNamesWords(kit.names, () => _locale.value)),
+            kit, _host, KitNamesWords(_names[kit.id]!, () => _locale.value)),
     };
     _open(document, measurer, loadDiagnostics);
     _savedState = document.commands.stateId;
@@ -295,6 +316,24 @@ class PlanController extends ChangeNotifier {
   final double _minScale, _maxScale;
 
   late final Map<String, KitServices> _services;
+
+  /// The host's words (spec 2b S4).
+  final KitNames _hostWords;
+
+  /// Each loaded kit's words with the host's first, per locale.
+  late final Map<String, KitNames> _names = {
+    for (final kit in kits.kits) kit.id: _hostWords.merge(kit.names),
+  };
+
+  /// The words of the loaded kit [kitId], the host's first (spec 2b S4);
+  /// null for a kit that is not loaded. Every reader of a kit's words reads
+  /// them here or through its services.
+  @internal
+  KitNames? namesOf(String kitId) => _names[kitId];
+
+  /// The refs `symbolDefinition` handed out whose `add` has not executed
+  /// (spec 2b S2): cleared by [execute] and by a document swap.
+  final Map<String, SymbolDefinitionRef> _pendingDefinitions = {};
   late final _Host _host = _Host(this);
   late DocumentSession _session;
   List<Diagnostic> _loadDiagnostics = const [];
@@ -346,8 +385,8 @@ class PlanController extends ChangeNotifier {
 
   final ValueNotifier<Locale> _locale = ValueNotifier(const Locale('en'));
   final DiagnosticsLog _diagnostics = DiagnosticsLog();
-  final ValueNotifier<PlanSymbolsState> _symbolsState =
-      ValueNotifier(PlanSymbolsState.ready);
+  final ValueNotifier<SymbolsState> _symbolsState =
+      ValueNotifier(SymbolsState.ready);
   final ValueNotifier<bool> _dirty = ValueNotifier(false);
   final ValueNotifier<bool> _canUndo = ValueNotifier(false);
   final ValueNotifier<bool> _canRedo = ValueNotifier(false);
@@ -569,7 +608,10 @@ class PlanController extends ChangeNotifier {
   /// `ArgumentError`, and a kit's hook failure the retry did not cure (one
   /// diagnostic). `StateError` (`PartialMutationError` included, after the
   /// damage is handled) goes on to the caller.
+  ///
+  /// Drops the pending symbol definitions (spec 2b S2).
   bool execute(DraftCommand command) {
+    _pendingDefinitions.clear();
     try {
       document.commands.execute(command);
       return true;
@@ -629,6 +671,7 @@ class PlanController extends ChangeNotifier {
 
   void _open(DraftDocument document, FlutterTextMeasurer measurer,
       List<Diagnostic> loadDiagnostics) {
+    _pendingDefinitions.clear();
     _damaged.value = false;
     _disabledTools.clear();
     // The engine's permissions follow the profile, before any system is
@@ -1035,7 +1078,7 @@ class PlanController extends ChangeNotifier {
 
   /// The symbol libraries' state (spec P2): loading until every source has
   /// settled; failed when every source failed; else ready.
-  ValueListenable<PlanSymbolsState> get symbolsState => _symbolsState;
+  ValueListenable<SymbolsState> get symbolsState => _symbolsState;
 
   /// The loaded symbols in load order, retired ones included (a placed
   /// retired symbol still resolves; the gallery hides them).
@@ -1056,7 +1099,7 @@ class PlanController extends ChangeNotifier {
 
   /// Loads the libraries again after a failure; nothing in another state.
   Future<void> retrySymbols() async {
-    if (_symbolsState.value != PlanSymbolsState.failed) return;
+    if (_symbolsState.value != SymbolsState.failed) return;
     await _loadSymbols();
   }
 
@@ -1072,10 +1115,10 @@ class PlanController extends ChangeNotifier {
     // A kit set without a symbol library is ready at once, empty (Task
     // 8's C1 reads `ready` right after construction).
     if (kits.kits.every((kit) => kit.symbols.isEmpty)) {
-      _symbolsState.value = PlanSymbolsState.ready;
+      _symbolsState.value = SymbolsState.ready;
       return;
     }
-    _symbolsState.value = PlanSymbolsState.loading;
+    _symbolsState.value = SymbolsState.loading;
     PlanSymbolLoad? load;
     Object? error;
     try {
@@ -1085,12 +1128,12 @@ class PlanController extends ChangeNotifier {
     }
     if (_disposed || run != _symbolRun) return;
     if (load == null) {
-      _symbolsState.value = PlanSymbolsState.failed;
+      _symbolsState.value = SymbolsState.failed;
       debugPrint('The symbol libraries could not be loaded: $error');
       return;
     }
-    _symbols = load.symbols;
-    _symbolsById = {for (final s in load.symbols) s.id: s};
+    _symbols = _named(load.symbols);
+    _symbolsById = {for (final s in _symbols) s.id: s};
     // This load's library problems replace the last one's: a source that
     // read on a retry has none left (Task 13 ruling, final review I3).
     _diagnostics.removeWhere((d) => _libraryCodes.contains(d.code));
@@ -1100,6 +1143,19 @@ class PlanController extends ChangeNotifier {
     _reportUnofferedKinds();
     _symbolsState.value = load.state;
   }
+
+  /// [symbols] named with the host's words first (spec 2b S4): each wrapped
+  /// again with its kit's merged words; as loaded when the host gave none
+  /// (a loader may serve several controllers).
+  List<PlanSymbol> _named(List<PlanSymbol> symbols) => _hostWords.words.isEmpty
+      ? symbols
+      : List.unmodifiable([
+          for (final s in symbols)
+            PlanSymbol(
+                kitId: s.kitId,
+                names: _names[s.kitId] ?? s.names,
+                entry: s.entry),
+        ]);
 
   /// One attachmentKindUnoffered per kit and kind (the log keeps one per
   /// kit, subject and code) for each loaded symbol's attachTo kind that no

@@ -35,10 +35,9 @@ String planToolLabel(
     PlanToolIds.arc => s.toolArc,
     PlanToolIds.text => s.toolText,
     PlanToolIds.symbol => s.toolSymbol,
-    _ => controller.kits
-            .kitOf(kitOfKey(toolId))
-            ?.names
-            .word(controller.locale.value.languageCode, 'tool:$toolId') ??
+    _ => controller
+            .namesOf(kitOfKey(toolId))
+            ?.word(controller.locale.value.languageCode, 'tool:$toolId') ??
         toolId,
   };
 }

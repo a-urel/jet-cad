@@ -25,9 +25,8 @@ PlanTool? planToolOf(PlanController controller, String toolId) {
 }
 
 /// [wordId] of kit [kitId] in the controller's locale, else English, else
-/// null (`KitNames.word`).
+/// null (`KitNames.word`), the host's words first (spec 2b S4).
 String? planWordOf(PlanController controller, String kitId, String wordId) =>
-    controller.kits
-        .kitOf(kitId)
-        ?.names
-        .word(controller.locale.value.languageCode, wordId);
+    controller
+        .namesOf(kitId)
+        ?.word(controller.locale.value.languageCode, wordId);
