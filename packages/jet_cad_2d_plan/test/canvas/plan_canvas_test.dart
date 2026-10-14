@@ -128,6 +128,42 @@ void main() {
   });
 
   testWidgets(
+      'CV-4b a lock hint set before the canvas mounts shows and clears '
+      'after kLockHintDuration (M-CV-4c)', (tester) async {
+    final c = paletteController(paper: white).c;
+    // A refusal with no canvas mounted (a host's execute on a locked
+    // object), so no canvas heard the change.
+    c.lockHint.value = true;
+    await pumpAlone(tester, PlanCanvas(controller: c));
+    final hint = find.byKey(const Key('plan-lock-hint'));
+    expect(hint, findsOneWidget);
+    await tester.pump(kLockHintDuration);
+    await tester.pump();
+    expect(c.lockHint.value, isFalse);
+    expect(hint, findsNothing);
+  });
+
+  testWidgets(
+      'CV-4c a canvas handed another controller whose hint shows clears it '
+      'after kLockHintDuration (M-CV-4d)', (tester) async {
+    final c = paletteController(paper: white).c;
+    final d = paletteController(paper: blueprint).c;
+    await pumpAlone(tester, PlanCanvas(controller: c));
+    c.lockHint.value = true;
+    await tester.pump();
+    d.lockHint.value = true;
+    await tester.pumpWidget(
+        MaterialApp(home: Scaffold(body: PlanCanvas(controller: d))));
+    await tester.pump();
+    final hint = find.byKey(const Key('plan-lock-hint'));
+    expect(hint, findsOneWidget, reason: 'd\'s hint, set while unshown');
+    await tester.pump(kLockHintDuration);
+    await tester.pump();
+    expect(d.lockHint.value, isFalse);
+    expect(hint, findsNothing);
+  });
+
+  testWidgets(
       'CV-5 rulers: false and grid: false: no ruler frame and a page chrome '
       'without the grid; the defaults draw both (M-CV-5)', (tester) async {
     final c = paletteController(paper: white).c;

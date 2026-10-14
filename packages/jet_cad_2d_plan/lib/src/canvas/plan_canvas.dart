@@ -104,6 +104,10 @@ class _PlanCanvasState extends State<PlanCanvas> {
     _enter(_c);
     _c.addListener(_onController);
     _c.lockHint.addListener(_onHint);
+    // A hint set before this canvas heard it (a refusal with no canvas
+    // mounted, or one in the 2 s before this canvas replaced another)
+    // clears too.
+    _onHint();
     _c.snappingAllowed = widget.snapping;
     _bind();
   }
@@ -133,6 +137,8 @@ class _PlanCanvasState extends State<PlanCanvas> {
       _enter(_c);
       _c.addListener(_onController);
       _c.lockHint.addListener(_onHint);
+      // The new controller's hint may be showing already.
+      _onHint();
       _rebind();
       PlanLocaleScope.push(context, _c);
     }
@@ -244,7 +250,11 @@ class _PlanCanvasState extends State<PlanCanvas> {
     return _fit;
   }
 
-  /// Spec P4: the hint clears [kLockHintDuration] after it was set.
+  /// Spec P4: the hint clears [kLockHintDuration] after it was set, or
+  /// after this canvas bound a controller whose hint was already set. A
+  /// refusal while the hint shows writes true over true, which notifies
+  /// nothing, so it does not restart the window (that needs an event from
+  /// the controller, not a ValueNotifier).
   void _onHint() {
     _hintTimer?.cancel();
     if (!_c.lockHint.value) return;
