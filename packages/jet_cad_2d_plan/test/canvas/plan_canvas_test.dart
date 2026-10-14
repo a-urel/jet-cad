@@ -7,10 +7,12 @@
 //
 // CV-8 and CV-9 are the carried items of Tasks 9 and 11: a locale report
 // that lands after its controller was disposed, and a grip drag in flight
-// whose type fails before the release.
+// whose type fails before the release. CV-10 pins the shortcut guard that
+// lands here (ruling R-l) through the text entry it wraps.
 import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart' show SchedulerBinding;
+import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
@@ -265,5 +267,45 @@ void main() {
         [('boom', KitDiagnosticCode.hookFailed)]);
     await tester.pumpWidget(const SizedBox());
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+      'CV-10 the text entry keeps the plan\'s letters and Undo from a host\'s '
+      'shortcuts above the canvas; once it closes they reach the host '
+      '(M-CV-10)', (tester) async {
+    final c = drawController().c;
+    final hits = <String>[];
+    await pumpDraw(tester, c,
+        frame: (canvas) => CallbackShortcuts(bindings: {
+              const SingleActivator(LogicalKeyboardKey.keyL): () =>
+                  hits.add('L'),
+              const SingleActivator(LogicalKeyboardKey.keyF): () =>
+                  hits.add('F'),
+              const SingleActivator(LogicalKeyboardKey.keyZ, meta: true): () =>
+                  hits.add('undo'),
+            }, child: canvas));
+    c.selectTool('plan.text');
+    await tester.pump();
+    await tester.tapAt(globalOf(tester, c, 7100, 3050));
+    await tester.pump();
+    expect(find.byKey(const Key('text-entry')), findsOneWidget);
+    for (final key in [LogicalKeyboardKey.keyL, LogicalKeyboardKey.keyF]) {
+      expect(await tester.sendKeyEvent(key), isFalse,
+          reason: '$key reaches the platform as text');
+    }
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pump();
+    expect(hits, isEmpty, reason: 'no key reached the host');
+
+    // The positive control: Escape closes the entry, the focus goes back
+    // to the canvas, and L reaches the host's binding.
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
+    expect(find.byKey(const Key('text-entry')), findsNothing);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyL);
+    await tester.pump();
+    expect(hits, ['L']);
   });
 }
