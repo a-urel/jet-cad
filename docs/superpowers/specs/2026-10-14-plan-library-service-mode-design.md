@@ -6,8 +6,8 @@ applies an independent Opus review (3 blocking, 11 important, 13 minor
 findings, each checked against the code), on the human's *"evet devam
 et"*; revision 3 applies that reviewer's re-review of revision 2 (N1-N10).
 Revision 4 applies a second, independent Opus review (4 blocking, 8
-important, 13 minor) on the human's *"evet yap"*. Awaiting the human's
-review of this file.
+important, 13 minor) on the human's *"evet yap"*. **Approved by the
+human** (*"onaylıyorum"*, 2026-10-14).
 
 **Binds:** the umbrella spec
 [2026-10-13-kit-architecture-design.md](2026-10-13-kit-architecture-design.md)
