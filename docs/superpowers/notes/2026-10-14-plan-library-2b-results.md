@@ -360,12 +360,13 @@ its ruling:
   `unit_editor_fixture.dart`, `locale_separator_test.dart`, `page_flows_test.dart`,
   `theme_canvas_test.dart`, `host_text_keys_test.dart`, `theme_colours_test.dart`), with 2b's
   halves listed above.
-- **Finding (this run): `host/view_palette_test.dart`** has neither a destination nor a ruling.
-  It holds service-mode tests (`M-DT-11 (${viewMode.name} mode)` two views side by side, and
-  three `ServiceView` tests including `M-DT-10, ServiceView: no page …`). No 2a or 2b plan,
-  report, ledger line or port comment names it (`grep -rn view_palette` over
-  `docs/superpowers/plans/2026-10-14-*`, the 2a results note, the 2a ledger and
-  `packages/jet_cad_2d_plan/test` finds nothing). Open, for the coordinator.
+- **Finding (Task 17's run): `host/view_palette_test.dart`** had neither a destination nor a
+  ruling (no 2a or 2b plan, report, ledger line or port comment named it). Ruled after Task 17
+  and **ported in the final fix wave** to `test/canvas/view_palette_test.dart`, assertions
+  unchanged, 7 tests: `M-DT-11 (design mode)` and `M-DT-11 (service mode)` (two views side by
+  side), the three `ServiceView, <theme>, <paper>` crossings, `M-DT-10, ServiceView: no page …`
+  and `ServiceView, a theme switch with no camera move …` (PlanCanvas in design,
+  PlanServiceView in service). See "Final fix wave".
 
 ## Mutations of Tasks 1-16
 
@@ -769,8 +770,9 @@ Found while executing (from the ledger and the reports):
   two lines (premise impossible under 2a P2). **F-1 of `chrome_change_test.dart`** (design-only,
   placed by neither 2a nor 2b) stays unported, a 2a gap to raise with the human. F-2 and F-3,
   also unplaced, were ported in Task 16b (16 tests) because F-3 is M-SV-R2's real killer.
-- **This run's finding:** `host/view_palette_test.dart` (service-mode `ServiceView` palette
-  tests) has no destination and no ruling (Ported tests, above). Open.
+- **Task 17's finding:** `host/view_palette_test.dart` (service-mode `ServiceView` palette
+  tests) had no destination and no ruling (Ported tests, above). Ported in the final fix wave
+  (7 tests, `test/canvas/view_palette_test.dart`).
 - Spec silent on a lock's report: `lockBroken` and `_lockFromCopy` neither report nor bump
   `revision` (Task 11 ruling, documented).
 - Equivalent or masked mutants in the plan: M-UL-number masked by the label system (Task 7:
@@ -790,7 +792,12 @@ Found while executing (from the ledger and the reports):
 - Deferred minors the ledger marks "FINAL REVIEW SHOULD TRIAGE" (spec-named behaviour
   unpinned): `restoreService`'s `_revision.value++` and `notifyListeners()` (and
   `resetService`'s `notifyListeners`); a restored group member naming only a hidden or locked
-  unit kept; `service_tool.dart`'s `roots.isEmpty ||` spend (M-ST-empty survives).
+  unit kept; `service_tool.dart`'s `roots.isEmpty ||` spend (M-ST-empty survives). The final
+  review ruled the first and the last fix-before-merge (I-3, I-4): both are pinned in the final
+  fix wave (`SR-restore-revision`, `SV-restore`, `ST-seat-drag`).
+- **Final review I-1:** S3's "the design is not edited in service" held for the controller's
+  members only; a `PlanCanvas` kept mounted in service still edited the design through its
+  tools. Fixed in the final fix wave (the design read-only while a copy exists).
 
 ### Execution rulings that changed a test's premise or a ported assertion
 
@@ -844,3 +851,75 @@ added (Task 7); M-DS2 pinned by three tests, DS-layer added (Task 8); `UnitIndex
 after it (Tasks 11, 14); `lockBroken` neither reports nor bumps (Task 11); M-14l re-worded
 (Task 14); `_requestOf` inside the `try` (Task 15); every Task 16 carry item to 16b; the
 `snappingAllowed` reset on a swap (Task 16b).
+
+## Final fix wave
+
+The whole-branch Opus review (`final-review.md` in the ledger) found no Critical issue and four
+Important ones; the controller ruled them and five cheap Minor folds into one wave
+(`final-fix-findings.md`). Commits on top of `e7b7ceb6`: `318d2844` (I-1), `93e92a74` (I-3,
+I-4, M-2, M-3, T12, T14), `bb5b7c05` (I-2's port), `ed27e2ca` (the CHANGELOGs), and the commit
+that adds this section (this note and STATUS). Evidence below is **this run** (the fix wave's).
+
+What changed:
+- **I-1** (`plan_controller.dart`): the design document's engine permissions are
+  `DraftPermissions.readOnly` exactly while a service copy exists: set on entering service and
+  by `_open` while a copy exists (a load or a new plan in service), the profile's `draft` again
+  on leaving. The `permissions` setter writes the same rule, so a profile change in service
+  does not re-open the design; leaving applies it. Tests (new,
+  `test/canvas/canvas_service_mode_test.dart`): `SM-design-readonly` (a mouse drag on a line in
+  a `PlanCanvas` mounted in service leaves `save()` bytes, `dirty` and the design's undo alone,
+  before and after a profile change in service; back in design the same drag edits) and
+  `SM-design-readonly-load` (load, new plan, reset in service; the profile restored on leaving,
+  `readOnly` when that is the profile).
+- **I-2**: `view_palette_test.dart` ported (above); this section; STATUS (A14 settled by spec
+  decision 9; the resume pointer); the engine CHANGELOG's stray blank line.
+- **I-3**: `SR-restore-revision` (a restore moves `revision` once and notifies once; a reset
+  notifies once) and `SV-restore` (after `restoreService` the view's canvas shows the new
+  `activeDocument` and a tap at the restored table's place reaches `onUnitTap`; its premises: the
+  reset put the table back, and a tap there before the restore finds the floor).
+- **I-4**: `ST-seat-drag` (the table selected, a drag from the unselected seat A3 is spent: the
+  selection stays the table, nothing moves, no step, neither `onLayoutChanged` nor
+  `onUnitsMoved`).
+- **M-2** `UA-unitAt-seat`; **M-3** `UA-locked-label` (the kit missing, the placed table under
+  the lock set: `setUnitLabel` false, no step, `lockHint` false); **T12** `SS-relabel` gains
+  `statusOf(table) == bill` before the relabel; **T14** `RB16-hall` gains "the band covers a
+  seat"; **M-7** the CHANGELOGs (the plan library's 2b public additions, the kit's label
+  constants).
+
+Mutations (each on a committed file, reverted with `git checkout --`, `git diff --quiet` exit 0):
+
+| Id | Edit | Red test | Failing line (quoted) |
+|---|---|---|---|
+| M-SM-ro-enter | `setMode(service)` without its `design.document.commands.permissions = _designDraft` | `SM-design-readonly` | `Expected: same instance as <Instance of 'DraftPermissions'>`; with that identity check also removed, the drag: `Expected: ... coords":[7137.3,3161 ...` / `Actual: ... coords":[7257.3,3221 ...` |
+| M-SM-ro-setter | the setter writes `value.draft` | `SM-design-readonly` | as above, the identity check after the setter; without it, the same moved coords |
+| M-SM-ro-leave | `setMode(design)` without the restore | both SM tests | `Expected: same instance as <Instance of 'DraftPermissions'>` |
+| M-SM-ro-open | `_open` writes `_permissions.draft` | `SM-design-readonly-load` | `Expected: same instance as <Instance of 'DraftPermissions'>` |
+| M-SR-restore-rev | `restoreService` without `_revision.value++` | `SR-restore-revision` | line 182 `expect(c.revision.value - r, 1);`: `Expected: <1>` / `Actual: <0>` |
+| M-SR-restore-notify | `restoreService` without `notifyListeners()` | `SR-restore-revision`, `SV-restore` | line 183 `expect(notified, 1);` (`Actual: <0>`); `plan_service_view_test.dart` line 311 `expect(identical(canvas.document, c.activeDocument), isTrue);` (`Actual: <false>`) |
+| M-SR-reset-notify | `resetService` without `notifyListeners()` | `SR-restore-revision` | line 187 `expect(notified, 1);`: `Actual: <0>` |
+| M-ST-empty | `if (roots.isEmpty \|\|` dropped in `_startDrag` | `ST-seat-drag` | line 266 `expect(r.keys, {r.key(t)}, …)`: `Expected: Set:[SelectionKey:SelectionKey( 18)]` / `Actual: Set:[SelectionKey:SelectionKey( 22)]` |
+| M-UA-at-seat | the controller's `unitAt` picker built `placedOnly: true` | `UA-unitAt-seat` | line 181 `expect(c.unitAt(at('A3')), 'A3');`: `Actual: <null>` |
+| M-UA-lock-label | `setUnitsLabel` without `\|\| _session.locks.covers(...)` | `UA-locked-label` | line 164 `expect(c.lockHint.value, isFalse, …)`: `Actual: <true>` |
+| T8 (`old.selectUnitsOnly != value.selectUnitsOnly \|\|` dropped) | the setter's stale test | `units_only_select_test.dart` R-1's body drag and R-1's rotation-grip turn | line 346 and line 399 `expect(encoded(c), before);` (`Which: is different.`); no pin needed |
+| M-VP-paper | `PlanServiceView` hands `paper: PaperPalette.light` | M-DT-11 (service), the three crossings, M-DT-10, the theme switch (6) | `Blueprint view: selection 0x1e55a4, want 0x7fb2ff` |
+| M-VP-chrome | `PlanServiceView` hands `chrome: ChromePalette.light` | the two dark crossings, the theme switch (3) | `Expected: '0x8a8a8a'` (the sheet edge) |
+| M-VP-surface | `PlanServiceView`'s `_surfaceArgb = 0xFFFFFFFF` | M-DT-10 | `Expected: <4294967295>` / `Actual: <4278190080>` |
+| M-VP-design-paper | `PlanCanvas` hands `paper: PaperPalette.light` | M-DT-11 (design) | `Blueprint view: selection 0x1e55a4, want 0x7fb2ff` |
+
+Premise checks (test-only edits, reverted): `SS-relabel` without its `setUnitStatus` goes red at
+the new premise (`Actual: <null>`); `RB16-hall` with the band shrunk to its press point goes red
+at the new premise (`Expected: non-empty` / `Actual: []`).
+
+Gates (this run, on the fix wave's code):
+- `jet_cad_2d_plan`: `flutter test --enable-vmservice` exit 0, `01:57 +1512: All tests passed!`
+  (1498 + 14 new); `flutter analyze` `No issues found! (ran in 4.6s)`; format
+  `Formatted 286 files (0 changed) in 0.81 seconds.`, exit 0.
+- `jet_cad_2d_kit` (CHANGELOG only): `flutter test` `00:03 +340: All tests passed!`;
+  `flutter analyze` `No issues found! (ran in 3.5s)`; format
+  `Formatted 74 files (0 changed) in 0.09 seconds.`, exit 0;
+  `dart run tool/ci/check_kit_deps.dart`:
+  `kit dependencies: 1 package(s) checked, none names the plan library or another kit`, exit 0.
+- `jet_cad_2d` (CHANGELOG only): `dart analyze` `No issues found!`; format
+  `Formatted 187 files (0 changed) in 0.43 seconds.`, exit 0.
+- `dart pub publish --dry-run`, exit 0 and `Package has 0 warnings.` each: `jet_cad_2d`,
+  `jet_cad_2d_kit`, `jet_cad_2d_plan` (`CHANGELOG.md (4 KB)`).

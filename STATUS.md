@@ -425,9 +425,9 @@ with 0.7.0 (below).
   Every task reviewed, whole-branch Opus review with one fix wave, re-review
   clean; **merged into `main` at `4130ebc`** on the human's *"1"* (local merge;
   on the merged tree `jet_cad_2d_plan` +735, `jet_cad_2d_kit` +314, analyze
-  clean); not pushed. One
-  host-API difference awaits the human's word (A14): `selectTool` works with
-  no view mounted (today it answers false). **2b, the plan library in service
+  clean); not pushed. Its one
+  host-API difference (A14: `selectTool` works with no view mounted; today it
+  answers false) is settled by 2b spec decision 9 (true kept). **2b, the plan library in service
   mode** (`jet_cad_2d_plan` 0.8.0 still unreleased, the contract's 2b
   additions, engine seam E5): spec
   [2026-10-14-plan-library-service-mode-design.md](docs/superpowers/specs/2026-10-14-plan-library-service-mode-design.md)
@@ -437,8 +437,11 @@ with 0.7.0 (below).
   [2026-10-14-plan-library-2b-results.md](docs/superpowers/notes/2026-10-14-plan-library-2b-results.md),
   on `feat/plan-library-2b` (worktree `.claude/worktrees/plan-library-2b`).
   Every task done and reviewed, the exit gate passed at `2ca9c84f`; the
-  whole-branch review, its fix wave and the ledger's archive are next. Not
-  merged, not pushed. The human asked to be told when
+  whole-branch Opus review (no Critical, four Important) and its fix wave
+  are done (the results note's "Final fix wave": the design read-only in
+  service, view_palette's tests ported, restore's notifications and the
+  seat drag's spend pinned). **2b is complete on its branch**; not merged,
+  not pushed. The human asked to be told when
   `apps/architecture_demo` runs on the new packages (the end of
   sub-project 3) and to have everything tested after sub-project 4.
 
@@ -572,11 +575,14 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 
 **In flight: the kit architecture. Sub-project 1 (`jet_cad_2d_kit`) is
 merged (PR #11 `bc705be`, PR #12 `27244bf`). Sub-project 2a (the plan library
-in design mode) is merged at `4130ebc`, not pushed. 2b (the service mode)
-passed its exit gate on `feat/plan-library-2b` at `2ca9c84f`; next: the
-whole-branch Opus review and its fix wave, then the ledger archived and the
-merge on the human's word.** (In flight). A14's `selectTool` difference was
-settled by the human (2b spec decision 9: true kept).
+in design mode) is merged at `4130ebc`, not pushed. 2b (the service mode) is
+complete on `feat/plan-library-2b` after the whole-branch Opus review and its
+fix wave; not merged, not pushed. Next: the human's word on the merge.** (In
+flight). Open for the human: F-1 of `chrome_change_test.dart` (design-only, a
+2a port gap). Where 2b stands, its gaps and rulings: the results note's
+[Spec gaps](docs/superpowers/notes/2026-10-14-plan-library-2b-results.md#spec-gaps-and-interface-problems-found-while-executing)
+section and its "Final fix wave". A14's `selectTool` difference was settled
+by the human (2b spec decision 9: true kept).
 
 **Done 2026-10-13: 0.7.2 of the three packages**, published by the human in
 order (spec D11): `jet_cad_2d`, `jet_cad_2d_flutter`, `jet_cad_floor_plan`,
