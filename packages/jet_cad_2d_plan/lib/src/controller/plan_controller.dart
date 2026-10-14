@@ -31,6 +31,7 @@ import '../service/service_record.dart';
 import '../service/service_session.dart';
 import '../service/service_state.dart';
 import '../service/unit_picker.dart';
+import '../service/view/plan_service_bar.dart' show kServiceBarHeight;
 import '../shortcuts/tool_letters.dart';
 import '../symbols/plan_symbol.dart';
 import '../symbols/plan_symbol_loader.dart';
@@ -57,6 +58,62 @@ import 'tool_settings_store.dart';
 /// The thumbnail capacity of a controller's own cache (today's
 /// `kFloorPlanThumbnailCapacity`).
 const int kPlanThumbnailCapacity = 128;
+
+/// Where each mode's canvas starts in a `PlanEditor`, by its chrome alone:
+/// the top bar (44), the left column (240) and the rulers in design; the
+/// service bar in service.
+const Map<PlanMode, Offset> _defaultChromeOrigins = {
+  PlanMode.design: Offset(240 + kRulerThickness, 44 + kRulerThickness),
+  PlanMode.service: Offset(0, kServiceBarHeight),
+};
+
+/// Where each mode's canvas starts until an editor has measured it (R-13
+/// as amended). Read when a controller is made; a test seam.
+@visibleForTesting
+final Map<PlanMode, Offset> planCanvasSeeds = Map.of(_defaultChromeOrigins);
+
+/// The controller's camera (today's `_ViewCamera`): a pan made while a
+/// view builds ([panUnheard]) is applied at once and heard after that
+/// frame.
+final class _PlanCamera extends CameraController {
+  _PlanCamera(super.initial, {super.minScale, super.maxScale});
+
+  bool _quiet = false;
+  bool _owed = false;
+  bool _gone = false;
+
+  /// Pans by [canvasDelta] now, while a view builds: the frame being built
+  /// lays out and paints at the new value; the listeners hear it once,
+  /// after the frame.
+  void panUnheard(Offset canvasDelta) {
+    _quiet = true;
+    try {
+      panBy(canvasDelta);
+    } finally {
+      _quiet = false;
+    }
+    if (_owed) return;
+    _owed = true;
+    SchedulerBinding.instance
+      ..addPostFrameCallback((_) {
+        _owed = false;
+        if (!_gone) notifyListeners();
+      })
+      ..ensureVisualUpdate();
+  }
+
+  @override
+  void notifyListeners() {
+    if (_quiet) return;
+    super.notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _gone = true;
+    super.dispose();
+  }
+}
 
 /// A bump-only notifier: each [bump] is one request.
 final class _Requests extends ChangeNotifier {
@@ -271,7 +328,7 @@ class PlanController extends ChangeNotifier {
         _ownsThumbnails = thumbnails == null,
         thumbnails =
             thumbnails ?? SymbolThumbnails(maxEntries: kPlanThumbnailCapacity),
-        camera = CameraController(
+        camera = _PlanCamera(
             ViewportTransform(
                 worldToScreenMatrix: const Transform2(1, 0, 0, -1, 0, 0)),
             minScale: minScale,
@@ -1611,6 +1668,12 @@ class PlanController extends ChangeNotifier {
       _service = null;
       _dropService(old);
     }
+    _reframe(_mode.value, next);
+    // The new mode's canvas, where an editor last showed it.
+    final shownIn = _canvasIn[next];
+    if (_canvasRect.value != null && shownIn != null) {
+      _canvasRect.value = shownIn;
+    }
     _mode.value = next;
     _select(labels);
     _refreshFlags();
@@ -2270,6 +2333,74 @@ class PlanController extends ChangeNotifier {
   final ValueNotifier<Rect?> _canvasRect = ValueNotifier(null);
   final Map<Object, Rect> _canvases = {};
 
+  /// The last rect a canvas reported in each mode, for [setMode].
+  final Map<PlanMode, Rect> _canvasIn = {};
+
+  // R-13 as amended (the human, 2026-10-07): a mode switch keeps the plan
+  // where it is on the screen. The camera's numbers are in the shown
+  // canvas's coordinates and the two modes' canvases start at different
+  // places in the editor, so [setMode] reframes the camera by the
+  // difference of their origins -- here, not in a widget, so a switch made
+  // while no editor is shown keeps the place too.
+  final Map<PlanMode, Offset> _canvasAt = Map.of(planCanvasSeeds);
+
+  /// The origins a reframing used and no measurement has confirmed yet.
+  final Map<PlanMode, Offset> _assumed = {};
+
+  /// Where each mode's chrome alone put its canvas when its origin was
+  /// seeded or measured: the basis [canvasAssumed] moves it from.
+  final Map<PlanMode, Offset> _chromeAt = Map.of(_defaultChromeOrigins);
+
+  /// An editor lays out [mode]'s chrome so that its canvas starts at
+  /// [chrome]. For a mode not shown, the origin a switch into it reframes
+  /// by moves by what the chrome moved, and so do a reframing's assumption
+  /// and the rect [canvasRect] takes at the switch: the first frame after
+  /// the switch is exact. The shown mode waits for its measurement.
+  @internal
+  void canvasAssumed(PlanMode mode, Offset chrome) {
+    if (mode == this.mode.value) return;
+    final delta = chrome - _chromeAt[mode]!;
+    _chromeAt[mode] = chrome;
+    if (delta == Offset.zero) return;
+    _canvasAt[mode] = _canvasAt[mode]! + delta;
+    final assumed = _assumed[mode];
+    if (assumed != null) _assumed[mode] = assumed + delta;
+    final rect = _canvasIn[mode];
+    if (rect != null) {
+      _canvasIn[mode] = Rect.fromLTRB(
+          rect.left + delta.dx, rect.top + delta.dy, rect.right, rect.bottom);
+    }
+  }
+
+  void _reframe(PlanMode from, PlanMode to) {
+    final a = _canvasAt[from]!, b = _canvasAt[to]!;
+    _assumed.putIfAbsent(from, () => a);
+    _assumed.putIfAbsent(to, () => b);
+    if (a != b) camera.panBy(a - b);
+  }
+
+  /// An editor measured where [shown]'s canvas starts in it, after the
+  /// frame that first showed a plan in that mode; a reframing that assumed
+  /// another origin is corrected. [chrome] is the basis a later
+  /// [canvasAssumed] moves the origin from.
+  @internal
+  void canvasMeasured(PlanMode shown, Offset origin, {Offset? chrome}) {
+    _canvasAt[shown] = origin;
+    if (chrome != null) _chromeAt[shown] = chrome;
+    final assumed = _assumed.remove(shown);
+    if (assumed == null || assumed == origin) return;
+    camera.panBy(shown == mode.value ? assumed - origin : origin - assumed);
+  }
+
+  /// An editor's chrome in the shown mode moved its canvas from [from] to
+  /// [to]: the camera pans by the difference, applied at once and heard
+  /// after the frame. No camera command: a pending fit still runs.
+  @internal
+  void chromeMoved(Offset from, Offset to) {
+    if (_disposed || from == to) return;
+    (camera as _PlanCamera).panUnheard(from - to);
+  }
+
   /// The canvas's place in global logical pixels, or null while none is
   /// mounted.
   ValueListenable<Rect?> get canvasRect => _canvasRect;
@@ -2282,6 +2413,7 @@ class PlanController extends ChangeNotifier {
       _canvases
         ..remove(view)
         ..[view] = global;
+      _canvasIn[mode.value] = global;
       _canvasRect.value = global;
       return;
     }

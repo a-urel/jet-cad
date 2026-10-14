@@ -9,7 +9,9 @@
 // words for its own tools (Wall, Door, Dimension) are the generic tools'
 // (Line, Circle, Text); its wall is the editor fixture's first mark; the
 // unit half of OV-H (2b Task 10) selects the unit editor fixture's tables;
-// the service bar's lines are 2b's.
+// the service bar's lines are 2b Task 16's: SW2's service half (its own
+// test, over the editor's service bar) and LK1's last step (the service
+// bar, in Turkish).
 import 'package:flutter/foundation.dart' show SynchronousFuture;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
@@ -22,6 +24,7 @@ import 'package:jet_cad_2d_plan/src/editor/plan_editor.dart';
 import 'package:jet_cad_2d_plan/src/l10n/localizations.dart';
 import 'package:jet_cad_2d_plan/src/l10n/strings.dart';
 import 'package:jet_cad_2d_plan/src/l10n/strings_tr.dart';
+import 'package:jet_cad_2d_plan/src/service/service_session.dart' show PlanMode;
 import 'package:jet_cad_2d_plan/src/symbols/gallery_model.dart'
     show PlanSymbolWords;
 
@@ -163,6 +166,25 @@ void main() {
     expect(tooltipOf(tester, 'toolbar-print'), 'Drucken… (Strg+P)');
   });
 
+  testWidgets(
+      'SW2 in German: the service bar; a switch to English while mounted '
+      'renames it (its service half; L3, M-14d-s)', (tester) async {
+    final c = await pump(tester, const Locale('de'));
+    c.setMode(PlanMode.service);
+    await tester.pump();
+    await tester.pump();
+    // M-SW2s: the service bar's Undo in English whatever the locale.
+    expect(tooltipOf(tester, 'service-undo'), 'Rückgängig');
+    expect(tooltipOf(tester, 'service-print'), 'Drucken…');
+
+    await tester.pumpWidget(app(c, const Locale('en')));
+    await tester.pump();
+    expect(tooltipOf(tester, 'service-undo'), 'Undo');
+    c.setMode(PlanMode.design);
+    await tester.pump();
+    await tester.pump();
+  });
+
   for (final code in ['de', 'tr']) {
     testWidgets(
         'OV-$code no overflow from 704 px down to 656 px, OSNAP off, a mark '
@@ -265,7 +287,8 @@ void main() {
 
   testWidgets(
       'LK1 in Turkish nothing on screen bypasses the strings: the editor, '
-      'its panels, tabs, menus and dialogs (M-14d-a)', (tester) async {
+      'its panels, tabs, menus and dialogs, the service bar (M-14d-a)',
+      (tester) async {
     final recording = RecordingPlanStrings(const PlanStringsTr());
     final c =
         PlanController(kits: [markKit(), demoKit()], json: editorPlanJson());
@@ -328,6 +351,10 @@ void main() {
     });
     await look();
     await tester.enterText(find.byType(TextField).first, 'zzz');
+    await look();
+    // The service bar (2b Task 16). M-LK1s: its Print in English.
+    c.setMode(PlanMode.service);
+    await tester.pump();
     await look();
 
     final leaks = leaksOf(seen, recording, c);

@@ -2,16 +2,17 @@
 // unchanged.
 //
 // Ports the service parts Part A owns: BC1 (all eight cases); BT1's service
-// half (the 16 FloorPlanServiceBar / FloorPlanServiceAction expects, skipped
-// until the barrel exports them, Part B Step B7); BT2's service case; M-H40's
+// half (the 16 FloorPlanServiceBar / FloorPlanServiceAction expects, through
+// the barrel, `host.`); BT2's service case; M-H40's
 // service test; the service half of "the editor bar [print, undo] ... the
 // service bar [redo, undo, merge, export, split]"; "today's rules inside the
 // subset"; "the selection mode: no bar, the canvas starts at the view's
 // top"; "the service bar: leading before the buttons ..."; T2-b's service
 // test; the mergeCandidate group (M-H44, S-5, T2-d, "its notifications");
 // T2-c "the selection mode is unchanged: undo() acts"; T2-e's service half;
-// R-5 "a host TextField in the service bar's trailing". Left to Part B: the
-// group "the canvas re-measured", the R-3 tests and K1. Not ported (2a's or
+// R-5 "a host TextField in the service bar's trailing". The group "the
+// canvas re-measured", the R-3 tests and K1 are Part B's
+// (test/editor/editor_modes_test.dart). Not ported (2a's or
 // design-only): BC2, BC3, BT1's editor half, BT2's editor case, M-H40's
 // editor test, "a bare shell's other file commands", the design halves.
 //
@@ -33,9 +34,6 @@ import 'package:jet_cad_2d_plan/src/controller/plan_controller.dart';
 import 'package:jet_cad_2d_plan/src/service/service_session.dart' show PlanMode;
 import 'package:jet_cad_2d_plan/src/service/service_state.dart';
 import 'package:jet_cad_2d_plan/src/service/view/plan_service_bar.dart';
-// BT1 reads the bar's names through `host.`; Part B (Step B6) reads them
-// through the barrel and drops this import.
-import 'package:jet_cad_2d_plan/src/service/view/plan_service_bar.dart' as host;
 import 'package:jet_cad_2d_plan/src/service/view/plan_service_view.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
@@ -261,7 +259,7 @@ void main() {
       expect(variants[0].toString(), 'PlanServiceBar(visible: false)');
       expect(variants[1].toString(), 'PlanServiceBar(actions: [print, undo])');
       expect(variants[2].toString(), 'PlanServiceBar(leading: [Text])');
-    }, skip: 'through the barrel from Part B, Step B7');
+    });
 
     for (final (name, service) in [
       (

@@ -190,6 +190,12 @@ class _PlanCanvasState extends State<PlanCanvas> {
       // RV6: the old controller is shown by no canvas now (unless another
       // shows it): its shape in progress does not stay part-way.
       _withdrawTool(old);
+      // 2a's parked final-review item (2b Task 16): this canvas no longer
+      // speaks for the old controller's object snap, so its own setting
+      // alone counts again (today's snap was the shell's, never the
+      // controller's). Only here, where the order is the swap's: a canvas
+      // replaced by another in one frame is not undone by its dispose.
+      if (!old.isDisposed) old.snappingAllowed = true;
       old.removeListener(_onController);
       old.lockHint.removeListener(_onHint);
       _hintTimer?.cancel();

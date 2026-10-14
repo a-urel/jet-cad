@@ -3,10 +3,14 @@
 // slot and `editorSelectedUnits`. Through `PlanEditor` on the editor fixture
 // under `editorCamera()`; the inspector's detail is checked against the
 // fixture's own forward transform of the box's centre. "None without a
-// builder ...; none in the selection mode" and T6-e need the mode (Task 16
-// ports them whole).
+// builder ...; none in the selection mode" and T6-e need the mode: 2b Task
+// 16 ports them whole (its `mode:` argument sets the mode before the
+// mount; FloorPlanMode.selection -> PlanMode.service; selectedTables,
+// editorSelectedTables -> selectedUnits, editorSelectedUnits; the wall ->
+// the fixture's north wall line).
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/gestures.dart' show PointerScrollEvent;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
@@ -42,9 +46,12 @@ final class InspectorHost {
 /// The editor with a host inspector: a line naming the unit and its data,
 /// and a field whose submission stores its text as the unit's `pos`.
 Future<InspectorHost> mountInspector(WidgetTester tester,
-    {bool panel = true, bool inspector = true}) async {
+    {bool panel = true,
+    bool inspector = true,
+    PlanMode mode = PlanMode.design}) async {
   final c = PlanController(kits: [fxKit()], json: t.unitEditorPlanJson());
   addTearDown(c.dispose);
+  c.setMode(mode);
   final h = InspectorHost(c, panel);
   addTearDown(h.panel.dispose);
   addTearDown(h.label.dispose);
@@ -274,10 +281,66 @@ void main() {
       expect(inspectorText(tester), 'pos 1 -', reason: 'the host rebuilt');
     });
 
-    testWidgets('none without a builder (no slot)', (tester) async {
+    testWidgets(
+        'none without a builder (no slot); none in the selection mode, the '
+        'builder given', (tester) async {
       final none = await mountInspector(tester, inspector: false);
       await selectKeys(tester, none.c, [keyOf(none.c, '1')]);
       expect(byKey('unit-inspector'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+      final h = await mountInspector(tester, mode: PlanMode.service);
+      final c = h.c;
+      c.select({'1'});
+      await tester.pump();
+      expect(c.selectedUnits.value, {'1'});
+      expect(byKey('unit-inspector'), findsNothing);
+      expect(h.calls, isEmpty);
+      c.setMode(PlanMode.design);
+      await tester.pump();
+      await tester.pump();
+      expect(c.selectedUnits.value, {'1'});
+      expect(byKey('host-inspector'), findsOneWidget, reason: 'the design');
+    });
+  });
+
+  group('editorSelectedUnits (S-17)', () {
+    testWidgets(
+        'T6-e through the barrel: 1 selected → {1}; the selection mode → '
+        'empty; back → {1}; notified once per change, never for a change '
+        'that keeps the numbers or one in the selection mode', (tester) async {
+      final h = await mountInspector(tester, inspector: false);
+      final c = h.c;
+      final ValueListenable<Set<String>> editor = c.editorSelectedUnits;
+      var notified = 0;
+      void count() => notified++;
+      editor.addListener(count);
+      addTearDown(() => editor.removeListener(count));
+      expect(editor.value, isEmpty);
+      c.select({'1'});
+      await tester.pump();
+      expect(editor.value, {'1'});
+      expect(notified, 1);
+      final wall = SelectionKey.root(northWall(c));
+      await selectKeys(tester, c, [keyOf(c, '1'), wall]);
+      expect(editor.value, {'1'});
+      expect(notified, 1, reason: 'the numbers kept');
+      c.setMode(PlanMode.service);
+      await tester.pump();
+      await tester.pump();
+      expect(c.selectedUnits.value, {'1'});
+      expect(editor.value, isEmpty);
+      expect(notified, 2);
+      c.select({'1', '2'});
+      await tester.pump();
+      expect(c.selectedUnits.value, {'1', '2'});
+      expect(editor.value, isEmpty);
+      expect(notified, 2, reason: 'the selection mode moves nothing');
+      c.setMode(PlanMode.design);
+      await tester.pump();
+      await tester.pump();
+      expect(editor.value, {'1', '2'});
+      expect(notified, 3);
+      expect(() => editor.value.add('9'), throwsUnsupportedError);
     });
   });
 }

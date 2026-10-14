@@ -2,8 +2,9 @@
 //
 // Dark canvas decision note (2026-10-05) K1–K3, wired: the canvas, read
 // back in pixels under the floor planner's seed (support/
-// canvas_fixture.dart). Today's selection-mode run is 2b's; each test runs
-// once, in design mode.
+// canvas_fixture.dart), in each mode: design through `PlanCanvas`, service
+// through `PlanServiceView` (today's selection-mode run, 2b Task 16: the
+// page edits act on the active document, the service copy in service).
 //
 // Beside the fixture's ACI 7 lines the document carries two fixed colours
 // as the planner draws them: a wall-black `TrueColor(0x000000)` line and a
@@ -43,10 +44,18 @@ PlanController controllerOn(int paper) => paletteController(
       }
     }).c;
 
-Future<void> pumpView(
-    WidgetTester tester, PlanController c, ThemeMode mode) async {
+/// [c]'s canvas in [viewMode]: the design's PlanCanvas, or the service
+/// view.
+Widget viewOf(PlanController c, PlanMode viewMode) => Scaffold(
+    body: viewMode == PlanMode.design
+        ? PlanCanvas(controller: c)
+        : PlanServiceView(controller: c));
+
+Future<void> pumpView(WidgetTester tester, PlanController c, ThemeMode mode,
+    PlanMode viewMode) async {
   windowAt(tester, const Size(1440, 900));
-  await pumpThemed(tester, Scaffold(body: PlanCanvas(controller: c)), mode);
+  c.setMode(viewMode);
+  await pumpThemed(tester, viewOf(c, viewMode), mode);
   await tester.pump();
   await tester.pump();
   c.camera.value = paletteCamera;
@@ -72,140 +81,153 @@ int bareAt(WidgetTester tester, Shot shot) {
 }
 
 void main() {
-  testWidgets(
-      'M-DC-1, M-DC-3, M-DC-4: dark theme on White: the sheet is '
-      'kDarkCanvasPaper, the black wall white, the light-grey finish '
-      'dark grey, ACI 7 white, the overlays the dark set; the page '
-      'keeps White', (tester) async {
-    final c = controllerOn(white);
-    await pumpView(tester, c, ThemeMode.dark);
-    final shot = await shoot(tester);
-    expect(hex(bareAt(tester, shot)), hex(kDarkCanvasPaper & 0xFFFFFF));
-    final wall = lineAt(tester, shot, wallY);
-    expect(channelDistance(wall, 0xFFFFFF), lessThanOrEqualTo(24),
-        reason: 'wall ${hex(wall)}');
-    final finish = lineAt(tester, shot, finishY);
-    final want = darkCanvasTone(0xBBBBBB, kDarkCanvasPaper);
-    expect(channelDistance(finish, want), lessThanOrEqualTo(12),
-        reason: 'finish ${hex(finish)}, want ${hex(want)}');
-    final ink = lineAt(tester, shot, inkY);
-    expect(channelDistance(ink, 0xFFFFFF), lessThanOrEqualTo(24),
-        reason: 'ACI 7 ${hex(ink)}');
+  for (final viewMode in PlanMode.values) {
+    group('${viewMode.name} mode', () {
+      testWidgets(
+          'M-DC-1, M-DC-3, M-DC-4: dark theme on White: the sheet is '
+          'kDarkCanvasPaper, the black wall white, the light-grey finish '
+          'dark grey, ACI 7 white, the overlays the dark set; the page '
+          'keeps White', (tester) async {
+        final c = controllerOn(white);
+        await pumpView(tester, c, ThemeMode.dark, viewMode);
+        final shot = await shoot(tester);
+        expect(hex(bareAt(tester, shot)), hex(kDarkCanvasPaper & 0xFFFFFF));
+        final wall = lineAt(tester, shot, wallY);
+        expect(channelDistance(wall, 0xFFFFFF), lessThanOrEqualTo(24),
+            reason: 'wall ${hex(wall)}');
+        final finish = lineAt(tester, shot, finishY);
+        final want = darkCanvasTone(0xBBBBBB, kDarkCanvasPaper);
+        expect(channelDistance(finish, want), lessThanOrEqualTo(12),
+            reason: 'finish ${hex(finish)}, want ${hex(want)}');
+        final ink = lineAt(tester, shot, inkY);
+        expect(channelDistance(ink, 0xFFFFFF), lessThanOrEqualTo(24),
+            reason: 'ACI 7 ${hex(ink)}');
 
-    final view = tester.widget<PlanCanvasView>(find.byType(PlanCanvasView));
-    expect(view.paper, PaperPalette.dark);
-    expect(view.sheetArgb, kDarkCanvasPaper);
-    expect(view.resolver, isA<DarkCanvasStyleResolver>());
-    final doc = c.document;
-    expect(doc.components.get<PageComponent>(doc.rootHandle)!.background, white,
-        reason: 'display only (K4)');
-  });
+        final view = tester.widget<PlanCanvasView>(find.byType(PlanCanvasView));
+        expect(view.paper, PaperPalette.dark);
+        expect(view.sheetArgb, kDarkCanvasPaper);
+        expect(view.resolver, isA<DarkCanvasStyleResolver>());
+        final doc = c.activeDocument;
+        expect(doc.components.get<PageComponent>(doc.rootHandle)!.background,
+            white,
+            reason: 'display only (K4)');
+      });
 
-  testWidgets(
-      'M-DC-2: dark theme on Blueprint: the sheet stays Blueprint and '
-      'nothing is re-toned: the black wall stays black', (tester) async {
-    final c = controllerOn(blueprint);
-    await pumpView(tester, c, ThemeMode.dark);
-    final shot = await shoot(tester);
-    expect(hex(bareAt(tester, shot)), hex(blueprint & 0xFFFFFF));
-    final wall = lineAt(tester, shot, wallY);
-    expect(channelDistance(wall, blueprint & 0xFFFFFF), lessThanOrEqualTo(12),
-        reason: 'the black wall\'s brightest pixel is the paper '
-            '${hex(wall)}');
-    final view = tester.widget<PlanCanvasView>(find.byType(PlanCanvasView));
-    expect(view.sheetArgb, isNull);
-    expect(view.resolver, isA<DocumentStyleResolver>());
-  });
+      testWidgets(
+          'M-DC-2: dark theme on Blueprint: the sheet stays Blueprint and '
+          'nothing is re-toned: the black wall stays black', (tester) async {
+        final c = controllerOn(blueprint);
+        await pumpView(tester, c, ThemeMode.dark, viewMode);
+        final shot = await shoot(tester);
+        expect(hex(bareAt(tester, shot)), hex(blueprint & 0xFFFFFF));
+        final wall = lineAt(tester, shot, wallY);
+        expect(
+            channelDistance(wall, blueprint & 0xFFFFFF), lessThanOrEqualTo(12),
+            reason: 'the black wall\'s brightest pixel is the paper '
+                '${hex(wall)}');
+        final view = tester.widget<PlanCanvasView>(find.byType(PlanCanvasView));
+        expect(view.sheetArgb, isNull);
+        expect(view.resolver, isA<DocumentStyleResolver>());
+      });
 
-  testWidgets(
-      'light theme on White: as before: a white sheet, black wall, the '
-      'finish its own grey; a live switch to dark and back re-tones and '
-      'restores', (tester) async {
-    final c = controllerOn(white);
-    await pumpView(tester, c, ThemeMode.light);
-    var shot = await shoot(tester);
-    expect(hex(bareAt(tester, shot)), hex(0xFFFFFF));
-    expect(channelDistance(darkLineAt(tester, shot, finishY), 0xBBBBBB),
-        lessThanOrEqualTo(12));
-    expect(channelDistance(darkLineAt(tester, shot, wallY), 0x000000),
-        lessThanOrEqualTo(24));
-    expect(tester.widget<PlanCanvasView>(find.byType(PlanCanvasView)).sheetArgb,
-        isNull);
+      testWidgets(
+          'light theme on White: as before: a white sheet, black wall, the '
+          'finish its own grey; a live switch to dark and back re-tones and '
+          'restores', (tester) async {
+        final c = controllerOn(white);
+        await pumpView(tester, c, ThemeMode.light, viewMode);
+        var shot = await shoot(tester);
+        expect(hex(bareAt(tester, shot)), hex(0xFFFFFF));
+        expect(channelDistance(darkLineAt(tester, shot, finishY), 0xBBBBBB),
+            lessThanOrEqualTo(12));
+        expect(channelDistance(darkLineAt(tester, shot, wallY), 0x000000),
+            lessThanOrEqualTo(24));
+        expect(
+            tester
+                .widget<PlanCanvasView>(find.byType(PlanCanvasView))
+                .sheetArgb,
+            isNull);
 
-    await pumpThemed(
-        tester, Scaffold(body: PlanCanvas(controller: c)), ThemeMode.dark);
-    await tester.pump();
-    shot = await shoot(tester);
-    expect(hex(bareAt(tester, shot)), hex(kDarkCanvasPaper & 0xFFFFFF));
-    expect(channelDistance(lineAt(tester, shot, wallY), 0xFFFFFF),
-        lessThanOrEqualTo(24));
+        await pumpThemed(tester, viewOf(c, viewMode), ThemeMode.dark);
+        await tester.pump();
+        shot = await shoot(tester);
+        expect(hex(bareAt(tester, shot)), hex(kDarkCanvasPaper & 0xFFFFFF));
+        expect(channelDistance(lineAt(tester, shot, wallY), 0xFFFFFF),
+            lessThanOrEqualTo(24));
 
-    await pumpThemed(
-        tester, Scaffold(body: PlanCanvas(controller: c)), ThemeMode.light);
-    await tester.pump();
-    shot = await shoot(tester);
-    expect(hex(bareAt(tester, shot)), hex(0xFFFFFF));
-    expect(channelDistance(darkLineAt(tester, shot, finishY), 0xBBBBBB),
-        lessThanOrEqualTo(12));
-  });
+        await pumpThemed(tester, viewOf(c, viewMode), ThemeMode.light);
+        await tester.pump();
+        shot = await shoot(tester);
+        expect(hex(bareAt(tester, shot)), hex(0xFFFFFF));
+        expect(channelDistance(darkLineAt(tester, shot, finishY), 0xBBBBBB),
+            lessThanOrEqualTo(12));
+      });
 
-  testWidgets(
-      'review finding 8: dark theme, White to Ivory keeps the key, so the '
-      'resolver and the canvas painter stay the same objects', (tester) async {
-    final c = controllerOn(white);
-    await pumpView(tester, c, ThemeMode.dark);
-    final resolver =
-        tester.widget<PlanCanvasView>(find.byType(PlanCanvasView)).resolver;
-    final painter =
-        tester.state<DraftCanvasState>(find.byType(DraftCanvas)).painter;
-    final doc = c.document;
-    doc.commands.execute(SetComponentCommand<PageComponent>(
-        doc.rootHandle,
-        doc.components
-            .get<PageComponent>(doc.rootHandle)!
-            .copyWith(background: 0xFFFAF6EC)));
-    await tester.pump();
-    await tester.pump();
-    expect(
-        identical(
-            tester.widget<PlanCanvasView>(find.byType(PlanCanvasView)).resolver,
-            resolver),
-        isTrue);
-    expect(
-        identical(
-            tester.state<DraftCanvasState>(find.byType(DraftCanvas)).painter,
-            painter),
-        isTrue);
-    expect(hex(bareAt(tester, await shoot(tester))),
-        hex(kDarkCanvasPaper & 0xFFFFFF));
-  });
-
-  testWidgets(
-      'dark theme, White to Blueprint and back: the sheet and the '
-      'resolver follow the page', (tester) async {
-    final c = controllerOn(white);
-    await pumpView(tester, c, ThemeMode.dark);
-    final doc = c.document;
-    void setPaper(int argb) =>
+      testWidgets(
+          'review finding 8: dark theme, White to Ivory keeps the key, so the '
+          'resolver and the canvas painter stay the same objects',
+          (tester) async {
+        final c = controllerOn(white);
+        await pumpView(tester, c, ThemeMode.dark, viewMode);
+        final resolver =
+            tester.widget<PlanCanvasView>(find.byType(PlanCanvasView)).resolver;
+        final painter =
+            tester.state<DraftCanvasState>(find.byType(DraftCanvas)).painter;
+        final doc = c.activeDocument;
         doc.commands.execute(SetComponentCommand<PageComponent>(
             doc.rootHandle,
             doc.components
                 .get<PageComponent>(doc.rootHandle)!
-                .copyWith(background: argb)));
-    setPaper(blueprint);
-    await tester.pump();
-    await tester.pump();
-    var shot = await shoot(tester);
-    expect(hex(bareAt(tester, shot)), hex(blueprint & 0xFFFFFF));
-    expect(tester.widget<PlanCanvasView>(find.byType(PlanCanvasView)).resolver,
-        isA<DocumentStyleResolver>());
+                .copyWith(background: 0xFFFAF6EC)));
+        await tester.pump();
+        await tester.pump();
+        expect(
+            identical(
+                tester
+                    .widget<PlanCanvasView>(find.byType(PlanCanvasView))
+                    .resolver,
+                resolver),
+            isTrue);
+        expect(
+            identical(
+                tester
+                    .state<DraftCanvasState>(find.byType(DraftCanvas))
+                    .painter,
+                painter),
+            isTrue);
+        expect(hex(bareAt(tester, await shoot(tester))),
+            hex(kDarkCanvasPaper & 0xFFFFFF));
+      });
 
-    setPaper(0xFFFAF6EC); // Ivory: light, so shown dark again
-    await tester.pump();
-    await tester.pump();
-    shot = await shoot(tester);
-    expect(hex(bareAt(tester, shot)), hex(kDarkCanvasPaper & 0xFFFFFF));
-    expect(channelDistance(lineAt(tester, shot, wallY), 0xFFFFFF),
-        lessThanOrEqualTo(24));
-  });
+      testWidgets(
+          'dark theme, White to Blueprint and back: the sheet and the '
+          'resolver follow the page', (tester) async {
+        final c = controllerOn(white);
+        await pumpView(tester, c, ThemeMode.dark, viewMode);
+        final doc = c.activeDocument;
+        void setPaper(int argb) =>
+            doc.commands.execute(SetComponentCommand<PageComponent>(
+                doc.rootHandle,
+                doc.components
+                    .get<PageComponent>(doc.rootHandle)!
+                    .copyWith(background: argb)));
+        setPaper(blueprint);
+        await tester.pump();
+        await tester.pump();
+        var shot = await shoot(tester);
+        expect(hex(bareAt(tester, shot)), hex(blueprint & 0xFFFFFF));
+        expect(
+            tester.widget<PlanCanvasView>(find.byType(PlanCanvasView)).resolver,
+            isA<DocumentStyleResolver>());
+
+        setPaper(0xFFFAF6EC); // Ivory: light, so shown dark again
+        await tester.pump();
+        await tester.pump();
+        shot = await shoot(tester);
+        expect(hex(bareAt(tester, shot)), hex(kDarkCanvasPaper & 0xFFFFFF));
+        expect(channelDistance(lineAt(tester, shot, wallY), 0xFFFFFF),
+            lessThanOrEqualTo(24));
+      });
+    });
+  }
 }

@@ -6,25 +6,38 @@
 // PF18-PF24) on the export fixture: two turned marks and a line around the
 // sheet's centre. Expected pixel sizes are computed here from the page,
 // never read from the code under test.
+//
+// 2b Task 16 ports, assertions unchanged, what needs the service mode or
+// the unit section: PF2's selection half, PF17 and PF23's last block
+// (S-22), each through PlanEditor; PF2's half on the view test's page plan
+// (units 1, turned and mirrored, and 2, off the sheet's centre), PF17 on
+// the embedding plan (`table-number` -> the unit section's `unit-label`;
+// `tables` -> `units`), PF23's block on the export fixture.
 import 'dart:async';
 import 'dart:convert' show latin1, utf8;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show PlanKit;
 import 'package:jet_cad_2d_plan/src/controller/permissions.dart';
 import 'package:jet_cad_2d_plan/src/controller/plan_controller.dart';
+import 'package:jet_cad_2d_plan/src/editor/plan_editor.dart';
 import 'package:jet_cad_2d_plan/src/export/builtin_exporters.dart';
 import 'package:jet_cad_2d_plan/src/export/editor_page_flows.dart';
 import 'package:jet_cad_2d_plan/src/export/export_dialog.dart';
 import 'package:jet_cad_2d_plan/src/export/page_printer.dart';
 import 'package:jet_cad_2d_plan/src/export/registries.dart';
 import 'package:jet_cad_2d_plan/src/fonts/plan_fonts.dart' show kPlanFontAsset;
+import 'package:jet_cad_2d_plan/src/service/service_session.dart' show PlanMode;
 
 import '../support/export_plan.dart';
 import '../support/fake_page_printer.dart';
 import '../support/flows_bar.dart';
 import '../support/mark_kit.dart';
+import '../support/service_fixtures.dart'
+    show embeddingPlanJson, fxKit, pagePlan;
+import '../support/service_plans.dart' show move;
 
 Finder byKey(String k) => find.byKey(Key(k));
 
@@ -773,5 +786,111 @@ void main() {
     await tester.pump();
     await letRun(tester, () => printer.calls.isNotEmpty);
     expect(printer.calls.single.name, 'plan', reason: 'the control');
+  });
+
+  // ---- 2b Task 16: the service mode and the unit section ----
+
+  /// [json] over [kits] under a PlanEditor with [onExport], [printer] and
+  /// [dialog]; today's `pumpFlows` over FloorPlanView.
+  Future<PlanController> pumpEditorFlows(WidgetTester tester,
+      {required String json,
+      required List<PlanKit> kits,
+      void Function(PlanExport)? onExport,
+      PagePrinter? printer,
+      PlanExportDialog? dialog}) async {
+    final c = PlanController(kits: kits, json: json);
+    addTearDown(c.dispose);
+    await tester.binding.setSurfaceSize(const Size(1440, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: PlanEditor(
+                controller: c,
+                onExport: onExport,
+                printer: printer,
+                onExportDialog: dialog))));
+    await tester.pump();
+    await tester.pump();
+    return c;
+  }
+
+  /// [c] switched to [mode], its view rebuilt.
+  Future<void> toMode(
+      WidgetTester tester, PlanController c, PlanMode mode) async {
+    c.setMode(mode);
+    await tester.pump();
+    await tester.pump();
+  }
+
+  testWidgets(
+      'PF2 exportPlan(PNG at 96) in each mode (its selection half): '
+      "image/png, <name>.png, the page's pixel size at 96 dpi; the copy's "
+      'moved table is in the bytes', (tester) async {
+    final got = <PlanExport>[];
+    final c = await pumpEditorFlows(tester,
+        json: pagePlan(), kits: [fxKit()], onExport: got.add);
+    final design = (await tester.runAsync(() => exportAs(c, png96)))!;
+
+    await toMode(tester, c, PlanMode.service);
+    final same = (await tester.runAsync(() => exportAs(c, png96)))!;
+    expect(same.name, 'plan.png');
+    expect(pngSize(same.bytes), pagePixels(c, 96));
+    expect(same.bytes, design.bytes, reason: 'the copy, unmoved');
+    move(c, '1', 900, -600);
+    await tester.pump();
+    // M-PF2s: the controller's flows export the design in service.
+    final moved = (await tester.runAsync(() => exportAs(c, png96)))!;
+    expect(moved.bytes, isNot(design.bytes), reason: 'the copy, moved');
+    expect(c.pageFlows.dialogAnswer, PlanExportAnswer.initial,
+        reason: 'exportPlan leaves the remembered choice');
+  });
+
+  testWidgets(
+      'PF17 (R-2) exportPlan settles pending input first: a table number '
+      'typed and not committed is in the bytes', (tester) async {
+    final c = await pumpEditorFlows(tester,
+        json: embeddingPlanJson(), kits: [fxKit()]);
+    c.select({'1'});
+    await tester.pump();
+    final before = (await tester.runAsync(() => exportAs(c, png96)))!;
+    await tester.tap(byKey('unit-label'));
+    await tester.pump();
+    await tester.enterText(byKey('unit-label'), '42');
+    await tester.pump();
+    expect([for (final t in c.units) t.label], isNot(contains('42')),
+        reason: 'premise: typed, not committed');
+    // M-PF17: the controller's export settles nothing first.
+    final typed = (await tester.runAsync(() => exportAs(c, png96)))!;
+    expect([for (final t in c.units) t.label], contains('42'));
+    final after = (await tester.runAsync(() => exportAs(c, png96)))!;
+    expect(typed.bytes, isNot(before.bytes));
+    expect(typed.bytes, after.bytes);
+  });
+
+  testWidgets(
+      "PF23 (final review F-4, its last block) the selection mode is never "
+      'refused (S-22): under a refused export the service bar exports',
+      (tester) async {
+    final got = <PlanExport>[];
+    var answer = Completer<PlanExportAnswer?>();
+    final c = await pumpEditorFlows(tester,
+        json: exportPlanJson(),
+        kits: [markKit()],
+        onExport: got.add,
+        printer: FakePagePrinter(),
+        dialog: (_, __, ___) => answer.future);
+    c.permissions = PlanPermissions.full.copyWith(export: false);
+    await tester.pump();
+    expect(byKey('toolbar-export'), findsNothing, reason: 'premise: refused');
+
+    // The selection mode exports under the same refusal.
+    await toMode(tester, c, PlanMode.service);
+    answer = Completer();
+    // M-SV-3a: the service view's export gated by permissions.export.
+    await tester.tap(byKey('service-export'));
+    await tester.pump();
+    answer.complete(png96);
+    await letRun(tester, () => got.isNotEmpty);
+    expect(got.single.name, 'plan.png');
   });
 }

@@ -21,3 +21,32 @@ The plan library of jet_cad_2d, in design mode (sub-project 2a).
   `PlanPropertyPanel`, `PlanLayerPanel`, `PlanPagePanel`, `PlanShortcuts`,
   and `PlanEditor` with `PlanEditorBar`.
 - Words in English, German and Turkish; `PlanTheme`; the bundled Roboto.
+
+The service mode (sub-project 2b).
+
+- Units: a placed symbol instance whose definition carries `jetcad.unit`,
+  or one a kit's parametric type generates (a seat in a row); identified
+  by its label (the `UNIT` attribute), numbered on placement when the
+  unit is `numbered`; `units`, `unitDetails`, `unitAt`, `select`,
+  `fitToUnits`, `labelWarnings`, `unitChanges`; host data and colour
+  (`setUnitData`, `setUnitColour`, `setUnitLabel` and their plural forms).
+- `PlanMode` and `setMode`: the service mode works on a copy of the design
+  with its own systems, lock and failure boundary; `undo`, `redo`,
+  `export`, `print` act on the active document.
+- Service state by label: `unitStatuses`, `unitGroups`, `groupStatuses`,
+  `unitFocus`, `selectedUnits`, `selectedGroup`, `mergeCandidate`; the
+  service record `jet_cad.service` (`serviceJson`, `restoreService`,
+  `resetService`, `serviceEdited`, `serviceChanges`).
+- `PlanServiceView` with `PlanServiceBar`, the events (`onUnitTap`,
+  `onUnitDoubleTap`, `onUnitContextMenu`, `onGroupTap`, `onUnitHover`,
+  `onUnitsMoved`, `onFloorTap`, `onMergeRequested`, `onSplitRequested`,
+  `onLayoutChanged`), unit overlays (`PlanUnitOverlay`,
+  `PlanOverlayLayout`); `PlanEditor` shows it in service and keeps the
+  plan in place across a switch.
+- `PlanPermissions`: `relabel`, `selectUnitsOnly`, `serviceMove`,
+  `serviceMerge`, the `unitsOnly` profile. `PlanTheme`: the service and
+  colour fields. Words for units and the service mode in English, German
+  and Turkish; a host's own words (`PlanController(words:)`).
+- In design, a generated unit stands for its object: a click on a seat
+  selects its row. A window band over a row of seats alone selects
+  nothing (a known limit).

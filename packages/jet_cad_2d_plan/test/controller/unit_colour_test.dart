@@ -29,7 +29,6 @@ import 'package:jet_cad_2d_plan/src/panels/symbol_section.dart'
     show changeSizeCommand;
 import 'package:jet_cad_2d_plan/src/units/unit_components.dart';
 import 'package:jet_cad_2d_plan/src/units/unit_index.dart';
-import 'package:jet_cad_2d_plan/src/units/unit_problems.dart' show UnitProblem;
 
 import '../support/unit_embedding_fixture.dart';
 import '../support/unit_fixtures.dart' show entryOf, fxKit;

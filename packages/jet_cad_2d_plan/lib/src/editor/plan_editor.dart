@@ -12,9 +12,9 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart'
     show ValueListenable, defaultTargetPlatform, listEquals;
 import 'package:flutter/material.dart';
-import 'package:jet_cad_2d/jet_cad_2d.dart' show zoomOf;
+import 'package:jet_cad_2d/jet_cad_2d.dart' show DraftDocument, zoomOf;
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
-    show kLogicalPixelsPerMm;
+    show InteractionLayer, kLogicalPixelsPerMm, kRulerThickness;
 
 import '../canvas/plan_canvas.dart';
 import '../controller/plan_controller.dart';
@@ -30,6 +30,11 @@ import '../panels/plan_layer_panel.dart';
 import '../panels/plan_page_panel.dart';
 import '../panels/plan_property_panel.dart';
 import '../panels/plan_symbol_gallery.dart';
+import '../service/service_session.dart' show PlanMode;
+import '../service/service_tool.dart';
+import '../service/view/plan_service_bar.dart';
+import '../service/view/plan_service_view.dart';
+import '../service/view/unit_overlays.dart';
 import '../shortcuts/plan_shortcut_guard.dart';
 import '../shortcuts/plan_shortcuts.dart';
 import '../symbols/plan_symbol.dart';
@@ -57,6 +62,10 @@ typedef PlanFileCallback = Future<void> Function();
 /// [onNew], [onOpen], [onSave] and [onSaveAs] are the host's, offered as
 /// buttons and chords only when given. Which buttons exist follows
 /// `controller.permissions` (`export`, `print`, `undo`) at each build.
+///
+/// In `PlanMode.service` the editor shows a `PlanServiceView` over the
+/// service copy with the options above, and the plan keeps its place on
+/// the screen across a switch (today's R-13).
 ///
 /// A host that owns the controller disposes it after the editor is gone
 /// (in its own `State.dispose`, which Flutter calls after its children's).
@@ -87,6 +96,23 @@ class PlanEditor extends StatefulWidget {
     this.autofocus = true,
     this.theme,
     this.unitInspectorBuilder,
+    this.serviceBar = const PlanServiceBar(),
+    this.onUnitTap,
+    this.onUnitDoubleTap,
+    this.onUnitContextMenu,
+    this.onGroupTap,
+    this.onUnitHover,
+    this.onMergeRequested,
+    this.onSplitRequested,
+    this.onLayoutChanged,
+    this.onUnitsMoved,
+    this.onFloorTap,
+    this.longPress = PlanLongPress.toggleSelection,
+    this.floorDrag = PlanFloorDrag.pan,
+    this.userCamera = true,
+    this.unitOverlayBuilder,
+    this.unitOverlayLayout = const PlanOverlayLayout(),
+    this.unitOverlayModes = const {PlanMode.service},
   });
 
   final PlanController controller;
@@ -170,6 +196,57 @@ class PlanEditor extends StatefulWidget {
   /// A per-view theme over the ambient `PlanTheme`, field by field.
   final PlanTheme? theme;
 
+  /// The service mode's bar; passed to the service view.
+  final PlanServiceBar serviceBar;
+
+  /// A tap on a labelled unit; passed to the service view.
+  final void Function(String label)? onUnitTap;
+
+  /// A double tap on a labelled unit; passed to the service view.
+  final void Function(String label)? onUnitDoubleTap;
+
+  /// A context menu asked on a labelled unit; passed to the service view.
+  final void Function(String label, Offset globalPosition)? onUnitContextMenu;
+
+  /// A tap on a member of a group; passed to the service view.
+  final void Function(String groupId, String label)? onGroupTap;
+
+  /// The labelled unit under the pointer, on change; passed to the service view.
+  final void Function(String? label)? onUnitHover;
+
+  /// The service bar's Merge; passed to the service view.
+  final void Function(Set<String> labels)? onMergeRequested;
+
+  /// The service bar's Split; passed to the service view.
+  final void Function(String groupId)? onSplitRequested;
+
+  /// After each drag in service; passed to the service view.
+  final VoidCallback? onLayoutChanged;
+
+  /// The units a drag moved, by detail; passed to the service view.
+  final void Function(List<PlanUnitDetail> moved)? onUnitsMoved;
+
+  /// A tap that missed every unit, in world millimetres; passed to the service view.
+  final void Function(Offset world)? onFloorTap;
+
+  /// What a long press on a unit does; passed to the service view.
+  final PlanLongPress longPress;
+
+  /// What a drag on the floor does; passed to the service view.
+  final PlanFloorDrag floorDrag;
+
+  /// False: no pan or zoom by the user in service; passed to the service view.
+  final bool userCamera;
+
+  /// The host's widget per labelled unit; passed to the service view.
+  final PlanUnitOverlayBuilder? unitOverlayBuilder;
+
+  /// Where the overlays sit; passed to the service view.
+  final PlanOverlayLayout unitOverlayLayout;
+
+  /// The modes that show the overlays; passed to the service view.
+  final Set<PlanMode> unitOverlayModes;
+
   @override
   State<PlanEditor> createState() => _PlanEditorState();
 }
@@ -236,7 +313,11 @@ class _PlanEditorState extends State<PlanEditor> {
   @override
   void didUpdateWidget(PlanEditor oldWidget) {
     super.didUpdateWidget(oldWidget);
+    // Every new widget is the host's rebuild: a new service view.
+    _service = null;
     if (!identical(oldWidget.controller, widget.controller)) {
+      // The new controller's camera is its own (floor_plan_view.dart:568).
+      _laidOutMode = null;
       oldWidget.controller.removeListener(_onController);
       widget.controller.addListener(_onController);
       _flows.dispose();
@@ -610,92 +691,303 @@ class _PlanEditorState extends State<PlanEditor> {
   static Widget _kept(bool shown, Widget panel) =>
       Visibility(visible: shown, maintainState: true, child: panel);
 
+  // ---- The service mode ----
+
+  /// The PlanServiceView handed down, made once per widget the host hands
+  /// in: the editor's own rebuilds hand the same one, so they build no
+  /// overlay (G-5).
+  PlanServiceView? _service;
+
+  /// The design canvas's overlay layer, likewise.
+  PlanEditor? _overlaysOf;
+  Widget? _designLayer;
+
+  PlanServiceView _serviceView() => _service ??= PlanServiceView(
+        controller: widget.controller,
+        bar: widget.serviceBar,
+        onUnitTap: widget.onUnitTap,
+        onUnitDoubleTap: widget.onUnitDoubleTap,
+        onUnitContextMenu: widget.onUnitContextMenu,
+        onGroupTap: widget.onGroupTap,
+        onUnitHover: widget.onUnitHover,
+        onMergeRequested: widget.onMergeRequested,
+        onSplitRequested: widget.onSplitRequested,
+        onLayoutChanged: widget.onLayoutChanged,
+        onUnitsMoved: widget.onUnitsMoved,
+        onFloorTap: widget.onFloorTap,
+        longPress: widget.longPress,
+        floorDrag: widget.floorDrag,
+        userCamera: widget.userCamera,
+        shortcuts: widget.shortcuts,
+        autofocus: widget.autofocus,
+        unitOverlayBuilder: widget.unitOverlayBuilder,
+        unitOverlayLayout: widget.unitOverlayLayout,
+        unitOverlayModes: widget.unitOverlayModes,
+        onExport: widget.onExport,
+        onExportDialog: widget.onExportDialog,
+        onPageFlowError: widget.onPageFlowError,
+        printer: widget.printer,
+        exportName: widget.exportName,
+        theme: widget.theme,
+      );
+
+  Widget? _designOverlays() {
+    final w = widget;
+    if (!identical(w, _overlaysOf)) {
+      _overlaysOf = w;
+      final builder = w.unitOverlayBuilder;
+      _designLayer =
+          builder == null || !w.unitOverlayModes.contains(PlanMode.design)
+              ? null
+              : UnitOverlayLayer(
+                  controller: w.controller,
+                  builder: builder,
+                  layout: w.unitOverlayLayout);
+    }
+    return _designLayer;
+  }
+
+  // ---- R-13 (floor_plan_view.dart:327-500) ----
+
+  /// The plan last measured: each plan shown, a mode's or a new copy's,
+  /// is measured once, after its first frame.
+  DraftDocument? _measuredFor;
+
+  void _measureAfterFrame(PlanMode shown, DraftDocument document) {
+    if (identical(_measuredFor, document)) return;
+    _measuredFor = document;
+    final c = widget.controller;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !identical(c, widget.controller)) return;
+      final origin = _canvasOrigin();
+      if (origin != null) {
+        c.canvasMeasured(shown, origin, chrome: _chromeOrigin(shown));
+      }
+    });
+  }
+
+  /// The service bar's height under this editor's resolved theme.
+  double _serviceBarHeight = kServiceBarHeight;
+
+  /// Where [mode]'s canvas starts in this editor by its chrome alone.
+  Offset _chromeOrigin(PlanMode mode) {
+    switch (mode) {
+      case PlanMode.service:
+        return Offset(0, widget.serviceBar.visible ? _serviceBarHeight : 0);
+      case PlanMode.design:
+        final ruler = widget.rulers ? kRulerThickness : 0.0;
+        final left = _leftShown ? 240.0 : 0.0;
+        final top = widget.bar.visible ? 44.0 : 0.0;
+        return Offset(left + ruler, top + ruler);
+    }
+  }
+
+  /// At each build and each change of the theme: the mode not shown is
+  /// assumed from its chrome; the shown one is kept in place. A changed
+  /// service bar height while service shows moves the canvas with the plan
+  /// (today's S-10); the canvas is measured again after the frame.
+  void _assumeCanvases(PlanTheme? theme) {
+    final height = theme?.serviceBarHeight ?? kServiceBarHeight;
+    final moved = height != _serviceBarHeight;
+    _serviceBarHeight = height;
+    final c = widget.controller;
+    for (final mode in PlanMode.values) {
+      if (mode != c.mode.value) c.canvasAssumed(mode, _chromeOrigin(mode));
+    }
+    _keepPlanInPlace();
+    if (moved && c.mode.value == PlanMode.service) _scheduleCanvasMoved();
+  }
+
+  PlanMode? _laidOutMode;
+  Offset _laidOutChrome = Offset.zero;
+
+  /// When the shown mode's chrome changes (a bar, the left column or the
+  /// rulers shown or hidden), the camera pans by the canvas origin's move,
+  /// so the plan keeps its place from the frame that lays the new chrome
+  /// out. The theme's bar height is not compensated.
+  void _keepPlanInPlace() {
+    final c = widget.controller;
+    final mode = c.mode.value;
+    final chrome = _chromeOrigin(mode);
+    final lastMode = _laidOutMode;
+    var last = _laidOutChrome;
+    if (mode == PlanMode.service && last.dy != 0) {
+      last = Offset(0, _serviceBarHeight);
+    }
+    _laidOutMode = mode;
+    _laidOutChrome = chrome;
+    if (lastMode != mode || last == chrome) return;
+    c.chromeMoved(last, chrome);
+  }
+
+  PlanMode? _shown;
+  (bool, bool, bool, bool)? _chrome;
+  bool _canvasMoveDue = false;
+
+  /// After the frame that lays out other chrome than the last, the shown
+  /// canvas is measured again.
+  void _measureChrome() {
+    final chrome = (
+      widget.serviceBar.visible,
+      widget.bar.visible,
+      widget.rulers,
+      _leftShown,
+    );
+    final last = _chrome;
+    _chrome = chrome;
+    if (last == null || last == chrome) return;
+    _scheduleCanvasMoved();
+  }
+
+  void _scheduleCanvasMoved() {
+    if (_canvasMoveDue) return;
+    _canvasMoveDue = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _canvasMoveDue = false;
+      _canvasMoved();
+    });
+  }
+
+  void _canvasMoved() {
+    final c = widget.controller;
+    final shown = _shown;
+    if (!mounted || shown == null || c.mode.value != shown) return;
+    final origin = _canvasOrigin();
+    if (origin != null) {
+      c.canvasMeasured(shown, origin, chrome: _chromeOrigin(shown));
+    }
+  }
+
+  /// The shown canvas's top left (its interaction layer's) in this editor.
+  Offset? _canvasOrigin() {
+    final view = context.findRenderObject();
+    if (view is! RenderBox || !view.attached) return null;
+    RenderBox? canvas;
+    void visit(Element e) {
+      if (canvas != null) return;
+      if (e.widget is InteractionLayer) {
+        final r = e.findRenderObject();
+        if (r is RenderBox && r.attached && r.hasSize) canvas = r;
+        return;
+      }
+      e.visitChildElements(visit);
+    }
+
+    context.visitChildElements(visit);
+    return canvas?.localToGlobal(Offset.zero, ancestor: view);
+  }
+
   @override
   Widget build(BuildContext context) {
     validatePlanEditorBar(widget.bar);
+    validatePlanServiceBar(widget.serviceBar);
+    if (widget.unitOverlayBuilder != null) {
+      validatePlanOverlayLayout(widget.unitOverlayLayout);
+    }
+    _measureChrome();
+    // The theme reader rebuilds alone on a theme change, handing back the
+    // same child, so no overlay is built again (G-5); the modes are built
+    // below it, after it assumed the canvases (floor_plan_view.dart:675-684).
+    return PlanThemeScope(
+      view: widget.theme,
+      child: _ChromeOrigins(
+        onTheme: _assumeCanvases,
+        child: Builder(builder: _modes),
+      ),
+    );
+  }
+
+  Widget _modes(BuildContext context) {
+    final c = widget.controller;
+    final mode = c.mode.value;
+    _shown = mode;
+    _measureAfterFrame(mode, c.activeDocument);
+    _keepPlanInPlace();
+    return mode == PlanMode.service ? _serviceView() : _editor(context);
+  }
+
+  /// 2a's editor: the shortcuts, the bar, the columns and the canvas.
+  Widget _editor(BuildContext context) {
     final c = widget.controller;
     final scheme = Theme.of(context).colorScheme;
     final strings = PlanStrings.of(context);
     final file = _fileCommands(strings);
     final edit = _editCommands(strings);
-    return PlanThemeScope(
-      view: widget.theme,
-      child: PlanShortcuts(
-        controller: c,
-        shortcuts: widget.shortcuts,
-        onNew: _chord(_byId(file, 'new')),
-        onOpen: _chord(_byId(file, 'open')),
-        onSave: _chord(_byId(file, 'save')),
-        onSaveAs: _chord(_byId(file, 'save-as')),
-        onExport: _chord(_byId(file, 'export')),
-        onPrint: _chord(_byId(file, 'print')),
-        child: Scaffold(
-          body: Column(
-            children: [
-              if (widget.bar.visible) _topBar(scheme, strings, file, edit),
-              Expanded(
-                child: Row(
-                  children: [
-                    if (_leftShown)
-                      Container(
-                        key: const Key('chrome-left'),
-                        width: 240,
-                        color: scheme.surfaceContainerLow,
-                        child: _leftPanel(strings),
-                      ),
-                    // Keyed: when the columns on both sides come or go at
-                    // once, the row still matches the canvas, so the
-                    // camera and the user's zoom stay.
-                    Expanded(
-                      key: const Key('chrome-canvas'),
-                      child: PlanCanvas(
-                        controller: c,
-                        rulers: widget.rulers,
-                        grid: widget.grid,
-                        snapping: widget.snapping,
-                        autofocus: widget.autofocus,
-                      ),
+    return PlanShortcuts(
+      controller: c,
+      shortcuts: widget.shortcuts,
+      onNew: _chord(_byId(file, 'new')),
+      onOpen: _chord(_byId(file, 'open')),
+      onSave: _chord(_byId(file, 'save')),
+      onSaveAs: _chord(_byId(file, 'save-as')),
+      onExport: _chord(_byId(file, 'export')),
+      onPrint: _chord(_byId(file, 'print')),
+      child: Scaffold(
+        body: Column(
+          children: [
+            if (widget.bar.visible) _topBar(scheme, strings, file, edit),
+            Expanded(
+              child: Row(
+                children: [
+                  if (_leftShown)
+                    Container(
+                      key: const Key('chrome-left'),
+                      width: 240,
+                      color: scheme.surfaceContainerLow,
+                      child: _leftPanel(strings),
                     ),
-                    if (widget.propertyPanel ||
-                        widget.layerPanel ||
-                        widget.pagePanel)
-                      Container(
-                        key: const Key('chrome-right'),
-                        width: 280,
-                        color: scheme.surfaceContainerLow,
-                        child: PlanShortcutGuard(
-                          controller: c,
-                          child: SingleChildScrollView(
-                            key: const Key('chrome-right-scroll'),
-                            child: Column(
-                              children: [
-                                _kept(widget.propertyPanel,
-                                    PlanPropertyPanel(controller: c)),
-                                // Spec S4: the host's inspector under the
-                                // panel's fields, with the panel. Keyed, so
-                                // adding or removing it keeps the panels
-                                // below.
-                                if (widget.unitInspectorBuilder
-                                    case final inspect?
-                                    when widget.propertyPanel)
-                                  UnitInspector(
-                                      key: const Key('unit-inspector'),
-                                      controller: c,
-                                      builder: inspect),
-                                _kept(widget.layerPanel,
-                                    PlanLayerPanel(controller: c)),
-                                _kept(widget.pagePanel,
-                                    PlanPagePanel(controller: c)),
-                              ],
-                            ),
+                  // Keyed: when the columns on both sides come or go at
+                  // once, the row still matches the canvas, so the
+                  // camera and the user's zoom stay.
+                  Expanded(
+                    key: const Key('chrome-canvas'),
+                    child: PlanCanvas(
+                      controller: c,
+                      rulers: widget.rulers,
+                      grid: widget.grid,
+                      snapping: widget.snapping,
+                      autofocus: widget.autofocus,
+                      unitOverlays: _designOverlays(),
+                    ),
+                  ),
+                  if (widget.propertyPanel ||
+                      widget.layerPanel ||
+                      widget.pagePanel)
+                    Container(
+                      key: const Key('chrome-right'),
+                      width: 280,
+                      color: scheme.surfaceContainerLow,
+                      child: PlanShortcutGuard(
+                        controller: c,
+                        child: SingleChildScrollView(
+                          key: const Key('chrome-right-scroll'),
+                          child: Column(
+                            children: [
+                              _kept(widget.propertyPanel,
+                                  PlanPropertyPanel(controller: c)),
+                              // Spec S4: the host's inspector under the
+                              // panel's fields, with the panel. Keyed, so
+                              // adding or removing it keeps the panels
+                              // below.
+                              if (widget.unitInspectorBuilder
+                                  case final inspect? when widget.propertyPanel)
+                                UnitInspector(
+                                    key: const Key('unit-inspector'),
+                                    controller: c,
+                                    builder: inspect),
+                              _kept(widget.layerPanel,
+                                  PlanLayerPanel(controller: c)),
+                              _kept(widget.pagePanel,
+                                  PlanPagePanel(controller: c)),
+                            ],
                           ),
                         ),
                       ),
-                  ],
-                ),
+                    ),
+                ],
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -814,5 +1106,21 @@ final class _Flag extends ChangeNotifier implements ValueListenable<bool> {
   void dispose() {
     _source.removeListener(_update);
     super.dispose();
+  }
+}
+
+/// Reads the resolved theme for [onTheme] at each build of the editor and
+/// each change of the theme, and builds [child] as given
+/// (floor_plan_view.dart:758-773).
+class _ChromeOrigins extends StatelessWidget {
+  const _ChromeOrigins({required this.onTheme, required this.child});
+
+  final void Function(PlanTheme? theme) onTheme;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    onTheme(PlanThemeScope.of(context));
+    return child;
   }
 }

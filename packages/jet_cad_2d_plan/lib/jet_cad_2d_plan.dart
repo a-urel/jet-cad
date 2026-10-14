@@ -67,12 +67,22 @@ export 'src/panels/plan_symbol_gallery.dart' show PlanSymbolGallery;
 export 'src/service/service_record.dart' show ServiceRestore;
 export 'src/service/service_session.dart' show PlanMode;
 export 'src/service/service_state.dart' show UnitGroup, UnitStatus;
+export 'src/service/service_tool.dart' show PlanFloorDrag, PlanLongPress;
+export 'src/service/view/plan_service_bar.dart'
+    show PlanServiceAction, PlanServiceBar;
+export 'src/service/view/plan_service_view.dart' show PlanServiceView;
+export 'src/service/view/unit_overlays.dart'
+    show
+        PlanOverlayLayout,
+        PlanOverlaySize,
+        PlanUnitOverlay,
+        PlanUnitOverlayBuilder;
 export 'src/shortcuts/plan_shortcut_guard.dart' show PlanShortcutGuard;
 export 'src/shortcuts/plan_shortcuts.dart' show PlanShortcuts;
 export 'src/symbols/plan_symbol.dart' show PlanSymbol;
 export 'src/symbols/plan_symbol_loader.dart'
     show PlanSymbolLoad, PlanSymbolLoader;
-export 'src/theme/plan_theme.dart' show PlanTheme;
+export 'src/theme/plan_theme.dart' show PlanTheme, kUnitColourOpacity;
 export 'src/units/unit_detail.dart'
     show
         PlanUnit,
@@ -84,4 +94,4 @@ export 'src/units/unit_detail.dart'
         PlanUnitsReplaced;
 export 'src/units/unit_label.dart' show UnitLabelProblem;
 export 'src/units/unit_problems.dart'
-    show BadLabel, DuplicateLabel, Unlabelled, UnitLabelWarning;
+    show BadLabel, DuplicateLabel, Unlabelled, UnitLabelWarning, UnitProblem;

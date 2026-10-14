@@ -198,6 +198,26 @@ void main() {
   });
 
   testWidgets(
+      'CV-6b (2a\'s parked final-review item, 2b Task 16) a canvas with '
+      'snapping: false handed another controller: the old one\'s object '
+      'snap is its user\'s again, the new one\'s off (M-CV-6c)',
+      (tester) async {
+    final a = paletteController(paper: white).c;
+    final b = paletteController(paper: white).c;
+    await pumpAlone(tester, PlanCanvas(controller: a, snapping: false));
+    expect(a.toolController.context.snap!.objectSnap, isFalse,
+        reason: 'premise: the canvas speaks for a');
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(body: PlanCanvas(controller: b, snapping: false))));
+    await tester.pump();
+    expect(b.toolController.context.snap!.objectSnap, isFalse);
+    // M-CV-6c: the swap leaves the old controller's snappingAllowed.
+    expect(a.toolController.context.snap!.objectSnap, isTrue,
+        reason: 'no canvas speaks for a now');
+    expect(a.snap.objectSnap, isTrue, reason: 'the user\'s setting');
+  });
+
+  testWidgets(
       'CV-7 the canvas pushes the app\'s locale into controller.locale and '
       'follows a change of language (M-CV-7)', (tester) async {
     final c = paletteController(paper: white).c;
