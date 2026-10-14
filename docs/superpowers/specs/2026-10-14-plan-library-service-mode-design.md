@@ -1207,9 +1207,9 @@ standing at the identity alone does not count.
   the engine's ported parametric tests, the standing hash tests, and E5's
   own mutants.
 - **A seat near the engine's selection** is new for the select gates and
-  the outlines. In design the gates map it to its object (S2), with the
-  window band open; in service the copy's selection holds seats, and the
-  service tool never drags one. The ported selection tests are the oracle.
+  the outlines. In design the gates map it to its object (S2), a window
+  band over a seats-only row taking nothing (decision 9); in service the
+  copy's selection holds seats, and the service tool never drags one. The ported selection tests are the oracle.
 - **The design's history survives a freeze made in the copy** (S3), where
   2a's `lockBroken` clears it so that no earlier edit can be undone onto a
   locked object. The dispatcher expands `execute` only
