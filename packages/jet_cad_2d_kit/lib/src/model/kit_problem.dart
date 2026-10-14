@@ -1,5 +1,5 @@
-// One problem of a kit (spec K5's PlanKit.validate, K7's conformance): a
-// code tests can assert and a message a person can act on.
+// One problem of a kit (spec K5's PlanKit.validate, K7's conformance, 2a's
+// kit set): a code tests can assert and a message a person can act on.
 //
 // Pure Dart: no Flutter, no dart:io.
 import 'package:meta/meta.dart';
@@ -26,6 +26,16 @@ enum KitProblemCode {
   wordUntranslated,
   wordOrphan,
   localeUndeclared,
+  // The code side and the kit set (spec 2a P4, contract R4): PlanKit.validate
+  // and conformance report the type and tool ones, the plan library's
+  // kit-set validation the others.
+  duplicateKit,
+  duplicateType,
+  duplicateTool,
+  reservedKitId,
+  typeOutsideKit,
+  toolOutsideKit,
+  typePlaceConflict,
 }
 
 @immutable

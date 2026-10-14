@@ -13,3 +13,9 @@
   `ChoiceProperty`, `ToggleProperty`, `TextProperty`, `ValueDisplay`,
   `ActionProperty`), their erased binding `PropertyField`, `PlanGate`,
   `ValueUnit` and `ColourTarget`.
+- The code side: `PlanType`, `PropertySectionBuilder`, `TypeGuard`,
+  `PlanTool`, `PlanToolSettings`, `PlanServices`, `KitWords`,
+  `KitNamesWords`, `Disposable`, the attachment types and `KitDiagnostic`.
+  `PlanKit` gains `types`, `tools`, `attachments` and `propertyIds`, and
+  `validate` checks them; seven `KitProblemCode`s for the code side and the
+  kit set; `isCodeId`. The contract depends on `jet_cad_2d_flutter`.
