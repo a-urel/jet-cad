@@ -1,6 +1,8 @@
 // Ported from jet_cad_floor_plan test/host/design_changes_test.dart (2b
-// Task 9, spec S3 `unitChanges`, S5): the design's unit changes. DC7,
-// DC10, DC15 and DC16 need the service mode (Tasks 11 and 14). DC8, DC9,
+// Task 9, spec S3 `unitChanges`, S5): the design's unit changes. DC10 and
+// DC16 (the service mode) are Task 11's; DC7 and DC15 read Task 13's
+// `serviceEdited` (DC7 also its record and reset, and a service drag), so
+// they wait for it. DC8, DC9,
 // DC11, DC12, DC13 and DC17 were ported by 2a for the object-level
 // `changes` stream (plan_change_test.dart); they are ported again here for
 // `unitChanges`, whose code is its own (controller ruling R-13, F-T9c).
@@ -312,7 +314,8 @@ void main() {
       }
     });
 
-    // DC7 (service moves report nothing) needs the service mode: Task 11.
+    // DC7 (service moves report nothing) reads Task 13's serviceEdited,
+    // record and reset, and drags with the service tool: not ported here.
 
     testWidgets(
         'DC8 newPlan: exactly [PlanUnitsReplaced()], no Removed per '
@@ -350,7 +353,21 @@ void main() {
     });
   });
 
-  // DC10 (PlanUnitsReplaced in the service mode) is Task 11's.
+  testWidgets(
+      'DC10 M-H29(PlanReplaced in service): there, a load is '
+      'exactly [PlanUnitsReplaced()], and so is a newPlan', (tester) async {
+    final c = fixtureController();
+    c.setMode(PlanMode.service);
+    await tester.pump();
+    final seen = listen(c);
+    c.load(embeddingPlanJson());
+    await tester.pump();
+    expect(seen, [const PlanUnitsReplaced()]);
+    c.newPlan();
+    await tester.pump();
+    expect(seen, [const PlanUnitsReplaced(), const PlanUnitsReplaced()]);
+    expect(c.mode.value, PlanMode.service, reason: 'premise');
+  });
 
   testWidgets(
       'DC11 nothing is read with no listener, nor after the last cancel; one '
@@ -536,7 +553,24 @@ void main() {
     expect(diffUnitDetails(const [], const [], const [], const []), isEmpty);
   });
 
-  // DC15 and DC16 (a service move) are Tasks 11 and 14's.
+  // DC15 (a listen in service after a service move) reads Task 13's
+  // serviceEdited as a premise: not ported here.
+
+  testWidgets(
+      'DC16 M-H29(service moves), the trigger alone: an edit then '
+      'setMode(service) in one synchronous step is reported at the next '
+      'pump, not withheld until the design moves again', (tester) async {
+    final c = fixtureController();
+    final b2 = detailOf(c, instancesOf(c, '2').single);
+    final seen = listen(c);
+
+    expect(c.setUnitData('2', hostData()), isTrue);
+    c.setMode(PlanMode.service);
+    expect(seen, isEmpty, reason: 'delivered asynchronously');
+    await tester.pump();
+    expect(seen, [PlanUnitChanged(b2, copyOf(b2, data: hostData()))]);
+    expect(c.mode.value, PlanMode.service, reason: 'premise');
+  });
 
   testWidgets(
       'DC17 O10: a failed load reports nothing and drops nothing owed: an '

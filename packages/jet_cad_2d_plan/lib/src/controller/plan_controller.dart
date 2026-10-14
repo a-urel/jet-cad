@@ -26,6 +26,7 @@ import '../l10n/strings.dart';
 import '../export/page_flows.dart';
 import '../export/page_printer.dart';
 import '../export/registries.dart';
+import '../service/service_session.dart';
 import '../service/unit_picker.dart';
 import '../shortcuts/tool_letters.dart';
 import '../symbols/plan_symbol.dart';
@@ -266,9 +267,10 @@ class PlanController extends ChangeNotifier {
           for (final type in kit.types)
             if (!type.exported) type.id,
       },
-      // `this.`: the constructor's own `document` parameter is the first
-      // plan, never the current one.
-      document: () => this.document,
+      // The active document (spec 2b S3): export and print act on the
+      // copy in service. A switch before the bytes are made answers null,
+      // as a replaced plan does.
+      document: () => activeDocument,
       catalog: () => catalog,
       settle: settlePendingInput,
       load: load,
@@ -639,6 +641,13 @@ class PlanController extends ChangeNotifier {
   /// Locks [objects] in the middle of a session (spec P4: a type's code
   /// failed, Task 11): adds them to the lock set, clears the undo history
   /// so no earlier edit can be undone onto them, and tells the listeners.
+  ///
+  /// A lock is no edit (it moves no state id): by itself it moves neither
+  /// [revision] nor [unitChanges], though [unitDetails] reads the new
+  /// `locked` at once (spec 2b S3 names edits, undo, redo, a mode switch,
+  /// [load] and [newPlan] for both). When the edit that froze the objects
+  /// applies on its retry, that edit reports the lock with it; when the
+  /// retry is refused, the lock is reported with the next design change.
   @internal
   void lockBroken(Set<Handle> objects) {
     if (objects.isEmpty) return;
@@ -681,7 +690,10 @@ class PlanController extends ChangeNotifier {
   /// damage is handled) goes on to the caller.
   ///
   /// Drops the pending symbol definitions (spec 2b S2).
+  ///
+  /// False in service (spec 2b S3): the design is not edited there.
   bool execute(DraftCommand command) {
+    if (_service != null) return false;
     _pendingDefinitions.clear();
     try {
       document.commands.execute(command);
@@ -742,21 +754,25 @@ class PlanController extends ChangeNotifier {
   // seams below to the service copy in service; every member that switches
   // on the mode reads them.
 
-  /// The active document's units (Task 11: the copy's in service).
-  UnitIndexCache get _activeUnits => _session.units;
+  /// The active document's units: the copy's in service (spec S3).
+  UnitIndexCache get _activeUnits => _service?.units ?? _session.units;
 
-  /// The active document (Task 11: the copy in service).
-  DraftDocument get _activeDocument => _session.document;
+  /// The active document: the copy in service.
+  DraftDocument get _activeDocument => activeDocument;
 
-  /// The active selection (Task 11: the copy's in service).
-  SelectionController get _activeSelection => _session.selection;
+  /// The active selection: the copy's in service.
+  SelectionController get _activeSelection => activeSelection;
 
-  /// Whether the design is the active document (Task 11: the mode).
-  bool get _inDesign => true;
+  /// Whether the design is the active document.
+  bool get _inDesign => _service == null;
 
-  /// Throws a [StateError] naming [who] in service (Task 11): a design
-  /// write is refused there (spec S3). Nothing in design.
-  void _requireDesign(String who) {}
+  /// Throws a [StateError] naming [who] in service: a design write is
+  /// refused there (spec S3, today's P-5). Nothing in design.
+  void _requireDesign(String who) {
+    if (_service != null) {
+      throw StateError('$who needs the design mode (P-5)');
+    }
+  }
 
   /// [labels], each label of a group replaced by its members in service
   /// (Task 12). The labels as given in design.
@@ -770,8 +786,9 @@ class PlanController extends ChangeNotifier {
   final ValueNotifier<int> _revision = ValueNotifier(0);
 
   /// Moves whenever the active plan changes: an edit, an undo or a redo of
-  /// it, [load], [newPlan] (Task 11 adds the mode switch, Task 13 the reset
-  /// and the restore). A host re-reads [units] and [labelWarnings] on it.
+  /// it (the design's in design, the copy's in service), a mode switch,
+  /// [load], [newPlan] (Task 13 adds the reset and the restore). A host
+  /// re-reads [units] and [labelWarnings] on it.
   ValueListenable<int> get revision => _revision;
 
   late final _PlanCameraValue _cameraValue = _PlanCameraValue(camera);
@@ -948,6 +965,10 @@ class PlanController extends ChangeNotifier {
   ValueListenable<Set<String>> get editorSelectedUnits => _editorSelected;
 
   /// The labels of the active selection's units (today's
+  /// `selectedTables`): the design's in design, the copy's in service.
+  ValueListenable<Set<String>> get selectedUnits => _selectedUnits;
+
+  /// The labels of the active selection's units (today's
   /// `_refreshSelected`, :1921-1940).
   void _refreshSelected() {
     final index = _activeUnits.current;
@@ -1060,7 +1081,8 @@ class PlanController extends ChangeNotifier {
   bool _runHostEdit(List<DraftCommand> edits, String label) {
     if (edits.isEmpty) return true;
     var applied = false;
-    _unrestricted(
+    final commands = document.commands;
+    _unrestricted(commands,
         () => applied = execute(CompoundCommand(edits, label: label)));
     _refreshFlags();
     return applied;
@@ -1171,6 +1193,12 @@ class PlanController extends ChangeNotifier {
     }
   }
 
+  /// The design's selection changed: the selected labels follow it while
+  /// the design is active (in service they are the copy's).
+  void _onDesignSelection() {
+    if (_inDesign) _refreshSelected();
+  }
+
   /// A design change (its `commands.changes`): the flags, the revision
   /// while the design is active, the selected labels, the unit changes.
   void _onDesignChange() {
@@ -1242,7 +1270,7 @@ class PlanController extends ChangeNotifier {
     session.history = document.commands.changes.listen((_) {
       if (!_disposed) _onDesignChange();
     });
-    session.selection.addListener(_refreshSelected);
+    session.selection.addListener(_onDesignSelection);
     _loadDiagnostics = List.unmodifiable(loadDiagnostics);
     _readManifest();
     _tracker.attach(document);
@@ -1279,10 +1307,19 @@ class PlanController extends ChangeNotifier {
     old.tools.removeListener(_onTools);
     _tracker.detach();
     _reportUnits();
-    old.selection.removeListener(_refreshSelected);
+    old.selection.removeListener(_onDesignSelection);
     old.disposeKitProducts();
     old.detach();
     _open(document, measurer, loadDiagnostics);
+    // In service the copy is rebuilt from the new design, the mode kept
+    // (today's `_replaceDesign`).
+    final service = _service;
+    if (service != null) {
+      final copy = _buildService();
+      _attachService(copy);
+      _service = copy;
+      _dropService(service);
+    }
     _tracker.replaced();
     if (_unitBaseline != null) {
       _unitOut.add(const PlanUnitsReplaced());
@@ -1315,11 +1352,148 @@ class PlanController extends ChangeNotifier {
       ..ensureVisualUpdate();
   }
 
+  // ---------------------------------------------------------------------
+  // The mode (spec 2b S3 "Mode and copy").
+
+  final ValueNotifier<PlanMode> _mode = ValueNotifier(PlanMode.design);
+
+  /// The service copy while the mode is service; null in design.
+  ServiceSession? _service;
+
+  /// Copies let go of whose disposal waits for the next frame (R-2).
+  final List<ServiceSession> _droppedServices = [];
+
+  /// The mode. Changed by [setMode].
+  ValueListenable<PlanMode> get mode => _mode;
+
+  /// The document the mode shows: the design, or the service copy.
+  DraftDocument get activeDocument => _service?.document ?? _session.document;
+
+  /// The active document's selection: the design's, or the copy's.
+  SelectionController get activeSelection =>
+      _service?.selection ?? _session.selection;
+
+  /// The service copy and its systems; null in design.
+  @internal
+  ServiceSession? get serviceSession => _service;
+
+  /// Switches the mode (spec S3). Into service: a copy of the design, the
+  /// design's tool back to plan.select. Out of it: the copy is discarded
+  /// with every service edit. The selected labels are selected again in
+  /// the new mode, by its rules. Moves [revision] and notifies.
+  void setMode(PlanMode next) {
+    if (next == _mode.value) return;
+    settlePendingInput();
+    // The settle may have relabelled a selected unit: read it now.
+    _refreshSelected();
+    final labels = _selectedUnits.value;
+    if (next == PlanMode.service) {
+      final design = _session;
+      // `_onTools` moves `activeTool` back to plan.select.
+      design.tools.activate(design.toolById(planSelectToolId)!);
+      final copy = _buildService();
+      _attachService(copy);
+      _service = copy;
+    } else {
+      final old = _service!;
+      _service = null;
+      _dropService(old);
+    }
+    _mode.value = next;
+    _select(labels);
+    _refreshFlags();
+    _revision.value++;
+    notifyListeners();
+  }
+
+  /// A copy of the design, its systems installed, nothing listening yet.
+  ServiceSession _buildService() {
+    final design = _session;
+    final measurer = FlutterTextMeasurer();
+    final DraftDocument copy;
+    try {
+      copy = serviceCopyOf(design.document,
+          register: _registerComponents, measurer: measurer);
+    } catch (_) {
+      measurer.clear();
+      rethrow;
+    }
+    return ServiceSession(
+        document: copy,
+        measurer: measurer,
+        catalog: catalog,
+        camera: camera,
+        locks: design.locks,
+        frozen: design.frozen,
+        locked: _locked,
+        log: _diagnostics,
+        lock: _lockFromCopy,
+        damage: _damageCopy);
+  }
+
+  /// The controller listens to [s]: its changes and its selection.
+  void _attachService(ServiceSession s) {
+    s.history = s.document.commands.changes.listen((_) {
+      if (_disposed || !identical(s, _service)) return;
+      _onServiceChanged();
+    });
+    void onSelection() {
+      if (!_disposed && identical(s, _service)) _refreshSelected();
+    }
+
+    s.onSelection = onSelection;
+    s.selection.addListener(onSelection);
+  }
+
+  /// The active copy changed (a move, an undo or a redo of one).
+  void _onServiceChanged() {
+    _refreshFlags();
+    _revision.value++;
+    _refreshSelected();
+  }
+
+  /// Lets [s] go (R-2): its listeners now, the session after the frame
+  /// that unmounts its view.
+  void _dropService(ServiceSession s) {
+    s.detach();
+    _droppedServices.add(s);
+    SchedulerBinding.instance
+      ..addPostFrameCallback((_) {
+        if (_droppedServices.remove(s)) s.dispose();
+      })
+      ..ensureVisualUpdate();
+  }
+
+  /// The copy's boundary froze [objects] (spec S3): they join the design's
+  /// lock set (refreshed over the design, whose handles the copy shares),
+  /// the copy's history is cleared so no earlier service step is undone
+  /// onto them, and the listeners are told. The design's history is never
+  /// touched (Risks, B3). As [lockBroken], it moves neither [revision] nor
+  /// [unitChanges] by itself.
+  void _lockFromCopy(ServiceSession s, Set<Handle> objects) {
+    if (objects.isEmpty) return;
+    _session.locks.addBroken(document, objects);
+    s.document.commands.clearHistory();
+    _locked.value = _session.locks.objects;
+    _refreshFlags();
+    grips.gatesChanged();
+    notifyListeners();
+  }
+
+  /// E3 in the copy: a rollback threw there. The copy is rebuilt from
+  /// what it holds (its history cleared); the design is not touched.
+  void _damageCopy(ServiceSession s, PartialMutationError error) {
+    s.document.commands.notifyLoaded();
+    _refreshFlags();
+    notifyListeners();
+  }
+
+  /// [dirty] reads the design; the history flags the active document.
   void _refreshFlags() {
-    final commands = document.commands;
-    _dirty.value = commands.stateId != _savedState;
-    _canUndo.value = commands.canUndo;
-    _canRedo.value = commands.canRedo;
+    _dirty.value = document.commands.stateId != _savedState;
+    final active = activeDocument.commands;
+    _canUndo.value = active.canUndo;
+    _canRedo.value = active.canRedo;
   }
 
   // ---------------------------------------------------------------------
@@ -1330,27 +1504,28 @@ class PlanController extends ChangeNotifier {
 
   bool get _midShape => _session.tools.active.isMidShape;
 
-  /// Undoes the last step, after settling pending input; nothing while the
+  /// Undoes the active document's last step (the copy's in service, spec
+  /// 2b S3), after settling pending input; in design, nothing while the
   /// active tool is part-way through a shape (today's S-4). A replay that
-  /// leaves the plan partially mutated (E3) does not escape: the plan is
-  /// rebuilt from what it holds and marked [damaged], as in [execute].
+  /// leaves the plan partially mutated (E3) does not escape: the document
+  /// is rebuilt from what it holds (the design marked [damaged]), as in
+  /// [execute].
   void undo() {
-    if (_midShape) return;
+    if (_service == null && _midShape) return;
     settlePendingInput();
-    final commands = document.commands;
+    final commands = activeDocument.commands;
     if (!commands.canUndo) return;
     try {
-      _unrestricted(commands.undo);
+      _unrestricted(commands, commands.undo);
     } on PartialMutationError catch (error) {
-      _session.boundary.partialMutation(error);
+      (_service?.boundary ?? _session.boundary).partialMutation(error);
     }
   }
 
-  /// Runs [step] with the document's engine permissions lifted, then puts
+  /// Runs [step] with [commands]' engine permissions lifted, then puts
   /// them back: a host's undo or redo is not gated (spec P2), and the
   /// dispatcher checks permissions on undo and redo too (undo.dart:213).
-  void _unrestricted(void Function() step) {
-    final commands = document.commands;
+  void _unrestricted(CommandDispatcher commands, void Function() step) {
     final saved = commands.permissions;
     commands.permissions = DraftPermissions.all;
     try {
@@ -1360,16 +1535,16 @@ class PlanController extends ChangeNotifier {
     }
   }
 
-  /// Redoes the next step, as [undo].
+  /// Redoes the active document's next step, as [undo].
   void redo() {
-    if (_midShape) return;
+    if (_service == null && _midShape) return;
     settlePendingInput();
-    final commands = document.commands;
+    final commands = activeDocument.commands;
     if (!commands.canRedo) return;
     try {
-      _unrestricted(commands.redo);
+      _unrestricted(commands, commands.redo);
     } on PartialMutationError catch (error) {
-      _session.boundary.partialMutation(error);
+      (_service?.boundary ?? _session.boundary).partialMutation(error);
     }
   }
 
@@ -1481,8 +1656,9 @@ class PlanController extends ChangeNotifier {
   /// locked object selected, and when every selected object is refused. A
   /// delete a lock refuses on commit (a locked object inside a selected
   /// group, Task 11) answers false and sets [lockHint], as [execute] does.
+  /// False in service (spec 2b S3): the design is not edited there.
   bool deleteSelection() {
-    if (_midShape) return false;
+    if (_service != null || _midShape) return false;
     settlePendingInput();
     final session = _session;
     try {
@@ -1601,8 +1777,11 @@ class PlanController extends ChangeNotifier {
     final separator = _separatorOf(locale);
     if (page.decimalSeparator == separator) return;
     // The controller's own settling, not an edit: not gated (spec P2).
-    _unrestricted(() => d.commands.execute(SetComponentCommand<PageComponent>(
-        d.rootHandle, page.copyWith(decimalSeparator: separator))));
+    // The design's, even in service: it settles the design's separator.
+    _unrestricted(
+        d.commands,
+        () => d.commands.execute(SetComponentCommand<PageComponent>(
+            d.rootHandle, page.copyWith(decimalSeparator: separator))));
     d.commands.clearHistory();
     _savedState = d.commands.stateId;
   }
@@ -1906,9 +2085,20 @@ class PlanController extends ChangeNotifier {
       s.dispose();
     }
     _dropped.clear();
+    for (final s in _droppedServices) {
+      s.dispose();
+    }
+    _droppedServices.clear();
+    final service = _service;
+    _service = null;
+    if (service != null) {
+      service
+        ..detach()
+        ..dispose();
+    }
     final session = _session;
     session.tools.removeListener(_onTools);
-    session.selection.removeListener(_refreshSelected);
+    session.selection.removeListener(_onDesignSelection);
     session
       ..disposeKitProducts()
       ..detach()
@@ -1926,6 +2116,7 @@ class PlanController extends ChangeNotifier {
     _activeTool.dispose();
     _fill.dispose();
     _locked.dispose();
+    _mode.dispose();
     lockHint.dispose();
     _damaged.dispose();
     _canvasRect.dispose();

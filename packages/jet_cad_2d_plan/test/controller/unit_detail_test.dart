@@ -240,8 +240,10 @@ void main() {
     expect(identical(moved, first), isFalse);
     expect(moved.first.center!.dx, near(first.first.center!.dx + 500));
     expect(identical(c.unitDetails, moved), isTrue);
-    // Today's mode-switch tail (a new, equal list in the selection mode)
-    // needs the service mode: Task 11.
+
+    c.setMode(PlanMode.service);
+    expect(identical(c.unitDetails, moved), isFalse);
+    expect(c.unitDetails, moved, reason: 'the copy is equal');
   });
 
   testWidgets(
@@ -491,6 +493,38 @@ void main() {
     expect(c.unitAt(far, kind: PointerDeviceKind.touch), isNull,
         reason: 'beyond a finger\'s reach');
   });
-  // TA3 (tableAt follows the camera and the mode) is Task 11's: it needs
-  // the service mode.
+
+  testWidgets(
+      'TA3 unitAt follows the camera and the mode: a service move is found '
+      'at the table\'s new place in service, at its old one '
+      'after switching back', (tester) async {
+    final c = embeddingController();
+    final one = fixtureTable('1');
+    final at = canvasAt(c, one.transform, 600, 0);
+    expect(c.unitAt(at), '1');
+    // A pan of 200 px moves what is under the point.
+    c.camera.panBy(const Offset(200, 0));
+    expect(c.unitAt(at), isNull);
+    c.camera.value = embeddingCamera();
+
+    c.setMode(PlanMode.service);
+    // Today's mode switch reframes the camera (R-13; the chrome is Task
+    // 16's): the fixture's again.
+    c.camera.value = embeddingCamera();
+    final d = c.activeDocument;
+    final h = c.unitIndex.withLabel('1').single.instance;
+    final node = d.tree[h]! as InstanceNode;
+    d.commands.execute(CompoundCommand([
+      TransformNodeCommand(
+          h, Transform2.translation(1500, 0).multiply(node.transform))
+    ], label: 'Move'));
+    final moved = Transform2.translation(1500, 0).multiply(one.transform);
+    expect(c.unitAt(canvasAt(c, moved, 600, 0)), '1');
+    expect(c.unitAt(at), isNull);
+
+    c.setMode(PlanMode.design);
+    c.camera.value = embeddingCamera();
+    expect(c.unitAt(at), '1');
+    expect(c.unitAt(canvasAt(c, moved, 600, 0)), isNull);
+  });
 }

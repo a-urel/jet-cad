@@ -1,7 +1,7 @@
 // Ported from jet_cad_floor_plan test/host/table_data_test.dart (2b Task
 // 9, spec S2 "Per-unit data", S3 "Design writes"): setUnitData and
-// setUnitsData on the embedding fixture. HD4 (the service mode) is Task
-// 11's. Today's header follows.
+// setUnitsData on the embedding fixture. HD4 and HD6's service-copy block
+// (the service mode) are Task 11's, appended there. Today's header follows.
 //
 // Host embedding API spec E-6, E-7, E-9 gates 2 and 3 (Slice 2 plan, Task
 // 2): the host's data on a table through the controller -- setUnitData and
@@ -176,8 +176,28 @@ void main() {
     expect(c.dirty.value, isFalse);
   });
 
-  // HD4 (the service mode throws a StateError) is Task 11's: its Step 3
-  // appends it here.
+  testWidgets(
+      'HD4 M-H23: in service both throw a StateError; the design '
+      'and the copy are untouched', (tester) async {
+    final c = controller(tester);
+    c.setUnitData('2', {'id': 'two'});
+    final before = c.save();
+    c.setMode(PlanMode.service);
+    await tester.pump();
+    final copy = c.unitDetails;
+    expect(detailsOf(c, '2').single.data, {'id': 'two'},
+        reason: 'the copy carries it, read only');
+    expect(() => c.setUnitData('1', hostData()), throwsStateError);
+    expect(() => c.setUnitsData({'1': hostData()}), throwsStateError);
+    expect(() => c.setUnitData('2', const {}), throwsStateError);
+    await tester.pump();
+    expect(c.save(), before);
+    expect(c.unitDetails, copy);
+    expect(c.canUndo.value, isFalse);
+    c.setMode(PlanMode.design);
+    expect(detailsOf(c, '1').single.data, isEmpty);
+    expect(detailsOf(c, '2').single.data, {'id': 'two'});
+  });
 
   testWidgets(
       'HD5 M-H24b: an empty map removes the data: no jetcad.unit_data '
@@ -237,8 +257,12 @@ void main() {
       for (final n in ['1', '2', '3', '4', 'L']) instanceOf(doc, n)
     ]);
 
-    // Today's service-copy check (the copy decodes it the same way) needs
-    // the service mode: Task 11.
+    // The service copy decodes it the same way.
+    c.setMode(PlanMode.service);
+    await tester.pump();
+    expect(detailsOf(c, '1').single.data, isEmpty);
+    expect(detailsOf(c, '5').single.data, hostData());
+    c.setMode(PlanMode.design);
 
     expect(c.setUnitData('1', {'id': 'one'}), isTrue);
     expect(c.setUnitData('2', const {}), isTrue, reason: 'removes it');

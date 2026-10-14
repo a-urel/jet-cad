@@ -1,8 +1,8 @@
 // Ported from jet_cad_floor_plan test/host/table_color_test.dart (2b Task
 // 9, spec S2 "Per-unit data", S3 "Design writes"): setUnitColour and
 // setUnitsColour on the embedding fixture. TC1 (the component's encoding)
-// is Task 6's; TC6 (the service mode) is Task 11's. Today's header
-// follows.
+// is Task 6's; TC6 and TC7's service-copy block (the service mode) are
+// Task 11's, appended there. Today's header follows.
 //
 // Plan colours spec PC-4 and PC-11 (Slice 2 plan, Task 2): a table's colour
 // as the plan stores it -- the `jetcad.unit_colour` component on the table's
@@ -265,8 +265,37 @@ void main() {
     expect(detailsOf(c, '5').single.colour, teal);
   });
 
-  // TC6 (the service mode throws a StateError) is Task 11's: its Step 3
-  // appends it here.
+  testWidgets(
+      'TC6 M-PC11-a in service setUnitColour and setUnitsColour '
+      'throw a StateError, the design untouched; the service copy reads the '
+      'design\'s colour', (tester) async {
+    final c = controller(tester);
+    expect(c.setUnitColour('2', purple), isTrue);
+    final before = c.save();
+    c.setMode(PlanMode.service);
+    await tester.pump();
+    expect(detailsOf(c, '2').single.colour, purple,
+        reason: 'the copy carries it, read only');
+    expect(detailsOf(c, '1').single.colour, isNull);
+    expect(() => c.setUnitColour('1', teal), throwsStateError);
+    expect(() => c.setUnitsColour({'1': teal}), throwsStateError);
+    expect(() => c.setUnitColour('2', null), throwsStateError);
+    expect(() => c.setUnitsColour(const {}), throwsStateError);
+    expect(
+        () => c.setUnitColour('1', teal),
+        throwsA(isA<StateError>().having((e) => e.message, 'message',
+            'setUnitColour needs the design mode (P-5)')));
+    expect(
+        () => c.setUnitData('1', const {'a': 'b'}),
+        throwsA(isA<StateError>().having((e) => e.message, 'message',
+            'setUnitData needs the design mode (P-5)')));
+    await tester.pump();
+    expect(c.save(), before);
+    expect(c.canUndo.value, isFalse);
+    c.setMode(PlanMode.design);
+    expect(detailsOf(c, '1').single.colour, isNull);
+    expect(detailsOf(c, '2').single.colour, purple);
+  });
 
   testWidgets(
       'TC7 M-C2 M-PC11-b a colour this release cannot read: the plan opens; '
@@ -304,8 +333,14 @@ void main() {
     expect(warning.severity, DiagnosticSeverity.warning);
     expect(warning.message, contains(instanceOf(doc, '1').toHex()));
 
-    // Today's service-copy check (the copy decodes it the same way) needs
-    // the service mode: Task 11.
+    // The service copy decodes it the same way.
+    c.setMode(PlanMode.service);
+    await tester.pump();
+    expect(detailsOf(c, '1').single.colour, isNull);
+    expect(detailsOf(c, '2').single.colour, isNull);
+    expect(detailsOf(c, '4').single.colour, purple);
+    c.setMode(PlanMode.design);
+    await tester.pump();
 
     final seen = listen(c);
     expect(c.dirty.value, isFalse);
