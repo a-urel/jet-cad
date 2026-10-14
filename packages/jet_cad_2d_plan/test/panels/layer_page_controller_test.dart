@@ -365,7 +365,7 @@ void main() {
   });
 
   testWidgets(
-      'LP-9 each panel alone reports the app\'s locale to its controller '
+      'LP-L each panel alone reports the app\'s locale to its controller '
       '(spec P5: every widget pushes it)', (tester) async {
     for (final (name, panel) in <(String, Widget Function(PlanController))>[
       ('layers', (c) => PlanLayerPanel(controller: c)),
@@ -379,7 +379,7 @@ void main() {
           localizationsDelegates: planLocalizationsDelegates,
           home: Scaffold(body: SizedBox(width: 280, child: panel(c)))));
       await tester.pump();
-      // M-LP-9a, M-LP-9b: the panel's `didChangeDependencies` without
+      // M-LP-La, M-LP-Lb: the panel's `didChangeDependencies` without
       // `PlanLocaleScope.push`.
       expect(c.locale.value, const Locale('de'), reason: name);
     }
