@@ -1,15 +1,12 @@
 // 2a spec P2 (PlanEditor: today's layout, its options, the host's file
 // callbacks, the bar's commands by the permissions, the theme), P4 (the
 // damaged warning) and P7 (one view over a controller).
-import 'dart:async';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
-import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
 import 'package:jet_cad_2d_plan/src/canvas/plan_canvas.dart';
 import 'package:jet_cad_2d_plan/src/controller/permissions.dart';
 import 'package:jet_cad_2d_plan/src/controller/plan_controller.dart';
@@ -31,17 +28,6 @@ import '../support/mark_kit.dart';
 import '../support/recording_exporters.dart';
 
 const _en = PlanStringsEn();
-
-/// A kit whose one library never finishes reading: the gallery has a
-/// source, so the Symbols tab is offered, and stays loading.
-PlanKit slowSymbolsKit() => PlanKit(
-      id: 'gal',
-      version: '1.0.0',
-      symbols: [
-        SymbolLibrarySource(
-            label: 'never', read: () => Completer<Uint8List>().future),
-      ],
-    );
 
 /// [c]'s marks, in the order the plan made them.
 List<Handle> marksOf(PlanController c) =>

@@ -3,24 +3,59 @@
 // 131-132`), two turned marks and a line around the sheet's centre, saved;
 // the camera the bar tests measured under (`embeddingCamera`, `:160-161`);
 // and the editor pumped at 1440 x 900.
+import 'dart:async' show Completer;
+import 'dart:typed_data' show Uint8List;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
     show ViewportTransform;
+import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart'
+    show PlanKit, SymbolLibrarySource;
 import 'package:jet_cad_2d_plan/src/controller/plan_controller.dart';
 import 'package:jet_cad_2d_plan/src/editor/plan_editor.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import 'mark_kit.dart';
 
+/// A kit whose one library never finishes reading: the gallery has a
+/// source, so the Symbols tab is offered, and stays loading.
+PlanKit slowSymbolsKit() => PlanKit(
+      id: 'gal',
+      version: '1.0.0',
+      symbols: [
+        SymbolLibrarySource(
+            label: 'never', read: () => Completer<Uint8List>().future),
+      ],
+    );
+
 /// The marks of [editorPlanJson], in order.
 const int kEditorMarks = 2;
 
-String editorPlanJson() {
+/// The name of [editorPlanJson]'s locked layer (`lockedLayer: true`).
+const String kEditorLocked = 'B';
+
+/// The fixture's plan; with [lockedLayer], a layer `B` (ACI 5, locked,
+/// visible, not current) beside layer 0, as `layerPlan`'s, and nothing on
+/// it (the embedding fixture's `kEmbeddingLocked`).
+String editorPlanJson({bool lockedLayer = false}) {
   final scratch = PlanController(kits: [markKit()]);
   final doc = scratch.document;
   final root = doc.rootHandle;
+  if (lockedLayer) {
+    final zero = doc.tables.layers[ReservedHandles.layerZero]!;
+    doc.commands.execute(AddLayerCommand(LayerRecord(
+      handle: doc.handleSeed.next(),
+      name: kEditorLocked,
+      color: const IndexedColor(5),
+      linetype: zero.linetype,
+      lineweight: zero.lineweight,
+      transparency: zero.transparency,
+      visible: true,
+      locked: true,
+    )));
+  }
   doc.commands.execute(SetComponentCommand<PageComponent>(
       root, PageComponent(originX: 37000, originY: -36200)));
   final sheet = sheetWorldRect(doc.components.get<PageComponent>(root)!);
