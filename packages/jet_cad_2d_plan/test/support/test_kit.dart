@@ -2,18 +2,32 @@
 // `test.slab`, with all eight property kinds, a gate, a title hook, a
 // colour target, grips and an escape-hatch section; one tool with
 // settings; a `test-edge` attachment provider; English and Turkish words,
-// no German (the fallback). `discKit` gives a second kit whose type has
-// another component type (the covariance tests); `conflictKit` a type that
+// no German (the fallback).
+// With `units: true` (`unitKit()`, 2b Task 5) it also carries a symbol
+// library (a numbered table of four, an assigned seat, a booth of six
+// whose kind only the kit names), the parametric row `test.row` that
+// generates labelled seats through E5, its tool, and the words they need.
+// `discKit` gives a second kit whose type has another component type (the
+// covariance tests); `conflictKit` a type that
 // both contributes and reads places (the kit-set refusal).
 //
 // Fixtures sit off the origin, turned, with non-default attributes
 // (CLAUDE.md): a slab's outline is turned by its own `angle` inside a group
 // placed by translation.
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart' hide Tolerance;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+import 'package:jet_cad_2d_kit/authoring.dart'
+    show
+        Catalog,
+        CatalogLine,
+        CatalogPolyline,
+        CatalogSymbol,
+        CatalogUnit,
+        encodeLibrary;
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
@@ -535,15 +549,25 @@ const KitNames testWords = KitNames({
 });
 
 /// The test kit: one type, one tool, one provider; a fresh descriptor per
-/// call. [log] records its factories' products.
-PlanKit testKit({String version = '1.2.0', KitLog? log}) => PlanKit(
+/// call. [log] records its factories' products. With [units], also the
+/// unit library, the row type and its tool, and their words (2b).
+PlanKit testKit({String version = '1.2.0', KitLog? log, bool units = false}) =>
+    PlanKit(
       id: 'test',
       version: version,
-      types: [slabType(log: log)],
-      tools: [slabTool(log: log)],
+      symbols: [
+        if (units)
+          SymbolLibrarySource(
+              label: 'test units', read: () async => testUnitLibraryBytes()),
+      ],
+      types: [slabType(log: log), if (units) rowType()],
+      tools: [slabTool(log: log), if (units) rowTool()],
       attachments: [(services) => TestEdge(log: log)],
-      names: testWords,
+      names: units ? testWords.merge(testUnitWords) : testWords,
     );
+
+/// The test kit with its units (2b): `testKit(units: true)`.
+PlanKit unitKit({KitLog? log}) => testKit(log: log, units: true);
 
 // ---------------------------------------------------------------------------
 // The disc kit: another component type, for the covariance tests.
@@ -709,6 +733,423 @@ PlanKit conflictKit() => PlanKit(
       names: const KitNames({
         'en': {'type:test.reader': 'Reader'},
       }),
+    );
+
+// ---------------------------------------------------------------------------
+// The units (2b): the symbols, the row, its tool, its words.
+
+const String rowTypeId = 'test.row';
+const String rowToolId = 'test.row';
+
+/// The seat a row generates.
+const String rowSeatKey = 'test.seat.basic.one@1';
+
+/// The placed, numbered table of four.
+const String tableSymbolId = 'test.table.square.four@1';
+
+/// The booth of six: a kind the contract does not name.
+const String boothSymbolId = 'test.booth.corner.six@1';
+
+/// The row tool's row: six seats, 600 mm apart, straight.
+const int kRowToolSeats = 6;
+const double kRowToolSpacing = 600;
+
+/// The unit library, kit `test`. Each unit draws its top first (K3 rule
+/// 11); every base point is off the frame's origin.
+final Catalog testUnitCatalog = Catalog(kit: 'test', symbols: [
+  CatalogSymbol(
+    key: 'test.table.square.four',
+    name: 'Square table',
+    category: 'Tests',
+    tags: const ['table', 'square'],
+    unit: const CatalogUnit(kind: UnitKinds.table, capacity: 4),
+    base: (600, 600),
+    shapes: const [
+      CatalogPolyline([(150, 150), (1050, 150), (1050, 1050), (150, 1050)],
+          closed: true),
+      CatalogPolyline([(375, -150), (825, -150), (825, 100), (375, 100)],
+          closed: true),
+      CatalogPolyline([(375, 1100), (825, 1100), (825, 1350), (375, 1350)],
+          closed: true),
+      CatalogPolyline([(-150, 375), (100, 375), (100, 825), (-150, 825)],
+          closed: true),
+      CatalogPolyline([(1100, 375), (1350, 375), (1350, 825), (1100, 825)],
+          closed: true),
+    ],
+  ),
+  CatalogSymbol(
+    key: 'test.seat.basic.one',
+    name: 'Seat',
+    category: 'Tests',
+    tags: const ['seat'],
+    unit: const CatalogUnit(
+        kind: UnitKinds.seat, capacity: 1, labelling: UnitLabelling.assigned),
+    base: (250, 265),
+    shapes: const [
+      CatalogPolyline([(25, 40), (475, 40), (475, 490), (25, 490)],
+          closed: true),
+      CatalogLine((25, 440), (475, 440)),
+    ],
+  ),
+  CatalogSymbol(
+    key: 'test.booth.corner.six',
+    name: 'Corner booth',
+    category: 'Tests',
+    tags: const ['booth'],
+    unit: const CatalogUnit(kind: 'booth', capacity: 6),
+    base: (400, 400),
+    shapes: const [
+      CatalogPolyline([
+        (100, 100),
+        (1700, 100),
+        (1700, 700),
+        (700, 700),
+        (700, 1500),
+        (100, 1500)
+      ], closed: true),
+      CatalogLine((300, 300), (1500, 300)),
+    ],
+  ),
+]);
+
+Uint8List testUnitLibraryBytes() => encodeLibrary(testUnitCatalog);
+
+/// The units' words: the row in English and Turkish, the symbols and their
+/// category in Turkish (their English is the catalog's), the booth's kind in
+/// English only (spec S4 "Words": the English fallback).
+const KitNames testUnitWords = KitNames({
+  'en': {
+    'type:test.row': 'Row',
+    'tool:test.row': 'Row',
+    'unit:test/booth': 'Booth',
+  },
+  'tr': {
+    'type:test.row': 'Sıra',
+    'tool:test.row': 'Sıra',
+    'symbol:test.table.square.four': 'Kare masa',
+    'symbol:test.seat.basic.one': 'Koltuk',
+    'symbol:test.booth.corner.six': 'Köşe loca',
+    'category:test/Tests': 'Testler',
+  },
+});
+
+/// A row of [count] seats of the definition [seat] (its [base] point and
+/// [top] box, from `PlanServices.symbolDefinition`), [spacing] mm apart,
+/// turning [curve] radians a seat, labelled `<prefix>1` to `<prefix>N`.
+@immutable
+final class RowComponent implements Component {
+  /// Throws [ArgumentError] for a prefix over 8 code units or with a
+  /// control character, a count outside 1 to 999, a spacing that is not
+  /// finite and above 0, a curve that is not finite or reaches ±π, and a
+  /// base point that is not finite.
+  RowComponent({
+    required this.prefix,
+    required this.count,
+    required this.spacing,
+    this.curve = 0,
+    required this.seat,
+    required Vector2 base,
+    required this.top,
+  }) : base = Vector2.copy(base) {
+    if (prefix.length > 8 ||
+        prefix.codeUnits.any((u) => u < 0x20 || (u >= 0x7F && u <= 0x9F))) {
+      throw ArgumentError.value(prefix, 'prefix',
+          'must be at most 8 code units, no control character');
+    }
+    if (count < 1 || count > 999) {
+      throw ArgumentError.value(count, 'count', 'must be 1 to 999');
+    }
+    if (!spacing.isFinite || spacing <= 0) {
+      throw ArgumentError.value(
+          spacing, 'spacing', 'must be finite and above 0');
+    }
+    if (!curve.isFinite || curve.abs() >= math.pi) {
+      throw ArgumentError.value(curve, 'curve', 'must be finite, below π');
+    }
+    if (!this.base.x.isFinite || !this.base.y.isFinite) {
+      throw ArgumentError.value(base, 'base', 'must be finite');
+    }
+  }
+
+  static const String componentTypeId = rowTypeId;
+
+  final String prefix;
+  final int count;
+  final double spacing;
+  final double curve;
+  final Handle seat;
+  final Vector2 base;
+  final Aabb2 top;
+
+  @override
+  String get typeId => componentTypeId;
+
+  @override
+  Map<String, Object?> toJson() => {
+        'base': [base.x, base.y],
+        'count': count,
+        'curve': curve,
+        'prefix': prefix,
+        'seat': seat.toJson(),
+        'spacing': spacing,
+        'top': [top.minX, top.minY, top.maxX, top.maxY],
+      };
+
+  static RowComponent fromJson(Map<String, Object?> json) {
+    final base = (json['base']! as List).cast<num>();
+    final top = (json['top']! as List).cast<num>();
+    return RowComponent(
+      prefix: json['prefix']! as String,
+      count: json['count']! as int,
+      spacing: (json['spacing']! as num).toDouble(),
+      curve: (json['curve']! as num).toDouble(),
+      seat: Handle.fromJson(json['seat']),
+      base: Vector2(base[0].toDouble(), base[1].toDouble()),
+      top: Aabb2.raw(top[0].toDouble(), top[1].toDouble(), top[2].toDouble(),
+          top[3].toDouble()),
+    );
+  }
+
+  RowComponent copyWith(
+          {String? prefix, int? count, double? spacing, double? curve}) =>
+      RowComponent(
+        prefix: prefix ?? this.prefix,
+        count: count ?? this.count,
+        spacing: spacing ?? this.spacing,
+        curve: curve ?? this.curve,
+        seat: seat,
+        base: base,
+        top: top,
+      );
+
+  @override
+  bool operator ==(Object other) =>
+      other is RowComponent &&
+      other.prefix == prefix &&
+      other.count == count &&
+      other.spacing == spacing &&
+      other.curve == curve &&
+      other.seat == seat &&
+      other.base.x == base.x &&
+      other.base.y == base.y &&
+      other.top.minX == top.minX &&
+      other.top.minY == top.minY &&
+      other.top.maxX == top.maxX &&
+      other.top.maxY == top.maxY;
+
+  @override
+  int get hashCode => Object.hash(prefix, count, spacing, curve, seat, base.x,
+      base.y, top.minX, top.minY, top.maxX, top.maxY);
+
+  @override
+  String toString() => 'RowComponent($prefix × $count @ $spacing, $curve)';
+}
+
+/// Seat [i] (0-based) of [row] in the row's group space: a chord walk of
+/// `spacing`, turning `curve` a seat; the seat's base point on its place.
+Transform2 rowSeatTransform(RowComponent row, int i) {
+  final theta = i * row.curve;
+  final double x, y;
+  if (row.curve == 0) {
+    x = i * row.spacing;
+    y = 0;
+  } else {
+    final r = row.spacing / (2 * math.sin(row.curve / 2));
+    x = r * math.sin(theta);
+    y = r * (1 - math.cos(theta));
+  }
+  final c = math.cos(theta), s = math.sin(theta);
+  return Transform2.translation(x, y)
+      .multiply(Transform2(c, s, -s, c, 0, 0))
+      .multiply(Transform2.translation(-row.base.x, -row.base.y));
+}
+
+/// The row's engine type: seats only (spec 2b "The test kit"; the
+/// selection rules of S2 discuss a seats-only row), each labelled through
+/// the kit's `unitLabelAttrib`.
+final class RowType extends ParametricType<RowComponent> {
+  const RowType();
+
+  @override
+  Capability get editCapability => Capability.geometry;
+
+  /// The seats' tops, in the world.
+  @override
+  Aabb2 reach(RowComponent params, Transform2 toWorld) {
+    final t = params.top;
+    return Aabb2.fromPoints([
+      for (var i = 0; i < params.count; i++)
+        for (final (x, y) in [
+          (t.minX, t.minY),
+          (t.maxX, t.minY),
+          (t.maxX, t.maxY),
+          (t.minX, t.maxY),
+        ])
+          toWorld
+              .multiply(rowSeatTransform(params, i))
+              .transformPoint(Vector2(x, y)),
+    ]);
+  }
+
+  @override
+  List<Generated> generate(ParametricView view, Handle self) => const [];
+
+  @override
+  List<GeneratedInstance> instances(ParametricView view, Handle self) {
+    final row = view.paramsOf<RowComponent>(self)!;
+    final toWorld = view.toWorld(self);
+    final out = <GeneratedInstance>[];
+    for (var i = 0; i < row.count; i++) {
+      final seat = rowSeatTransform(row, i);
+      out.add(GeneratedInstance(row.seat, seat, attributes: [
+        unitLabelAttrib('${row.prefix}${i + 1}',
+            instanceToWorld: toWorld.multiply(seat),
+            anchor: row.base,
+            top: row.top),
+      ]));
+    }
+    return out;
+  }
+}
+
+/// The first free prefix for a row of [count] seats in [d] (spec S2: the
+/// placing tool's job): `A`, `B`, …, `Z`, `AA`, `AB`, …, the first `P` for
+/// which none of `P1` to `P<count>` is the trimmed text of a live UNIT
+/// ATTRIB. O(entities), once per placement.
+String freeRowPrefix(DraftDocument d, int count) {
+  final e = d.entities;
+  final labels = <String>{
+    for (final s in e.liveSlots)
+      if (e.kindAt(s) == EntityKind.attrib && e.tagAt(s) == kUnitLabelTag)
+        e.textAt(s).trim(),
+  };
+  for (var n = 0;; n++) {
+    final prefix = _letters(n);
+    var free = true;
+    for (var i = 1; i <= count && free; i++) {
+      if (labels.contains('$prefix$i')) free = false;
+    }
+    if (free) return prefix;
+  }
+}
+
+/// 0 → A, 25 → Z, 26 → AA: bijective base 26.
+String _letters(int n) {
+  var k = n + 1;
+  final codes = <int>[];
+  while (k > 0) {
+    k--;
+    codes.add(0x41 + k % 26);
+    k ~/= 26;
+  }
+  return String.fromCharCodes(codes.reversed);
+}
+
+/// A root-level group at [at] turned by [angle], carrying [row] and the
+/// drawing layer: one step (the seats come from the row's regeneration).
+CompoundCommand placeRowCommand(DraftDocument d, RowComponent row,
+    {required Vector2 at, double angle = 0, Handle? handle}) {
+  final h = handle ?? d.handleSeed.next();
+  return CompoundCommand([
+    AddNodeCommand(GroupNode(
+        handle: h,
+        parent: d.rootHandle,
+        transform: Transform2.translation(at.x, at.y)
+            .multiply(Transform2.rotation(angle)),
+        children: const [])),
+    SetComponentCommand<RowComponent>(h, row),
+    SetComponentCommand<ObjectLayer>(h, ObjectLayer(drawingLayer(d))),
+  ], label: 'Add row');
+}
+
+/// The definition's top, as `SymbolDefinitionRef.top` gives it (spec S2):
+/// the first leaf's box when it is a closed polyline or a circle, else the
+/// leaves' vertex box. The unit library's entries all take the first
+/// branch.
+Aabb2 entryTop(SymbolEntry entry) {
+  if (entry.leaves.isEmpty) return Aabb2.empty();
+  final first = entry.leaves.first;
+  final p = first.payload;
+  if (first.record.kind == EntityKind.circle) {
+    final r = p.scalars[0];
+    return Aabb2.raw(
+        p.coords[0] - r, p.coords[1] - r, p.coords[0] + r, p.coords[1] + r);
+  }
+  if (first.record.kind == EntityKind.polyline && isClosedPolyline(p)) {
+    return Aabb2.fromPoints(
+        [for (var i = 0; i < p.pointCount; i++) p.pointAt(i)]);
+  }
+  return Aabb2.fromPoints([
+    for (final l in entry.leaves)
+      for (var i = 0; i < l.payload.pointCount; i++) l.payload.pointAt(i),
+  ]);
+}
+
+/// What a row placement needs.
+const Set<Capability> rowNeeds = {
+  Capability.structure,
+  Capability.components,
+  Capability.geometry,
+};
+
+/// Two presses: the first anchors the row, the second turns it towards the
+/// press and places a row of [kRowToolSeats] seats with the first free
+/// prefix, through `symbolDefinition` once.
+final class RowTool extends PlacementTool {
+  RowTool(this.services);
+
+  final PlanServices services;
+
+  @override
+  String get name => 'Row';
+
+  @override
+  void accept(Vector2 point, ToolContext ctx) {
+    if (points.isEmpty) {
+      points.add(point);
+      return;
+    }
+    final start = points.first;
+    final d = point - start;
+    if (d.length <= Tolerance.standard.linear) return;
+    clearShape();
+    // The permissions first: a refused row allocates no handle (Ruling
+    // 05-3), then the definition, once per placement (spec S2).
+    if (!rowNeeds.every(ctx.document.commands.permissions.allows)) return;
+    final ref = services.symbolDefinition(rowSeatKey);
+    if (ref == null) return;
+    final document = services.document;
+    ctx.execute(CompoundCommand([
+      if (ref.add case final add?) add,
+      placeRowCommand(
+          document,
+          RowComponent(
+              prefix: freeRowPrefix(document, kRowToolSeats),
+              count: kRowToolSeats,
+              spacing: kRowToolSpacing,
+              seat: ref.handle,
+              base: ref.basePoint,
+              top: ref.top),
+          at: start,
+          angle: math.atan2(d.y, d.x)),
+    ], label: 'Add row'));
+  }
+
+  @override
+  void paintRubberBand(Canvas canvas, Vector2 origin, double scale) {}
+}
+
+PlanType<RowComponent> rowType() => PlanType<RowComponent>(
+      id: rowTypeId,
+      fromJson: RowComponent.fromJson,
+      parametric: const RowType(),
+    );
+
+PlanTool rowTool() => PlanTool(
+      id: rowToolId,
+      icon: Icons.event_seat,
+      needs: rowNeeds,
+      create: RowTool.new,
     );
 
 // ---------------------------------------------------------------------------
