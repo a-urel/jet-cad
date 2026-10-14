@@ -1,0 +1,1764 @@
+# Review package: abbc9612..HEAD
+
+## Commits
+1a2c645e feat(plan): the unit label system, the placed number, rotation (2b S2)
+
+## Files changed
+ .../lib/src/controller/plan_controller.dart        |   3 +-
+ .../lib/src/controller/session.dart                |  11 +-
+ .../lib/src/symbols/symbol_placer.dart             |  61 ++-
+ .../lib/src/tools/plan_symbol_tool.dart            |  10 +-
+ .../lib/src/units/unit_label_system.dart           | 171 ++++++++
+ .../jet_cad_2d_plan/lib/src/units/unit_rotate.dart |  44 +++
+ .../test/units/unit_data_delete_test.dart          | 239 ++++++++++++
+ .../test/units/unit_label_stack_test.dart          | 208 ++++++++++
+ .../test/units/unit_label_system_test.dart         | 431 +++++++++++++++++++++
+ .../test/units/unit_placement_test.dart            | 160 ++++++++
+ .../test/units/unit_rotate_test.dart               | 100 +++++
+ 11 files changed, 1422 insertions(+), 16 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart b/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
+index 6ba9dc1b..73bb8818 100644
+--- a/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
++++ b/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
+@@ -707,21 +707,22 @@ class PlanController extends ChangeNotifier {
+         guard: _guardTool,
+         moveResolver: _moveResolver);
+     _session = session;
+     // The attachment providers, once per document, before the kits' tools
+     // (the kits' services read this session's registry), then plan.symbol
+     // over the registry (Task 14).
+     session.runAttachmentFactories(kits, _services, _diagnostics.add);
+     session.addSymbolTool(PlanSymbolTool(_armed,
+         attachments: session.attachments,
+         canRotate: () => _permissions.rotate,
+-        canMirror: () => _permissions.mirror));
++        canMirror: () => _permissions.mirror,
++        units: () => session.units.current));
+     registerToolNeeds(PlanToolIds.symbol, PlanToolIds.symbolNeeds);
+     _locked.value = session.locks.objects;
+     session.boundary = FailureBoundary(
+         document: document,
+         catalog: catalog,
+         system: session.parametric,
+         frozen: session.frozen,
+         log: _diagnostics,
+         lock: lockBroken,
+         damage: _damage);
+diff --git a/packages/jet_cad_2d_plan/lib/src/controller/session.dart b/packages/jet_cad_2d_plan/lib/src/controller/session.dart
+index 1be49630..0e96fb26 100644
+--- a/packages/jet_cad_2d_plan/lib/src/controller/session.dart
++++ b/packages/jet_cad_2d_plan/lib/src/controller/session.dart
+@@ -12,20 +12,21 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+ 
+ import '../attach/attachment_registry.dart';
+ import '../kits/guard.dart';
+ import '../kits/kit_set.dart';
+ import '../kits/locks.dart';
+ import '../tools/generic_tools.dart';
+ import '../tools/plan_select_gates.dart';
+ import '../tools/plan_symbol_tool.dart';
+ import '../units/unit_index.dart';
++import '../units/unit_label_system.dart';
+ import 'grip_dispatch.dart';
+ import 'permissions.dart';
+ import 'services.dart';
+ import 'shared_cache.dart';
+ 
+ /// The plan library's own select tool (spec P1 reserved ids).
+ const String planSelectToolId = 'plan.select';
+ 
+ final class DocumentSession {
+   DocumentSession(
+@@ -75,24 +76,26 @@ final class DocumentSession {
+     // Every tool in the map is guarded (spec P4), the plan's own under the
+     // kit id `plan`; the tool controller knows the guarded one.
+     final guardedSelect = guard('plan', planSelectToolId, select);
+     _entries.add((id: planSelectToolId, tool: guardedSelect, kit: false));
+     tools = ToolController(initial: guardedSelect, context: toolContext);
+     // The other generic tools, before any kit's (runKitFactories runs
+     // later, from the controller's _open). The map owns and disposes them.
+     for (final e in generic.byId.entries) {
+       if (e.key != planSelectToolId) addTool(e.key, e.value);
+     }
+-    // :1050-1057: the document arrives built; the system installs last,
+-    // and the lock expander stacks after it.
++    // :1050-1057: the document arrives built; the system installs last.
++    // Spec 2b S2: parametric system -> unit label system -> lock expander,
++    // so the lock checks the stamps too.
+     parametric = ParametricSystem(document, catalog, isFrozen: frozen.contains)
+       ..install();
++    labels = UnitLabelSystem(document)..install();
+     lockExpander = LockExpander(document, locks)..install();
+     // Spec 2b S2: the document's units, rebuilt on its state id, its
+     // layers' revision and the controller's locked set. Last: it listens to
+     // [locked], so no later step can throw and leak the listener.
+     units = UnitIndexCache(document,
+         catalog: catalog, locks: locks, locked: locked);
+   }
+ 
+   final DraftDocument document;
+   final FlutterTextMeasurer measurer;
+@@ -113,20 +116,23 @@ final class DocumentSession {
+   late final OutlineCache outlines;
+   late final GripCache grips;
+   late final ToolContext toolContext;
+ 
+   /// The plan's select tool, unguarded (its `deleteSelection`); the map and
+   /// the tool controller hold it guarded.
+   late final SelectTool select;
+   late final ToolController tools;
+   late final ParametricSystem parametric;
+ 
++  /// The placed units' label stamps (spec 2b S2).
++  late final UnitLabelSystem labels;
++
+   /// The document's lock set and expander (spec P4).
+   late final LockSet locks;
+   late final LockExpander lockExpander;
+ 
+   /// The document's units (spec 2b S2, `UnitIndex`).
+   late final UnitIndexCache units;
+ 
+   /// The select tool's and the grip cache's gates: the permissions and the
+   /// locks (spec P2, P4).
+   late final PlanSelectGates gates;
+@@ -279,16 +285,17 @@ final class DocumentSession {
+       e.tool.dispose();
+     }
+     _entries.clear();
+     grips.dispose();
+     outlines.dispose();
+     selection.dispose();
+     page.dispose();
+     gates.dispose();
+     units.dispose();
+     lockExpander.dispose();
++    labels.dispose();
+     parametric.dispose();
+     index.dispose();
+     unawaited(document.dispose());
+     measurer.clear();
+   }
+ }
+diff --git a/packages/jet_cad_2d_plan/lib/src/symbols/symbol_placer.dart b/packages/jet_cad_2d_plan/lib/src/symbols/symbol_placer.dart
+index 72a1c3bc..a2c5d121 100644
+--- a/packages/jet_cad_2d_plan/lib/src/symbols/symbol_placer.dart
++++ b/packages/jet_cad_2d_plan/lib/src/symbols/symbol_placer.dart
+@@ -1,24 +1,35 @@
+ // The symbol placer (spec 09 D6), ported from jet_cad_floor_plan's
+ // symbol_placer.dart (2a Task 13): one command that copies a library symbol
+ // into a document on first use and adds an instance of it. The copy carries
+-// the entry's whole `jetcad.symbol` and its `jetcad.unit`; the table number
+-// goes to 2b with the units.
++// the entry's whole `jetcad.symbol` and its `jetcad.unit`; a placed `numbered`
++// unit gets the plan's next number as its UNIT label in the same command
++// (spec 2b S2).
+ //
+ // No Flutter import and no `dart:io`. It writes no table record (a symbol
+ // uses only reserved handles) and never touches `DraftDocument.purge`.
+ 
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart'
+-    show SymbolComponent, SymbolEntry, UnitComponent;
++    show
++        SymbolComponent,
++        SymbolEntry,
++        UnitComponent,
++        UnitLabelling,
++        unitLabelHeight,
++        unitLabelPayload;
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
++import '../units/unit_index.dart' show UnitIndex;
++import '../units/unit_label.dart' show placedLabelTop, unitLabelRecord;
++import '../units/unit_numbers.dart' show nextUnitNumber;
++
+ /// The instance fields a placement imposes on the symbol's BYBLOCK contents.
+ /// The defaults are [InstanceNode]'s own.
+ final class InstanceStyle {
+   final DraftColor color;
+   final int lineweight;
+   final int transparency;
+   final Handle linetype;
+   final double linetypeScale;
+ 
+   const InstanceStyle({
+@@ -141,49 +152,77 @@ bool _ascending(List<({EntityRecord record, GeometryPayload payload})> leaves) {
+   }
+   return true;
+ }
+ 
+ /// The command that places [entry] in [doc] at [at], labelled
+ /// `Place <name>`; it does not execute. Every handle is allocated here,
+ /// once, so a redo reuses them. The instance takes the current layer
+ /// (`drawingLayer`) and [style]; [transform], when given, is used as is
+ /// (an attachment's), else [placementTransform] of [at], [quarterTurns]
+ /// and [mirrored].
++///
++/// With [units] (the plan's index), a `numbered` unit gets
++/// `nextUnitNumber(units)` as its `UNIT` label after the instance, anchored
++/// at the base point, the height of its top, stamped upright for the
++/// placement (spec 2b S2). The number is fixed here, with the handles, so
++/// a redo replays the same one. An `assigned` unit, and any placement
++/// without [units] (a thumbnail), gets no label.
+ CompoundCommand placeSymbol(
+   DraftDocument doc,
+   SymbolEntry entry, {
+   required Vector2 at,
+   int quarterTurns = 0,
+   bool mirrored = false,
+   Transform2? transform,
+   InstanceStyle style = const InstanceStyle(),
++  UnitIndex? units,
+ }) {
+   final made = definitionForEntry(doc, entry);
+   final commands = <DraftCommand>[...made.commands];
++  final instance = doc.handleSeed.next();
++  final placement = transform ??
++      placementTransform(
++        at: at,
++        basePoint: entry.definition.basePoint,
++        quarterTurns: quarterTurns,
++        mirrored: mirrored,
++      );
+   commands.add(AddNodeCommand(InstanceNode(
+-    handle: doc.handleSeed.next(),
++    handle: instance,
+     parent: doc.rootHandle,
+     definition: made.definition,
+     layer: drawingLayer(doc),
+-    transform: transform ??
+-        placementTransform(
+-          at: at,
+-          basePoint: entry.definition.basePoint,
+-          quarterTurns: quarterTurns,
+-          mirrored: mirrored,
+-        ),
++    transform: placement,
+     color: style.color,
+     lineweight: style.lineweight,
+     transparency: style.transparency,
+     linetype: style.linetype,
+     linetypeScale: style.linetypeScale,
+   )));
++  final unit = entry.unit;
++  if (units != null &&
++      unit != null &&
++      unit.labelling == UnitLabelling.numbered) {
++    commands.add(AddEntityCommand(
++      record: unitLabelRecord(
++          handle: doc.handleSeed.next(),
++          instance: instance,
++          text: nextUnitNumber(units)),
++      payload: unitLabelPayload(
++        anchor: entry.definition.basePoint,
++        height: unitLabelHeight(placedLabelTop([
++          for (final leaf in entry.leaves) (leaf.record.kind, leaf.payload),
++        ])),
++        instanceToWorld: placement,
++      ),
++    ));
++  }
+   return CompoundCommand(commands, label: 'Place ${entry.symbol.name}');
+ }
+ 
+ /// Whether the definition [definition] in [doc] is **leaf-equal** to [entry]
+ /// (spec 09c D10, W-11): what a placement checks before it reuses a
+ /// definition found by key and version.
+ ///
+ /// Leaf-equal means: [definition] names a definition; its base point is the
+ /// entry's; it has no child node; it owns as many live leaves as the entry
+ /// has; and, pairing its leaves ascending by handle with the entry's (which
+diff --git a/packages/jet_cad_2d_plan/lib/src/tools/plan_symbol_tool.dart b/packages/jet_cad_2d_plan/lib/src/tools/plan_symbol_tool.dart
+index 21daff9f..b602b6e2 100644
+--- a/packages/jet_cad_2d_plan/lib/src/tools/plan_symbol_tool.dart
++++ b/packages/jet_cad_2d_plan/lib/src/tools/plan_symbol_tool.dart
+@@ -25,20 +25,21 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart'
+     show Attachment, AttachmentQuery, AttachmentRegistry;
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import '../attach/attachment_painter.dart';
+ import '../symbols/plan_symbol.dart';
+ import '../symbols/symbol_box.dart';
+ import '../symbols/symbol_ghost.dart';
+ import '../symbols/symbol_placer.dart';
++import '../units/unit_index.dart' show UnitIndex;
+ import 'generic_tools.dart' show PlanToolIds;
+ 
+ /// The half-size of the ghost's base-point cross, in screen pixels.
+ const double kGhostCrossPixels = 6.0;
+ 
+ /// How near, in screen pixels, the raw pointer may be for an attachment
+ /// (today's kWallAttachPixels, spec 09c D4, D6): larger than the snap
+ /// aperture, since the pointer is often the symbol's centre.
+ const double kAttachPixels = 16.0;
+ 
+@@ -61,39 +62,43 @@ const double kAttachPixels = 16.0;
+ /// - Attachment (spec P3): for a symbol whose component's `attachTo` is not
+ ///   empty, with object snap on and [attachments] given, each recompute
+ ///   asks `attachments.attach(attachTo, query)` with the symbol's
+ ///   footprint, the free placement as `current`, the raw pointer, the
+ ///   captures `kAttachPixels / scale` and `kSnapAperturePixels / scale`,
+ ///   the mirror, `mayRotate` ([canRotate]) and the last answer as `keep`.
+ ///   Attached, the ghost and the release use the answer's transform
+ ///   verbatim and the marker is drawn at its marker; M mirrors in place.
+ class PlanSymbolTool extends Tool {
+   PlanSymbolTool(this.armed,
+-      {this.attachments, this.canRotate, this.canMirror}) {
++      {this.attachments, this.canRotate, this.canMirror, this.units}) {
+     armed.addListener(_onArmed);
+     _syncPath();
+   }
+ 
+   /// The armed symbol; the controller's, read here.
+   final ValueListenable<PlanSymbol?> armed;
+ 
+   /// The document's attachment registry, or null: nothing attaches.
+   final AttachmentRegistry? attachments;
+ 
+   /// Whether `R` and `Shift+R` turn the next placement (the permissions'
+   /// `rotate`), read at each use; null allows.
+   final bool Function()? canRotate;
+ 
+   /// Whether `M` mirrors the next placement (the permissions' `mirror`),
+   /// read at each use; null allows.
+   final bool Function()? canMirror;
+ 
++  /// The plan's units, read at each placement: a numbered unit takes the
++  /// next number (spec 2b S2). Null places no label.
++  final UnitIndex Function()? units;
++
+   final DragPoint _at = DragPoint();
+   final SnapResult _scratch = SnapResult();
+   final GhostMatrix _matrix = GhostMatrix();
+   // Coloured from the overlay's paper set where they are drawn (dark theme
+   // spec D5): the ghost `preview`, the marker `snap`.
+   final ui.Paint _ghostPaint = ui.Paint()..style = ui.PaintingStyle.stroke;
+   final ui.Paint _markerPaint = ui.Paint()
+     ..style = ui.PaintingStyle.stroke
+     ..strokeWidth = kSnapMarkerStrokePixels;
+ 
+@@ -438,21 +443,22 @@ class PlanSymbolTool extends Tool {
+ 
+   /// The one commit path: one command, one undo step; the permissions are
+   /// checked before placeSymbol allocates a handle (Ruling 05-3, F-16). An
+   /// attached placement commits the attachment's transform verbatim.
+   void _place(ToolContext ctx, PlanSymbol symbol) {
+     if (!needs.every(ctx.document.commands.permissions.allows)) return;
+     ctx.execute(placeSymbol(ctx.document, symbol.entry,
+         at: _at.point,
+         quarterTurns: _turns,
+         mirrored: _mirror,
+-        transform: _attached?.transform));
++        transform: _attached?.transform,
++        units: units?.call()));
+   }
+ 
+   /// The snap marker, in screen space; attached, the nearest glyph at the
+   /// attachment's marker.
+   @override
+   void paintOverlay(ui.Canvas canvas, ViewportTransform camera,
+       ui.Size viewport, PaperPalette paper) {
+     if (!ghostVisible) return;
+     _markerPaint.color = paper.snap;
+     final attached = _attached;
+diff --git a/packages/jet_cad_2d_plan/lib/src/units/unit_label_system.dart b/packages/jet_cad_2d_plan/lib/src/units/unit_label_system.dart
+new file mode 100644
+index 00000000..20189df8
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/units/unit_label_system.dart
+@@ -0,0 +1,171 @@
++// The unit label system (spec 2b S2 "The label system"): keeps every placed
++// unit's label upright, inside the edit that turns or mirrors the unit, as
++// one undo step. Ported from jet_cad_floor_plan's
++// tables/table_label_system.dart (TableLabelSystem, TableLabelEdit) and
++// table_label.dart (restampedTableLabel): the servable check is the
++// definition's UnitComponent, the root rule is kept. A generated unit's
++// label is its type's, restamped by its regeneration (spec S1). A deleted
++// unit's data and colour are not this file's: the delete takes them
++// (`RemoveNodeCommand`, node-components D-1).
++//
++// No Flutter import: Dart over package:jet_cad_2d and the kit's model.
++import 'dart:typed_data';
++
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart'
++    show UnitComponent, kUnitLabelMaxHeight, unitLabelStamp;
++
++import 'unit_label.dart' show unitLabelOf;
++
++/// [payload] re-stamped for [placement]: anchor and height kept, rotation
++/// and width factor replaced. Null when they already match by exact `==`
++/// (stored values), so a translation writes nothing.
++GeometryPayload? restampedUnitLabel(
++    GeometryPayload payload, Transform2 placement) {
++  final s = unitLabelStamp(placement);
++  final scalars = payload.scalars;
++  if (scalars.length >= 3 &&
++      scalars[1] == s.rotation &&
++      scalars[2] == s.widthFactor) {
++    return null;
++  }
++  return GeometryPayload(
++    coords: Float64List.fromList(payload.coords),
++    scalars: Float64List.fromList([
++      scalars.isEmpty ? kUnitLabelMaxHeight : scalars[0],
++      s.rotation,
++      s.widthFactor,
++    ]),
++  );
++}
++
++/// Stacks on the dispatcher's one expander slot (spec 06 D2, 14a F-1):
++/// [install] keeps the expander it found (the parametric system's, or none)
++/// and wraps what that one returns; [dispose] puts it back.
++///
++/// **Last in, first out.** The session installs this after the parametric
++/// system and before the lock expander (parametric system → this → lock
++/// expander) and disposes in reverse; out of order, this would put a
++/// disposed system's tear-off back in the slot, so [dispose] asserts that
++/// the slot still holds its own.
++final class UnitLabelSystem {
++  UnitLabelSystem(this.document);
++
++  final DraftDocument document;
++  DraftCommand Function(DraftCommand command)? _previous;
++  bool _installed = false;
++
++  void install() {
++    if (_installed) {
++      throw StateError('the unit label system is installed already');
++    }
++    _previous = document.commands.expander;
++    document.commands.expander = _expand;
++    _installed = true;
++  }
++
++  /// Puts the expander [install] found back, only if the slot still holds
++  /// this system's own tear-off.
++  void dispose() {
++    if (!_installed) return;
++    _installed = false;
++    final mine = document.commands.expander == _expand;
++    if (mine) document.commands.expander = _previous;
++    _previous = null;
++    assert(mine, 'UnitLabelSystem disposed out of order (spec 2b S2)');
++  }
++
++  DraftCommand _expand(DraftCommand command) {
++    final inner = _previous?.call(command) ?? command;
++    // The cheap path: a plan with no unit definition has no placed unit.
++    if (document.components.withComponent<UnitComponent>().isEmpty) {
++      return inner;
++    }
++    return UnitLabelEdit._(inner);
++  }
++}
++
++/// An edit and the derived commands it makes necessary: [inner] applies,
++/// then, per touched handle in `touched`'s order, a placed unit whose label
++/// no longer matches [unitLabelStamp] for its transform is re-stamped, by
++/// exact `==` on the stored values. All or nothing; undo restores the
++/// stamps and the edit. Created only by [UnitLabelSystem], once per
++/// `execute`.
++final class UnitLabelEdit extends DraftCommand {
++  UnitLabelEdit._(this.inner);
++
++  final DraftCommand inner;
++  bool _stamped = false;
++
++  @override
++  String get label => inner.label;
++
++  /// [inner]'s own: a stamp is derived data inside the edit that causes it
++  /// and adds no authority (T12, F-2). A translation never stamps.
++  @override
++  Set<Capability> get capabilities => inner.capabilities;
++
++  /// Raised to `geometry` when a label was written, so the index does not
++  /// skip it (F-2's rule).
++  @override
++  Capability get capability =>
++      _stamped && inner.capability.index < Capability.geometry.index
++          ? Capability.geometry
++          : inner.capability;
++
++  @override
++  CommandResult apply(CommandTarget target) {
++    final r = inner.apply(target);
++    final inverses = <DraftCommand>[];
++    final written = <Handle>{};
++    var stamps = 0;
++    try {
++      for (final h in r.touched) {
++        final DraftCommand derived;
++        if (_stampFor(target, h) case final stamp?) {
++          derived = stamp;
++          stamps++;
++        } else {
++          continue;
++        }
++        final result = derived.apply(target);
++        inverses.add(result.inverse);
++        written.addAll(result.touched);
++      }
++    } catch (_) {
++      // All or nothing: the stamps written so far, then the edit itself.
++      for (final inverse in inverses.reversed) {
++        inverse.apply(target);
++      }
++      r.inverse.apply(target);
++      rethrow;
++    }
++    _stamped = stamps > 0;
++    if (inverses.isEmpty) return r;
++    // A replay with the edit's own authority: undo and redo need exactly
++    // what the edit needed, not the stamps' `geometry` (review R-5).
++    return CommandResult(
++      inverse: ParametricReplay(
++          CompoundCommand([...inverses.reversed, r.inverse], label: label),
++          inner.capabilities),
++      touched: {...r.touched, ...written},
++    );
++  }
++
++  /// The stamp [h] needs, or null: [h] is a placed unit (a live, root-level
++  /// instance of a definition carrying `jetcad.unit`) with a `UNIT` label
++  /// whose rotation or width factor differs from its transform's stamp.
++  static DraftCommand? _stampFor(CommandTarget target, Handle h) {
++    final node = target.tree[h];
++    if (node is! InstanceNode || node.parent != target.tree.root) return null;
++    if (target.components.get<UnitComponent>(node.definition) == null) {
++      return null;
++    }
++    final label = unitLabelOf(target, h);
++    if (label == null) return null;
++    final payload = target.geometry
++        .read(target.entities.geomIndexAt(target.entities.slotOf(label)!));
++    final next = restampedUnitLabel(payload, node.transform);
++    return next == null ? null : SetEntityGeometryCommand(label, next);
++  }
++}
+diff --git a/packages/jet_cad_2d_plan/lib/src/units/unit_rotate.dart b/packages/jet_cad_2d_plan/lib/src/units/unit_rotate.dart
+new file mode 100644
+index 00000000..d0f42d41
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/units/unit_rotate.dart
+@@ -0,0 +1,44 @@
++// Turning a placed unit by a quarter (spec 2b S4, the unit section's ±90
++// buttons), ported from jet_cad_floor_plan's tables/table_rotate.dart (spec
++// 14a T16): about its base point, so the unit turns in place and its label
++// does not move. The label system stamps the label upright in the same step.
++//
++// No Flutter import: this file is Dart over `package:jet_cad_2d` only.
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++
++/// The command that turns [instance] by [quarterTurns] × 90° (positive is
++/// counter-clockwise, on the world and on the screen alike) about its
++/// definition's base point, or null when [instance] is not a live instance
++/// of a live definition. One `TransformNodeCommand` in a `Rotate` compound.
++///
++/// The new linear part is exact: a quarter turn only swaps and negates the
++/// entries, and `0.0` is stored for `−0.0`, so four turns return it bit for
++/// bit. The translation keeps the base point's world position; it is exact
++/// for a unit placed at integer coordinates and within rounding otherwise.
++DraftCommand? rotateUnitCommand(
++    DraftDocument doc, Handle instance, int quarterTurns) {
++  final node = doc.tree[instance];
++  if (node is! InstanceNode) return null;
++  final definition = doc.tree.definition(node.definition);
++  if (definition == null) return null;
++  final t = node.transform;
++  final bp = definition.basePoint;
++  final worldX = t.a * bp.x + t.c * bp.y + t.e;
++  final worldY = t.b * bp.x + t.d * bp.y + t.f;
++
++  final q = ((quarterTurns % 4) + 4) % 4;
++  // R(q · 90°) · L, written as swaps and negations.
++  final (a, b, c, d) = switch (q) {
++    0 => (t.a, t.b, t.c, t.d),
++    1 => (-t.b, t.a, -t.d, t.c),
++    2 => (-t.a, -t.b, -t.c, -t.d),
++    _ => (t.b, -t.a, t.d, -t.c),
++  };
++  double clean(double v) => v == 0 ? 0.0 : v;
++  final e = worldX - (a * bp.x + c * bp.y);
++  final f = worldY - (b * bp.x + d * bp.y);
++  return CompoundCommand([
++    TransformNodeCommand(instance,
++        Transform2(clean(a), clean(b), clean(c), clean(d), clean(e), clean(f))),
++  ], label: 'Rotate');
++}
+diff --git a/packages/jet_cad_2d_plan/test/units/unit_data_delete_test.dart b/packages/jet_cad_2d_plan/test/units/unit_data_delete_test.dart
+new file mode 100644
+index 00000000..fe077d2c
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/units/unit_data_delete_test.dart
+@@ -0,0 +1,239 @@
++// Ported from jet_cad_floor_plan/test/tables/table_data_test.dart (TD7-TD9);
++// assertions unchanged.
++// Host embedding API spec E-6, E-9 gate 3, spec 2b S2: a deleted unit takes
++// its data with it (`RemoveNodeCommand`, node-components D-1), undoably.
++// Units are placed off the origin, turned and mirrored; data is written
++// with its keys out of order, a 64-character key and a 1024-unit value.
++import 'dart:convert';
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_plan/src/symbols/symbol_placer.dart';
++import 'package:jet_cad_2d_plan/src/units/unit_components.dart';
++import 'package:jet_cad_2d_plan/src/units/unit_index.dart' show UnitInfo;
++import 'package:jet_cad_2d_plan/src/units/unit_label_system.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/unit_fixtures.dart';
++
++/// Data as a host writes it: keys out of order, a value with a space, a dot
++/// and a non-ASCII letter.
++Map<String, String> hostData() => {
++      'zeta': 'Masa 4.ğ',
++      'id': '7f3c-ä',
++      'alpha': '',
++    };
++
++/// A key of exactly 64 characters of the allowed set.
++final String key64 = 'k${'a_.-9' * 12}xyz';
++
++/// A value of exactly 1024 UTF-16 units, non-ASCII included.
++final String value1024 = '${'ş' * 1000}${'x' * 24}';
++
++/// A plan with the parametric system and the label system installed, in
++/// the session's order, torn down in reverse.
++DraftDocument rig() {
++  final d = plan();
++  final parametric = ParametricSystem(d, ParametricCatalog())..install();
++  final labels = UnitLabelSystem(d)..install();
++  addTearDown(() {
++    labels.dispose();
++    parametric.dispose();
++    d.dispose();
++  });
++  return d;
++}
++
++/// The unit placed last in [doc].
++UnitInfo placeTable(DraftDocument doc, Vector2 at,
++    {int quarterTurns = 0, bool mirrored = false}) {
++  doc.commands.execute(placeSymbol(doc, entryOf(tableSymbol()),
++      at: at,
++      quarterTurns: quarterTurns,
++      mirrored: mirrored,
++      units: unitIndexOf(doc)));
++  return unitIndexOf(doc)
++      .units
++      .reduce((a, b) => a.instance.value > b.instance.value ? a : b);
++}
++
++/// The editor's Delete of [t]: its label, then the instance (spec 14a T9).
++DraftCommand deleteTable(UnitInfo t) => CompoundCommand(
++    [RemoveEntityCommand(t.label!), RemoveNodeCommand(t.instance)],
++    label: 'Delete');
++
++UnitData? dataOf(DraftDocument doc, Handle h) =>
++    doc.components.get<UnitData>(h);
++
++/// The root group's children in the encoding [json].
++List<Object?> rootChildren(String json) {
++  final map = jsonDecode(json) as Map<String, Object?>;
++  final root = (map['nodes']! as List)
++      .cast<Map<String, Object?>>()
++      .firstWhere((n) => n['handle'] == map['root']);
++  return root['children']! as List;
++}
++
++void main() {
++  group('a deleted unit takes its data (E-9 gate 3)', () {
++    test(
++        'TD7 M-H27: a Delete takes the data in the same step; undo puts '
++        'it back byte for byte, redo drops it again; the other table keeps '
++        'its', () {
++      final doc = rig();
++      final a = placeTable(doc, Vector2(41200, -27300),
++          quarterTurns: 1, mirrored: true);
++      final b = placeTable(doc, Vector2(44700, -27300), quarterTurns: 3);
++      final other = UnitData({key64: value1024});
++      final mine = UnitData(hostData());
++      doc.commands.execute(SetComponentCommand<UnitData>(a.instance, other));
++      doc.commands.execute(SetComponentCommand<UnitData>(b.instance, mine));
++      final before = DraftDocumentCodec.encodeToString(doc);
++      final depth = doc.commands.undoDepth;
++
++      // B is the root's last child (TD7b: the first table; TD7c: two
++      // non-adjacent ones in one step).
++      doc.commands.execute(deleteTable(b));
++      expect(doc.tree[b.instance], isNull);
++      expect(dataOf(doc, b.instance), isNull, reason: 'no orphan');
++      expect(dataOf(doc, a.instance), same(other));
++      expect(doc.commands.undoDepth, depth + 1, reason: 'one step');
++      final json = jsonDecode(DraftDocumentCodec.encodeToString(doc)) as Map;
++      expect((json['components'] as Map)['jetcad.unit_data'],
++          {'${a.instance.value}': other.toJson()});
++
++      doc.commands.undo();
++      expect(dataOf(doc, b.instance), same(mine));
++      expect(DraftDocumentCodec.encodeToString(doc), before);
++      doc.commands.redo();
++      expect(doc.tree[b.instance], isNull);
++      expect(dataOf(doc, b.instance), isNull);
++      doc.commands.undo();
++      expect(DraftDocumentCodec.encodeToString(doc), before);
++    });
++
++    test(
++        'TD7b the first table deleted and undone: its data back, the plan '
++        'byte for byte, the table back before B among the root\'s children '
++        '(O-10)', () {
++      final doc = rig();
++      final a = placeTable(doc, Vector2(41200, -27300),
++          quarterTurns: 1, mirrored: true);
++      final b = placeTable(doc, Vector2(44700, -27300), quarterTurns: 3);
++      final mine = UnitData(hostData());
++      doc.commands.execute(SetComponentCommand<UnitData>(a.instance, mine));
++      final before = DraftDocumentCodec.encodeToString(doc);
++      expect(rootChildren(before).sublist(rootChildren(before).length - 2),
++          [a.instance.value, b.instance.value],
++          reason: 'premise: A is not the last child');
++      doc.commands.execute(deleteTable(a));
++      expect(dataOf(doc, a.instance), isNull);
++      doc.commands.undo();
++      expect(dataOf(doc, a.instance), same(mine));
++      expect(DraftDocumentCodec.encodeToString(doc), before);
++    });
++
++    test(
++        'TD7c two non-adjacent tables, neither last, deleted in one step: '
++        'undo writes the plan back byte for byte, redo deletes both again', () {
++      final doc = rig();
++      final a = placeTable(doc, Vector2(41200, -27300),
++          quarterTurns: 1, mirrored: true);
++      final b = placeTable(doc, Vector2(44700, -27300), quarterTurns: 3);
++      final c = placeTable(doc, Vector2(41200, -23100), quarterTurns: 2);
++      final d = placeTable(doc, Vector2(44700, -23100), mirrored: true);
++      doc.commands.execute(
++          SetComponentCommand<UnitData>(a.instance, UnitData(hostData())));
++      doc.commands.execute(SetComponentCommand<UnitData>(
++          c.instance, UnitData({key64: value1024})));
++      final before = DraftDocumentCodec.encodeToString(doc);
++      final root = rootChildren(before);
++      expect(
++          root.sublist(root.length - 4),
++          [
++            for (final t in [a, b, c, d]) t.instance.value
++          ],
++          reason: 'premise: B between A and C, D after both');
++      final depth = doc.commands.undoDepth;
++      // The tables sit in ascending handle order, so this cannot tell
++      // "restore the index" from "insert sorted by handle"; the engine's
++      // node_index_undo_test, whose children are out of order, does.
++
++      doc.commands.execute(CompoundCommand([
++        RemoveEntityCommand(a.label!),
++        RemoveNodeCommand(a.instance),
++        RemoveEntityCommand(c.label!),
++        RemoveNodeCommand(c.instance),
++      ], label: 'Delete'));
++      expect(doc.commands.undoDepth, depth + 1, reason: 'one step');
++      expect(doc.tree[a.instance], isNull);
++      expect(doc.tree[c.instance], isNull);
++      expect(dataOf(doc, c.instance), isNull);
++      final deleted = DraftDocumentCodec.encodeToString(doc);
++
++      doc.commands.undo();
++      expect(DraftDocumentCodec.encodeToString(doc), before);
++      doc.commands.redo();
++      expect(DraftDocumentCodec.encodeToString(doc), deleted);
++      doc.commands.undo();
++      expect(DraftDocumentCodec.encodeToString(doc), before);
++    });
++
++    test(
++        'TD8 a nested instance of a deleted group loses its data too; a '
++        'kept payload is dropped and restored as read', () {
++      final doc = rig();
++      final t = placeTable(doc, Vector2(-41200, 27300), quarterTurns: 2);
++      final definition = (doc.tree[t.instance]! as InstanceNode).definition;
++      final group = doc.handleSeed.next();
++      doc.commands.execute(AddNodeCommand(GroupNode(
++          handle: group,
++          parent: doc.rootHandle,
++          transform: Transform2.translation(-4000, 300),
++          children: const [])));
++      final nested = doc.handleSeed.next();
++      doc.commands.execute(AddNodeCommand(InstanceNode(
++          handle: nested,
++          parent: group,
++          transform: placementAt(100, 200, kDeg37, mirrored: true),
++          definition: definition,
++          layer: ReservedHandles.layerZero)));
++      final kept = UnitData.fromJson(
++          (jsonDecode('{"data":{"Bad Key":[1,"x"]}}') as Map)
++              .cast<String, Object?>());
++      doc.commands.execute(SetComponentCommand<UnitData>(nested, kept));
++      final before = DraftDocumentCodec.encodeToString(doc);
++
++      // The editor's group cascade: the instance, then the group.
++      doc.commands.execute(CompoundCommand(
++          [RemoveNodeCommand(nested), RemoveNodeCommand(group)],
++          label: 'Delete'));
++      expect(dataOf(doc, nested), isNull);
++      doc.commands.undo();
++      expect(dataOf(doc, nested), same(kept));
++      expect(DraftDocumentCodec.encodeToString(doc), before);
++    });
++
++    test(
++        'TD9 an edit that does not remove the table keeps its data: a turn, '
++        'and a delete of another table', () {
++      final doc = rig();
++      final a = placeTable(doc, Vector2(41200, -27300), mirrored: true);
++      final b = placeTable(doc, Vector2(44700, -23100), quarterTurns: 1);
++      final mine = UnitData(hostData());
++      doc.commands.execute(SetComponentCommand<UnitData>(a.instance, mine));
++      final node = doc.tree[a.instance]! as InstanceNode;
++      doc.commands.execute(CompoundCommand([
++        TransformNodeCommand(
++            a.instance,
++            Transform2.translation(-1750, 3300)
++                .multiply(Transform2.rotation(kDeg37))
++                .multiply(Transform2.translation(1750, -3300))
++                .multiply(node.transform)),
++      ], label: 'Rotate'));
++      expect(dataOf(doc, a.instance), same(mine));
++      doc.commands.execute(deleteTable(b));
++      expect(dataOf(doc, a.instance), same(mine));
++    });
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/units/unit_label_stack_test.dart b/packages/jet_cad_2d_plan/test/units/unit_label_stack_test.dart
+new file mode 100644
+index 00000000..1ddf3fc4
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/units/unit_label_stack_test.dart
+@@ -0,0 +1,208 @@
++// Spec 2b S2 "The label system", "The label" (placed rules): the label
++// system stacks between the parametric system and the lock, so the lock
++// sees its stamps; a placed numbered unit gets the next number, upright, in
++// the placement's one step, from the controller's index and through its
++// symbol tool; an assigned one gets none; a seat's label stays its type's.
++// On the service fixture: a mirrored, turned table, a turned row and a
++// curved one, off the origin.
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show unitLabelAttrib;
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart' show PlanController;
++import 'package:jet_cad_2d_plan/src/symbols/symbol_placer.dart'
++    show placeSymbol;
++import 'package:jet_cad_2d_plan/src/units/unit_rotate.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/harness.dart';
++import '../support/unit_fixtures.dart' show kDeg37, plan, unitIndexOf;
++import '../support/service_fixture.dart';
++import '../support/symbol_fixtures.dart' show settle;
++import '../support/test_kit.dart';
++import '../support/tool_events.dart';
++
++const Tolerance exact = Tolerance(linear: 0, angular: 0);
++
++GeometryPayload payloadOf(DraftDocument d, Handle entity) =>
++    d.geometry.read(d.entities.geomIndexAt(d.entities.slotOf(entity)!));
++
++/// The one new root-level instance [action] adds to [c]'s document.
++Handle placedBy(PlanController c, void Function() action) {
++  final d = c.document;
++  final before = {for (final n in d.tree.nodes) n.handle};
++  action();
++  return d.tree.nodes
++      .whereType<InstanceNode>()
++      .singleWhere((n) => !before.contains(n.handle))
++      .handle;
++}
++
++void main() {
++  TestWidgetsFlutterBinding.ensureInitialized();
++
++  test(
++      'UL-stack the lock sees the label system\'s stamps: a turn whose stamp '
++      'writes a locked handle is refused, nothing changed; unlocked, the '
++      'same turn passes and stamps (M-UL-stack)', () {
++    final f = serviceFixture();
++    final c = controllerFor(kits: [unitKit()], json: f.json);
++    final d = c.document;
++    final start = (d.tree[f.table]! as InstanceNode).transform;
++    final label0 = payloadOf(d, f.tableLabel);
++    // Positive control: the turn applies and stamps the label.
++    expect(c.execute(rotateUnitCommand(d, f.table, 1)!), isTrue);
++    expect(payloadOf(d, f.tableLabel), isNot(label0));
++    c.undo();
++    expect(payloadOf(d, f.tableLabel), label0);
++    // The label alone locked: it stands for any handle only a stamp
++    // touches. The turn itself touches the table, which is not locked.
++    c.lockBroken({f.tableLabel});
++    expect(c.isLocked(f.table), isFalse, reason: 'premise');
++    expect(c.execute(rotateUnitCommand(d, f.table, 1)!), isFalse);
++    expect(c.lockHint.value, isTrue);
++    expect((d.tree[f.table]! as InstanceNode).transform.equals(start, exact),
++        isTrue);
++    expect(payloadOf(d, f.tableLabel), label0);
++  });
++
++  test(
++      'UL-place-number a placed numbered unit gets the next number as its '
++      'UNIT label in the placement\'s one step, upright though turned and '
++      'mirrored; the symbol tool numbers through the controller\'s index '
++      '(M-UL-number, M-UL-tool)', () async {
++    final f = serviceFixture();
++    final c = controllerFor(kits: [unitKit()], json: f.json);
++    await settle();
++    final d = c.document;
++    final entry = c.symbolById(tableSymbolId)!.entry;
++    final depth = d.commands.undoDepth;
++    final first = placedBy(
++        c,
++        () => expect(
++            c.execute(placeSymbol(d, entry,
++                at: Vector2(-6100.25, 4300.5),
++                quarterTurns: 3,
++                mirrored: true,
++                units: c.unitIndex)),
++            isTrue));
++    expect(d.commands.undoDepth, depth + 1, reason: 'one step');
++    final [(label, text)] = unitLabelsOf(d, first);
++    expect(text, '13', reason: 'the table is 12; seats do not count');
++    final node = d.tree[first]! as InstanceNode;
++    expect(node.transform.determinant, lessThan(0), reason: 'premise');
++    expectUprightLabel(d, label, node.transform);
++    expect(payloadOf(d, label).coords,
++        [entry.definition.basePoint.x, entry.definition.basePoint.y]);
++
++    // The placer's own stamp, without the label system to mask it: on a
++    // bare document the placement alone leaves the label upright.
++    final bare = plan();
++    bare.commands.execute(placeSymbol(bare, entry,
++        at: Vector2(-6100.25, 4300.5),
++        quarterTurns: 3,
++        mirrored: true,
++        units: unitIndexOf(bare)));
++    final bareUnit = bare.tree.nodes.whereType<InstanceNode>().single;
++    final [(bareLabel, _)] = unitLabelsOf(bare, bareUnit.handle);
++    expectUprightLabel(bare, bareLabel, bareUnit.transform);
++
++    useTestCamera(c);
++    expect(c.armSymbol(c.symbolById(tableSymbolId)!), isTrue);
++    final second = placedBy(c, () => tapAt(c, Vector2(7300.75, -5200.5)));
++    expect([for (final l in unitLabelsOf(d, second)) l.$2], ['14']);
++  });
++
++  test(
++      'UL-assigned an assigned unit placed gets no label; a numbered one '
++      'placed after it takes the next number (M-UL-assigned)', () {
++    final f = serviceFixture();
++    final c = controllerFor(kits: [unitKit()], json: f.json);
++    final d = c.document;
++    final seat = placedBy(
++        c,
++        () => expect(
++            c.execute(placeSymbol(d, testEntry(rowSeatKey),
++                at: Vector2(3300.5, 6100.25),
++                quarterTurns: 2,
++                units: c.unitIndex)),
++            isTrue));
++    expect(unitLabelsOf(d, seat), isEmpty);
++    final booth = placedBy(
++        c,
++        () => expect(
++            c.execute(placeSymbol(d, testEntry(boothSymbolId),
++                at: Vector2(-7200.75, -1100.5),
++                quarterTurns: 1,
++                mirrored: true,
++                units: c.unitIndex)),
++            isTrue));
++    expect([for (final l in unitLabelsOf(d, booth)) l.$2], ['13']);
++  });
++
++  test(
++      'UL-seat a seat a row\'s regeneration adds keeps its type\'s label, '
++      'stamped for the world: the label system stamps placed units only '
++      '(M-UL-root)', () {
++    final f = serviceFixture();
++    final c = controllerFor(kits: [unitKit()], json: f.json);
++    final d = c.document;
++    final p = d.components.get<RowComponent>(f.rowA)!;
++    final grown = p.copyWith(count: 7);
++    expect(c.execute(SetComponentCommand<RowComponent>(f.rowA, grown)), isTrue);
++    final seven = seatsOf(d, f.rowA);
++    expect(seven.sublist(0, 6), f.seatsA);
++    final added = seven.last;
++    final [(label, text)] = unitLabelsOf(d, added);
++    expect(text, 'A7');
++    final group = (d.tree[f.rowA]! as GroupNode).transform;
++    final toWorld = group.multiply((d.tree[added]! as InstanceNode).transform);
++    final want = unitLabelAttrib('A7',
++            instanceToWorld: toWorld, anchor: grown.base, top: grown.top)
++        .payload;
++    final got = payloadOf(d, label);
++    expect(got.coords, want.coords);
++    expect(got.scalars[0], want.scalars[0]);
++    expect(got.scalars[1], closeTo(want.scalars[1], 1e-12));
++    expect(got.scalars[2], want.scalars[2]);
++    expectUprightLabel(d, label, toWorld);
++  });
++
++  test(
++      'UL-turn-row a row group turned about a point off it keeps every seat '
++      'label upright for the world: the label system stamps nothing here, '
++      'the row\'s regeneration restamps (M-UL-turn)', () {
++    final f = serviceFixture();
++    final c = controllerFor(kits: [unitKit()], json: f.json);
++    final d = c.document;
++    final group = d.tree[f.rowA]! as GroupNode;
++    Transform2 toWorld(Handle seat) => (d.tree[f.rowA]! as GroupNode)
++        .transform
++        .multiply((d.tree[seat]! as InstanceNode).transform);
++    final seats = seatsOf(d, f.rowA);
++    final before = {
++      for (final s in seats) s: payloadOf(d, unitLabelsOf(d, s).single.$1),
++    };
++    final pivot = Vector2(-1750.5, 3300.25);
++    final turned = Transform2.translation(pivot.x, pivot.y)
++        .multiply(Transform2.rotation(kDeg37))
++        .multiply(Transform2.translation(-pivot.x, -pivot.y))
++        .multiply(group.transform);
++    expect(c.execute(TransformNodeCommand(f.rowA, turned)), isTrue);
++    expect(
++        (d.tree[f.rowA]! as GroupNode).transform.equals(group.transform, exact),
++        isFalse,
++        reason: 'premise: the row turned');
++    for (final s in seats) {
++      final [(label, _)] = unitLabelsOf(d, s);
++      expectUprightLabel(d, label, toWorld(s));
++      expect(payloadOf(d, label).scalars[1], isNot(before[s]!.scalars[1]),
++          reason: 'restamped for the new group transform');
++    }
++    c.undo();
++    for (final s in seats) {
++      final [(label, _)] = unitLabelsOf(d, s);
++      expectUprightLabel(d, label, toWorld(s));
++      expect(payloadOf(d, label), before[s]);
++    }
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/units/unit_label_system_test.dart b/packages/jet_cad_2d_plan/test/units/unit_label_system_test.dart
+new file mode 100644
+index 00000000..d87c73c9
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/units/unit_label_system_test.dart
+@@ -0,0 +1,431 @@
++// Ported from jet_cad_floor_plan/test/tables/table_label_system_test.dart,
++// table_data_test.dart (TD10) and table_label_test.dart (TL3); assertions
++// unchanged.
++// Spec 2b S2 "The label system": the unit label system keeps a placed
++// unit's label upright inside the edit that turns the unit, stacked on the
++// parametric system's expander. Units are placed off the origin, turned and
++// mirrored; the rotation is 37 degrees about a point that is neither the
++// origin nor the unit.
++import 'dart:ui' show Size;
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart'
++    show unitLabelPayload, unitLabelStamp;
++import 'package:jet_cad_2d_plan/src/symbols/symbol_placer.dart';
++import 'package:jet_cad_2d_plan/src/units/unit_index.dart' show UnitInfo;
++import 'package:jet_cad_2d_plan/src/units/unit_label.dart';
++import 'package:jet_cad_2d_plan/src/units/unit_label_system.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/box_kit.dart' show Switches, SquareParams, boxKit;
++import '../support/harness.dart' show catalogOf, registerPlanComponents;
++import '../support/unit_fixtures.dart';
++
++/// A plan with the parametric system and the label system installed, in
++/// the session's order, torn down in reverse.
++DraftDocument rig({DraftDocument? doc}) {
++  final catalog = catalogOf([boxKit(Switches())]);
++  final d = doc ?? plan(catalog: catalog);
++  final parametric = ParametricSystem(d, catalog)..install();
++  final labels = UnitLabelSystem(d)..install();
++  addTearDown(() {
++    labels.dispose();
++    parametric.dispose();
++  });
++  return d;
++}
++
++InstanceNode placeTable(DraftDocument doc, Vector2 at,
++    {int quarterTurns = 0, bool mirrored = false}) {
++  doc.commands.execute(placeSymbol(doc, entryOf(tableSymbol()),
++      at: at,
++      quarterTurns: quarterTurns,
++      mirrored: mirrored,
++      units: unitIndexOf(doc)));
++  return doc.tree.nodes
++      .whereType<InstanceNode>()
++      .reduce((a, b) => a.handle.value > b.handle.value ? a : b);
++}
++
++/// The unit placed last in [doc], as the index reads it.
++UnitInfo placeUnit(DraftDocument doc, Vector2 at,
++    {int quarterTurns = 0, bool mirrored = false}) {
++  final node =
++      placeTable(doc, at, quarterTurns: quarterTurns, mirrored: mirrored);
++  return unitIndexOf(doc)[node.handle]!;
++}
++
++/// The grip drag's rotate: `T_about(pivot) · R(theta) · T(-pivot)` after the
++/// node's transform, in a `Rotate` compound.
++DraftCommand rotate(InstanceNode node, double theta, Vector2 pivot) =>
++    CompoundCommand([
++      TransformNodeCommand(
++          node.handle,
++          Transform2.translation(pivot.x, pivot.y)
++              .multiply(Transform2.rotation(theta))
++              .multiply(Transform2.translation(-pivot.x, -pivot.y))
++              .multiply(node.transform)),
++    ], label: 'Rotate');
++
++GeometryPayload labelPayload(DraftDocument doc, Handle instance) {
++  final label = unitIndexOf(doc)[instance]!.label!;
++  return doc.geometry
++      .read(doc.entities.geomIndexAt(doc.entities.slotOf(label)!));
++}
++
++/// The label's world linear map: the instance's linear part times the
++/// text's own, `R(rotation) · diag(widthFactor, 1)`.
++Transform2 labelWorldLinear(DraftDocument doc, Handle instance) {
++  final t = (doc.tree[instance]! as InstanceNode).transform;
++  final s = labelPayload(doc, instance).scalars;
++  return Transform2(t.a, t.b, t.c, t.d, 0, 0)
++      .multiply(Transform2.rotation(s[1]))
++      .multiply(Transform2.scale(s[2], 1));
++}
++
++void expectUpright(DraftDocument doc, Handle instance) {
++  final w = labelWorldLinear(doc, instance);
++  expect([
++    w.a,
++    w.b,
++    w.c,
++    w.d
++  ], [
++    closeTo(1, 1e-12),
++    closeTo(0, 1e-12),
++    closeTo(0, 1e-12),
++    closeTo(1, 1e-12)
++  ]);
++}
++
++final Vector2 pivot = Vector2(-1750, 3300);
++
++void main() {
++  test(
++      'LS1 a 37° turn of a mirrored table stamps its number upright in the '
++      'same step; undo and redo carry both (M-14a-8, M-14a-10)', () async {
++    final doc = rig();
++    final node = placeTable(doc, Vector2(2400, -1300), mirrored: true);
++    final before = labelPayload(doc, node.handle);
++    expectUpright(doc, node.handle);
++    final depth = doc.commands.undoDepth;
++    final label = unitIndexOf(doc).units.single.label!;
++    final applied = <CommandApplied>[];
++    final sub = doc.changes.listen((c) {
++      if (c is CommandApplied) applied.add(c);
++    });
++    addTearDown(sub.cancel);
++
++    doc.commands.execute(rotate(node, kDeg37, pivot));
++    await pumpEventQueue();
++
++    expect(applied.single.capability, Capability.geometry,
++        reason: 'a label was written (F-2\'s rule, review F-8)');
++    expect(applied.single.touched, containsAll([node.handle, label]));
++    expect(applied.single.label, 'Rotate');
++    expect(doc.commands.undoDepth, depth + 1, reason: 'one step, not two');
++    expectUpright(doc, node.handle);
++    final after = labelPayload(doc, node.handle);
++    expect(after.coords, before.coords, reason: 'the anchor stays put');
++    expect(after.scalars[0], before.scalars[0]);
++    expect(after.scalars[1], isNot(before.scalars[1]));
++
++    doc.commands.undo();
++    expect((doc.tree[node.handle]! as InstanceNode).transform, node.transform);
++    expect(labelPayload(doc, node.handle), before);
++    doc.commands.redo();
++    expect(labelPayload(doc, node.handle), after);
++    expectUpright(doc, node.handle);
++  });
++
++  test(
++      'LS2 a translation writes no label: the edit touches the table only '
++      'and stays a transform (M-14a-9)', () async {
++    final doc = rig();
++    final node = placeTable(doc, Vector2(-900, 4100), quarterTurns: 3);
++    final label = unitIndexOf(doc).units.single.label!;
++    final before = labelPayload(doc, node.handle);
++    final changes = <DocChange>[];
++    final sub = doc.changes.listen(changes.add);
++    addTearDown(sub.cancel);
++
++    doc.commands.execute(CompoundCommand([
++      TransformNodeCommand(node.handle,
++          Transform2.translation(1234.5, -678.25).multiply(node.transform)),
++    ], label: 'Move'));
++    await pumpEventQueue();
++
++    expect(labelPayload(doc, node.handle), before);
++    final applied = changes.whereType<CommandApplied>().single;
++    expect(applied.touched, {node.handle});
++    expect(applied.touched.contains(label), isFalse);
++    expect(applied.capability, Capability.transform);
++  });
++
++  test(
++      'LS3 stacked on the parametric system: a box still regenerates, a '
++      'table still stamps (M-14a-11)', () {
++    final doc = rig();
++    final box = doc.handleSeed.next();
++    doc.commands.execute(CompoundCommand([
++      AddNodeCommand(GroupNode(
++          handle: box,
++          parent: doc.rootHandle,
++          transform: Transform2.translation(5000, 5000),
++          children: const [])),
++      SetComponentCommand<SquareParams>(box, const SquareParams(side: 1200)),
++    ], label: 'Add box'));
++    final lines = doc.entities.liveSlots
++        .where((s) => doc.entities.ownerAt(s) == box)
++        .length;
++    expect(lines, 4, reason: 'the parametric system regenerated the box');
++
++    final node = placeTable(doc, Vector2(-2500, -2500), quarterTurns: 1);
++    doc.commands.execute(rotate(node, -kDeg37, pivot));
++    expectUpright(doc, node.handle);
++  });
++
++  test(
++      'LS4 dispose in the shell\'s order empties the slot; a slot taken '
++      'by someone else is not released, and asserts', () {
++    final doc = plan();
++    final parametric = ParametricSystem(doc, ParametricCatalog())..install();
++    final tables = UnitLabelSystem(doc)..install();
++    tables.dispose();
++    parametric.dispose();
++    expect(doc.commands.expander, isNull);
++
++    final again = ParametricSystem(doc, ParametricCatalog())..install();
++    final tables2 = UnitLabelSystem(doc)..install();
++    DraftCommand other(DraftCommand c) => c;
++    doc.commands.expander = other;
++    expect(tables2.dispose, throwsA(isA<AssertionError>()));
++    expect(doc.commands.expander, other,
++        reason: 'never releases a slot it does not hold');
++    doc.commands.expander = null;
++    again.dispose();
++  });
++
++  test(
++      'LS5 a turn executed under transform-only permissions undoes and '
++      'redoes there (M-14a-20)', () {
++    final doc = rig();
++    final node = placeTable(doc, Vector2(3100, 2700), mirrored: true);
++    doc.commands.permissions = DraftPermissions.runtime;
++    doc.commands.execute(rotate(node, kDeg37, pivot));
++    expectUpright(doc, node.handle);
++
++    expect(doc.commands.undo, returnsNormally);
++    expectUpright(doc, node.handle);
++    expect(doc.commands.redo, returnsNormally);
++    expectUpright(doc, node.handle);
++  });
++
++  test('LS6 a plan with no servable symbol is passed through unwrapped', () {
++    final doc = rig();
++    final seen = <DraftCommand>[];
++    final inner = doc.commands.expander!;
++    doc.commands.expander = (c) {
++      final out = inner(c);
++      seen.add(out);
++      return out;
++    };
++    doc.commands.execute(
++        placeSymbol(doc, entryOf(planterSymbol), at: Vector2(600, -600)));
++    expect(seen.single, isNot(isA<UnitLabelEdit>()));
++    doc.commands.expander = inner;
++  });
++
++  test(
++      'LS6b the number is the lowest-handle label, and that one is stamped; '
++      'a servable instance in a group is not stamped (review F-8)', () {
++    final doc = rig();
++    final early = doc.handleSeed.next();
++    final node = placeTable(doc, Vector2(2400, -1300), mirrored: true);
++    final placed = unitIndexOf(doc).units.single.label!;
++    final extra = addUnitLabelCommand(doc,
++        instance: node.handle,
++        definition: node.definition,
++        placement: node.transform,
++        text: '8');
++    doc.commands.execute(AddEntityCommand(
++        record: extra.record.copyWith(handle: early), payload: extra.payload));
++    expect(unitIndexOf(doc).units.single.label, early);
++    GeometryPayload read(Handle h) =>
++        doc.geometry.read(doc.entities.geomIndexAt(doc.entities.slotOf(h)!));
++    final placedBefore = read(placed);
++
++    doc.commands.execute(rotate(node, kDeg37, pivot));
++    expectUpright(doc, node.handle);
++    expect(read(placed), placedBefore, reason: 'only the number is stamped');
++
++    // A servable instance under a group, with a UNIT label of its own.
++    final group = doc.handleSeed.next();
++    doc.commands.execute(AddNodeCommand(GroupNode(
++        handle: group,
++        parent: doc.rootHandle,
++        transform: Transform2.translation(-4000, 300),
++        children: const [])));
++    final nested = doc.handleSeed.next();
++    doc.commands.execute(AddNodeCommand(InstanceNode(
++        handle: nested,
++        parent: group,
++        transform: placementAt(100, 200, 0),
++        definition: node.definition,
++        layer: ReservedHandles.layerZero)));
++    final nestedLabel = addUnitLabelCommand(doc,
++        instance: nested,
++        definition: node.definition,
++        placement: placementAt(100, 200, 0),
++        text: '9');
++    doc.commands.execute(nestedLabel);
++    final before = read(nestedLabel.record.handle);
++    doc.commands.execute(TransformNodeCommand(
++        nested, placementAt(100, 200, kDeg37, mirrored: true)));
++    expect(read(nestedLabel.record.handle), before,
++        reason: 'not a table in v1 (T1)');
++  });
++
++  test('TL3 restamp: nothing for a translation; new scalars for a turn', () {
++    final p = placementAt(500, 600, kDeg37, mirrored: true);
++    final payload = unitLabelPayload(
++        anchor: Vector2(900, 700), height: 152, instanceToWorld: p);
++    final moved = Transform2.translation(-2500, 1250).multiply(p);
++    expect(restampedUnitLabel(payload, moved), isNull);
++
++    final turned = Transform2.rotation(0.3).multiply(p);
++    final next = restampedUnitLabel(payload, turned)!;
++    expect(next.coords, [900, 700]);
++    expect(next.scalars[0], 152);
++    final s = unitLabelStamp(turned);
++    expect(next.scalars.sublist(1), [s.rotation, s.widthFactor]);
++  });
++
++  test(
++      'TD10 all or nothing: a stamp that throws after another stamp '
++      'puts that one back with the edit', () {
++    final doc = rig();
++    final a = placeUnit(doc, Vector2(41200, -27300), quarterTurns: 1);
++    final b = placeUnit(doc, Vector2(44700, -27300), mirrored: true);
++    final before = DraftDocumentCodec.encodeToString(doc);
++    Transform2 turned(UnitInfo t, double x, double y) =>
++        Transform2.translation(x, y)
++            .multiply(Transform2.rotation(kDeg37))
++            .multiply(Transform2.translation(-x, -y))
++            .multiply((doc.tree[t.instance]! as InstanceNode).transform);
++    final edit = doc.commands.expander!(CompoundCommand([
++      TransformNodeCommand(a.instance, turned(a, 41200, -27300)),
++      TransformNodeCommand(b.instance, turned(b, 44700, -27300)),
++    ], label: 'Turn both'));
++    expect(edit, isA<UnitLabelEdit>());
++    final target =
++        _RefusingTarget(doc, a.label!, payloadOfLabel(doc, a.label!));
++    expect(() => edit.apply(target), throwsA(isA<_Refused>()));
++    expect(target.refused, isTrue,
++        reason: 'premise: A\'s stamp wrote before B\'s read was refused');
++    expect(DraftDocumentCodec.encodeToString(doc), before,
++        reason: 'both tables unturned, A\'s label as it was');
++  });
++
++  group('the drawn label (render check, F-16)', () {
++    /// The residual the painter hands `DrawSink.text` for [doc]'s label,
++    /// through [camera] over [size].
++    Transform2 textResidual(
++        DraftDocument doc, ViewportTransform camera, Size size) {
++      final index = SpatialIndex(doc);
++      addTearDown(index.dispose);
++      final painter = DraftPainter(
++          document: doc, index: index, resolver: DocumentStyleResolver(doc));
++      final sink = RecordingDrawSink();
++      painter.paint(sink, camera, size);
++      final ops = sink.ops;
++      final at = ops.indexWhere((op) => op is TextOp);
++      expect(at, greaterThan(0), reason: 'the label was drawn');
++      return (ops[at - 1] as BeginResidualOp).residual;
++    }
++
++    void expectCameraAligned(Transform2 r, ViewportTransform camera) {
++      final c = camera.worldToScreenMatrix;
++      final k = r.a / c.a;
++      expect(k, greaterThan(0));
++      expect(r.b, closeTo(k * c.b, 1e-9 * k.abs()));
++      expect(r.c, closeTo(k * c.c, 1e-9 * k.abs()));
++      expect(r.d, closeTo(k * c.d, 1e-9 * k.abs()));
++    }
++
++    test('LS7 on the screen camera and the page camera', () {
++      final doc =
++          rig(doc: DraftDocument.empty(measurer: MetricModelMeasurer()));
++      registerPlanComponents(doc.components, ParametricCatalog());
++      final page = PageComponent();
++      final sheet = sheetWorldRect(page);
++      final centre = Vector2((sheet.minX + sheet.maxX) / 2 + 300,
++          (sheet.minY + sheet.maxY) / 2 - 200);
++      final node = placeTable(doc, centre, mirrored: true);
++      doc.commands.execute(rotate(node, kDeg37, centre + Vector2(450, 0)));
++
++      const size = Size(800, 600);
++      final screen = ViewportTransform.fit(doc.extents, size);
++      expectCameraAligned(textResidual(doc, screen, size), screen);
++
++      final paper = pageCamera(page, 72 / 25.4);
++      expectCameraAligned(
++          textResidual(doc, paper.camera, paper.size), paper.camera);
++    });
++  });
++}
++
++final class _Refused implements Exception {}
++
++GeometryPayload payloadOfLabel(DraftDocument doc, Handle label) =>
++    doc.geometry.read(doc.entities.geomIndexAt(doc.entities.slotOf(label)!));
++
++bool samePayload(GeometryPayload x, GeometryPayload y) =>
++    x.coords.length == y.coords.length &&
++    x.scalars.length == y.scalars.length &&
++    [for (var i = 0; i < x.coords.length; i++) x.coords[i] == y.coords[i]]
++        .every((e) => e) &&
++    [for (var i = 0; i < x.scalars.length; i++) x.scalars[i] == y.scalars[i]]
++        .every((e) => e);
++
++/// [doc] as a command target whose geometry -- read by a label stamp --
++/// is refused once, the first time it is asked for after [stamped]'s
++/// payload has changed from [unstamped]: so the edit throws with that
++/// stamp applied, and the rollback (which reads geometry again) is let
++/// through.
++final class _RefusingTarget implements CommandTarget {
++  _RefusingTarget(this.doc, this.stamped, this.unstamped);
++
++  final DraftDocument doc;
++  final Handle stamped;
++  final GeometryPayload unstamped;
++  bool refused = false;
++
++  @override
++  GeometryStore get geometry {
++    if (!refused && !samePayload(payloadOfLabel(doc, stamped), unstamped)) {
++      refused = true;
++      throw _Refused();
++    }
++    return doc.geometry;
++  }
++
++  @override
++  EntityStore get entities => doc.entities;
++  @override
++  DocumentTree get tree => doc.tree;
++  @override
++  DocumentTables get tables => doc.tables;
++  @override
++  ComponentRegistry get components => doc.components;
++  @override
++  HandleSeed get handleSeed => doc.handleSeed;
++  @override
++  DocumentHeader get header => doc.header;
++  @override
++  FillIndex get fills => doc.fills;
++  @override
++  void invalidateDerived() => doc.invalidateDerived();
++}
+diff --git a/packages/jet_cad_2d_plan/test/units/unit_placement_test.dart b/packages/jet_cad_2d_plan/test/units/unit_placement_test.dart
+new file mode 100644
+index 00000000..28ed7021
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/units/unit_placement_test.dart
+@@ -0,0 +1,160 @@
++// Ported from jet_cad_floor_plan/test/tables/table_placement_test.dart;
++// assertions unchanged.
++// Spec 2b S2 "The label" (placed): placing a numbered unit numbers it,
++// inside the placement's one undo step; an unnumbered symbol is not
++// numbered; the palette's thumbnails are not numbered. Placements are off
++// the origin, turned and mirrored.
++import 'dart:math' as math;
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart'
++    show KitNames, SymbolEntry, unitLabelStamp;
++import 'package:jet_cad_2d_plan/src/symbols/plan_symbol.dart';
++import 'package:jet_cad_2d_plan/src/symbols/symbol_placer.dart';
++import 'package:jet_cad_2d_plan/src/symbols/thumbnail_document.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/service_fixture.dart' show testEntry;
++import '../support/test_kit.dart' show tableSymbolId;
++import '../support/unit_fixtures.dart';
++
++/// Places [entry]; returns the new instance's handle.
++Handle place(DraftDocument doc, SymbolEntry entry, Vector2 at,
++    {int quarterTurns = 0, bool mirrored = false}) {
++  final before = {for (final n in doc.tree.nodes) n.handle};
++  doc.commands.execute(placeSymbol(doc, entry,
++      at: at,
++      quarterTurns: quarterTurns,
++      mirrored: mirrored,
++      units: unitIndexOf(doc)));
++  return doc.tree.nodes
++      .whereType<InstanceNode>()
++      .singleWhere((n) => !before.contains(n.handle))
++      .handle;
++}
++
++/// Every ATTRIB in [doc]: (handle, owner, text, tag).
++List<(Handle, Handle, String, String)> attribs(DraftDocument doc) {
++  final e = doc.entities;
++  return [
++    for (final s in e.liveSlots)
++      if (e.kindAt(s) == EntityKind.attrib)
++        (e.handleAt(s), e.ownerAt(s), e.textAt(s), e.tagAt(s))
++  ]..sort((a, b) => a.$1.value.compareTo(b.$1.value));
++}
++
++List<String?> numbers(DraftDocument doc) =>
++    [for (final u in unitIndexOf(doc).units) u.text];
++
++void main() {
++  test(
++      'TP1 a turned, mirrored placement adds its label in the same step; '
++      'undo and redo take and give both', () {
++    final doc = plan();
++    final depth = doc.commands.undoDepth;
++    final i = place(doc, entryOf(tableSymbol()), Vector2(-3700, 2900),
++        quarterTurns: 3, mirrored: true);
++    expect(doc.commands.undoDepth, depth + 1);
++
++    final [(label, owner, text, tag)] = attribs(doc);
++    expect((owner, text, tag), (i, '1', 'UNIT'));
++    final slot = doc.entities.slotOf(label)!;
++    expect(doc.entities.layerAt(slot), ReservedHandles.layerZero);
++    final payload = doc.geometry.read(doc.entities.geomIndexAt(slot));
++    expect(payload.coords, [900, 700], reason: 'the top centre, local');
++    final node = doc.tree[i]! as InstanceNode;
++    final s = unitLabelStamp(node.transform);
++    expect(payload.scalars, [200, s.rotation, s.widthFactor]);
++    expect(s.widthFactor, -1.0);
++
++    doc.commands.undo();
++    expect(doc.tree[i], isNull);
++    expect(attribs(doc), isEmpty);
++    doc.commands.redo();
++    expect(attribs(doc), [(label, i, '1', 'UNIT')],
++        reason: 'redo replays the same handle and number');
++    expect(doc.validate(), isEmpty);
++  });
++
++  test(
++      'TP2 an unservable symbol gets no label and takes no number '
++      '(M-14a-13)', () {
++    final doc = plan();
++    place(doc, entryOf(tableSymbol()), Vector2(-2000, 0), quarterTurns: 1);
++    place(doc, entryOf(stoolSymbol), Vector2(0, 1500));
++    final planter = place(doc, entryOf(planterSymbol), Vector2(1200, -900));
++    place(doc, entryOf(tableSymbol()), Vector2(3000, 600), mirrored: true);
++    expect(numbers(doc), ['1', '2', '3']);
++    expect(attribs(doc).any((a) => a.$2 == planter), isFalse);
++  });
++
++  test(
++      'TP3 two placements of one symbol share a definition and keep their '
++      'own numbers (M-14a-16)', () {
++    final doc = plan();
++    final entry = entryOf(tableSymbol());
++    final a = place(doc, entry, Vector2(-2000, 800), quarterTurns: 1);
++    final b = place(doc, entry, Vector2(2600, -800), mirrored: true);
++    expect((doc.tree[a]! as InstanceNode).definition,
++        (doc.tree[b]! as InstanceNode).definition);
++    final labels = attribs(doc);
++    expect([for (final l in labels) l.$2], [a, b],
++        reason: 'each label is owned by its instance, not the definition');
++    doc.commands.execute(SetEntityTextCommand(labels.first.$1, '15', 'UNIT'));
++    expect(numbers(doc), ['15', '2']);
++  });
++
++  test(
++      'TP4 a deleted table\'s number is free again; the next follows the '
++      'live maximum (M-14a-2)', () {
++    final doc = plan();
++    final entry = entryOf(tableSymbol());
++    final placed = [
++      for (var k = 0; k < 5; k++)
++        place(doc, entry, Vector2(1500.0 * k - 3000, 700), quarterTurns: k)
++    ];
++    expect(numbers(doc), ['1', '2', '3', '4', '5']);
++    final fifth = attribs(doc).last;
++    doc.commands.execute(CompoundCommand(
++        [RemoveEntityCommand(fifth.$1), RemoveNodeCommand(placed.last)],
++        label: 'Delete'));
++    place(doc, entry, Vector2(0, -2500));
++    expect(numbers(doc), ['1', '2', '3', '4', '5']);
++  });
++
++  test(
++      'TP5 the Q-2 ruling: the only table renamed 101, the next placement '
++      'is 102', () {
++    final doc = plan();
++    final entry = entryOf(stoolSymbol);
++    place(doc, entry, Vector2(-900, 400));
++    doc.commands
++        .execute(SetEntityTextCommand(attribs(doc).single.$1, '101', 'UNIT'));
++    place(doc, entry, Vector2(900, 400), quarterTurns: 2);
++    expect(numbers(doc), ['101', '102']);
++  });
++
++  test('TP6 a palette thumbnail carries no number (M-14a-17)', () {
++    final thumb = symbolThumbnailDocument(PlanSymbol(
++        kitId: fxKitId, names: KitNames.empty, entry: entryOf(tableSymbol())));
++    expect(thumb.tree.nodes.whereType<InstanceNode>(), hasLength(1));
++    expect(attribs(thumb), isEmpty);
++  });
++
++  test(
++      'TP7 the unit kit\'s square table places numbered, its label inside '
++      'the top', () {
++    final round = testEntry(tableSymbolId);
++    final doc = plan();
++    place(doc, round, Vector2(-1234, 5678), quarterTurns: 1);
++    final [(label, _, text, _)] = attribs(doc);
++    expect(text, '1');
++    final payload = doc.geometry
++        .read(doc.entities.geomIndexAt(doc.entities.slotOf(label)!));
++    expect(payload.coords,
++        [round.definition.basePoint.x, round.definition.basePoint.y]);
++    expect(payload.scalars[0], 200);
++    expect(payload.scalars[1], -math.pi / 2);
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/units/unit_rotate_test.dart b/packages/jet_cad_2d_plan/test/units/unit_rotate_test.dart
+new file mode 100644
+index 00000000..610baf6f
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/units/unit_rotate_test.dart
+@@ -0,0 +1,100 @@
++// Ported from jet_cad_floor_plan/test/tables/table_section_test.dart (TS9,
++// TS10); assertions unchanged.
++// Spec 2b S4: the unit section's quarter turn about the base point, and the
++// label following its unit to a hidden layer (T8). Units are placed off the
++// origin, turned and mirrored.
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/authoring.dart' show CatalogSymbol;
++import 'package:jet_cad_2d_plan/src/symbols/symbol_placer.dart';
++import 'package:jet_cad_2d_plan/src/units/unit_label_system.dart';
++import 'package:jet_cad_2d_plan/src/units/unit_rotate.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/unit_fixtures.dart';
++
++/// A plan with the parametric and label systems, as the session has them.
++DraftDocument rig() {
++  final doc = plan();
++  final parametric = ParametricSystem(doc, ParametricCatalog())..install();
++  final labels = UnitLabelSystem(doc)..install();
++  addTearDown(() {
++    labels.dispose();
++    parametric.dispose();
++  });
++  return doc;
++}
++
++Handle placeOne(DraftDocument doc, CatalogSymbol s, Vector2 at,
++    {int quarterTurns = 0, bool mirrored = false}) {
++  doc.commands.execute(placeSymbol(doc, entryOf(s),
++      at: at,
++      quarterTurns: quarterTurns,
++      mirrored: mirrored,
++      units: unitIndexOf(doc)));
++  return doc.tree.nodes
++      .whereType<InstanceNode>()
++      .reduce((a, b) => a.handle.value > b.handle.value ? a : b)
++      .handle;
++}
++
++List<double> parts(Transform2 t) => [t.a, t.b, t.c, t.d, t.e, t.f];
++
++void main() {
++  test(
++      'TS9 a 37°-turned table: the base point stays, the linear part turns '
++      'exactly, four turns return within rounding', () {
++    final doc = rig();
++    final a = placeOne(doc, tableSymbol(), Vector2(-2300.5, 1700.25));
++    final node0 = doc.tree[a]! as InstanceNode;
++    doc.commands.execute(TransformNodeCommand(
++        a, placementAt(-2300.5, 1700.25, kDeg37, mirrored: true)));
++    final start = (doc.tree[a]! as InstanceNode).transform;
++    expect(parts(start), isNot(parts(node0.transform)));
++    for (var k = 0; k < 4; k++) {
++      doc.commands.execute(rotateUnitCommand(doc, a, 1)!);
++      final t = (doc.tree[a]! as InstanceNode).transform;
++      final w = t.transformPoint(Vector2(900, 700));
++      expect(w.x, closeTo(-2300.5, 1e-9));
++      expect(w.y, closeTo(1700.25, 1e-9));
++    }
++    final end = (doc.tree[a]! as InstanceNode).transform;
++    expect([end.a, end.b, end.c, end.d], [start.a, start.b, start.c, start.d]);
++    expect(end.e, closeTo(start.e, 1e-9));
++    expect(end.f, closeTo(start.f, 1e-9));
++  });
++
++  test(
++      'TS10 a table moved to a hidden layer hides its number; back, it shows '
++      '(M-14a-12)', () {
++    final doc = rig();
++    final layerA = doc.handleSeed.next();
++    final layerB = doc.handleSeed.next();
++    final zero = doc.tables.layers[ReservedHandles.layerZero]!;
++    for (final (h, name, visible) in [
++      (layerA, 'A', true),
++      (layerB, 'B', false),
++    ]) {
++      doc.commands.execute(AddLayerCommand(LayerRecord(
++          handle: h,
++          name: name,
++          color: const IndexedColor(3),
++          linetype: zero.linetype,
++          lineweight: zero.lineweight,
++          transparency: zero.transparency,
++          visible: visible,
++          locked: false)));
++    }
++    doc.commands.execute(SetCurrentLayerCommand(layerA));
++    final a =
++        placeOne(doc, tableSymbol(), Vector2(-2300, 1700), mirrored: true);
++    final slot = doc.entities.slotOf(unitIndexOf(doc).units.single.label!)!;
++    bool drawn() =>
++        FilterEvaluator(doc).acceptsEntity(slot, const QueryFilter.rendering());
++    expect(drawn(), isTrue);
++    doc.commands.execute(SetInstanceLayerCommand(a, layerB));
++    expect(drawn(), isFalse);
++    doc.commands.execute(SetInstanceLayerCommand(a, layerA));
++    expect(drawn(), isTrue);
++  });
++}

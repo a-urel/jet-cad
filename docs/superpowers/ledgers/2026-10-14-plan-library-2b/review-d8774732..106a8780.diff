@@ -1,0 +1,3305 @@
+# Review package: d8774732..HEAD
+
+## Commits
+106a8780 feat(plan): unit words, the unit section and the unit inspector (2b S4)
+
+## Files changed
+ .../lib/src/controller/plan_controller.dart        |   7 +
+ .../lib/src/editor/plan_editor.dart                |  25 ++
+ .../lib/src/editor/unit_inspector.dart             | 126 ++++++
+ packages/jet_cad_2d_plan/lib/src/l10n/strings.dart |  38 ++
+ .../jet_cad_2d_plan/lib/src/l10n/strings_de.dart   |  56 ++-
+ .../jet_cad_2d_plan/lib/src/l10n/strings_en.dart   |  55 ++-
+ .../jet_cad_2d_plan/lib/src/l10n/strings_tr.dart   |  54 ++-
+ .../jet_cad_2d_plan/lib/src/panels/colour_row.dart |  30 +-
+ .../lib/src/panels/plan_property_panel.dart        | 171 +++++++-
+ .../lib/src/panels/unit_section.dart               |  32 ++
+ .../jet_cad_2d_plan/lib/src/units/unit_index.dart  |   8 +-
+ .../jet_cad_2d_plan/lib/src/units/unit_words.dart  |  22 ++
+ .../test/editor/editor_words_test.dart             |  30 +-
+ .../test/editor/unit_inspector_test.dart           | 283 ++++++++++++++
+ .../test/editor/units_only_select_test.dart        |  58 +++
+ .../test/l10n/stale_error_test.dart                |  73 ++++
+ .../jet_cad_2d_plan/test/l10n/unit_words_test.dart | 118 ++++++
+ .../test/l10n/value_words_test.dart                |  25 ++
+ .../test/panels/colour_row_test.dart               | 332 +++++++++++++++-
+ .../test/panels/hover_removal_test.dart            |  43 +-
+ .../test/panels/symbol_section_test.dart           |  77 +++-
+ .../test/panels/unit_section_test.dart             | 435 +++++++++++++++++++++
+ .../test/support/recording_plan_strings.dart       |  32 ++
+ 23 files changed, 2109 insertions(+), 21 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart b/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
+index 73bc806a..d0c34b85 100644
+--- a/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
++++ b/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
+@@ -497,20 +497,27 @@ class PlanController extends ChangeNotifier {
+   /// unsettled; null for a settled or a loaded plan.
+   ({DraftDocument document, int at})? _unsettled;
+ 
+   /// The last locale a widget reported, for [newPlan].
+   Locale? _reported;
+ 
+   /// The language class the last report carried (a host's own, NS7), or
+   /// null when it carried none.
+   PlanStrings? _reportedStrings;
+ 
++  /// The language class the widgets last reported (a host's own included),
++  /// else the built-in language of [locale]: the plan library's words
++  /// outside a widget (the unit kinds', `unitKindWord`).
++  @internal
++  PlanStrings get planStrings =>
++      _reportedStrings ?? PlanStrings.forLocale(_locale.value);
++
+   /// A new plan's separator under [locale]: the reported class's, else the
+   /// built-in language's.
+   DecimalSeparator _separatorOf(Locale locale) =>
+       documentSeparatorFor(_reportedStrings ?? PlanStrings.forLocale(locale));
+ 
+   /// The plan's text: the engine's JSON with the manifest of the kits it
+   /// uses (Task 7). [markSaved] marks the state encoded here. An empty plan
+   /// read here is settled as it is.
+   ///
+   /// A damaged plan (E3) is first read back; if it does not encode or does
+diff --git a/packages/jet_cad_2d_plan/lib/src/editor/plan_editor.dart b/packages/jet_cad_2d_plan/lib/src/editor/plan_editor.dart
+index 96d5a0e2..1d99969f 100644
+--- a/packages/jet_cad_2d_plan/lib/src/editor/plan_editor.dart
++++ b/packages/jet_cad_2d_plan/lib/src/editor/plan_editor.dart
+@@ -28,22 +28,24 @@ import '../l10n/strings.dart';
+ import '../panels/frame_safe_relay.dart';
+ import '../panels/plan_layer_panel.dart';
+ import '../panels/plan_page_panel.dart';
+ import '../panels/plan_property_panel.dart';
+ import '../panels/plan_symbol_gallery.dart';
+ import '../shortcuts/plan_shortcut_guard.dart';
+ import '../shortcuts/plan_shortcuts.dart';
+ import '../symbols/plan_symbol.dart';
+ import '../theme/plan_theme.dart';
+ import '../tools/generic_tools.dart';
++import '../units/unit_detail.dart';
+ import 'plan_editor_bar.dart';
+ import 'plan_tool_palette.dart';
++import 'unit_inspector.dart';
+ 
+ /// A host's file command: called after the editor settles pending input.
+ typedef PlanFileCallback = Future<void> Function();
+ 
+ /// The design-mode editor over [controller] (2a spec P2): the top bar
+ /// ([bar]); the tool palette, or the Tools and Symbols tabs when a loaded
+ /// kit has symbols, on the left; the canvas; the property, layer and page
+ /// panels on the right. Every widget in it takes only the controller.
+ ///
+ /// The bar's Export (only with [onExport]) and Print run the controller's
+@@ -77,38 +79,50 @@ class PlanEditor extends StatefulWidget {
+     this.onSave,
+     this.onSaveAs,
+     this.onExport,
+     this.onExportDialog,
+     this.onPageFlowError,
+     this.printer,
+     this.exportName = 'plan',
+     this.shortcuts = true,
+     this.autofocus = true,
+     this.theme,
++    this.unitInspectorBuilder,
+   });
+ 
+   final PlanController controller;
+ 
+   /// Whether the left column offers the tool palette.
+   final bool toolPalette;
+ 
+   /// Whether the left column offers the Symbols tab (today's
+   /// `symbolPalette`), when a loaded kit has symbols.
+   final bool gallery;
+ 
+   /// The gallery's filter (today's `symbolFilter`), read at each build.
+   final bool Function(PlanSymbol symbol)? symbolFilter;
+ 
+   /// Whether the property panel shows. A hidden right-column panel is kept
+   /// offstage with its state and out of the focus order.
+   final bool propertyPanel;
+ 
++  /// The host's unit inspector (spec S4; today's `tableInspectorBuilder`):
++  /// built under the property panel for exactly one selected placed unit
++  /// whose label no other unit has, with nothing else selected, with that
++  /// unit's detail as `unitDetails` reads it; null from it shows nothing.
++  /// Built when the selection becomes such a unit, at each change of the
++  /// plan, and at each host rebuild; never on pan, zoom or hover. Hidden
++  /// with the property panel. A host links a drawn unit to its own record
++  /// here, with `PlanController.setUnitData`.
++  final Widget? Function(BuildContext context, PlanUnitDetail unit)?
++      unitInspectorBuilder;
++
+   /// Whether the Layers section shows.
+   final bool layerPanel;
+ 
+   /// Whether the Page section shows.
+   final bool pagePanel;
+ 
+   /// The canvas's rulers.
+   final bool rulers;
+ 
+   /// The canvas's grid.
+@@ -637,20 +651,31 @@ class _PlanEditorState extends State<PlanEditor> {
+                         width: 280,
+                         color: scheme.surfaceContainerLow,
+                         child: PlanShortcutGuard(
+                           controller: c,
+                           child: SingleChildScrollView(
+                             key: const Key('chrome-right-scroll'),
+                             child: Column(
+                               children: [
+                                 _kept(widget.propertyPanel,
+                                     PlanPropertyPanel(controller: c)),
++                                // Spec S4: the host's inspector under the
++                                // panel's fields, with the panel. Keyed, so
++                                // adding or removing it keeps the panels
++                                // below.
++                                if (widget.unitInspectorBuilder
++                                    case final inspect?
++                                    when widget.propertyPanel)
++                                  UnitInspector(
++                                      key: const Key('unit-inspector'),
++                                      controller: c,
++                                      builder: inspect),
+                                 _kept(widget.layerPanel,
+                                     PlanLayerPanel(controller: c)),
+                                 _kept(widget.pagePanel,
+                                     PlanPagePanel(controller: c)),
+                               ],
+                             ),
+                           ),
+                         ),
+                       ),
+                   ],
+diff --git a/packages/jet_cad_2d_plan/lib/src/editor/unit_inspector.dart b/packages/jet_cad_2d_plan/lib/src/editor/unit_inspector.dart
+new file mode 100644
+index 00000000..4ddc4d92
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/editor/unit_inspector.dart
+@@ -0,0 +1,126 @@
++// The host's unit inspector (spec 2b S4 "The unit inspector"; today's
++// _TableInspector, jet_cad_floor_plan/lib/src/planner_shell.dart:1626-1700,
++// and FloorPlanView._inspect, host/floor_plan_view.dart:622-643): built under
++// the property panel for exactly one selected placed unit whose label no
++// other unit has; again when the unit shown changes (a selection change,
++// frame-safe), at each change of the plan while one is shown (the detail is
++// read fresh), and at each host rebuild. A hover, the camera and a selection
++// change that keeps the unit build nothing.
++import 'package:flutter/widgets.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart' show Handle;
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
++    show SelectionController;
++
++import '../controller/plan_controller.dart';
++import '../panels/frame_safe_relay.dart';
++import '../units/unit_detail.dart';
++
++class UnitInspector extends StatefulWidget {
++  const UnitInspector(
++      {super.key, required this.controller, required this.builder});
++
++  final PlanController controller;
++  final Widget? Function(BuildContext context, PlanUnitDetail unit) builder;
++
++  @override
++  State<UnitInspector> createState() => _UnitInspectorState();
++}
++
++class _UnitInspectorState extends State<UnitInspector> {
++  /// The unit shown; null for none.
++  Handle? _shown;
++  SelectionController? _selection;
++  FrameSafeRelay? _relay;
++
++  @override
++  void initState() {
++    super.initState();
++    _bind();
++    widget.controller.revision.addListener(_onDocument);
++    _shown = _inspected();
++  }
++
++  @override
++  void didUpdateWidget(UnitInspector oldWidget) {
++    super.didUpdateWidget(oldWidget);
++    if (!identical(oldWidget.controller, widget.controller)) {
++      oldWidget.controller.revision.removeListener(_onDocument);
++      widget.controller.revision.addListener(_onDocument);
++    }
++    _bind();
++    _shown = _inspected();
++  }
++
++  @override
++  void dispose() {
++    widget.controller.revision.removeListener(_onDocument);
++    _unbind();
++    super.dispose();
++  }
++
++  /// The relay over the controller's current selection (a new one per
++  /// document).
++  void _bind() {
++    final selection = widget.controller.selection;
++    if (identical(selection, _selection)) return;
++    _unbind();
++    _selection = selection;
++    _relay = FrameSafeRelay(selection)..addListener(_onSelection);
++  }
++
++  void _unbind() {
++    _relay
++      ?..removeListener(_onSelection)
++      ..dispose();
++    _relay = null;
++    _selection = null;
++  }
++
++  /// The selection's one key when it is a root key on a placed unit.
++  Handle? _inspected() {
++    final c = widget.controller;
++    final keys = c.selection.keys;
++    if (keys.length != 1) return null;
++    final key = keys.single;
++    if (key.chain.isNotEmpty) return null;
++    return c.unitIndex[key.target]?.generated == false ? key.target : null;
++  }
++
++  void _onSelection() {
++    final next = _inspected();
++    if (next == _shown) return;
++    setState(() => _shown = next);
++  }
++
++  void _onDocument() {
++    _bind();
++    final next = _inspected();
++    if (next == null && _shown == null) return;
++    setState(() => _shown = next);
++  }
++
++  /// [instance]'s fresh detail, or null for an unlabelled unit or a label
++  /// another unit shares (today's _inspect: the label names no one unit,
++  /// and setUnitData refuses it).
++  PlanUnitDetail? _detail(Handle instance) {
++    final c = widget.controller;
++    final details = c.unitDetails;
++    final i = c.unitDetailInstances.indexOf(instance);
++    if (i < 0) return null;
++    final detail = details[i];
++    final label = detail.unit.label;
++    if (label == null) return null;
++    for (var j = 0; j < details.length; j++) {
++      if (j != i && details[j].unit.label == label) return null;
++    }
++    return detail;
++  }
++
++  @override
++  Widget build(BuildContext context) {
++    final shown = _shown;
++    final detail = shown == null ? null : _detail(shown);
++    if (detail == null) return const SizedBox.shrink();
++    return widget.builder(context, detail) ?? const SizedBox.shrink();
++  }
++}
+diff --git a/packages/jet_cad_2d_plan/lib/src/l10n/strings.dart b/packages/jet_cad_2d_plan/lib/src/l10n/strings.dart
+index 3b743640..81a66313 100644
+--- a/packages/jet_cad_2d_plan/lib/src/l10n/strings.dart
++++ b/packages/jet_cad_2d_plan/lib/src/l10n/strings.dart
+@@ -2,20 +2,22 @@
+ // member per string -- a getter for a fixed one, a method for one with
+ // values or a count -- and one implementation per built-in language, so the
+ // compiler refuses a language that misses a word. A host may subclass a
+ // language and provide it through its own delegate. Ported from
+ // jet_cad_floor_plan's FloorPlanStrings (spec 14d L1, L2): its generic
+ // words; a kit's words come from KitNames (KitWords).
+ import 'package:flutter/widgets.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart' show LayerNameProblem;
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show PlanSwatch;
+ 
++import '../units/unit_label.dart' show UnitLabelProblem;
++import '../units/unit_problems.dart' show UnitLabelWarning;
+ import 'strings_de.dart';
+ import 'strings_en.dart';
+ import 'strings_tr.dart';
+ 
+ /// The plan library's words in one language.
+ abstract class PlanStrings {
+   const PlanStrings();
+ 
+   /// The words of [context]'s scope: those a [Localizations] scope provides
+   /// through a `LocalizationsDelegate<PlanStrings>`, else the built-in
+@@ -297,11 +299,47 @@ abstract class PlanStrings {
+   /// The canvas's short hint when an edit would change a locked object
+   /// (spec P4 "Locks").
+   String get lockedHint;
+ 
+   /// What stands in a property section whose kit code failed (spec P4
+   /// "The failure boundary").
+   String get sectionFailed;
+ 
+   /// The warning a damaged plan shows (spec P4: a rollback that threw).
+   String get planDamaged;
++
++  // The units and the service mode (sub-project 2b).
++
++  /// The service bar's Merge.
++  String get merge;
++
++  /// The service bar's Split.
++  String get split;
++
++  /// The label field's title for a numbered unit ("Number").
++  String get number;
++
++  /// The label field's title for an assigned unit ("Label").
++  String get label;
++
++  /// The capacity read-out's title (today's "Seats").
++  String get capacity;
++
++  /// "Rotate 90° left".
++  String get rotateLeft;
++
++  /// "Rotate 90° right".
++  String get rotateRight;
++
++  /// Why a text cannot be a unit's label (the text rule).
++  String labelProblem(UnitLabelProblem problem);
++
++  /// A label another unit already holds.
++  String labelUsed(String label);
++
++  /// One of the plan's labelling problems.
++  String labelWarning(UnitLabelWarning warning);
++
++  /// The contract's unit kinds' words: `table` and `seat`; null for any
++  /// other kind (a kit words its own, `unit:<kit>/<kind>`).
++  String? unitKind(String kind);
+ }
+diff --git a/packages/jet_cad_2d_plan/lib/src/l10n/strings_de.dart b/packages/jet_cad_2d_plan/lib/src/l10n/strings_de.dart
+index 90a0f9cc..5ba2abc2 100644
+--- a/packages/jet_cad_2d_plan/lib/src/l10n/strings_de.dart
++++ b/packages/jet_cad_2d_plan/lib/src/l10n/strings_de.dart
+@@ -1,22 +1,25 @@
+ // The plan library's words in German (spec P5; ported from
+ // jet_cad_floor_plan's strings_de.dart, spec 14d L1).
+ import 'package:jet_cad_2d/jet_cad_2d.dart'
+     show
+         LayerNameBadCharacter,
+         LayerNameDuplicate,
+         LayerNameEdgeSpace,
+         LayerNameEmpty,
+         LayerNameProblem,
+         LayerNameTooLong;
+-import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show PlanSwatch;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show PlanSwatch, UnitKinds;
+ 
++import '../units/unit_label.dart' show UnitLabelProblem, kUnitLabelMaxLength;
++import '../units/unit_problems.dart'
++    show BadLabel, DuplicateLabel, Unlabelled, UnitLabelWarning;
+ import 'strings.dart';
+ 
+ /// The plan library's words in German.
+ class PlanStringsDe extends PlanStrings {
+   const PlanStringsDe();
+ 
+   @override
+   String get languageCode => 'de';
+ 
+   @override
+@@ -301,11 +304,62 @@ class PlanStringsDe extends PlanStrings {
+   @override
+   String get lockedHint => 'Dieses Objekt ist gesperrt';
+ 
+   @override
+   String get sectionFailed => 'Dieser Abschnitt kann nicht angezeigt werden';
+ 
+   @override
+   String get planDamaged =>
+       'Eine Bearbeitung ist fehlgeschlagen; der Plan ist möglicherweise '
+       'beschädigt';
++
++  @override
++  String get merge => 'Zusammenlegen';
++
++  @override
++  String get split => 'Trennen';
++
++  @override
++  String get number => 'Nummer';
++
++  @override
++  String get label => 'Bezeichnung';
++
++  @override
++  String get capacity => 'Plätze';
++
++  @override
++  String get rotateLeft => '90° nach links drehen';
++
++  @override
++  String get rotateRight => '90° nach rechts drehen';
++
++  @override
++  String labelProblem(UnitLabelProblem problem) => switch (problem) {
++        UnitLabelProblem.length => '1 bis $kUnitLabelMaxLength Zeichen',
++        UnitLabelProblem.control => 'Keine Zeilenumbrüche oder Steuerzeichen',
++      };
++
++  @override
++  String labelUsed(String label) => 'Die Nummer $label ist bereits vergeben';
++
++  @override
++  String labelWarning(UnitLabelWarning warning) => switch (warning) {
++        DuplicateLabel(:final label, :final count) =>
++          'Die Nummer $label wird von $count Tischen verwendet',
++        Unlabelled(:final kind, :final capacity) => kind == UnitKinds.table
++            ? (capacity == 1
++                ? 'Ein Tisch mit 1 Platz hat keine Nummer'
++                : 'Ein Tisch mit $capacity Plätzen hat keine Nummer')
++            : '${unitKind(kind) ?? kind} mit $capacity '
++                '${capacity == 1 ? 'Platz' : 'Plätzen'} hat keine Nummer',
++        BadLabel(:final label, :final problem) =>
++          '„$label" ist keine Bezeichnung: ${labelProblem(problem)}',
++      };
++
++  @override
++  String? unitKind(String kind) => switch (kind) {
++        UnitKinds.table => 'Tisch',
++        UnitKinds.seat => 'Sitzplatz',
++        _ => null,
++      };
+ }
+diff --git a/packages/jet_cad_2d_plan/lib/src/l10n/strings_en.dart b/packages/jet_cad_2d_plan/lib/src/l10n/strings_en.dart
+index 95e95780..1337b23c 100644
+--- a/packages/jet_cad_2d_plan/lib/src/l10n/strings_en.dart
++++ b/packages/jet_cad_2d_plan/lib/src/l10n/strings_en.dart
+@@ -1,22 +1,25 @@
+ // The plan library's words in English (spec P5; ported from
+ // jet_cad_floor_plan's strings_en.dart, spec 14d L1).
+ import 'package:jet_cad_2d/jet_cad_2d.dart'
+     show
+         LayerNameBadCharacter,
+         LayerNameDuplicate,
+         LayerNameEdgeSpace,
+         LayerNameEmpty,
+         LayerNameProblem,
+         LayerNameTooLong;
+-import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show PlanSwatch;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show PlanSwatch, UnitKinds;
+ 
++import '../units/unit_label.dart' show UnitLabelProblem, kUnitLabelMaxLength;
++import '../units/unit_problems.dart'
++    show BadLabel, DuplicateLabel, Unlabelled, UnitLabelWarning;
+ import 'strings.dart';
+ 
+ /// The plan library's words in English.
+ class PlanStringsEn extends PlanStrings {
+   const PlanStringsEn();
+ 
+   @override
+   String get languageCode => 'en';
+ 
+   @override
+@@ -294,11 +297,61 @@ class PlanStringsEn extends PlanStrings {
+   String layerName(int n) => 'Layer $n';
+ 
+   @override
+   String get lockedHint => 'This object is locked';
+ 
+   @override
+   String get sectionFailed => 'This section could not be shown';
+ 
+   @override
+   String get planDamaged => 'An edit failed and the plan may be damaged';
++
++  @override
++  String get merge => 'Merge';
++
++  @override
++  String get split => 'Split';
++
++  @override
++  String get number => 'Number';
++
++  @override
++  String get label => 'Label';
++
++  @override
++  String get capacity => 'Seats';
++
++  @override
++  String get rotateLeft => 'Rotate 90° left';
++
++  @override
++  String get rotateRight => 'Rotate 90° right';
++
++  @override
++  String labelProblem(UnitLabelProblem problem) => switch (problem) {
++        UnitLabelProblem.length => '1 to $kUnitLabelMaxLength characters',
++        UnitLabelProblem.control => 'No line breaks or control characters',
++      };
++
++  @override
++  String labelUsed(String label) => 'Number $label is already used';
++
++  @override
++  String labelWarning(UnitLabelWarning warning) => switch (warning) {
++        DuplicateLabel(:final label, :final count) =>
++          'Number $label is used by $count tables',
++        Unlabelled(:final kind, :final capacity) => capacity == 1
++            ? 'A ${_kindLower(kind)} with 1 seat has no number'
++            : 'A ${_kindLower(kind)} with $capacity seats has no number',
++        BadLabel(:final label, :final problem) =>
++          '"$label" is no label: ${labelProblem(problem)}',
++      };
++
++  String _kindLower(String kind) => (unitKind(kind) ?? kind).toLowerCase();
++
++  @override
++  String? unitKind(String kind) => switch (kind) {
++        UnitKinds.table => 'Table',
++        UnitKinds.seat => 'Seat',
++        _ => null,
++      };
+ }
+diff --git a/packages/jet_cad_2d_plan/lib/src/l10n/strings_tr.dart b/packages/jet_cad_2d_plan/lib/src/l10n/strings_tr.dart
+index ab57ee09..9c4f19eb 100644
+--- a/packages/jet_cad_2d_plan/lib/src/l10n/strings_tr.dart
++++ b/packages/jet_cad_2d_plan/lib/src/l10n/strings_tr.dart
+@@ -1,22 +1,25 @@
+ // The plan library's words in Turkish (spec P5; ported from
+ // jet_cad_floor_plan's strings_tr.dart, spec 14d L1).
+ import 'package:jet_cad_2d/jet_cad_2d.dart'
+     show
+         LayerNameBadCharacter,
+         LayerNameDuplicate,
+         LayerNameEdgeSpace,
+         LayerNameEmpty,
+         LayerNameProblem,
+         LayerNameTooLong;
+-import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show PlanSwatch;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show PlanSwatch, UnitKinds;
+ 
++import '../units/unit_label.dart' show UnitLabelProblem, kUnitLabelMaxLength;
++import '../units/unit_problems.dart'
++    show BadLabel, DuplicateLabel, Unlabelled, UnitLabelWarning;
+ import 'strings.dart';
+ 
+ /// The plan library's words in Turkish.
+ class PlanStringsTr extends PlanStrings {
+   const PlanStringsTr();
+ 
+   @override
+   String get languageCode => 'tr';
+ 
+   @override
+@@ -293,11 +296,60 @@ class PlanStringsTr extends PlanStrings {
+ 
+   @override
+   String get lockedHint => 'Bu nesne kilitli';
+ 
+   @override
+   String get sectionFailed => 'Bu bölüm gösterilemiyor';
+ 
+   @override
+   String get planDamaged =>
+       'Bir düzenleme başarısız oldu; plan bozulmuş olabilir';
++
++  @override
++  String get merge => 'Birleştir';
++
++  @override
++  String get split => 'Ayır';
++
++  @override
++  String get number => 'Numara';
++
++  @override
++  String get label => 'Etiket';
++
++  @override
++  String get capacity => 'Kişilik';
++
++  @override
++  String get rotateLeft => '90° sola döndür';
++
++  @override
++  String get rotateRight => '90° sağa döndür';
++
++  @override
++  String labelProblem(UnitLabelProblem problem) => switch (problem) {
++        UnitLabelProblem.length =>
++          '1 ile $kUnitLabelMaxLength karakter arasında olmalı',
++        UnitLabelProblem.control => 'Satır sonu veya kontrol karakteri olamaz',
++      };
++
++  @override
++  String labelUsed(String label) => '$label numarası zaten kullanılıyor';
++
++  @override
++  String labelWarning(UnitLabelWarning warning) => switch (warning) {
++        DuplicateLabel(:final label, :final count) =>
++          '$label numarası $count masada kullanılıyor',
++        Unlabelled(:final kind, :final capacity) => kind == UnitKinds.table
++            ? '$capacity kişilik bir masanın numarası yok'
++            : '$capacity kişilik ${unitKind(kind) ?? kind}: numara yok',
++        BadLabel(:final label, :final problem) =>
++          '"$label" bir etiket değil: ${labelProblem(problem)}',
++      };
++
++  @override
++  String? unitKind(String kind) => switch (kind) {
++        UnitKinds.table => 'Masa',
++        UnitKinds.seat => 'Koltuk',
++        _ => null,
++      };
+ }
+diff --git a/packages/jet_cad_2d_plan/lib/src/panels/colour_row.dart b/packages/jet_cad_2d_plan/lib/src/panels/colour_row.dart
+index 4315618a..16abdea8 100644
+--- a/packages/jet_cad_2d_plan/lib/src/panels/colour_row.dart
++++ b/packages/jet_cad_2d_plan/lib/src/panels/colour_row.dart
+@@ -1,54 +1,76 @@
+ // The property panel's colour row (spec 2a P3, "Colour"; plan colours spec
+ // PC-9): None and the plan's eight swatches over every selected object
+ // whose type has a colour target, in one step labelled Colour, gated by
+ // recolor. Ported from jet_cad_floor_plan/lib/src/colors/color_picker.dart:
+ // the closed list of rooms and tables (pickedColors, :18-53) becomes the
+ // types' colour targets (PlanType.colourOf, recolour); the swatches,
+-// marks, tooltips and semantics are today's.
++// marks, tooltips and semantics are today's. Placed units are today's
++// tables (2b Task 10): `jetcad.unit_colour` on the instance.
+ import 'package:flutter/material.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+ 
+ import '../controller/plan_controller.dart';
+ import '../kits/guard.dart' show KitHookFailure;
+ import '../l10n/strings.dart';
++import '../units/unit_components.dart' show UnitColour;
+ import 'kit_lookup.dart';
+ 
+ typedef ColourTargetOf = ({Handle handle, PlanType<Component> type});
+ 
+ /// The objects among [keys] whose type has a colour target, each once, in
+ /// key order: live objects (E1) that are not locked (spec P4).
+ List<ColourTargetOf> colourTargets(
+     PlanController c, Iterable<SelectionKey> keys) {
+   if (keys.isEmpty) return const [];
+   final doc = c.document;
+   return [
+     for (final h in {for (final k in keys) k.target})
+       if (!c.isLocked(h))
+         if (c.catalog.typeIdOf(doc, h) case final typeId?)
+           if (planTypeOf(c, typeId) case final type? when type.hasColour)
+             (handle: h, type: type),
+   ];
+ }
+ 
++/// The placed units among [keys], each once, in key order, that the lock
++/// does not cover (today's `_tables`, colors/color_picker.dart:24-35: a
++/// key's target is a placed unit's instance). Per key, read from the
++/// controller's cached index: the panel asks on every build, hovers
++/// included.
++List<Handle> unitColourTargets(PlanController c, Iterable<SelectionKey> keys) {
++  if (keys.isEmpty) return const [];
++  final index = c.unitIndex;
++  return [
++    for (final h in {for (final k in keys) k.target})
++      if (index[h]?.generated == false && !c.isLocked(h)) h,
++  ];
++}
++
+ /// What [pickedColours] lists for a target whose colour `read` threw:
+ /// equal to no swatch's name, so it marks nothing.
+ const String _unreadable = '\u0001';
+ 
+ /// Each target's stored swatch name (null for none), in [colourTargets]'
+ /// order. A kit's colour `read` that throws (spec P4: every kit hook at the
+ /// contract's boundary) lists a name that marks nothing and is one
+ /// `hookFailed` diagnostic, published after the frame (a build reads it).
+ List<String?> pickedColours(PlanController c, Iterable<SelectionKey> keys) => [
+       for (final t in colourTargets(c, keys)) _colourOf(c, t),
++      for (final h in unitColourTargets(c, keys))
++        switch (c.document.components.get<UnitColour>(h)) {
++          null => null,
++          // A payload of another shape marks nothing (today's _keptMarker).
++          final u => u.name ?? _unreadable,
++        },
+     ];
+ 
+ String? _colourOf(PlanController c, ColourTargetOf t) {
+   try {
+     return t.type.colourOf(c.document, t.handle);
+   } catch (error) {
+     c.diagnosticsLog.addAfterFrame(KitDiagnostic(
+         kitId: kitOfKey(t.type.id),
+         subject: t.type.id,
+         code: KitDiagnosticCode.hookFailed,
+@@ -69,20 +91,26 @@ DraftCommand? recolourCommand(
+   for (final t in colourTargets(c, keys)) {
+     final DraftCommand? edit;
+     try {
+       edit = t.type.recolour(doc, t.handle, swatch?.name);
+     } catch (error) {
+       throw KitHookFailure(
+           kitOfKey(t.type.id), t.type.id, 'colour write', error);
+     }
+     if (edit != null) edits.add(edit);
+   }
++  final wanted = swatch == null ? null : UnitColour(swatch);
++  for (final h in unitColourTargets(c, keys)) {
++    if (doc.components.get<UnitColour>(h) != wanted) {
++      edits.add(SetComponentCommand<UnitColour>(h, wanted));
++    }
++  }
+   return edits.isEmpty ? null : CompoundCommand(edits, label: 'Colour');
+ }
+ 
+ /// Why the row is read-only for [keys], or null when it acts (today's
+ /// `colorPickerBlocked`, `color_picker.dart:72-86`):
+ /// [PlanStrings.readOnlyDocument] when the document's permissions refuse
+ /// `components` or a target type's edit capability; [PlanStrings.colorRefused]
+ /// when `recolor` is off.
+ String? colourRowBlocked(
+     PlanController c, Iterable<SelectionKey> keys, PlanStrings strings) {
+diff --git a/packages/jet_cad_2d_plan/lib/src/panels/plan_property_panel.dart b/packages/jet_cad_2d_plan/lib/src/panels/plan_property_panel.dart
+index 48ea1a56..8e41e60e 100644
+--- a/packages/jet_cad_2d_plan/lib/src/panels/plan_property_panel.dart
++++ b/packages/jet_cad_2d_plan/lib/src/panels/plan_property_panel.dart
+@@ -23,26 +23,31 @@ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+ import 'package:meta/meta.dart' show internal;
+ 
+ import '../controller/plan_controller.dart';
+ import '../kits/section_boundary.dart' show KitSectionBoundary;
+ import '../l10n/locale_scope.dart';
+ import '../l10n/number_text.dart';
+ import '../l10n/strings.dart';
+ import '../l10n/strings_en.dart';
+ import '../shortcuts/plan_shortcut_guard.dart';
+ import '../symbols/symbol_box.dart';
++import '../units/unit_problems.dart' show DuplicateLabel;
++import '../units/unit_rotate.dart' show rotateUnitCommand;
++import '../units/unit_words.dart';
++import '../units/unit_writes.dart' show unitLabelCommand;
+ import 'colour_row.dart';
+ import 'frame_safe_relay.dart';
+ import 'kit_lookup.dart';
+ import 'layer_picker.dart';
+ import 'panel_focus.dart';
+ import 'symbol_section.dart';
++import 'unit_section.dart';
+ 
+ /// The selected object's and the active tool's properties, over
+ /// [controller].
+ class PlanPropertyPanel extends StatefulWidget {
+   const PlanPropertyPanel({super.key, required this.controller});
+ 
+   final PlanController controller;
+ 
+   @override
+   State<PlanPropertyPanel> createState() => _PlanPropertyPanelState();
+@@ -96,21 +101,34 @@ final class _SymbolTarget extends _Target {
+   final Handle handle;
+ 
+   @override
+   bool operator ==(Object other) =>
+       other is _SymbolTarget && other.handle == handle;
+ 
+   @override
+   int get hashCode => handle.hashCode;
+ }
+ 
+-enum _Scope { object, tool, symbol }
++final class _UnitTarget extends _Target {
++  const _UnitTarget(this.handle);
++
++  final Handle handle;
++
++  @override
++  bool operator ==(Object other) =>
++      other is _UnitTarget && other.handle == handle;
++
++  @override
++  int get hashCode => Object.hash(_UnitTarget, handle);
++}
++
++enum _Scope { object, tool, symbol, unit }
+ 
+ /// One text field's state (today's `_Field`, `selection_panel.dart:160-186`):
+ /// [pinned] is the target recorded at focus gain; [loadedTarget] and
+ /// [loadedText] are what the field last showed, so a reload can tell a real
+ /// change from a notification that carries none.
+ final class _Field {
+   _Field(this.scope, this.id);
+ 
+   final _Scope scope;
+ 
+@@ -132,20 +150,25 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
+   PlanController get _c => widget.controller;
+ 
+   final Map<(_Scope, String), _Field> _fields = {};
+ 
+   /// The document the subscriptions below belong to.
+   DraftDocument? _document;
+   StreamSubscription<DocChange>? _changes;
+   FrameSafeRelay? _selection;
+   VoidCallback? _releaseSettle;
+ 
++  /// The label field's last refusal and the unit it was for (today's
++  /// `_numberError`, selection_panel.dart:244-249).
++  String Function(PlanStrings)? _labelError;
++  Handle? _labelErrorFor;
++
+   /// The panel's words: set before the first build and on a change of
+   /// language, when the fields are shown again in it (spec 14d L12).
+   PlanStrings _strings = const PlanStringsEn();
+ 
+   @override
+   void initState() {
+     super.initState();
+     _attach();
+   }
+ 
+@@ -272,29 +295,36 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
+   }
+ 
+   _SymbolTarget? get _symbolTarget {
+     final h = _single;
+     if (h == null || _c.isLocked(h) || !isSymbolInstance(_c.document, h)) {
+       return null;
+     }
+     return _SymbolTarget(h);
+   }
+ 
++  _UnitTarget? get _unitTarget {
++    final h = _single;
++    if (h == null || _c.isLocked(h)) return null;
++    return placedUnitOf(_c.unitIndex, h) == null ? null : _UnitTarget(h);
++  }
++
+   _ToolTarget? get _toolTarget {
+     final id = _c.activeTool.value;
+     return planToolOf(_c, id)?.settings == null ? null : _ToolTarget(id);
+   }
+ 
+   _Target? _targetOf(_Field f) => switch (f.scope) {
+         _Scope.object => _objectTarget,
+         _Scope.tool => _toolTarget,
+         _Scope.symbol => _symbolTarget,
++        _Scope.unit => _unitTarget,
+       };
+ 
+   /// [t]'s fields, bound now; none when [t] is no longer a live object of
+   /// its type, or when a kit hook threw binding them ([_fieldsOrNull]).
+   List<PropertyField> _bound(_Target t) => _fieldsOrNull(t) ?? const [];
+ 
+   /// [t]'s fields, bound now, or null when a kit's hook threw binding them
+   /// (a spec's `read` or `enabled`): spec P4, every kit hook at the
+   /// contract's boundary. The failure is one diagnostic ([_hookFailed]);
+   /// the panel's builds, listeners and focus changes go on.
+@@ -315,39 +345,45 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
+         try {
+           return settings.fieldsOf(c.toolSettings.valueOf(toolId),
+               (v) => c.toolSettings.store(toolId, v),
+               toolId: toolId);
+         } catch (error) {
+           _hookFailed(toolId, 'settings', error);
+           return null;
+         }
+       case _SymbolTarget():
+         return const [];
++      case _UnitTarget():
++        return const [];
+     }
+   }
+ 
+   PropertyField? _fieldOf(_Target t, String id) {
+     for (final f in _bound(t)) {
+       if (f.spec.id == id) return f;
+     }
+     return null;
+   }
+ 
+   // ---- reading and parsing ----
+ 
+   /// What [f] shows for [t] now, or null when [t] is no longer live.
+   String? _shown(_Target t, _Field f) {
+     if (t case _SymbolTarget(:final handle)) {
+       return isSymbolInstance(_c.document, handle)
+           ? formatPanelNumber(shownRotation(_c.document, handle), _strings)
+           : null;
+     }
++    if (t case _UnitTarget(:final handle)) {
++      final u = placedUnitOf(_c.unitIndex, handle);
++      return u == null ? null : (u.text ?? '');
++    }
+     final field = _fieldOf(t, f.id);
+     return field == null ? null : _textOf(field);
+   }
+ 
+   String? _textOf(PropertyField field) {
+     final value = field.value;
+     switch (field.spec) {
+       case TextProperty():
+         return value is String ? value : null;
+       case AngleProperty():
+@@ -372,20 +408,31 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
+   double? _number(String text) {
+     final v = parsePanelNumber(text, _strings);
+     return v != null && v.isFinite ? v : null;
+   }
+ 
+   /// [f]'s text as the input to commit to [t], or null when the field
+   /// reverts instead.
+   Object? _parse(_Target t, _Field f) {
+     final text = f.text.text.trim();
+     if (t is _SymbolTarget) return _number(text);
++    if (t case _UnitTarget(:final handle)) {
++      final u = placedUnitOf(_c.unitIndex, handle);
++      if (u == null) return null;
++      final refusal = labelRefusal(_c.unitIndex, u, text);
++      if (refusal == null) return text;
++      // The line is not cleared here: Enter's focus-loss commit re-reads
++      // the reverted text, which must not end it (today's T14).
++      _labelError = refusal;
++      _labelErrorFor = handle;
++      return null;
++    }
+     final field = _fieldOf(t, f.id);
+     if (field == null) return null;
+     switch (field.spec) {
+       case TextProperty(:final maxLength):
+         return maxLength != null && text.runes.length > maxLength ? null : text;
+       case AngleProperty():
+         final degrees = _number(text);
+         return degrees == null ? null : degrees * math.pi / 180;
+       case LengthProperty() || NumberProperty():
+         return _number(text);
+@@ -396,45 +443,62 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
+         return null;
+     }
+   }
+ 
+   /// Whether [t]'s field [id] edits (today's `_editable` and `_capable`,
+   /// `selection_panel.dart:356-391`).
+   bool _editable(_Target t, String id) {
+     final c = _c;
+     final engine = c.document.commands.permissions;
+     switch (t) {
+-      case _SymbolTarget():
+-        // A rotation is a TransformNodeCommand (09c D7).
+-        return c.permissions.rotate && engine.allows(Capability.transform);
++      case _SymbolTarget(:final handle):
++        // A rotation is a TransformNodeCommand (09c D7); a placed unit's
++        // also re-stamps its label (V-1).
++        return c.permissions.rotate && _turnableAt(handle);
++      case _UnitTarget():
++        // A label is entity text (today's _editable, :362-366).
++        return c.permissions.relabel && engine.allows(Capability.geometry);
+       case _ToolTarget():
+         // A tool's settings are no edit of the document (:73).
+         final field = _fieldOf(t, id);
+         return field != null && field.enabled && field.commit != null;
+       case _ObjectTarget(:final typeId):
+         final field = _fieldOf(t, id);
+         if (field == null || !field.enabled || field.commit == null) {
+           return false;
+         }
+         final gate = field.spec.gate;
+         if (gate != null && !c.permissions.allows(gate)) return false;
+         return engine.allows(Capability.components) &&
+             engine.allows(planTypeOf(c, typeId)!.parametric.editCapability);
+     }
+   }
+ 
++  /// Whether [symbol] can be turned or mirrored now (today's `_turnableAt`,
++  /// selection_panel.dart:486-491): `transform`, and for a placed unit, whose
++  /// label is re-stamped by the same step, `geometry` too -- a unit turns in
++  /// the design mode only (V-1, 14a Q-4). Asked of the pinned target at a
++  /// commit, which the selection may no longer be.
++  bool _turnableAt(Handle symbol) {
++    final engine = _c.document.commands.permissions;
++    if (!engine.allows(Capability.transform)) return false;
++    return placedUnitOf(_c.unitIndex, symbol) == null ||
++        engine.allows(Capability.geometry);
++  }
++
+   // ---- writing ----
+ 
+   String _kitOf(_Target t) => switch (t) {
+         _ObjectTarget(:final typeId) => kitOfKey(typeId),
+         _ToolTarget(:final toolId) => kitOfKey(toolId),
+         _SymbolTarget() => 'plan',
++        _UnitTarget() => 'plan',
+       };
+ 
+   /// Runs [edit]. A commit goes through `controller.execute`, which catches
+   /// every refusal itself (the lock hint, the diagnostics) and answers
+   /// false. What can throw here is what runs before it: the spec's refusals
+   /// (`ArgumentError` out of range, `StateError` disabled: Task 3) change
+   /// nothing and the field shows the stored value; anything else a kit's
+   /// `write` or `apply` threw is one diagnostic (spec P4).
+   void _guarded(_Target t, String what, void Function() edit) {
+     final c = _c;
+@@ -444,37 +508,43 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
+       // Refused by the spec: nothing changed.
+     } on StateError {
+       // Refused: a disabled field. Nothing changed.
+     } on Object catch (error) {
+       c.diagnosticsLog.report(KitDiagnostic(
+           kitId: _kitOf(t),
+           subject: switch (t) {
+             _ObjectTarget(:final typeId) => typeId,
+             _ToolTarget(:final toolId) => toolId,
+             _SymbolTarget() => 'plan.symbol',
++            _UnitTarget() => 'plan.unit',
+           },
+           code: KitDiagnosticCode.hookFailed,
+           message: '$what threw',
+           error: error));
+     }
+   }
+ 
+   /// Stores [input] as [t]'s field [id]: one command for an object or a
+   /// symbol, the settings for a tool, nothing when the value is unchanged.
+   void _write(_Target t, String id, Object? input) {
+     final c = _c;
+     _guarded(t, 'the property "$id"', () {
+       switch (t) {
+         case _SymbolTarget(:final handle):
+           final command =
+               rotateSymbolCommand(c.document, handle, input! as double);
+           if (command != null) c.execute(command);
++        case _UnitTarget(:final handle):
++          final u = placedUnitOf(c.unitIndex, handle);
++          if (u == null) return;
++          final command = unitLabelCommand(c.document, u, input! as String);
++          if (command != null) c.execute(command);
+         case _ObjectTarget(:final handle, :final typeId):
+           final field = _fieldOf(t, id);
+           if (field == null || (input != null && input == field.value)) {
+             return;
+           }
+           final command = planTypeOf(c, typeId)!
+               .commitField(c.document, handle, field, input);
+           // A value the spec rounds back to the stored one (2.31 at one
+           // decimal over 2.3) writes nothing: no empty undo step (final
+           // review).
+@@ -565,28 +635,35 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
+         f.loadedText = null;
+         continue;
+       }
+       if (f.focus.hasFocus) continue;
+       if (t == f.loadedTarget && shown == f.loadedText) continue;
+       _show(f);
+     }
+   }
+ 
+   void _sync() {
++    // A selection change ends the label field's refusal line.
++    if (_labelError != null && _labelErrorFor != _unitTarget?.handle) {
++      _labelError = null;
++    }
+     _load();
+     if (mounted) setState(() {});
+   }
+ 
+   /// 07 D11, 08 D16: while a tool's settings show, every valid keystroke
+   /// reaches them at once (a canvas click accepts its point before the
+   /// field's focus-loss commit runs).
+   void _onChanged(_Field f) {
++    if (f.scope == _Scope.unit && _labelError != null) {
++      setState(() => _labelError = null);
++    }
+     final t = f.pinned;
+     if (t is! _ToolTarget) return;
+     final input = _parse(t, f);
+     if (input != null) _write(t, f.id, input);
+   }
+ 
+   // ---- widgets ----
+ 
+   Widget _textField(Key key, String label, _Field f, bool editable,
+           {String? suffix, bool signed = false, bool isText = false}) =>
+@@ -774,21 +851,21 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
+     final doc = c.document;
+     final h = t.handle;
+     final node = doc.tree[h]! as InstanceNode;
+     final component = doc.components.get<SymbolComponent>(node.definition)!;
+     final box = boxOfDefinition(doc, node.definition);
+     final members = sizeMenuMembers(symbolEntriesOf(c.symbols), doc, h);
+     String size(SymbolBox b) => '${formatPanelNumber(b.width, _strings)} × '
+         '${formatPanelNumber(b.depth, _strings)}';
+     final p = c.permissions;
+     final engine = doc.commands.permissions;
+-    final turnable = engine.allows(Capability.transform);
++    final turnable = _turnableAt(h);
+     final resizable = engine.allows(Capability.structure) &&
+         engine.allows(Capability.geometry) &&
+         engine.allows(Capability.components) &&
+         turnable;
+     final name = c
+             .namesOf(kitOfKey(component.key))
+             ?.symbolName(_strings.languageCode, component) ??
+         component.name;
+     return [
+       Text(_strings.toolSymbol, key: const Key('symbol-section'), style: title),
+@@ -844,40 +921,120 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
+                     if (command != null) c.execute(command);
+                   });
+                   if (mounted) setState(() {});
+                 }
+               : null,
+         ),
+       ],
+     ];
+   }
+ 
++  /// The unit section (spec S4; today's Table section,
++  /// selection_panel.dart:1193-1248).
++  List<Widget> _unitSection(_UnitTarget t, TextStyle? title) {
++    final c = _c;
++    final u = placedUnitOf(c.unitIndex, t.handle)!;
++    final error =
++        _labelErrorFor == t.handle ? _labelError?.call(_strings) : null;
++    final shared = u.text == null ? 0 : c.unitIndex.withLabel(u.text!).length;
++    final theme = Theme.of(context);
++    final engine = c.document.commands.permissions;
++    final turnable = engine.allows(Capability.transform) &&
++        engine.allows(Capability.geometry);
++    return [
++      Text(unitKindWord(c, u), key: const Key('unit-section'), style: title),
++      _textField(
++          const Key('unit-label'),
++          u.labelling == UnitLabelling.assigned
++              ? _strings.label
++              : _strings.number,
++          _fieldFor(_Scope.unit, 'label'),
++          _editable(t, 'label'),
++          isText: true),
++      if (error != null)
++        Padding(
++          padding: const EdgeInsets.only(top: 4),
++          child: Text(error,
++              key: const Key('unit-label-error'),
++              style: TextStyle(color: theme.colorScheme.error)),
++        ),
++      if (shared > 1)
++        Padding(
++          padding: const EdgeInsets.only(top: 4),
++          child: Text(
++              _strings
++                  .labelWarning(DuplicateLabel(label: u.text!, count: shared)),
++              key: const Key('unit-label-duplicate'),
++              style: TextStyle(color: theme.colorScheme.tertiary)),
++        ),
++      InputDecorator(
++        decoration: InputDecoration(
++            labelText: _strings.capacity, border: InputBorder.none),
++        child: Text('${u.capacity}', key: const Key('unit-capacity')),
++      ),
++      // A button the permissions refuse is not shown (S-11).
++      if (turnable && c.permissions.rotate)
++        Row(
++          children: [
++            Expanded(
++              child: OutlinedButton.icon(
++                key: const Key('unit-rotate-left'),
++                onPressed: () => _rotateUnit(t, 1),
++                icon: const Icon(Icons.rotate_left),
++                label: Text(_strings.rotateLeft),
++              ),
++            ),
++            const SizedBox(width: 8),
++            Expanded(
++              child: OutlinedButton.icon(
++                key: const Key('unit-rotate-right'),
++                onPressed: () => _rotateUnit(t, -1),
++                icon: const Icon(Icons.rotate_right),
++                label: Text(_strings.rotateRight),
++              ),
++            ),
++          ],
++        ),
++    ];
++  }
++
++  /// Today's `_rotateTable` (:685-701): one Rotate step about the base
++  /// point; a refusal is caught inside `execute`.
++  void _rotateUnit(_UnitTarget t, int quarterTurns) =>
++      _guarded(t, 'Rotate', () {
++        final command = rotateUnitCommand(_c.document, t.handle, quarterTurns);
++        if (command != null) _c.execute(command);
++      });
++
+   @override
+   Widget build(BuildContext context) {
+     final c = _c;
+     // A parent rebuild may arrive before the controller's notification.
+     if (!identical(c.document, _document)) {
+       _unbindDocument();
+       _forgetTargets();
+       _bindDocument();
+     }
+     final title = Theme.of(context).textTheme.titleSmall;
+     final tool = _toolTarget;
+     final object = _objectTarget;
+     final symbol = object == null ? _symbolTarget : null;
++    final unit = tool == null && object == null ? _unitTarget : null;
+     // CP1, CP11 (M-PC9-tool): no colour row while a tool's settings show.
+-    final colours =
+-        tool == null && colourTargets(c, c.selection.keys).isNotEmpty;
++    final colours = tool == null &&
++        (colourTargets(c, c.selection.keys).isNotEmpty ||
++            unitColourTargets(c, c.selection.keys).isNotEmpty);
+     final sections = <List<Widget>>[
+       if (tool != null) _settingsSection(tool, title),
+       if (object != null) _objectSection(object, title),
+       if (symbol != null) _symbolSection(symbol, title),
++      if (unit != null) _unitSection(unit, title),
+       if (colours)
+         [
+           ColourRow(
+               controller: c,
+               darkCanvasPaper: darkCanvasFor(
+                       page: c.page.value?.background,
+                       brightness: Theme.of(context).brightness)
+                   ? kDarkCanvasPaper
+                   : null),
+         ],
+diff --git a/packages/jet_cad_2d_plan/lib/src/panels/unit_section.dart b/packages/jet_cad_2d_plan/lib/src/panels/unit_section.dart
+new file mode 100644
+index 00000000..e444ae0e
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/panels/unit_section.dart
+@@ -0,0 +1,32 @@
++// The unit section's model (spec 2b S4, the unit section; today's Table
++// section, jet_cad_floor_plan/lib/src/selection_panel.dart:437-456,
++// :1193-1248): which placed unit it shows and why a text cannot be its
++// label. The widgets are the property panel's.
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++
++import '../l10n/strings.dart';
++import '../units/unit_index.dart';
++import '../units/unit_label.dart' show unitLabelProblem;
++
++/// The placed unit [handle] names in [index], or null (no unit, or a
++/// generated one: its object stands for it in design).
++UnitInfo? placedUnitOf(UnitIndex index, Handle handle) {
++  final u = index[handle];
++  return u == null || u.generated ? null : u;
++}
++
++/// Why [text] (trimmed) cannot be [unit]'s label, worded on demand: the
++/// text rule's problem, or a label another unit holds (today's
++/// `_parseNumber`, :437-456). Null when it can, or when it is the unit's
++/// own label (an unlabelled unit's empty field included: no error).
++String Function(PlanStrings)? labelRefusal(
++    UnitIndex index, UnitInfo unit, String text) {
++  final t = text.trim();
++  if (t == (unit.text ?? '')) return null;
++  final problem = unitLabelProblem(t);
++  if (problem != null) return (s) => s.labelProblem(problem);
++  if (index.withLabel(t).any((o) => o.instance != unit.instance)) {
++    return (s) => s.labelUsed(t);
++  }
++  return null;
++}
+diff --git a/packages/jet_cad_2d_plan/lib/src/units/unit_index.dart b/packages/jet_cad_2d_plan/lib/src/units/unit_index.dart
+index 4a9cd47c..8ea9c785 100644
+--- a/packages/jet_cad_2d_plan/lib/src/units/unit_index.dart
++++ b/packages/jet_cad_2d_plan/lib/src/units/unit_index.dart
+@@ -1,18 +1,19 @@
+ // The units of a plan (spec 2b S2 "A unit", "UnitIndex", "Diagnostics",
+ // "Unlabelled, duplicate and bad labels"): every live symbol instance whose
+ // definition carries `jetcad.unit`, placed at the root or generated by an
+ // object, in one pass, with its label, its lock, its world transform and
+ // its definition-space top and box. Replaces jet_cad_floor_plan's
+ // TableSurvey (tables/table_index.dart:61-226); the top and box follow
+ // service/table_picker.dart:92-110, :259-299.
+-import 'package:flutter/foundation.dart' show ValueListenable;
++import 'package:flutter/foundation.dart'
++    show ValueListenable, visibleForTesting;
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart'
+     show SymbolComponent, UnitComponent, UnitLabelling, kUnitLabelTag;
+ 
+ import '../kits/locks.dart';
+ import '../symbols/symbol_box.dart' show boxOfLeaves;
+ import 'unit_components.dart';
+ import 'unit_label.dart';
+ import 'unit_locks.dart';
+ import 'unit_problems.dart';
+@@ -82,20 +83,25 @@ final class UnitInfo {
+ 
+   @override
+   String toString() => 'UnitInfo(${instance.toHex()}, $text, $kind)';
+ }
+ 
+ /// The units of one document, and what their labels and data raise.
+ final class UnitIndex {
+   UnitIndex._(this.units, this.nested, this._byInstance, this._extraLabels,
+       this._keptData, this._invalidColour);
+ 
++  /// How many indexes [UnitIndex.of] has built (today's
++  /// `TableSurvey.surveys`): a test counts the passes a rebuild costs.
++  @visibleForTesting
++  static int debugBuilds = 0;
++
+   /// One pass, O(nodes + entities): at document-change rate (through
+   /// [UnitIndexCache]), never per frame.
+   factory UnitIndex.of(CommandTarget document,
+       {required ParametricCatalog catalog, required LockSet locks}) {
+     final entities = document.entities;
+     final tree = document.tree;
+     final root = tree.root;
+     // One bucketing pass: the UNIT labels by owner, every other leaf by
+     // owner (a definition's leaves among them).
+     final labels = <Handle, List<(Handle, String)>>{};
+diff --git a/packages/jet_cad_2d_plan/lib/src/units/unit_words.dart b/packages/jet_cad_2d_plan/lib/src/units/unit_words.dart
+new file mode 100644
+index 00000000..fb18cda3
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/units/unit_words.dart
+@@ -0,0 +1,22 @@
++// A unit kind's word (spec 2b S4 "Words"): the kit's own, as
++// `unit:<kit id>/<kind>` in its KitNames (a host's word first, through the
++// kit's KitWords, Task 4); else the contract's word in PlanStrings (table,
++// seat); else the kind as stored. The kit id is the unit's symbol key's
++// first segment; a unit with no symbol key skips the kit's word.
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show kitOfKey;
++
++import '../controller/plan_controller.dart';
++import 'unit_index.dart';
++
++/// [unit]'s kind in the controller's language.
++String unitKindWord(PlanController c, UnitInfo unit) {
++  final key = unit.symbolKey;
++  if (key != null) {
++    final kit = kitOfKey(key);
++    if (c.kits.kitOf(kit) != null) {
++      final word = c.servicesOf(kit).words.maybe('unit:$kit/${unit.kind}');
++      if (word != null) return word;
++    }
++  }
++  return c.planStrings.unitKind(unit.kind) ?? unit.kind;
++}
+diff --git a/packages/jet_cad_2d_plan/test/editor/editor_words_test.dart b/packages/jet_cad_2d_plan/test/editor/editor_words_test.dart
+index a4a6c677..b3b55754 100644
+--- a/packages/jet_cad_2d_plan/test/editor/editor_words_test.dart
++++ b/packages/jet_cad_2d_plan/test/editor/editor_words_test.dart
+@@ -1,40 +1,43 @@
+ // Spec 14d L3-L5, R-2, M-14d-a (revision 2) through PlanEditor: the
+ // editor's words follow the host's locale and a change of it while
+ // mounted; German and Turkish never overflow the bar's 656 px floor; and
+ // nothing on screen bypasses the strings. Ported, assertions unchanged,
+ // from jet_cad_floor_plan/test/l10n/shell_words_test.dart (SW1, SW2's
+ // design half), overflow_test.dart (OV-<code>, OV-H-<code>), leak_test.dart
+ // (LK1's editor half, with RecordingPlanStrings) and panel_words_test.dart
+ // (PW1's zoom read-out, which Task 18 left here). The floor planner's
+ // words for its own tools (Wall, Door, Dimension) are the generic tools'
+ // (Line, Circle, Text); its wall is the editor fixture's first mark; the
+-// service bar's lines are 2b's.
++// unit half of OV-H (2b Task 10) selects the unit editor fixture's tables;
++// the service bar's lines are 2b's.
+ import 'package:flutter/foundation.dart' show SynchronousFuture;
+ import 'package:flutter/material.dart';
+ import 'package:flutter/services.dart' show LogicalKeyboardKey;
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show SymbolsState;
+ import 'package:jet_cad_2d_plan/src/controller/plan_controller.dart';
+ import 'package:jet_cad_2d_plan/src/editor/plan_editor.dart';
+ import 'package:jet_cad_2d_plan/src/l10n/localizations.dart';
+ import 'package:jet_cad_2d_plan/src/l10n/strings.dart';
+ import 'package:jet_cad_2d_plan/src/l10n/strings_tr.dart';
+ import 'package:jet_cad_2d_plan/src/symbols/gallery_model.dart'
+     show PlanSymbolWords;
+ 
+ import '../support/editor_host.dart';
+ import '../support/mark_kit.dart';
+ import '../support/recording_plan_strings.dart';
+ import '../support/symbol_fixtures.dart' show demoKit;
++import '../support/unit_editor_fixture.dart' show tableOf, unitEditorPlanJson;
++import '../support/unit_fixtures.dart' show fxKit;
+ 
+ Widget app(PlanController c, Locale locale) => MaterialApp(
+     locale: locale,
+     supportedLocales: planSupportedLocales,
+     localizationsDelegates: planLocalizationsDelegates,
+     home: Scaffold(body: PlanEditor(controller: c, onExport: (_) {})));
+ 
+ /// An empty plan with the Tools and Symbols tabs ([slowSymbolsKit]), in
+ /// [locale].
+ Future<PlanController> pump(WidgetTester tester, Locale locale) async {
+@@ -228,20 +231,45 @@ void main() {
+       expect(roots, hasLength(kEditorMarks + 1),
+           reason: 'premise: the marks and the line');
+       for (final h in roots) {
+         c.selection.replace([SelectionKey.root(h)]);
+         await tester.pump();
+         expect(tester.takeException(), isNull, reason: '$code, $h');
+       }
+     });
+   }
+ 
++  for (final code in ['en', 'de', 'tr']) {
++    testWidgets(
++        'OV-H-unit-$code at 656 x 700, the unit fixture\'s table 1, then the '
++        'unlabelled one, then 7 selected in turn: the right panel never '
++        'overflows (review 14d-1 F-2)', (tester) async {
++      final c = PlanController(kits: [fxKit()], json: unitEditorPlanJson());
++      addTearDown(c.dispose);
++      await tester.binding.setSurfaceSize(const Size(656, 700));
++      addTearDown(() => tester.binding.setSurfaceSize(null));
++      await tester.pumpWidget(MaterialApp(
++          locale: Locale(code),
++          supportedLocales: planSupportedLocales,
++          localizationsDelegates: planLocalizationsDelegates,
++          home: Scaffold(body: PlanEditor(controller: c))));
++      await tester.pump();
++      for (final n in ['1', null, '7']) {
++        c.selection.replace([SelectionKey.root(tableOf(c, n))]);
++        await tester.pump();
++        expect(find.byKey(const Key('unit-section')), findsOneWidget,
++            reason: '$code, $n: premise');
++        expect(tester.takeException(), isNull, reason: '$code, $n');
++      }
++    });
++  }
++
+   testWidgets(
+       'LK1 in Turkish nothing on screen bypasses the strings: the editor, '
+       'its panels, tabs, menus and dialogs (M-14d-a)', (tester) async {
+     final recording = RecordingPlanStrings(const PlanStringsTr());
+     final c =
+         PlanController(kits: [markKit(), demoKit()], json: editorPlanJson());
+     addTearDown(c.dispose);
+     final mark = c.catalog.objectsOf<MarkCross>(c.document).first;
+     await tester.binding.setSurfaceSize(const Size(1440, 900));
+     addTearDown(() => tester.binding.setSurfaceSize(null));
+diff --git a/packages/jet_cad_2d_plan/test/editor/unit_inspector_test.dart b/packages/jet_cad_2d_plan/test/editor/unit_inspector_test.dart
+new file mode 100644
+index 00000000..08f821c8
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/editor/unit_inspector_test.dart
+@@ -0,0 +1,283 @@
++// Ported from jet_cad_floor_plan/test/host/inspector_test.dart (assertions
++// unchanged; 2b Task 10, spec S4 "The unit inspector"): the unit inspector
++// slot and `editorSelectedUnits`. Through `PlanEditor` on the editor fixture
++// under `editorCamera()`; the inspector's detail is checked against the
++// fixture's own forward transform of the box's centre. "None without a
++// builder ...; none in the selection mode" and T6-e need the mode (Task 16
++// ports them whole).
++import 'dart:ui' as ui;
++
++import 'package:flutter/gestures.dart' show PointerScrollEvent;
++import 'package:flutter/material.dart';
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
++    show InteractionLayer, SelectionKey;
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++
++import '../support/unit_editor_fixture.dart' as t;
++import '../support/unit_editor_fixture.dart'
++    show editorCamera, editorNorthWall, editorTextAt, kEditorSurface;
++import '../support/unit_fixtures.dart' show fxKit;
++
++Finder byKey(String k) => find.byKey(Key(k));
++
++final class InspectorHost {
++  InspectorHost(this.c, bool panel)
++      : panel = ValueNotifier(panel),
++        label = ValueNotifier('host');
++
++  final PlanController c;
++  final ValueNotifier<bool> panel;
++
++  /// The host's own state, read by its inspector: a change rebuilds the
++  /// editor (the host's rebuild).
++  final ValueNotifier<String> label;
++
++  /// Every detail the builder was called with, in order.
++  final List<PlanUnitDetail> calls = [];
++}
++
++/// The editor with a host inspector: a line naming the unit and its data,
++/// and a field whose submission stores its text as the unit's `pos`.
++Future<InspectorHost> mountInspector(WidgetTester tester,
++    {bool panel = true, bool inspector = true}) async {
++  final c = PlanController(kits: [fxKit()], json: t.unitEditorPlanJson());
++  addTearDown(c.dispose);
++  final h = InspectorHost(c, panel);
++  addTearDown(h.panel.dispose);
++  addTearDown(h.label.dispose);
++  await tester.binding.setSurfaceSize(kEditorSurface);
++  addTearDown(() => tester.binding.setSurfaceSize(null));
++  await tester.pumpWidget(MaterialApp(
++      home: Scaffold(
++          body: ListenableBuilder(
++              listenable: Listenable.merge([h.panel, h.label]),
++              builder: (_, __) {
++                final label = h.label.value;
++                return PlanEditor(
++                    controller: c,
++                    propertyPanel: h.panel.value,
++                    unitInspectorBuilder: !inspector
++                        ? null
++                        : (context, d) {
++                            h.calls.add(d);
++                            return Column(
++                                key: const Key('host-inspector'),
++                                children: [
++                                  Text(
++                                      '$label ${d.unit.label} '
++                                      '${d.data['pos'] ?? '-'}',
++                                      key: const Key('host-inspector-text')),
++                                  TextField(
++                                      key: const Key('host-inspector-field'),
++                                      onSubmitted: (v) => c.setUnitData(
++                                          d.unit.label!, {'pos': v})),
++                                ]);
++                          });
++              }))));
++  await tester.pump();
++  await tester.pump();
++  c.camera.value = editorCamera();
++  await tester.pump();
++  return h;
++}
++
++String inspectorText(WidgetTester tester) =>
++    tester.widget<Text>(byKey('host-inspector-text')).data!;
++
++SelectionKey keyOf(PlanController c, String? n) =>
++    SelectionKey.root(t.tableOf(c, n));
++
++Future<void> selectKeys(
++    WidgetTester tester, PlanController c, List<SelectionKey> keys) async {
++  c.selection.replace(keys);
++  await tester.pump();
++}
++
++/// The north wall's stand-in: the root line between [editorNorthWall]'s
++/// points.
++Handle northWall(PlanController c) {
++  final d = c.document;
++  final (a, b) = editorNorthWall;
++  for (final slot in d.entities.liveSlots) {
++    if (d.entities.kindAt(slot) != EntityKind.line ||
++        d.entities.ownerAt(slot) != d.rootHandle) {
++      continue;
++    }
++    final coords = d.geometry.read(d.entities.geomIndexAt(slot)).coords;
++    if (coords[0] == a.x &&
++        coords[1] == a.y &&
++        coords[2] == b.x &&
++        coords[3] == b.y) {
++      return d.entities.handleAt(slot);
++    }
++  }
++  throw StateError('no north wall');
++}
++
++void main() {
++  group('the inspector (S-18)', () {
++    testWidgets(
++        'M-H45 none for 1 and 2, for 7 and " 7 " (one number), for 7 or '
++        '" 7 " alone (a number two tables share), for 1 and a wall, for the '
++        "unnumbered table alone; 1 alone shows the host's widget with 1's "
++        'detail under the Selection panel, 2 alone with 2\'s', (tester) async {
++      final h = await mountInspector(tester);
++      final c = h.c;
++      expect(c.setUnitData('1', const {'pos': 'a1'}), isTrue);
++      await tester.pump();
++      final wall = SelectionKey.root(northWall(c));
++      final cases = <String, List<SelectionKey>>{
++        '1 and 2': [keyOf(c, '1'), keyOf(c, '2')],
++        '7 and " 7 "': [keyOf(c, '7'), keyOf(c, ' 7 ')],
++        // Task 6 review R-1 (a): a number another table shares names no
++        // one table; `setUnitData` refuses it too.
++        '7 alone': [keyOf(c, '7')],
++        '" 7 " alone': [keyOf(c, ' 7 ')],
++        '1 and a wall': [keyOf(c, '1'), wall],
++        'the unnumbered table': [keyOf(c, null)],
++        'a wall': [wall],
++      };
++      for (final MapEntry(key: name, value: keys) in cases.entries) {
++        await selectKeys(tester, c, keys);
++        expect(c.selection.length, keys.length, reason: name);
++        expect(byKey('host-inspector'), findsNothing, reason: name);
++      }
++      expect(c.editorSelectedUnits.value, isEmpty, reason: 'the last: a wall');
++      expect(h.calls, isEmpty, reason: 'the builder was never asked');
++      // `select` picks both sevens: one number, two tables.
++      c.select({'7'});
++      await tester.pump();
++      expect(c.selection.length, 2);
++      expect(c.editorSelectedUnits.value, {'7'});
++      expect(byKey('host-inspector'), findsNothing);
++      expect(h.calls, isEmpty);
++
++      await selectKeys(tester, c, [keyOf(c, '1')]);
++      expect(byKey('host-inspector'), findsOneWidget);
++      expect(inspectorText(tester), 'host 1 a1');
++      final d = h.calls.last;
++      expect(d.unit.label, '1');
++      expect(d.data, const {'pos': 'a1'});
++      final centre = t.centreOf(c, '1');
++      expect(d.center!.dx, closeTo(centre.x, 1e-6));
++      expect(d.center!.dy, closeTo(centre.y, 1e-6));
++      expect(d.rotation, closeTo(30 * 3.141592653589793 / 180, 1e-9));
++      // Under jet-cad's fields, above the Layers.
++      expect(
++          tester.getTopLeft(byKey('host-inspector')).dy,
++          greaterThanOrEqualTo(
++              tester.getBottomLeft(byKey('property-panel')).dy));
++      expect(tester.getBottomLeft(byKey('host-inspector')).dy,
++          lessThanOrEqualTo(tester.getTopLeft(find.byType(PlanLayerPanel)).dy));
++      // 2 alone: its own detail, not the first table's.
++      await selectKeys(tester, c, [keyOf(c, '2')]);
++      expect(inspectorText(tester), 'host 2 -');
++      expect(h.calls.last.unit.label, '2');
++      expect(h.calls.last.center, isNot(d.center));
++      // ` 7 ` alone: none (Task 6 review R-1 (a)).
++      await selectKeys(tester, c, [keyOf(c, ' 7 ')]);
++      expect(byKey('host-inspector'), findsNothing);
++      expect(c.setUnitData('7', const {'pos': 'x'}), isFalse,
++          reason: 'the link the inspector would offer is refused');
++    });
++
++    testWidgets(
++        'T6-d a counting builder: no call across 50 pans and zooms (the '
++        "controller's and the user's wheel) nor across hovers; one per "
++        'selection change', (tester) async {
++      final h = await mountInspector(tester);
++      final c = h.c;
++      await selectKeys(tester, c, [keyOf(c, '1')]);
++      expect(h.calls.length, 1);
++      final canvas = tester.getCenter(find.byType(InteractionLayer));
++      final mouse =
++          await tester.createGesture(kind: ui.PointerDeviceKind.mouse);
++      await mouse.addPointer(location: canvas);
++      for (var i = 0; i < 50; i++) {
++        switch (i % 3) {
++          case 0:
++            c.panBy(Offset(i.isEven ? 7 : -5, 3));
++          case 1:
++            c.zoomBy(i.isEven ? 1.05 : 0.96);
++          case 2:
++            await tester.sendEventToBinding(PointerScrollEvent(
++                position: canvas, scrollDelta: Offset(0, i.isEven ? 20 : -20)));
++        }
++        await tester.pump();
++      }
++      expect(h.calls.length, 1, reason: 'the camera builds nothing');
++      // Hovers over 2, 1 and the TEXT: the selection's hover moves.
++      final hovers = <SelectionKey?>{};
++      for (final w in [t.centreOf(c, '2'), t.centreOf(c, '1'), editorTextAt]) {
++        await mouse.moveTo(t.screenOf(tester, c, w));
++        await tester.pump();
++        hovers.add(c.selection.hover);
++      }
++      expect(hovers.length, 3, reason: 'three hovers: $hovers');
++      expect(h.calls.length, 1, reason: 'a hover builds nothing');
++      await selectKeys(tester, c, [keyOf(c, '2')]);
++      expect(h.calls.length, 2);
++      await selectKeys(tester, c, [keyOf(c, '2')]);
++      expect(h.calls.length, 2, reason: 'the same table');
++      await selectKeys(tester, c, [keyOf(c, '1')]);
++      expect(h.calls.length, 3);
++      await selectKeys(tester, c, [keyOf(c, '1'), keyOf(c, '2')]);
++      expect(h.calls.length, 3, reason: 'none shown');
++      await mouse.removePointer();
++    });
++
++    testWidgets(
++        'T6-f propertyPanel: false, 1 selected: no inspector, no call; '
++        'shown again with the panel', (tester) async {
++      final h = await mountInspector(tester, panel: false);
++      final c = h.c;
++      await selectKeys(tester, c, [keyOf(c, '1')]);
++      expect(byKey('unit-inspector'), findsNothing);
++      expect(byKey('host-inspector'), findsNothing);
++      expect(h.calls, isEmpty);
++      h.panel.value = true;
++      await tester.pump();
++      expect(byKey('host-inspector'), findsOneWidget);
++      expect(h.calls.single.unit.label, '1');
++    });
++
++    testWidgets(
++        "the inspector reaches the host's state: its field calls "
++        'setUnitData and the inspector shows the new data after the '
++        "revision; letters typed there are the field's; undo shows the old; "
++        'a host rebuild builds it again', (tester) async {
++      final h = await mountInspector(tester);
++      final c = h.c;
++      await selectKeys(tester, c, [keyOf(c, '1')]);
++      expect(inspectorText(tester), 'host 1 -');
++      final revision = c.revision.value;
++      await tester.tap(byKey('host-inspector-field'));
++      await tester.pump();
++      await tester.sendKeyEvent(LogicalKeyboardKey.keyL);
++      await tester.pump();
++      expect(c.activeTool.value, 'plan.select',
++          reason: 'a letter in the field is no tool letter');
++      await tester.enterText(byKey('host-inspector-field'), 'b7');
++      await tester.testTextInput.receiveAction(TextInputAction.done);
++      await tester.pump();
++      expect(c.revision.value, greaterThan(revision));
++      expect(inspectorText(tester), 'host 1 b7');
++      expect(h.calls.last.data, const {'pos': 'b7'});
++      c.undo();
++      await tester.pump();
++      expect(inspectorText(tester), 'host 1 -');
++      h.label.value = 'pos';
++      await tester.pump();
++      expect(inspectorText(tester), 'pos 1 -', reason: 'the host rebuilt');
++    });
++
++    testWidgets('none without a builder (no slot)', (tester) async {
++      final none = await mountInspector(tester, inspector: false);
++      await selectKeys(tester, none.c, [keyOf(none.c, '1')]);
++      expect(byKey('unit-inspector'), findsNothing);
++    });
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/editor/units_only_select_test.dart b/packages/jet_cad_2d_plan/test/editor/units_only_select_test.dart
+index cb9a6d18..1a7a7706 100644
+--- a/packages/jet_cad_2d_plan/test/editor/units_only_select_test.dart
++++ b/packages/jet_cad_2d_plan/test/editor/units_only_select_test.dart
+@@ -91,20 +91,37 @@ Future<void> drag(WidgetTester tester, Offset from, Offset to,
+ 
+ /// A finger's tap at [at]: down, held past the touch hold-back, up.
+ Future<void> fingerTap(WidgetTester tester, Offset at) async {
+   final g = await tester.startGesture(at,
+       pointer: 41, kind: ui.PointerDeviceKind.touch);
+   await tester.pump(const Duration(milliseconds: 150));
+   await g.up();
+   await tester.pump(const Duration(milliseconds: 300));
+ }
+ 
++/// The rotation grip of table [n]: 24 px above its top's screen box.
++Offset rotationGripOf(WidgetTester tester, PlanController c, String n) {
++  final corners = [
++    for (final (x, y) in const [
++      (300, -200),
++      (1100, -200),
++      (900, 400),
++      (300, 250)
++    ])
++      screenOf(tester, c, onTable(c, n, x.toDouble(), y.toDouble())),
++  ];
++  final minX = corners.map((p) => p.dx).reduce(math.min);
++  final maxX = corners.map((p) => p.dx).reduce(math.max);
++  final minY = corners.map((p) => p.dy).reduce(math.min);
++  return Offset((minX + maxX) / 2, minY - 24);
++}
++
+ /// The turn of [m], in degrees.
+ double degreesOf(Transform2 m) => math.atan2(m.b, m.a) * 180 / math.pi;
+ 
+ /// The bands' corners: the whole canvas, inset 4 px.
+ Rect canvasRect(WidgetTester tester) =>
+     tester.getRect(find.byType(InteractionLayer)).deflate(4);
+ 
+ void main() {
+   group('selectUnitsOnly (M-H42, S-15)', () {
+     testWidgets(
+@@ -240,20 +257,61 @@ void main() {
+       final centre = centreOf(c, '1');
+       final from = screenOf(tester, c, topOf(c, '1'));
+       await drag(tester, from, from + const Offset(80, -40));
+       final moved = centreOf(c, '1') - centre;
+       // 80 px right and 40 px up at 0.37 px/mm, y up; the move is exact up
+       // to the grid's 50 mm snap.
+       expect(moved.x, closeTo(80 / 0.37, 50));
+       expect(moved.y, closeTo(40 / 0.37, 50));
+     });
+ 
++    testWidgets(
++        'T5-b readOnly: 1 selected shows no rotation grip, no ±90, and a '
++        'read-only Rotation field whose typed value does not commit; a drag '
++        'at the grip\'s place turns nothing. unitsOnly: the grip turns it',
++        (tester) async {
++      final c = await mountUnitEditor(tester, permissions: P.readOnly);
++      c.selection.replace([keyOf(c, '1')]);
++      await tester.pump();
++      final before = encoded(c);
++      expect(c.grips.rotatable, isFalse);
++      expect(find.byKey(const Key('unit-rotate-left')), findsNothing);
++      expect(find.byKey(const Key('unit-rotate-right')), findsNothing);
++      final field =
++          tester.widget<TextField>(find.byKey(const Key('symbol-rotation')));
++      expect(field.readOnly, isTrue);
++      await tester.tap(find.byKey(const Key('symbol-rotation')));
++      await tester.pump();
++      field.controller!.text = '75';
++      FocusManager.instance.primaryFocus?.unfocus();
++      await tester.pump();
++      expect(encoded(c), before, reason: 'the typed value');
++      final grip = rotationGripOf(tester, c, '1');
++      await drag(tester, grip, grip + const Offset(120, 60));
++      expect(encoded(c), before, reason: 'the grip\'s place');
++      await setPermissions(tester, c, P.unitsOnly);
++      c.selection.replace([keyOf(c, '1')]);
++      await tester.pump();
++      expect(c.grips.rotatable, isTrue);
++      expect(find.byKey(const Key('unit-rotate-left')), findsOneWidget);
++      expect(
++          tester
++              .widget<TextField>(find.byKey(const Key('symbol-rotation')))
++              .readOnly,
++          isFalse);
++      final turn = degreesOf(transformOf(c, '1'));
++      // The left column came back: the canvas moved on the screen.
++      final grip2 = rotationGripOf(tester, c, '1');
++      await drag(tester, grip2, grip2 + const Offset(120, 60));
++      expect(degreesOf(transformOf(c, '1')), isNot(closeTo(turn, 1)));
++    });
++
+     testWidgets(
+         'S-9 h a body drag of 1 started under tablesOnly and switched to '
+         'move: false before its up executes nothing; kept under tablesOnly '
+         'it moves 1', (tester) async {
+       final c = await mountUnitEditor(tester, permissions: P.unitsOnly);
+       final from = screenOf(tester, c, topOf(c, '1'));
+       final before = encoded(c);
+       await drag(tester, from, from + const Offset(80, -40),
+           before: () =>
+               setPermissions(tester, c, P.unitsOnly.copyWith(move: false)));
+diff --git a/packages/jet_cad_2d_plan/test/l10n/stale_error_test.dart b/packages/jet_cad_2d_plan/test/l10n/stale_error_test.dart
+new file mode 100644
+index 00000000..98c34115
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/l10n/stale_error_test.dart
+@@ -0,0 +1,73 @@
++// Ported from jet_cad_floor_plan/test/l10n/stale_error_test.dart (2b Task
++// 10; assertions unchanged; SE1 is named SE1L here, as 2a named SE2 SE2L:
++// Task 14 ports service_events_test.dart's SE1 ... SE16 under their source
++// ids; SE2 -- the layer name -- is 2a's ground).
++//
++// Review 14d-1 F-3 (the M-14d-s class): an error shown under a field when
++// the language changes is worded again in the new language -- the unit
++// label field's.
++import 'package:flutter/material.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/harness.dart';
++import '../support/unit_fixtures.dart';
++
++/// Tables 1 (turned) and 2 off the origin, and a layer `Bar` beside `0`.
++String twoTables() => planText([fxKit()], (d) {
++      addUnitLabel(
++          d,
++          placeAt(d, tableSymbol(), Vector2(-1250.5, 830.25), quarterTurns: 1),
++          '1');
++      addUnitLabel(d, placeAt(d, tableSymbol(), Vector2(2140.75, -610.5)), '2');
++      addLayer(d, 'Bar');
++    });
++
++Future<(PlanController, ValueNotifier<Locale>)> pump(
++    WidgetTester tester, String json) async {
++  final c = controllerFor(kits: [fxKit()], json: json);
++  final locale = ValueNotifier(const Locale('de'));
++  addTearDown(locale.dispose);
++  await tester.binding.setSurfaceSize(const Size(1440, 900));
++  addTearDown(() => tester.binding.setSurfaceSize(null));
++  await tester.pumpWidget(ValueListenableBuilder<Locale>(
++      valueListenable: locale,
++      builder: (_, l, __) => MaterialApp(
++          locale: l,
++          supportedLocales: planSupportedLocales,
++          localizationsDelegates: planLocalizationsDelegates,
++          home: Scaffold(body: PlanEditor(controller: c)))));
++  await tester.pump();
++  return (c, locale);
++}
++
++Future<void> enter(WidgetTester tester, String key, String text) async {
++  await tester.tap(find.byKey(Key(key)));
++  await tester.pump();
++  await tester.enterText(find.byKey(Key(key)), text);
++  await tester.testTextInput.receiveAction(TextInputAction.done);
++  await tester.pump();
++  await tester.pump();
++}
++
++void main() {
++  testWidgets(
++      'SE1L a number already used, refused in German, reads in English after '
++      'the switch', (tester) async {
++    final (c, locale) = await pump(tester, twoTables());
++    final one = c.unitIndex.withLabel('1').single;
++    c.selection.replace([SelectionKey.root(one.instance)]);
++    await tester.pump();
++    await enter(tester, 'unit-label', '2');
++    String numberError() =>
++        tester.widget<Text>(find.byKey(const Key('unit-label-error'))).data!;
++    expect(numberError(), 'Die Nummer 2 ist bereits vergeben',
++        reason: 'premise: refused in German');
++    locale.value = const Locale('en');
++    await tester.pump();
++    await tester.pump();
++    expect(numberError(), 'Number 2 is already used');
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/l10n/unit_words_test.dart b/packages/jet_cad_2d_plan/test/l10n/unit_words_test.dart
+new file mode 100644
+index 00000000..f9d270a7
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/l10n/unit_words_test.dart
+@@ -0,0 +1,118 @@
++// 2b Task 10, spec S4 "Words": a unit kind's word -- the kit's (through its
++// KitWords, a host's word first), else PlanStrings' for the contract's
++// kinds, else the kind as stored -- and the new words in each language.
++import 'dart:ui' show Locale;
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_kit/authoring.dart'
++    show CatalogPolyline, CatalogSymbol, CatalogUnit;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:jet_cad_2d_plan/src/units/unit_words.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/harness.dart';
++import '../support/unit_fixtures.dart';
++
++/// A booth (a kit's own kind), a table and a kiosk (no word anywhere) of
++/// kit `bt`, each a closed outline off its base point.
++CatalogSymbol unit(String key, String kind, int capacity) => CatalogSymbol(
++      key: key,
++      name: key,
++      category: 'Tests',
++      tags: const ['test'],
++      unit: CatalogUnit(kind: kind, capacity: capacity),
++      base: (410.5, 220.25),
++      shapes: const [
++        CatalogPolyline([(100, 50), (900, 50), (900, 650), (100, 650)],
++            closed: true),
++      ],
++    );
++
++final CatalogSymbol booth = unit('bt.booth.corner', 'booth', 6);
++final CatalogSymbol table = unit('bt.table.round', UnitKinds.table, 4);
++final CatalogSymbol kiosk = unit('bt.kiosk.small', 'kiosk', 2);
++
++/// Kit `bt`: an English and a Turkish word for its booth; no type, no
++/// library (the units are placed by hand).
++PlanKit btKit() => PlanKit(
++    id: 'bt',
++    version: '1.0.0',
++    names: const KitNames({
++      'en': {'unit:bt/booth': 'Booth'},
++      'tr': {'unit:bt/booth': 'Loca'},
++    }));
++
++String boothPlan() => planText([btKit()], (d) {
++      placeAt(d, booth, Vector2(-2600.5, 1400.25), quarterTurns: 1);
++      placeAt(d, table, Vector2(2300.75, 1400.5), mirrored: true);
++      placeAt(d, kiosk, Vector2(900.25, -1700.75), quarterTurns: 3);
++    });
++
++/// The kind's word of the unit of kind [kind] in [c], at [locale].
++String wordOf(PlanController c, String kind, String locale) {
++  c.reportLocale(Locale(locale));
++  return unitKindWord(c, c.unitIndex.units.singleWhere((u) => u.kind == kind));
++}
++
++void main() {
++  test(
++      'UW-kind-lookup the kit\'s word in Turkish, its English in German; '
++      'PlanStrings\' word for a table; the stored kind with no word', () {
++    final c = controllerFor(kits: [btKit()], json: boothPlan());
++    // M-UW1: the kit's step skipped.
++    expect(wordOf(c, 'booth', 'tr'), 'Loca');
++    expect(wordOf(c, 'booth', 'de'), 'Booth', reason: 'the English fallback');
++    // M-UW2: the PlanStrings step skipped.
++    expect(wordOf(c, UnitKinds.table, 'tr'), 'Masa');
++    expect(wordOf(c, UnitKinds.table, 'de'), 'Tisch');
++    expect(wordOf(c, 'kiosk', 'tr'), 'kiosk');
++  });
++
++  test(
++      'UW-host-word-first a host\'s word comes before the kit\'s, per '
++      'locale; the kit\'s still answers where the host has none', () {
++    final c = PlanController(
++        kits: [btKit()],
++        json: boothPlan(),
++        words: const KitNames({
++          'tr': {'unit:bt/booth': 'Bölme'},
++        }));
++    addTearDown(c.dispose);
++    // M-UW3 (Task 4's merge, cross-check): `kit.names.merge(words)`.
++    expect(wordOf(c, 'booth', 'tr'), 'Bölme');
++    expect(wordOf(c, 'booth', 'en'), 'Booth');
++  });
++
++  test(
++      'UW-words the unit words in each language: never empty, each '
++      'language its own; unitKind for table and seat only', () {
++    const languages = <PlanStrings>[
++      PlanStringsEn(),
++      PlanStringsDe(),
++      PlanStringsTr(),
++    ];
++    for (final word in <String Function(PlanStrings)>[
++      (s) => s.merge,
++      (s) => s.split,
++      (s) => s.number,
++      (s) => s.label,
++      (s) => s.capacity,
++      (s) => s.rotateLeft,
++      (s) => s.rotateRight,
++      (s) => s.unitKind(UnitKinds.table)!,
++      (s) => s.unitKind(UnitKinds.seat)!,
++      (s) => s.labelWarning(
++          const BadLabel(label: 'A\u0007', problem: UnitLabelProblem.control)),
++    ]) {
++      final words = [for (final s in languages) word(s)];
++      expect(words, everyElement(isNotEmpty));
++      expect(words.toSet(), hasLength(3), reason: '$words');
++    }
++    for (final s in languages) {
++      // M-UW4: unitKind answering a word for any kind.
++      expect(s.unitKind('booth'), isNull, reason: s.languageCode);
++    }
++    expect(const PlanStringsEn().unitKind(UnitKinds.seat), 'Seat');
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/l10n/value_words_test.dart b/packages/jet_cad_2d_plan/test/l10n/value_words_test.dart
+index c62594c6..c2a6c416 100644
+--- a/packages/jet_cad_2d_plan/test/l10n/value_words_test.dart
++++ b/packages/jet_cad_2d_plan/test/l10n/value_words_test.dart
+@@ -48,20 +48,45 @@ void main() {
+       LayerNameEmpty(),
+       LayerNameEdgeSpace(),
+       LayerNameTooLong(255),
+       LayerNameBadCharacter('|'),
+       LayerNameDuplicate('A'),
+     ]) {
+       expect(const PlanStringsEn().layerNameProblem(p), p.toString());
+     }
+   });
+ 
++  test('VW2 unit-label problems and the clash in each language', () {
++    for (final p in UnitLabelProblem.values) {
++      expectWorded((s) => s.labelProblem(p));
++    }
++    expect(const PlanStringsEn().labelProblem(UnitLabelProblem.length),
++        '1 to 8 characters');
++    expectWorded((s) => s.labelUsed('12'),
++        parts: ['12'], english: 'Number 12 is already used');
++  });
++
++  test('VW3 label warnings in each language (the Room notice is 3\'s)', () {
++    expectWorded(
++        (s) => s.labelWarning(const DuplicateLabel(label: '7', count: 3)),
++        parts: ['7', '3'],
++        english: 'Number 7 is used by 3 tables');
++    expectWorded(
++        (s) => s.labelWarning(
++            const Unlabelled(kind: 'table', capacity: 4, symbolKey: 'k')),
++        parts: ['4']);
++    expect(
++        const PlanStringsEn().labelWarning(
++            const Unlabelled(kind: 'table', capacity: 1, symbolKey: null)),
++        'A table with 1 seat has no number');
++  });
++
+   test('W-VW5 the plan library\'s three new words in each language', () {
+     // M-W-VW5: a language that returns the English text for a new word
+     // (copy-paste) makes the three not distinct.
+     expectWorded((s) => s.lockedHint, english: 'This object is locked');
+     expectWorded((s) => s.sectionFailed,
+         english: 'This section could not be shown');
+     expectWorded((s) => s.planDamaged,
+         english: 'An edit failed and the plan may be damaged');
+   });
+ 
+diff --git a/packages/jet_cad_2d_plan/test/panels/colour_row_test.dart b/packages/jet_cad_2d_plan/test/panels/colour_row_test.dart
+index a3da39f5..cd5618d9 100644
+--- a/packages/jet_cad_2d_plan/test/panels/colour_row_test.dart
++++ b/packages/jet_cad_2d_plan/test/panels/colour_row_test.dart
+@@ -5,34 +5,39 @@
+ // hues, set the colour of every selected object whose type has a colour
+ // target in one undo step labelled Colour; read-only while the permissions
+ // refuse `recolor` or the document's permissions refuse the edit; its words
+ // in Turkish; its swatches as the canvas shows the hues.
+ //
+ // Today's rooms A and B become two boxes of the box kit: A at
+ // (7010.25, 3020.5) in a group turned 0.61 rad, B at (7400.75, 3120.25)
+ // unturned; today's wall becomes a plain line. The hues under test are
+ // `teal` and `purple`, never the first of the palette, and `magenta`, a
+ // name no release knows. CP2 (tint pixels) is the room's (sub-project 3);
+-// CP7 to CP12 are tables (2b).
++// CP7 to CP12 are tables (2b Task 10): placed units, three of the fixture's
++// `tableSymbol(seats: 4)` labelled 1, 2 and 7.
+ import 'dart:convert' show jsonEncode;
+ 
+ import 'package:flutter/material.dart';
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
+     show SelectionKey, darkCanvasTone, kDarkCanvasPaper;
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show PlanSwatch;
+ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+ import 'package:jet_cad_2d_plan/src/panels/colour_row.dart';
++import 'package:jet_cad_2d_plan/src/units/unit_components.dart' show UnitColour;
++import 'package:jet_cad_2d_plan/src/units/unit_index.dart' show UnitIndex;
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import '../support/panel_kits.dart';
++import '../support/unit_fixtures.dart'
++    show addUnitLabel, fxKit, placeAt, tableSymbol;
+ 
+ Finder swatch(String name) => find.byKey(Key('color-swatch-$name'));
+ Finder get picker => find.byKey(const Key('color-picker'));
+ 
+ /// The Semantics node of swatch [name] (the nearest above its InkWell that
+ /// carries the label).
+ Semantics semanticsOf(WidgetTester tester, String name) =>
+     tester.widget<Semantics>(find
+         .ancestor(
+             of: swatch(name),
+@@ -67,49 +72,96 @@ String canon(DraftDocument d) {
+         .compareTo((b['record']! as Map)['handle']! as int));
+   return jsonEncode(j);
+ }
+ 
+ /// The panel's plan.
+ typedef Boxes = ({
+   PlanController c,
+   DraftDocument doc,
+   Handle a,
+   Handle b,
+-  Handle line
++  Handle line,
++  Handle one,
++  Handle two,
++  Handle seven
+ });
+ 
+ /// Two boxes and a plain line over the box and disc kits: A (120 x 70) in a
+ /// group of its own turned 0.61 rad, B (90 x 60) at the identity, the line
+-/// on layer 0. The history cleared.
++/// on layer 0; three units of `tableSymbol(seats: 4)` labelled 1 (turned),
++/// 2 (mirrored) and 7 (turned three quarters), off the origin. The history
++/// cleared.
+ Boxes boxesPlan() {
+-  final c = boxController(kits: [boxKit, discKit]);
++  final c = boxController(kits: [boxKit, discKit, fxKit()]);
+   final a = addBox(c, Vector2(7010.25, 3020.5),
+       const BoxParams(120, 70, label: 'A', count: 2),
+       turn: 0.61);
+   final b = addBox(c, Vector2(7400.75, 3120.25),
+       const BoxParams(90, 60, label: 'B', finish: BoxFinish.gloss));
+   final add = addDrafted(c.document, EntityKind.line,
+       linePayload(Vector2(7210.5, 3300.25), Vector2(7390.75, 3360.5)),
+       layer: ReservedHandles.layerZero);
+   c.document.commands.execute(add);
++  Handle unit(String label, Vector2 at,
++      {int quarterTurns = 0, bool mirrored = false}) {
++    final h = placeAt(c.document, tableSymbol(seats: 4), at,
++        quarterTurns: quarterTurns, mirrored: mirrored);
++    addUnitLabel(c.document, h, label);
++    return h;
++  }
++
++  final one = unit('1', Vector2(7210.25, 3150.5), quarterTurns: 1);
++  final two = unit('2', Vector2(7050.75, 3400.25), mirrored: true);
++  final seven = unit('7', Vector2(7600.5, 3300.75), quarterTurns: 3);
+   c.document.commands.clearHistory();
+-  return (c: c, doc: c.document, a: a, b: b, line: add.record.handle);
++  return (
++    c: c,
++    doc: c.document,
++    a: a,
++    b: b,
++    line: add.record.handle,
++    one: one,
++    two: two,
++    seven: seven
++  );
+ }
+ 
+ BoxParams boxOf(DraftDocument doc, Handle h) =>
+     doc.components.get<BoxParams>(h)!;
+ 
+ /// Today's `paint(doc, room, name)`: the box's colour set to [name], one
+ /// step.
+ void paint(DraftDocument doc, Handle box, String? name) => doc.commands.execute(
+     SetComponentCommand<BoxParams>(box, boxOf(doc, box).withColour(name)));
+ 
++/// The unit labelled [label]'s detail.
++PlanUnitDetail detailOf(PlanController c, String label) =>
++    c.unitDetails.singleWhere((d) => d.unit.label == label);
++
++/// The unit labelled [label]'s colour as the host reads it.
++PlanSwatch? colourOf(PlanController c, String label) =>
++    detailOf(c, label).colour;
++
++/// The stored `jetcad.unit_colour` of [unit].
++UnitColour? storedOf(DraftDocument doc, Handle unit) =>
++    doc.components.get<UnitColour>(unit);
++
++/// The labels of the steps applied from now on.
++List<String> appliedLabels(DraftDocument doc) {
++  final labels = <String>[];
++  final sub = doc.changes.listen((ch) {
++    if (ch is CommandApplied) labels.add(ch.label);
++  });
++  addTearDown(sub.cancel);
++  return labels;
++}
++
+ /// The composition over [r]: the canvas and, on the right, the property
+ /// panel.
+ final class Rig {
+   Rig._(this.tester, this.c);
+ 
+   final WidgetTester tester;
+   final PlanController c;
+ 
+   /// Pumps the canvas and the panel over [r], with [permissions] and, when
+   /// given, [locale] (with the plan library's delegates) and [theme].
+@@ -387,11 +439,281 @@ void main() {
+   });
+ 
+   test('CP6 the swatch is the canvas\'s hue, re-toned on a dark canvas', () {
+     expect(swatchColor(0x00897B, null).toARGB32(), 0xFF00897B);
+     expect(swatchColor(0x8E24AA, null).toARGB32(), 0xFF8E24AA);
+     expect(swatchColor(0x00897B, kDarkCanvasPaper).toARGB32(),
+         0xFF000000 | darkCanvasTone(0x00897B, kDarkCanvasPaper));
+     expect(
+         swatchColor(0x00897B, kDarkCanvasPaper).toARGB32(), isNot(0xFF00897B));
+   });
++
++  testWidgets(
++      'CP7 a tap on teal with two units and a room selected: one undo step '
++      'labelled Colour, the units\' details read teal, the room is teal, '
++      'the others untouched; one Ctrl+Z takes all three back (M-C12 tables)',
++      (tester) async {
++    final r = boxesPlan();
++    final c = r.c;
++    final doc = r.doc;
++    final rig = await Rig.pump(tester, r);
++    final labels = appliedLabels(doc);
++    for (final n in ['1', '2', '7']) {
++      expect(colourOf(c, n), isNull, reason: 'premise: table $n');
++    }
++    await rig.select([r.one, r.two, r.a]);
++    expect(picker, findsOneWidget);
++    expect(marked(tester), 'none', reason: 'two bare tables and a bare room');
++    final depth = doc.commands.undoDepth;
++
++    await tester.tap(swatch('teal'));
++    await tester.pump();
++    expect(doc.commands.undoDepth, depth + 1, reason: 'one undo step');
++    expect(labels, ['Colour']);
++    expect(colourOf(c, '1'), PlanSwatch.teal);
++    expect(colourOf(c, '2'), PlanSwatch.teal);
++    expect(storedOf(doc, r.one), UnitColour(PlanSwatch.teal));
++    expect(boxOf(doc, r.a).colour, 'teal');
++    expect(colourOf(c, '7'), isNull, reason: 'an unselected table');
++    expect(storedOf(doc, r.seven), isNull);
++    expect(marked(tester), 'teal');
++
++    await tester.tap(swatch('purple'));
++    await tester.pump();
++    expect(labels, ['Colour', 'Colour']);
++    expect(colourOf(c, '1'), PlanSwatch.purple);
++    expect(colourOf(c, '2'), PlanSwatch.purple);
++    expect(boxOf(doc, r.a).colour, 'purple');
++    expect(doc.commands.undoDepth, depth + 2);
++
++    c.undo();
++    await tester.pump();
++    expect(colourOf(c, '1'), PlanSwatch.teal);
++    expect(boxOf(doc, r.a).colour, 'teal');
++    c.undo();
++    await tester.pump();
++    expect(doc.commands.undoDepth, depth);
++    expect(colourOf(c, '1'), isNull);
++    expect(colourOf(c, '2'), isNull);
++    expect(storedOf(doc, r.one), isNull, reason: 'the component is gone');
++    expect(boxOf(doc, r.a).colour, isNull);
++
++    // None clears the tables, and a table already bare is no edit.
++    await tester.tap(swatch('teal'));
++    await tester.pump();
++    final after = doc.commands.undoDepth;
++    await rig.select([r.one, r.seven]);
++    await tester.tap(swatch('none'));
++    await tester.pump();
++    expect(colourOf(c, '1'), isNull);
++    expect(doc.commands.undoDepth, after + 1);
++    await tester.tap(swatch('none'));
++    await tester.pump();
++    expect(doc.commands.undoDepth, after + 1, reason: 'none, twice');
++    expect(recolourCommand(c, [k(r.seven)], null), isNull,
++        reason: 'a bare table, none');
++    expect(recolourCommand(c, [k(r.seven)], PlanSwatch.teal),
++        isA<CompoundCommand>());
++  });
++
++  testWidgets(
++      'CP8 marking: two teal tables mark teal; a teal table and a purple '
++      'room mark nothing; a table with a kept payload marks nothing, alone '
++      'or beside a bare table (M-PC9-t)', (tester) async {
++    final r = boxesPlan();
++    final c = r.c;
++    final doc = r.doc;
++    final rig = await Rig.pump(tester, r);
++    expect(
++        c.setUnitsColour({'1': PlanSwatch.teal, '2': PlanSwatch.teal}), isTrue);
++    await rig.select([r.one, r.two]);
++    expect(marked(tester), 'teal', reason: 'two teal tables');
++    await rig.select([r.one]);
++    expect(marked(tester), 'teal');
++
++    paint(doc, r.a, 'purple');
++    await rig.select([r.one, r.a]);
++    expect(marked(tester), isNull, reason: 'a teal table and a purple room');
++    await rig.select([r.one, r.seven]);
++    expect(marked(tester), isNull, reason: 'a teal table and a bare one');
++
++    // A payload of another shape is kept verbatim: it reads as no colour,
++    // and as no colour that a bare table has either.
++    doc.commands.execute(SetComponentCommand<UnitColour>(
++        r.seven, UnitColour.fromJson(const {'color': 7})));
++    expect(storedOf(doc, r.seven)!.isKept, isTrue, reason: 'premise');
++    expect(colourOf(c, '7'), isNull);
++    await rig.select([r.seven]);
++    expect(picker, findsOneWidget);
++    expect(marked(tester), isNull, reason: 'a kept payload marks no swatch');
++    await rig.select([r.seven, r.two]);
++    expect(marked(tester), isNull, reason: 'a kept payload and a teal table');
++    // An unknown name marks nothing either.
++    doc.commands.execute(SetComponentCommand<UnitColour>(
++        r.two, UnitColour.fromJson(const {'color': 'magenta'})));
++    await rig.select([r.two]);
++    expect(marked(tester), isNull, reason: 'magenta equals no swatch');
++    expect(storedOf(doc, r.two)!.name, 'magenta');
++
++    // A tap replaces the kept payload; None removes it.
++    await rig.select([r.seven, r.two]);
++    await tester.tap(swatch('teal'));
++    await tester.pump();
++    expect(storedOf(doc, r.seven), UnitColour(PlanSwatch.teal));
++    expect(storedOf(doc, r.two), UnitColour(PlanSwatch.teal));
++    expect(marked(tester), 'teal');
++    doc.commands.execute(SetComponentCommand<UnitColour>(
++        r.seven, UnitColour.fromJson(const {'hue': 'teal'})));
++    await rig.select([r.seven]);
++    await tester.tap(swatch('none'));
++    await tester.pump();
++    expect(storedOf(doc, r.seven), isNull, reason: 'none drops a kept payload');
++  });
++
++  testWidgets(
++      'CP9 unitsOnly: the row shows for a selected table and acts; with '
++      'recolor false it shows read-only and says why', (tester) async {
++    final r = boxesPlan();
++    final c = r.c;
++    final doc = r.doc;
++    final rig =
++        await Rig.pump(tester, r, permissions: PlanPermissions.unitsOnly);
++    await rig.select([r.one, r.two]);
++    expect(picker, findsOneWidget);
++    expect(find.byKey(const Key('layer-picker')), findsNothing,
++        reason: 'premise: unitsOnly has no layer picker');
++    final labels = appliedLabels(doc);
++    await tester.tap(swatch('purple'));
++    await tester.pump();
++    expect(labels, ['Colour']);
++    expect(colourOf(c, '1'), PlanSwatch.purple);
++    expect(colourOf(c, '2'), PlanSwatch.purple);
++    expect(marked(tester), 'purple');
++
++    c.permissions = PlanPermissions.unitsOnly.copyWith(recolor: false);
++    await tester.pump();
++    expect(picker, findsOneWidget, reason: 'read-only, still shown');
++    expect(marked(tester), 'purple');
++    final before = canon(doc);
++    final depth = doc.commands.undoDepth;
++    await tester.tap(swatch('teal'));
++    await tester.pump();
++    await tester.tap(swatch('none'));
++    await tester.pump();
++    expect(canon(doc), before);
++    expect(doc.commands.undoDepth, depth);
++    expect(colourOf(c, '1'), PlanSwatch.purple);
++    expect(tooltipOf(tester, 'teal'), const PlanStringsEn().colorRefused);
++    expect(semanticsOf(tester, 'teal').properties.enabled, isFalse);
++
++    c.permissions = PlanPermissions.unitsOnly;
++    await tester.pump();
++    await tester.tap(swatch('teal'));
++    await tester.pump();
++    expect(colourOf(c, '1'), PlanSwatch.teal, reason: 'allowed again');
++  });
++
++  testWidgets(
++      'CP10 permissions: without components the row is read-only for a '
++      'table selection, with the readOnlyDocument tooltip; restored, it acts',
++      (tester) async {
++    final r = boxesPlan();
++    final c = r.c;
++    final doc = r.doc;
++    final rig = await Rig.pump(tester, r);
++    expect(c.setUnitColour('1', PlanSwatch.teal), isTrue);
++    await rig.select([r.one]);
++    expect(picker, findsOneWidget);
++    doc.commands.permissions = const DraftPermissions(
++        transform: true, components: false, geometry: true, structure: true);
++    await rig.select([r.two]);
++    await rig.select([r.one]);
++    expect(picker, findsOneWidget, reason: 'read-only, still shown');
++    expect(marked(tester), 'teal');
++    final before = canon(doc);
++    final depth = doc.commands.undoDepth;
++    await tester.tap(swatch('purple'));
++    await tester.pump();
++    await tester.tap(swatch('none'));
++    await tester.pump();
++    expect(canon(doc), before);
++    expect(doc.commands.undoDepth, depth);
++    expect(tooltipOf(tester, 'purple'), const PlanStringsEn().readOnlyDocument);
++    expect(semanticsOf(tester, 'purple').properties.enabled, isFalse);
++
++    doc.commands.permissions = DraftPermissions.all;
++    await rig.select([r.two]);
++    await rig.select([r.one]);
++    await tester.tap(swatch('purple'));
++    await tester.pump();
++    expect(colourOf(c, '1'), PlanSwatch.purple, reason: 'allowed again');
++  });
++
++  testWidgets(
++      'CP11 a table selected under the active Disc tool: the tool is still '
++      'the disc, the selection holds the table, and the Colour row is '
++      'absent (M-PC9-tool)', (tester) async {
++    final r = boxesPlan();
++    final c = r.c;
++    final rig = await Rig.pump(tester, r);
++    await rig.select([r.one]);
++    expect(picker, findsOneWidget, reason: 'the select tool: the row shows');
++
++    expect(c.selectTool('disc.draw'), isTrue);
++    await tester.pump();
++    expect(c.activeTool.value, 'disc.draw');
++    expect(find.byKey(const Key('settings-disc.draw')), findsOneWidget,
++        reason: 'the Disc tool\'s settings show');
++    // Activating a tool clears the selection; select the table afterwards.
++    c.select({'1'});
++    await tester.pump();
++    expect({...c.selection.keys}, {k(r.one)},
++        reason: 'premise: the table is selected');
++    expect(c.activeTool.value, 'disc.draw',
++        reason: 'premise: selecting did not leave the Disc tool');
++    expect(picker, findsNothing, reason: 'no Colour row under a tool');
++
++    expect(c.selectTool('plan.select'), isTrue);
++    await tester.pump();
++    c.select({'1'});
++    await tester.pump();
++    expect(picker, findsOneWidget, reason: 'back on the select tool');
++  });
++
++  testWidgets(
++      'CP12 hover notifications over a selection of two tables and a room '
++      'rebuild the panel and the Colour row without surveying the document '
++      '(14a review R-7; the panel keeps its survey per document change)',
++      (tester) async {
++    final r = boxesPlan();
++    final c = r.c;
++    final rig = await Rig.pump(tester, r);
++    await rig.select([r.one, r.two, r.a]);
++    expect(picker, findsOneWidget);
++    final keys = [k(r.one), k(r.seven), k(r.a)];
++    // Warm: one hover so any first-use work is behind us.
++    c.selection.setHover(keys.first);
++    await tester.pump();
++    final before = UnitIndex.debugBuilds;
++    for (final key in [...keys, null, ...keys.reversed, null]) {
++      c.selection.setHover(key);
++      await tester.pump();
++      expect(picker, findsOneWidget);
++    }
++    expect(UnitIndex.debugBuilds, before,
++        reason: 'a hover rebuild rescanned the document');
++    // The picker's own reads are survey-free, empty selection included.
++    pickedColours(c, const []);
++    pickedColours(c, keys);
++    recolourCommand(c, keys, PlanSwatch.teal);
++    expect(UnitIndex.debugBuilds, before);
++    // And they agree with the index: the placed-unit check is its rule.
++    expect(pickedColours(c, keys), hasLength(3));
++    bool isTable(Handle h) => c.unitIndex[h]?.generated == false;
++    for (final h in [r.one, r.two, r.seven]) {
++      expect(isTable(h), isTrue, reason: h.toHex());
++    }
++    expect(isTable(r.a), isFalse);
++    expect(isTable(r.doc.rootHandle), isFalse);
++    expect(isTable(const Handle(0x7FFFFFF)), isFalse, reason: 'no node');
++  });
+ }
+diff --git a/packages/jet_cad_2d_plan/test/panels/hover_removal_test.dart b/packages/jet_cad_2d_plan/test/panels/hover_removal_test.dart
+index f6dd9e3b..cd188d1e 100644
+--- a/packages/jet_cad_2d_plan/test/panels/hover_removal_test.dart
++++ b/packages/jet_cad_2d_plan/test/panels/hover_removal_test.dart
+@@ -1,30 +1,34 @@
+ // Ported from jet_cad_floor_plan/test/hover_removal_test.dart; assertions unchanged.
+ //
+ // Removing the editor while a mouse hovers an entity (Slice 3's results,
+ // "Found, not fixed"): the interaction layer's deactivation clears the
+ // hover, and the property panel, outside the canvas and still active while
+ // the removed subtree deactivates, must not be marked dirty during that
+ // build. The panel's frame-safe selection relay (FrameSafeRelay, today's
+ // _FrameSafeRelay) holds the notification; the panel listening to the
+-// selection directly turns it red. HR2 (a hovered table) is 2b's.
++// selection directly turns it red. HR2 (a hovered unit, 2b Task 10) mounts the
++// editor over the embedding fixture.
+ import 'package:flutter/gestures.dart' show PointerDeviceKind;
+ import 'package:flutter/material.dart';
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
++    show InteractionLayer;
+ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+ import 'package:jet_cad_2d_plan/src/canvas/plan_canvas_view.dart';
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import '../support/panel_kits.dart';
+ import '../support/canvas_fixture.dart';
+ import '../support/design_harness.dart';
++import '../support/unit_embedding_fixture.dart';
+ 
+ void main() {
+   testWidgets(
+       'HR1 a bare shell: a hovered line, then the shell removed in one pump',
+       (tester) async {
+     final c = boxController();
+     final doc = c.document;
+     // Off the camera's centre and off the axes, under pumpDraw's rotated,
+     // zoomed camera.
+     doc.commands.execute(addDrafted(doc, EntityKind.line,
+@@ -37,11 +41,48 @@ void main() {
+     await tester.pump();
+     expect(c.selection.hover, isNull, reason: 'premise: off the line');
+     await mouse.moveTo(globalOf(tester, c, 7180, 3125));
+     await tester.pump();
+     expect(c.selection.hover, isNotNull, reason: 'premise: on the line');
+ 
+     await tester.pumpWidget(const SizedBox());
+     expect(tester.takeException(), isNull);
+     expect(find.byType(PlanCanvasView), findsNothing);
+   });
++
++  testWidgets(
++      'HR2 the editor: a hovered unit, then the editor removed in one pump',
++      (tester) async {
++    final c = embeddingController();
++    await tester.binding.setSurfaceSize(const Size(1440, 900));
++    addTearDown(() => tester.binding.setSurfaceSize(null));
++    await tester.pumpWidget(
++        MaterialApp(home: Scaffold(body: PlanEditor(controller: c))));
++    await tester.pump();
++    await tester.pump();
++    c.camera.value = embeddingCamera();
++    await tester.pump();
++    final one = embeddingTables.firstWhere((t) => t.number == '1');
++    Offset onScreen(double x, double y) {
++      final p = canvasOf(c.camera.value, x, y);
++      return tester.getTopLeft(find.byType(InteractionLayer)) +
++          Offset(p.x, p.y);
++    }
++
++    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
++    addTearDown(mouse.removePointer);
++    // The floor between units 1 and 2, on no unit's box.
++    await mouse.addPointer(location: onScreen(41900, -26500));
++    await tester.pump();
++    expect(c.selection.hover, isNull, reason: 'premise: on the floor');
++    // Unit 1's local (700, 100), inside its box, through its placement.
++    final m = one.transform;
++    await mouse.moveTo(
++        onScreen(m.a * 700 + m.c * 100 + m.e, m.b * 700 + m.d * 100 + m.f));
++    await tester.pump();
++    expect(c.selection.hover, isNotNull, reason: 'premise: on unit 1');
++
++    await tester.pumpWidget(const SizedBox());
++    expect(tester.takeException(), isNull);
++    expect(find.byType(PlanCanvasView), findsNothing);
++  });
+ }
+diff --git a/packages/jet_cad_2d_plan/test/panels/symbol_section_test.dart b/packages/jet_cad_2d_plan/test/panels/symbol_section_test.dart
+index 8fbc5bd8..4266ccb3 100644
+--- a/packages/jet_cad_2d_plan/test/panels/symbol_section_test.dart
++++ b/packages/jet_cad_2d_plan/test/panels/symbol_section_test.dart
+@@ -2,22 +2,23 @@
+ //
+ // Spec 09c D7, revision 5 (R5-2..R5-4, R5-7, V-1, V-3..V-7): the Symbol
+ // section -- name, size, Rotation, Mirror and the Size menu -- and the
+ // commands behind them, over a kit library ("test") built with the
+ // authoring toolkit. Hand-made symbols, so every rule has a fixture that
+ // can tell it apart: a bed family whose base point is the box's centre (not
+ // its back-left corner), a servable member in that family, a family of
+ // tables, and a corner seat whose base point is off its box's centre x.
+ // Instances sit 40 m off the origin, mirrored and turned 30 degrees.
+ //
+-// SS9 (definitionForEntry's assertion) is Task 13's; SW6 and SW9 (table
+-// numbers, the runtime table rule) are 2b's; SW7 (a loader handed to the
++// SS9 (definitionForEntry's assertion) is Task 13's; SW6 and SW9 (a unit's
++// label, the runtime unit rule) are 2b's (Task 10), over the library's
++// corner seat and table A, which are units; SW7 (a loader handed to the
+ // panel) has no counterpart: the controller owns the loader (Task 13).
+ import 'dart:async';
+ import 'dart:math' as math;
+ import 'dart:typed_data';
+ 
+ import 'package:flutter/gestures.dart' show kDoubleTapTimeout;
+ import 'package:flutter/material.dart';
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
+@@ -30,20 +31,22 @@ import 'package:jet_cad_2d_kit/authoring.dart'
+         CatalogSymbol,
+         CatalogUnit,
+         encodeLibrary;
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+ import 'package:jet_cad_2d_plan/src/panels/symbol_section.dart';
+ import 'package:jet_cad_2d_plan/src/symbols/symbol_box.dart';
+ import 'package:jet_cad_2d_plan/src/symbols/symbol_placer.dart';
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
++import '../support/unit_fixtures.dart' show addUnitLabel;
++
+ /// A [w] x [d] rectangle, base point at its centre.
+ CatalogSymbol rect(String key, double w, double d,
+         {List<String> tags = const [],
+         int? seats,
+         double? baseX,
+         String? family}) =>
+     CatalogSymbol(
+       key: key,
+       name: 'Test $key',
+       category: 'Tests',
+@@ -559,20 +562,90 @@ void main() {
+       // but a table never changes size.
+       final bedTable = place(doc, 'test.bed.table', far + Vector2(4000, 0));
+       expect(
+           familyMembers(familyEntries, entry('test.bed.table')), hasLength(3),
+           reason: 'premise: the family offers beds');
+       await select(tester, c, [bedTable]);
+       expect(byKey('symbol-section'), findsOneWidget);
+       expect(byKey('symbol-size-menu'), findsNothing);
+     });
+ 
++    testWidgets(
++        'SW6 a corner unit turned to 37 then mirrored: its label stays '
++        'upright, its footprint stays; one undo each (R5-2, V-6)',
++        (tester) async {
++      final c = await pumpPanel(tester);
++      final doc = c.document;
++      final corner = place(doc, 'test.corner.seat', far, mirrored: false);
++      addUnitLabel(doc, corner, '1');
++      await select(tester, c, [corner]);
++      void expectUpright(String why) {
++        final info = c.unitIndex[corner]!;
++        final slot = doc.entities.slotOf(info.label!)!;
++        final scalars =
++            doc.geometry.read(doc.entities.geomIndexAt(slot)).scalars;
++        final want = unitLabelStamp(transformOf(doc, corner));
++        expect(scalars[1], closeTo(want.rotation, 1e-12), reason: why);
++        expect(scalars[2], want.widthFactor, reason: why);
++      }
++
++      final depth = doc.commands.undoDepth;
++      final base = doc.tree
++          .definition((doc.tree[corner]! as InstanceNode).definition)!
++          .basePoint;
++      final insertion = transformOf(doc, corner).transformPoint(base);
++      await typeRotation(tester, '37');
++      expect(rotationDegreesOf(transformOf(doc, corner)), closeTo(37, 1e-9));
++      expectNear(transformOf(doc, corner).transformPoint(base), insertion,
++          'turned about the insertion point (M-09c-y)');
++      expectUpright('after the rotation');
++      final before = footprint(doc, corner);
++      await tester.tap(byKey('symbol-mirror'));
++      await tester.pump();
++      expect(footprint(doc, corner), before);
++      expectUpright('after the mirror');
++      expect(doc.commands.undoDepth, depth + 2);
++      doc.commands.undo();
++      expectUpright('after one undo');
++      doc.commands.undo();
++      expect(rotationDegreesOf(transformOf(doc, corner)), closeTo(30, 1e-9));
++      expectUpright('after two');
++    });
++
++    testWidgets(
++        'SW9 a rotation typed for a bed under runtime commits to the bed '
++        'when the selection moves to a table before the edit ends: the '
++        'pinned target decides (V-1)', (tester) async {
++      final c = await pumpPanel(tester);
++      final doc = c.document;
++      final bed = place(doc, 'test.bed.1600', far);
++      final table = place(doc, 'test.table.a', far + Vector2(0, 4000));
++      doc.commands.permissions = DraftPermissions.runtime;
++      await select(tester, c, [bed]);
++      expect(editable(tester), isTrue, reason: 'premise: a bed turns');
++      final tableBefore = transformOf(doc, table);
++      await tester.pump(kDoubleTapTimeout * 2);
++      await tester.tap(byKey('symbol-rotation'));
++      await tester.pump();
++      await tester.enterText(byKey('symbol-rotation'), '45');
++      await select(tester, c, [table]);
++      // The table's field is read-only: the input connection closes, and
++      // the edit ends by losing focus, which commits (06 D13).
++      expect(editable(tester), isFalse, reason: 'premise: a table does not');
++      tester.binding.focusManager.primaryFocus!.unfocus();
++      await tester.pump();
++      await tester.pump();
++      expect(rotationDegreesOf(transformOf(doc, bed)), closeTo(45, 1e-9),
++          reason: 'the bed, which the field was pinned to');
++      expect(transformOf(doc, table), tableBefore, reason: 'not the table');
++    });
++
+     testWidgets('SW8 the Rotation field offers a minus key (−90 on a phone)',
+         (tester) async {
+       final c = await pumpPanel(tester);
+       final bed = place(c.document, 'test.bed.1600', far);
+       await select(tester, c, [bed]);
+       expect(tester.widget<TextField>(byKey('symbol-rotation')).keyboardType,
+           const TextInputType.numberWithOptions(decimal: true, signed: true));
+     });
+ 
+     testWidgets(
+diff --git a/packages/jet_cad_2d_plan/test/panels/unit_section_test.dart b/packages/jet_cad_2d_plan/test/panels/unit_section_test.dart
+new file mode 100644
+index 00000000..25b172f1
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/panels/unit_section_test.dart
+@@ -0,0 +1,435 @@
++// 2b Task 10, spec S4 "The unit inspector" (the unit section): one selected
++// placed unit shows its kind, its label field (Number for a numbered unit,
++// Label for an assigned one; gated by relabel), its capacity and the ±90
++// buttons (gated by rotate). Ported from jet_cad_floor_plan's
++// tables/table_section_test.dart (TS1-TS8, assertions unchanged) and new
++// cases (UW-*). Units are placed off the origin, turned and mirrored.
++import 'package:flutter/gestures.dart' show kDoubleTapTimeout;
++import 'package:flutter/material.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
++import 'package:jet_cad_2d_kit/authoring.dart'
++    show CatalogPolyline, CatalogSymbol, CatalogUnit;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:jet_cad_2d_plan/src/symbols/symbol_placer.dart'
++    show placeSymbol;
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/harness.dart';
++import '../support/unit_fixtures.dart';
++
++Finder get section => find.byKey(const Key('unit-section'));
++Finder get label => find.byKey(const Key('unit-label'));
++Finder get capacity => find.byKey(const Key('unit-capacity'));
++Finder get error => find.byKey(const Key('unit-label-error'));
++Finder get duplicate => find.byKey(const Key('unit-label-duplicate'));
++Finder get left => find.byKey(const Key('unit-rotate-left'));
++Finder get right => find.byKey(const Key('unit-rotate-right'));
++
++String fieldText(WidgetTester tester) =>
++    tester.widget<TextField>(label).controller!.text;
++
++/// The label field's title.
++String fieldTitle(WidgetTester tester) =>
++    tester.widget<TextField>(label).decoration!.labelText!;
++
++Future<void> pumpPanel(WidgetTester tester, PlanController c) => pumpApp(
++    tester, SingleChildScrollView(child: PlanPropertyPanel(controller: c)));
++
++Future<void> select(WidgetTester tester, PlanController c, Handle h) async {
++  c.selection.replace([SelectionKey.root(h)]);
++  await tester.pump();
++}
++
++Future<void> enterAndSubmit(WidgetTester tester, String text) async {
++  await tester.pump(kDoubleTapTimeout * 2);
++  await tester.tap(label);
++  await tester.pump();
++  await tester.enterText(label, text);
++  await tester.testTextInput.receiveAction(TextInputAction.done);
++  await tester.pump();
++  await tester.pump();
++}
++
++/// A seat (an assigned unit): [tableSymbol]'s shapes and base point.
++const CatalogSymbol seatSymbol = CatalogSymbol(
++  key: 'fx.seat.single',
++  name: 'Test seat',
++  category: 'Tests',
++  tags: ['seat', 'test'],
++  unit: CatalogUnit(
++      kind: UnitKinds.seat, capacity: 1, labelling: UnitLabelling.assigned),
++  base: (900, 700),
++  shapes: [
++    CatalogPolyline([(300, 300), (1500, 300), (1500, 1100), (300, 1100)],
++        closed: true),
++  ],
++);
++
++/// A seat placed by hand (no label) and a table labelled 1, both off the
++/// origin, turned or mirrored.
++({String json, String seatKey}) seatAndTable() {
++  final json = planText([fxKit()], (d) {
++    placeAt(d, seatSymbol, Vector2(-2400.5, 1300.25), quarterTurns: 1);
++    addUnitLabel(
++        d,
++        placeAt(d, tableSymbol(seats: 4), Vector2(2400.75, 1300.5),
++            mirrored: true),
++        '1');
++  });
++  return (json: json, seatKey: seatSymbol.key);
++}
++
++/// A controller over an empty plan of the fixture kit (it installs the
++/// parametric system, the label system and the lock).
++PlanController rig() =>
++    controllerFor(kits: [fxKit()], json: planText([fxKit()], (d) {}));
++
++List<double> parts(Transform2 t) => [t.a, t.b, t.c, t.d, t.e, t.f];
++
++List<String?> numbers(PlanController c) =>
++    [for (final u in c.unitIndex.units) u.text];
++
++void main() {
++  testWidgets(
++      'UW-section-assigned an assigned unit: the kind\'s word as the title, '
++      'the field titled Label, empty; typing gives it a label', (tester) async {
++    final f = seatAndTable();
++    final c = controllerFor(kits: [fxKit()], json: f.json);
++    await pumpPanel(tester, c);
++    final seat = c.unitIndex.units.singleWhere((u) => u.text == null);
++    await select(tester, c, seat.instance);
++    expect(tester.widget<Text>(section).data, 'Seat');
++    // M-UW5: the field always titled by `number`.
++    expect(fieldTitle(tester), 'Label');
++    expect(fieldText(tester), '');
++    await enterAndSubmit(tester, 'S1');
++    expect(c.unitIndex.withLabel('S1').single.instance, seat.instance);
++    final table = c.unitIndex.withLabel('1').single;
++    await select(tester, c, table.instance);
++    expect(fieldTitle(tester), 'Number');
++    expect(tester.widget<Text>(capacity).data, '4');
++  });
++
++  testWidgets(
++      'UW-relabel-gate relabel off: the field is read-only and a typed '
++      'label commits nothing; the buttons still show', (tester) async {
++    final f = seatAndTable();
++    final c = controllerFor(kits: [fxKit()], json: f.json);
++    c.permissions = PlanPermissions.full.copyWith(relabel: false);
++    await pumpPanel(tester, c);
++    final table = c.unitIndex.withLabel('1').single;
++    await select(tester, c, table.instance);
++    // M-UW6: `_editable` of the unit target ignoring `relabel`.
++    expect(tester.widget<TextField>(label).readOnly, isTrue);
++    final depth = c.document.commands.undoDepth;
++    await enterAndSubmit(tester, '5');
++    expect(c.document.commands.undoDepth, depth);
++    expect(c.unitIndex.withLabel('1'), hasLength(1));
++    expect(left, findsOneWidget);
++  });
++
++  testWidgets(
++      'UW-locked-none a placed unit under the lock (its kit missing) shows '
++      'no unit section', (tester) async {
++    final f = seatAndTable();
++    final c = controllerFor(kits: const [], json: f.json);
++    await pumpPanel(tester, c);
++    final table = c.unitIndex.withLabel('1').single;
++    expect(c.isLocked(table.instance), isTrue, reason: 'premise');
++    await select(tester, c, table.instance);
++    // M-UW7: the unit target ignoring `isLocked`.
++    expect(section, findsNothing);
++  });
++
++  testWidgets('TS1 one table shows its number and seats; a planter does not',
++      (tester) async {
++    final c = rig();
++    final a = placeAt(c.document, tableSymbol(seats: 4), Vector2(-2400, 1300),
++        quarterTurns: 1, mirrored: true);
++    addUnitLabel(c.document, a, '1');
++    final planter = placeAt(c.document, planterSymbol, Vector2(900, -700));
++    await pumpPanel(tester, c);
++    expect(section, findsNothing);
++
++    await select(tester, c, a);
++    expect(section, findsOneWidget);
++    expect(fieldText(tester), '1');
++    expect(tester.widget<Text>(capacity).data, '4');
++    expect(duplicate, findsNothing, reason: 'a unique number');
++    expect(left, findsOneWidget);
++    expect(right, findsOneWidget);
++
++    await select(tester, c, planter);
++    expect(section, findsNothing);
++  });
++
++  testWidgets(
++      'TS2 a new number is one step; its own number again, or padded, is '
++      'nothing (M-14a-4)', (tester) async {
++    final c = rig();
++    final a = placeAt(c.document, tableSymbol(), Vector2(-2400, 1300),
++        mirrored: true);
++    addUnitLabel(c.document, a, '1');
++    final b = placeAt(c.document, tableSymbol(), Vector2(2400, 1300),
++        quarterTurns: 3);
++    addUnitLabel(c.document, b, '2');
++    await pumpPanel(tester, c);
++    await select(tester, c, a);
++    final depth = c.document.commands.undoDepth;
++
++    await enterAndSubmit(tester, ' 1 ');
++    expect(c.document.commands.undoDepth, depth,
++        reason: 'unchanged: no command');
++    expect(error, findsNothing);
++
++    await enterAndSubmit(tester, 'B4');
++    expect(c.document.commands.undoDepth, depth + 1);
++    expect(numbers(c), ['B4', '2']);
++    expect(fieldText(tester), 'B4');
++
++    await enterAndSubmit(tester, 'b4');
++    expect(numbers(c), ['b4', '2'], reason: 'case-sensitive');
++    await select(tester, c, b);
++    await enterAndSubmit(tester, 'B4');
++    expect(error, findsNothing, reason: '"B4" is not "b4"');
++    expect(numbers(c), ['b4', 'B4']);
++    c.document.commands.undo();
++    await select(tester, c, a);
++    c.document.commands.undo();
++    c.document.commands.undo();
++    await tester.pump();
++    expect(numbers(c), ['1', '2']);
++    expect(fieldText(tester), '1');
++  });
++
++  testWidgets(
++      'TS3 a number used by another table, or invalid, is refused: the '
++      'field reverts and says why, until the next edit', (tester) async {
++    final c = rig();
++    final a = placeAt(c.document, tableSymbol(), Vector2(-2400, 1300));
++    addUnitLabel(c.document, a, '1');
++    final b =
++        placeAt(c.document, tableSymbol(), Vector2(2400, 1300), mirrored: true);
++    addUnitLabel(c.document, b, '2');
++    await pumpPanel(tester, c);
++    await select(tester, c, a);
++    final depth = c.document.commands.undoDepth;
++
++    await enterAndSubmit(tester, ' 2');
++    expect(c.document.commands.undoDepth, depth);
++    expect(fieldText(tester), '1');
++    expect(tester.widget<Text>(error).data, 'Number 2 is already used');
++
++    await tester.enterText(label, '12');
++    await tester.pump();
++    expect(error, findsNothing, reason: 'the next edit ends it');
++
++    await enterAndSubmit(tester, '123456789');
++    expect(fieldText(tester), '1');
++    expect(tester.widget<Text>(error).data, '1 to 8 characters');
++    expect(numbers(c), ['1', '2']);
++
++    // A selection change ends it (review F-5).
++    await select(tester, c, b);
++    await select(tester, c, a);
++    expect(error, findsNothing);
++  });
++
++  testWidgets(
++      'TS3b unchanged is nothing: an unnumbered table\'s empty field, a '
++      'duplicate from a file (review F-1)', (tester) async {
++    final c = rig();
++    final bare = placeAt(c.document, tableSymbol(), Vector2(1700, -2900));
++    final a = placeAt(c.document, tableSymbol(), Vector2(-2400, 1300));
++    addUnitLabel(c.document, a, '1');
++    final b = placeAt(c.document, tableSymbol(), Vector2(2400, 1300));
++    addUnitLabel(c.document, b, '2');
++    c.document.commands.execute(SetEntityTextCommand(
++        c.unitIndex.units.last.label!, '1', kUnitLabelTag));
++    await pumpPanel(tester, c);
++    final depth = c.document.commands.undoDepth;
++
++    await select(tester, c, bare);
++    await enterAndSubmit(tester, '');
++    expect(error, findsNothing);
++    expect(c.unitIndex.units.first.label, isNull, reason: 'no empty label');
++
++    await select(tester, c, b);
++    await enterAndSubmit(tester, '1');
++    expect(error, findsNothing);
++    expect(c.document.commands.undoDepth, depth);
++  });
++
++  testWidgets(
++      'TS4 a deleted table\'s number is accepted (M-14a-2); the Q-2 ruling: '
++      'renamed 101, the next placement is 102', (tester) async {
++    final c = rig();
++    final a = placeAt(c.document, tableSymbol(), Vector2(-2400, 1300));
++    addUnitLabel(c.document, a, '1');
++    final b =
++        placeAt(c.document, stoolSymbol, Vector2(2400, 1300), quarterTurns: 2);
++    final bLabel = addUnitLabel(c.document, b, '2');
++    c.document.commands.execute(CompoundCommand(
++        [RemoveEntityCommand(bLabel), RemoveNodeCommand(b)],
++        label: 'Delete'));
++    await pumpPanel(tester, c);
++    await select(tester, c, a);
++
++    await enterAndSubmit(tester, '2');
++    expect(error, findsNothing);
++    expect(numbers(c), ['2']);
++
++    await enterAndSubmit(tester, '101');
++    c.execute(placeSymbol(c.document, entryOf(stoolSymbol),
++        at: Vector2(0, -2200), mirrored: true, units: c.unitIndex));
++    expect(numbers(c), ['101', '102']);
++  });
++
++  testWidgets('TS5 an unnumbered table gets a label from the field',
++      (tester) async {
++    final c = rig();
++    final a = placeAt(c.document, tableSymbol(), Vector2(1700, -2900),
++        quarterTurns: 1);
++    final node = c.document.tree[a]! as InstanceNode;
++    await pumpPanel(tester, c);
++    await select(tester, c, a);
++    expect(fieldText(tester), '');
++
++    await enterAndSubmit(tester, '7');
++    final t = c.unitIndex.units.single;
++    expect(t.text, '7');
++    final doc = c.document;
++    final payload = doc.geometry
++        .read(doc.entities.geomIndexAt(doc.entities.slotOf(t.label!)!));
++    final st = unitLabelStamp(node.transform);
++    expect(payload.scalars, [200, st.rotation, st.widthFactor]);
++  });
++
++  testWidgets('TS6 a duplicate from a file is shown on both tables',
++      (tester) async {
++    final c = rig();
++    final a = placeAt(c.document, tableSymbol(), Vector2(-2400, 1300));
++    addUnitLabel(c.document, a, '1');
++    final b = placeAt(c.document, tableSymbol(), Vector2(2400, 1300));
++    addUnitLabel(c.document, b, '2');
++    c.document.commands.execute(SetEntityTextCommand(
++        c.unitIndex.units.last.label!, '1', kUnitLabelTag));
++    await pumpPanel(tester, c);
++    for (final h in [a, b]) {
++      await select(tester, c, h);
++      expect(
++          tester.widget<Text>(duplicate).data, 'Number 1 is used by 2 tables');
++    }
++  });
++
++  testWidgets(
++      'TS7 the rotate buttons turn the table in place about its base point '
++      '(not its box centre), one Rotate step each, the number upright '
++      '(M-14a-15)', (tester) async {
++    final c = rig();
++    final doc = c.document;
++    final a = placeAt(doc, oneChairTable, Vector2(-2300, 1700),
++        quarterTurns: 1, mirrored: true);
++    addUnitLabel(doc, a, '1');
++    final start = (doc.tree[a]! as InstanceNode).transform;
++    await pumpPanel(tester, c);
++    await select(tester, c, a);
++    final depth = doc.commands.undoDepth;
++    final labels = <String>[];
++    final sub = doc.changes.listen((ch) {
++      if (ch is CommandApplied) labels.add(ch.label);
++    });
++    addTearDown(sub.cancel);
++
++    await tester.tap(right);
++    await tester.pump();
++    final once = (doc.tree[a]! as InstanceNode).transform;
++    expect(doc.commands.undoDepth, depth + 1);
++    expect(once.transformPoint(Vector2(900, 700)), Vector2(-2300, 1700),
++        reason: 'the base point stays at the same world point');
++    expect(parts(once), isNot(parts(start)));
++    // Right is clockwise: R(−90°) takes the local x axis's image (a, b) to
++    // (b, −a), exactly.
++    expect([once.a, once.b], [start.b, -start.a]);
++    expect(parts(once).any((v) => v == 0 && v.isNegative), isFalse,
++        reason: 'no −0.0 is stored');
++    final st = unitLabelStamp(once);
++    final payload = doc.geometry.read(doc.entities
++        .geomIndexAt(doc.entities.slotOf(c.unitIndex.units.single.label!)!));
++    expect(payload.scalars.sublist(1), [st.rotation, st.widthFactor]);
++
++    for (var k = 0; k < 3; k++) {
++      await tester.tap(right);
++      await tester.pump();
++    }
++    expect(parts((doc.tree[a]! as InstanceNode).transform), parts(start),
++        reason: 'four quarter turns: exactly where it began');
++
++    // Left is counter-clockwise: (a, b) to (−b, a).
++    await tester.tap(left);
++    await tester.pump();
++    final leftOnce = (doc.tree[a]! as InstanceNode).transform;
++    expect([leftOnce.a, leftOnce.b], [-start.b, start.a]);
++    expect(leftOnce.transformPoint(Vector2(900, 700)), Vector2(-2300, 1700));
++    await tester.pump();
++    expect(labels, List.filled(5, 'Rotate'));
++    doc.commands.undo();
++    expect(parts((doc.tree[a]! as InstanceNode).transform), parts(start));
++  });
++
++  testWidgets(
++      'TS8 under runtime permissions the field is read-only and the rotate '
++      'buttons do not show (Q-4)', (tester) async {
++    final c = rig();
++    final a = placeAt(c.document, tableSymbol(), Vector2(-2300, 1700));
++    addUnitLabel(c.document, a, '1');
++    c.document.commands.permissions = DraftPermissions.runtime;
++    await pumpPanel(tester, c);
++    await select(tester, c, a);
++    expect(tester.widget<TextField>(label).readOnly, isTrue);
++    expect(left, findsNothing);
++    expect(right, findsNothing);
++  });
++
++  testWidgets(
++      'UW-order the Symbol section stands above the unit section (R5-2, '
++      'today\'s order)', (tester) async {
++    final c = controllerFor(kits: [fxKit()], json: seatAndTable().json);
++    await pumpPanel(tester, c);
++    await select(tester, c, c.unitIndex.withLabel('1').single.instance);
++    expect(find.byKey(const Key('symbol-section')), findsOneWidget);
++    expect(section, findsOneWidget);
++    expect(tester.getTopLeft(find.byKey(const Key('symbol-section'))).dy,
++        lessThan(tester.getTopLeft(section).dy));
++  });
++
++  testWidgets(
++      'UW-runtime-unit under runtime permissions a placed unit\'s Symbol '
++      'rotation is read-only and its Mirror disabled, where a symbol with no '
++      'unit still turns and mirrors (V-1, 14a Q-4)', (tester) async {
++    final c = rig();
++    final unit = placeAt(c.document, tableSymbol(), Vector2(-2300, 1700));
++    addUnitLabel(c.document, unit, '1');
++    final planter = placeAt(c.document, planterSymbol, Vector2(900, -700));
++    c.document.commands.permissions = DraftPermissions.runtime;
++    await pumpPanel(tester, c);
++    bool rotationEditable() => !tester
++        .widget<TextField>(find.byKey(const Key('symbol-rotation')))
++        .readOnly;
++    bool mirrorEnabled() =>
++        tester
++            .widget<OutlinedButton>(find.byKey(const Key('symbol-mirror')))
++            .onPressed !=
++        null;
++    await select(tester, c, planter);
++    expect(rotationEditable(), isTrue, reason: 'premise: a planter turns');
++    expect(mirrorEnabled(), isTrue);
++    await select(tester, c, unit);
++    // M-UW13: `_turnableAt` ignoring a placed unit's `geometry` need.
++    expect(rotationEditable(), isFalse);
++    expect(mirrorEnabled(), isFalse);
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/support/recording_plan_strings.dart b/packages/jet_cad_2d_plan/test/support/recording_plan_strings.dart
+index 3d706e22..0fd179ce 100644
+--- a/packages/jet_cad_2d_plan/test/support/recording_plan_strings.dart
++++ b/packages/jet_cad_2d_plan/test/support/recording_plan_strings.dart
+@@ -2,20 +2,24 @@
+ // V-10; ported from jet_cad_floor_plan/test/l10n/recording_strings.dart):
+ // a language whose every word is recorded as it is handed out, so a test
+ // can tell a word the plan library asked for from a literal it did not.
+ // Regenerate when a member is added: one override per member, a String
+ // getter as `record(inner.x)`, a method returning String as
+ // `record(inner.x(...))`, `languageCode` and `decimalSeparator` delegated
+ // unrecorded.
+ import 'package:jet_cad_2d/jet_cad_2d.dart' show LayerNameProblem;
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show PlanSwatch;
+ import 'package:jet_cad_2d_plan/src/l10n/strings.dart';
++import 'package:jet_cad_2d_plan/src/units/unit_label.dart'
++    show UnitLabelProblem;
++import 'package:jet_cad_2d_plan/src/units/unit_problems.dart'
++    show UnitLabelWarning;
+ 
+ class RecordingPlanStrings implements PlanStrings {
+   RecordingPlanStrings(this.inner);
+ 
+   final PlanStrings inner;
+ 
+   /// Every string handed out.
+   final Set<String> handedOut = {};
+ 
+   /// Records [s] as handed out and returns it.
+@@ -272,11 +276,39 @@ class RecordingPlanStrings implements PlanStrings {
+   String layerName(int n) => record(inner.layerName(n));
+ 
+   @override
+   String get lockedHint => record(inner.lockedHint);
+ 
+   @override
+   String get sectionFailed => record(inner.sectionFailed);
+ 
+   @override
+   String get planDamaged => record(inner.planDamaged);
++
++  @override
++  String get merge => record(inner.merge);
++  @override
++  String get split => record(inner.split);
++  @override
++  String get number => record(inner.number);
++  @override
++  String get label => record(inner.label);
++  @override
++  String get capacity => record(inner.capacity);
++  @override
++  String get rotateLeft => record(inner.rotateLeft);
++  @override
++  String get rotateRight => record(inner.rotateRight);
++  @override
++  String labelProblem(UnitLabelProblem problem) =>
++      record(inner.labelProblem(problem));
++  @override
++  String labelUsed(String label) => record(inner.labelUsed(label));
++  @override
++  String labelWarning(UnitLabelWarning warning) =>
++      record(inner.labelWarning(warning));
++  @override
++  String? unitKind(String kind) => switch (inner.unitKind(kind)) {
++        null => null,
++        final w => record(w),
++      };
+ }

@@ -1,0 +1,2777 @@
+# Review package: 395ec35f..HEAD
+
+## Commits
+85065219 test(plan): reflow registerPlanComponents' doc comment
+9ce5096a feat(plan): units: the index, labels, numbering, data, locks (2b S2)
+
+## Files changed
+ .../lib/src/controller/plan_controller.dart        |  12 +-
+ .../lib/src/controller/session.dart                |   9 +
+ .../jet_cad_2d_plan/lib/src/export/page_flows.dart |   2 +
+ .../lib/src/units/unit_components.dart             | 253 ++++++++++
+ .../jet_cad_2d_plan/lib/src/units/unit_index.dart  | 372 +++++++++++++++
+ .../jet_cad_2d_plan/lib/src/units/unit_label.dart  | 203 ++++++++
+ .../jet_cad_2d_plan/lib/src/units/unit_locks.dart  |  35 ++
+ .../lib/src/units/unit_numbers.dart                |  56 +++
+ .../lib/src/units/unit_problems.dart               |  88 ++++
+ packages/jet_cad_2d_plan/test/support/harness.dart |   9 +-
+ .../test/support/unit_fixtures.dart                | 206 ++++++++
+ .../test/units/unit_components_test.dart           | 275 +++++++++++
+ .../test/units/unit_index_test.dart                | 218 +++++++++
+ .../test/units/unit_label_test.dart                |  84 ++++
+ .../test/units/unit_numbers_test.dart              |  83 ++++
+ .../jet_cad_2d_plan/test/units/units_test.dart     | 529 +++++++++++++++++++++
+ 16 files changed, 2429 insertions(+), 5 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart b/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
+index 65aa7609..6ba9dc1b 100644
+--- a/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
++++ b/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
+@@ -25,20 +25,22 @@ import '../l10n/strings.dart';
+ import '../export/page_flows.dart';
+ import '../export/page_printer.dart';
+ import '../export/registries.dart';
+ import '../shortcuts/tool_letters.dart';
+ import '../symbols/plan_symbol.dart';
+ import '../symbols/plan_symbol_loader.dart';
+ import '../tools/generic_tools.dart';
+ import '../tools/move_resolver.dart';
+ import '../tools/plan_select_gates.dart';
+ import '../tools/plan_symbol_tool.dart';
++import '../units/unit_components.dart';
++import '../units/unit_index.dart';
+ import 'camera_bounds.dart';
+ import 'new_plan.dart';
+ import 'permissions.dart';
+ import 'plan_change.dart';
+ import 'services.dart';
+ import 'session.dart';
+ import 'tool_settings_store.dart';
+ 
+ /// The thumbnail capacity of a controller's own cache (today's
+ /// `kFloorPlanThumbnailCapacity`).
+@@ -220,25 +222,26 @@ class PlanController extends ChangeNotifier {
+     if (unsettled) _unsettled = (document: document, at: _savedState);
+     _placeNominally();
+     _refreshFlags();
+     // The tool letters are the kit set's (Task 16): a letterTaken
+     // diagnostic is in the log before any widget is built.
+     planToolEntries(this);
+     // Last: a constructor that threw leaves no load running.
+     unawaited(_loadSymbols());
+   }
+ 
+-  /// The page, the contract's four components and the kits' types: what a
+-  /// plan's registry holds. Once per registry.
++  /// The page, the contract's four components, the unit components and the
++  /// kits' types: what a plan's registry holds. Once per registry.
+   static void _register(ComponentRegistry r, ParametricCatalog catalog) {
+     PageComponent.register(r);
+     registerKitComponents(r);
++    registerUnitComponents(r);
+     catalog.registerComponents(r);
+   }
+ 
+   void _registerComponents(ComponentRegistry r) => _register(r, catalog);
+ 
+   /// The least `minScale`: a thousand times the bound decisions' tolerance.
+   static const double _minScaleFloor = 1e-6;
+ 
+   /// The validated kits, in load order (spec P4).
+   final KitSet kits;
+@@ -558,20 +561,25 @@ class PlanController extends ChangeNotifier {
+ 
+   /// The locked objects: a missing kit's, an unknown type's, a broken
+   /// one's. Never the root.
+   ValueListenable<Set<Handle>> get locked => _locked;
+ 
+   /// Whether [handle] is locked: a locked object, inside one, or inside a
+   /// locked symbol's definition. The property panel shows no section for
+   /// it; the pickers refuse it.
+   bool isLocked(Handle handle) => _session.locks.covers(document, handle);
+ 
++  /// The design document's units (spec 2b S2). Task 11 re-points it at the
++  /// active document.
++  @internal
++  UnitIndex get unitIndex => _session.units.current;
++
+   /// Locks [objects] in the middle of a session (spec P4: a type's code
+   /// failed, Task 11): adds them to the lock set, clears the undo history
+   /// so no earlier edit can be undone onto them, and tells the listeners.
+   @internal
+   void lockBroken(Set<Handle> objects) {
+     if (objects.isEmpty) return;
+     _session.locks.addBroken(document, objects);
+     document.commands.clearHistory();
+     _locked.value = _session.locks.objects;
+     // clearHistory emits no change: refresh the undo listenables here.
+diff --git a/packages/jet_cad_2d_plan/lib/src/controller/session.dart b/packages/jet_cad_2d_plan/lib/src/controller/session.dart
+index b86511af..d3a53ebd 100644
+--- a/packages/jet_cad_2d_plan/lib/src/controller/session.dart
++++ b/packages/jet_cad_2d_plan/lib/src/controller/session.dart
+@@ -11,20 +11,21 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+ 
+ import '../attach/attachment_registry.dart';
+ import '../kits/guard.dart';
+ import '../kits/kit_set.dart';
+ import '../kits/locks.dart';
+ import '../tools/generic_tools.dart';
+ import '../tools/plan_select_gates.dart';
+ import '../tools/plan_symbol_tool.dart';
++import '../units/unit_index.dart';
+ import 'grip_dispatch.dart';
+ import 'permissions.dart';
+ import 'services.dart';
+ import 'shared_cache.dart';
+ 
+ /// The plan library's own select tool (spec P1 reserved ids).
+ const String planSelectToolId = 'plan.select';
+ 
+ final class DocumentSession {
+   DocumentSession(
+@@ -39,20 +40,24 @@ final class DocumentSession {
+       required PlanPermissions Function() permissions,
+       required ValueListenable<bool> fill,
+       required Tool Function(String kitId, String toolId, Tool tool) guard,
+       MoveResolver? moveResolver})
+       : _log = log,
+         _guard = guard,
+         page = PageNotifier(document),
+         index = SpatialIndex(document),
+         dispatch = GripDispatch(catalog) {
+     locks = LockSet.scan(document, kitLoaded);
++    // Spec 2b S2: the document's units, rebuilt on its state id, its
++    // layers' revision and the controller's locked set.
++    units = UnitIndexCache(document,
++        catalog: catalog, locks: locks, locked: locked);
+     // planner_shell.dart:625-671, the order load-bearing: the selection
+     // prunes a dead key before the outline cache walks it; the gates
+     // listen to the selection before the outline and grip caches do; the
+     // grip cache rebuilds after the outlines.
+     selection = SelectionController(document);
+     gates = PlanSelectGates(
+         permissions: permissions, selection: selection, locked: locked);
+     outlines = OutlineCache(document, selection);
+     grips = GripCache(document, selection, outlines,
+         objects: LockedGrips(locks,
+@@ -111,20 +116,23 @@ final class DocumentSession {
+   /// The plan's select tool, unguarded (its `deleteSelection`); the map and
+   /// the tool controller hold it guarded.
+   late final SelectTool select;
+   late final ToolController tools;
+   late final ParametricSystem parametric;
+ 
+   /// The document's lock set and expander (spec P4).
+   late final LockSet locks;
+   late final LockExpander lockExpander;
+ 
++  /// The document's units (spec 2b S2, `UnitIndex`).
++  late final UnitIndexCache units;
++
+   /// The select tool's and the grip cache's gates: the permissions and the
+   /// locks (spec P2, P4).
+   late final PlanSelectGates gates;
+ 
+   /// The generic tools (Task 12). The map holds each of them, guarded, and
+   /// disposes them: never [GenericToolSet.dispose] here (a second dispose
+   /// of a tool asserts).
+   late final GenericToolSet generic;
+   final SharedCache shared = SharedCache();
+ 
+@@ -268,17 +276,18 @@ final class DocumentSession {
+     tools.dispose();
+     for (final e in _entries) {
+       e.tool.dispose();
+     }
+     _entries.clear();
+     grips.dispose();
+     outlines.dispose();
+     selection.dispose();
+     page.dispose();
+     gates.dispose();
++    units.dispose();
+     lockExpander.dispose();
+     parametric.dispose();
+     index.dispose();
+     unawaited(document.dispose());
+     measurer.clear();
+   }
+ }
+diff --git a/packages/jet_cad_2d_plan/lib/src/export/page_flows.dart b/packages/jet_cad_2d_plan/lib/src/export/page_flows.dart
+index 082df24f..bdd89843 100644
+--- a/packages/jet_cad_2d_plan/lib/src/export/page_flows.dart
++++ b/packages/jet_cad_2d_plan/lib/src/export/page_flows.dart
+@@ -5,20 +5,21 @@
+ import 'dart:async' show unawaited;
+ import 'dart:typed_data';
+ 
+ import 'package:flutter/foundation.dart' show ValueListenable, ValueNotifier;
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
+     show FlutterTextMeasurer;
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show registerKitComponents;
+ 
+ import '../file/plan_file.dart' show ensureManifest;
++import '../units/unit_components.dart' show registerUnitComponents;
+ import 'builtin_exporters.dart';
+ import 'export_font.dart';
+ import 'page_printer.dart';
+ import 'registries.dart';
+ 
+ bool _never() => false;
+ 
+ /// The export, print and import flows of one controller: the registries,
+ /// the one-flow guard its views share, the remembered dialog answer and
+ /// the font.
+@@ -141,20 +142,21 @@ final class PlanPageFlows {
+       DraftDocument live) {
+     final measurer = FlutterTextMeasurer();
+     final catalog = _catalog();
+     final DraftDocument copy;
+     try {
+       copy = DraftDocumentCodec.decodeString(
+           DraftDocumentCodec.encodeToString(live),
+           measurer: measurer, registerComponents: (r) {
+         PageComponent.register(r);
+         registerKitComponents(r);
++        registerUnitComponents(r);
+         catalog.registerComponents(r);
+       }, diagnostics: <Diagnostic>[], keepUnreadableComponents: true);
+     } catch (_) {
+       measurer.clear();
+       rethrow;
+     }
+     return (document: copy, measurer: measurer);
+   }
+ 
+   /// [flow] under the guard, after the settle; [busy] when another flow
+diff --git a/packages/jet_cad_2d_plan/lib/src/units/unit_components.dart b/packages/jet_cad_2d_plan/lib/src/units/unit_components.dart
+new file mode 100644
+index 00000000..d97b83c3
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/units/unit_components.dart
+@@ -0,0 +1,253 @@
++// A host's data and colour on a unit (spec 2b S2 "Per-unit data"), on the
++// unit's **instance** node, placed or generated: ported from
++// jet_cad_floor_plan's table_data_component.dart and
++// table_color_component.dart. A generated unit keeps both while it keeps
++// its handle (E5) and loses them when its row drops it.
++//
++// No Flutter import: this file is Dart over `package:jet_cad_2d`, the
++// kit's swatch and `unit_label.dart` only.
++import 'dart:convert' show jsonEncode;
++
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart'
++    show PlanSwatch, planSwatchNamed;
++
++import 'unit_label.dart' show isControlCodeUnit;
++
++/// At most this many keys on one unit (E-6).
++const int kUnitDataMaxKeys = 32;
++
++/// A key's longest length, in characters of `[a-z0-9_.-]` (E-6).
++const int kUnitDataMaxKeyLength = 64;
++
++/// A value's longest length, in UTF-16 code units (E-6).
++const int kUnitDataMaxValueLength = 1024;
++
++final RegExp _key = RegExp('^[a-z0-9_.-]{1,$kUnitDataMaxKeyLength}\$');
++
++/// Why [data] is outside the limits (E-6), or null when it is within them:
++/// at most [kUnitDataMaxKeys] keys; each key 1 to [kUnitDataMaxKeyLength]
++/// characters of `[a-z0-9_.-]`; each value at most
++/// [kUnitDataMaxValueLength] UTF-16 code units, none of them a control
++/// character ([isControlCodeUnit], the unit labels' rule: below U+0020,
++/// or U+007F to U+009F). An empty map is within them, and so is an empty
++/// value (spec point S-6). The one test the component's constructor and the
++/// controller share.
++String? unitDataProblem(Map<String, String> data) {
++  if (data.length > kUnitDataMaxKeys) {
++    return 'has ${data.length} keys; at most $kUnitDataMaxKeys';
++  }
++  for (final MapEntry(:key, :value) in data.entries) {
++    if (!_key.hasMatch(key)) {
++      return 'key "$key" is not 1 to $kUnitDataMaxKeyLength characters '
++          'of [a-z0-9_.-]';
++    }
++    if (value.length > kUnitDataMaxValueLength) {
++      return 'the value of "$key" has ${value.length} code units; at most '
++          '$kUnitDataMaxValueLength';
++    }
++    if (value.codeUnits.any(isControlCodeUnit)) {
++      return 'the value of "$key" has a control character';
++    }
++  }
++  return null;
++}
++
++/// The host's data on one unit (E-6): `{"data": {key: value}}`, keys
++/// written sorted.
++///
++/// Immutable and value-equal. Made by the constructor, always within the
++/// limits and never empty (an empty map is no component); or read by
++/// [fromJson], which **never throws**: a payload outside the limits or of
++/// another shape is [kept] verbatim, written back as read, and reads as
++/// empty [data] (spec point S-2: the engine's preserve-unknown store holds
++/// only unregistered types, and a throwing factory would refuse the whole
++/// plan). `UnitIndex.diagnostics` reports such a unit as
++/// `unit.invalid_data` (S-3).
++final class UnitData implements Component {
++  static const String componentTypeId = 'jetcad.unit_data';
++
++  /// [data], its keys sorted. Throws [ArgumentError] (not an `assert`: a
++  /// release build must refuse too) when [data] is empty or outside the
++  /// limits ([unitDataProblem]).
++  factory UnitData(Map<String, String> data) {
++    if (data.isEmpty) {
++      throw ArgumentError.value(
++          data, 'data', 'is empty: an empty map is no component');
++    }
++    if (unitDataProblem(data) case final problem?) {
++      throw ArgumentError.value(data, 'data', problem);
++    }
++    return UnitData._(_sorted(data), null);
++  }
++
++  UnitData._(this.data, this.kept)
++      : _encoded = kept == null ? null : jsonEncode(kept);
++
++  /// The unit's data, its keys in ascending order; unmodifiable. Empty
++  /// when the payload was [kept].
++  final Map<String, String> data;
++
++  /// The payload as read, when it was not data within the limits: written
++  /// back exactly as read. Unmodifiable, all the way down. Null otherwise.
++  final Map<String, Object?>? kept;
++
++  /// [kept]'s encoding, its equality.
++  final String? _encoded;
++
++  /// Whether the payload was kept verbatim (and reads as empty [data]).
++  bool get isKept => kept != null;
++
++  @override
++  String get typeId => componentTypeId;
++
++  /// [kept] as read, or `{"data": {...}}` with the keys sorted.
++  @override
++  Map<String, Object?> toJson() => kept ?? {'data': data};
++
++  /// The payload's data when it is exactly `{"data": {key: value}}`, every
++  /// value a string, within the limits and not empty (re-sorted: a
++  /// hand-edited file is canonicalised on its next save); otherwise the
++  /// payload kept verbatim. Never throws.
++  static UnitData fromJson(Map<String, Object?> json) {
++    final raw = json['data'];
++    if (json.length == 1 && raw is Map && raw.isNotEmpty) {
++      final data = <String, String>{};
++      for (final MapEntry(:key, :value) in raw.entries) {
++        if (key is! String || value is! String) return _keep(json);
++        data[key] = value;
++      }
++      if (unitDataProblem(data) == null) {
++        return UnitData._(_sorted(data), null);
++      }
++    }
++    return _keep(json);
++  }
++
++  static UnitData _keep(Map<String, Object?> json) => UnitData._(
++      const <String, String>{}, _frozen(json) as Map<String, Object?>);
++
++  static Map<String, String> _sorted(Map<String, String> data) {
++    final keys = data.keys.toList()..sort();
++    return Map.unmodifiable({for (final k in keys) k: data[k]!});
++  }
++
++  /// A deep, unmodifiable copy of a decoded JSON value, its maps' key
++  /// order kept.
++  static Object? _frozen(Object? value) => switch (value) {
++        Map() => Map<String, Object?>.unmodifiable({
++            for (final MapEntry(:key, :value) in value.entries)
++              key as String: _frozen(value),
++          }),
++        List() =>
++          List<Object?>.unmodifiable([for (final v in value) _frozen(v)]),
++        _ => value,
++      };
++
++  @override
++  bool operator ==(Object other) {
++    if (other is! UnitData) return false;
++    if (isKept || other.isKept) return other._encoded == _encoded;
++    if (other.data.length != data.length) return false;
++    for (final MapEntry(:key, :value) in data.entries) {
++      if (other.data[key] != value) return false;
++    }
++    return true;
++  }
++
++  @override
++  int get hashCode =>
++      _encoded?.hashCode ??
++      Object.hashAll([
++        for (final MapEntry(:key, :value) in data.entries) ...[key, value]
++      ]);
++
++  @override
++  String toString() => isKept ? 'UnitData(kept: $_encoded)' : 'UnitData($data)';
++}
++
++/// The colour of one unit (PC-4): `{"color": name}`.
++///
++/// Immutable and value-equal. Made by the constructor from a palette entry;
++/// or read by [fromJson], which **never throws**: a payload of another shape
++/// than `{"color": String}` is [kept] verbatim and written back as read
++/// (the engine's preserve-unknown store holds only unregistered types, and
++/// a throwing factory would refuse the whole plan), and a name this release
++/// does not know is stored as read in [name] and reads as no [swatch].
++/// `UnitIndex.diagnostics` reports both as `unit.invalid_colour`.
++final class UnitColour implements Component {
++  static const String componentTypeId = 'jetcad.unit_colour';
++
++  /// The colour [swatch], stored by its name (never its index: a palette
++  /// reordered or extended breaks no file).
++  UnitColour(PlanSwatch swatch) : this._(swatch.name, null);
++
++  UnitColour._(this.name, this.kept)
++      : _encoded = jsonEncode(kept ?? {'color': name});
++
++  /// The stored name: a palette entry's, or a name this release does not
++  /// know, as read. Null when the payload was [kept].
++  final String? name;
++
++  /// The payload as read, when it was not `{"color": String}`: written back
++  /// exactly as read. Unmodifiable, all the way down. Null otherwise.
++  final Map<String, Object?>? kept;
++
++  /// The payload's encoding, its equality.
++  final String _encoded;
++
++  /// Whether the payload was kept verbatim (and reads as no colour).
++  bool get isKept => kept != null;
++
++  /// The palette entry named [name]; null when the payload was [kept] or
++  /// the name is not one this release knows.
++  PlanSwatch? get swatch => planSwatchNamed(name);
++
++  @override
++  String get typeId => componentTypeId;
++
++  /// [kept] as read, or `{"color": name}`.
++  @override
++  Map<String, Object?> toJson() => kept ?? {'color': name};
++
++  /// The payload's colour when it is exactly `{"color": String}`, whatever
++  /// the string; otherwise the payload kept verbatim. Never throws.
++  static UnitColour fromJson(Map<String, Object?> json) {
++    final raw = json['color'];
++    if (json.length == 1 && raw is String) {
++      return UnitColour._(raw, null);
++    }
++    return UnitColour._(null, _frozen(json) as Map<String, Object?>);
++  }
++
++  /// A deep, unmodifiable copy of a decoded JSON value, its maps' key
++  /// order kept.
++  static Object? _frozen(Object? value) => switch (value) {
++        Map() => Map<String, Object?>.unmodifiable({
++            for (final MapEntry(:key, :value) in value.entries)
++              key as String: _frozen(value),
++          }),
++        List() =>
++          List<Object?>.unmodifiable([for (final v in value) _frozen(v)]),
++        _ => value,
++      };
++
++  @override
++  bool operator ==(Object other) =>
++      other is UnitColour && other._encoded == _encoded;
++
++  @override
++  int get hashCode => _encoded.hashCode;
++
++  @override
++  String toString() => 'UnitColour($_encoded)';
++}
++
++/// Registers [UnitData] and [UnitColour]. **Once per registry**: a second
++/// registration replaces the stores and drops every unit's data and
++/// colour.
++void registerUnitComponents(ComponentRegistry registry) {
++  registry.register<UnitData>(UnitData.componentTypeId, UnitData.fromJson);
++  registry.register<UnitColour>(
++      UnitColour.componentTypeId, UnitColour.fromJson);
++}
+diff --git a/packages/jet_cad_2d_plan/lib/src/units/unit_index.dart b/packages/jet_cad_2d_plan/lib/src/units/unit_index.dart
+new file mode 100644
+index 00000000..4a9cd47c
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/units/unit_index.dart
+@@ -0,0 +1,372 @@
++// The units of a plan (spec 2b S2 "A unit", "UnitIndex", "Diagnostics",
++// "Unlabelled, duplicate and bad labels"): every live symbol instance whose
++// definition carries `jetcad.unit`, placed at the root or generated by an
++// object, in one pass, with its label, its lock, its world transform and
++// its definition-space top and box. Replaces jet_cad_floor_plan's
++// TableSurvey (tables/table_index.dart:61-226); the top and box follow
++// service/table_picker.dart:92-110, :259-299.
++import 'package:flutter/foundation.dart' show ValueListenable;
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart'
++    show SymbolComponent, UnitComponent, UnitLabelling, kUnitLabelTag;
++
++import '../kits/locks.dart';
++import '../symbols/symbol_box.dart' show boxOfLeaves;
++import 'unit_components.dart';
++import 'unit_label.dart';
++import 'unit_locks.dart';
++import 'unit_problems.dart';
++
++/// One unit.
++final class UnitInfo {
++  const UnitInfo({
++    required this.instance,
++    required this.definition,
++    this.owner,
++    this.ownerType,
++    this.label,
++    this.text,
++    required this.kind,
++    required this.capacity,
++    required this.labelling,
++    this.symbolKey,
++    required this.locked,
++    required this.visible,
++    required this.toWorld,
++    required this.top,
++    required this.box,
++  });
++
++  final Handle instance;
++  final Handle definition;
++
++  /// The generating object (a root-level group); null when placed.
++  final Handle? owner;
++
++  /// The owner's type id, or the missing kit's component type id of a held
++  /// group; null when placed.
++  final String? ownerType;
++
++  /// The lowest-handle `UNIT` ATTRIB; null when there is none.
++  final Handle? label;
++
++  /// [label]'s text, trimmed; null when unlabelled (no label, or an empty
++  /// one).
++  final String? text;
++
++  final String kind;
++  final int capacity;
++  final UnitLabelling labelling;
++
++  /// The definition's `jetcad.symbol` key; null for a hand-made one.
++  final String? symbolKey;
++
++  /// [isLockedUnit].
++  final bool locked;
++
++  /// The instance's layer is shown (a missing layer counts as shown).
++  final bool visible;
++
++  /// Definition space to world: the instance's transform, after its root
++  /// group's for a generated unit.
++  final Transform2 toWorld;
++
++  /// Definition space: the served top (the first leaf, a closed polyline or
++  /// a circle), else [box].
++  final Aabb2 top;
++
++  /// Definition space: the symbol's box.
++  final Aabb2 box;
++
++  bool get generated => owner != null;
++
++  @override
++  String toString() => 'UnitInfo(${instance.toHex()}, $text, $kind)';
++}
++
++/// The units of one document, and what their labels and data raise.
++final class UnitIndex {
++  UnitIndex._(this.units, this.nested, this._byInstance, this._extraLabels,
++      this._keptData, this._invalidColour);
++
++  /// One pass, O(nodes + entities): at document-change rate (through
++  /// [UnitIndexCache]), never per frame.
++  factory UnitIndex.of(CommandTarget document,
++      {required ParametricCatalog catalog, required LockSet locks}) {
++    final entities = document.entities;
++    final tree = document.tree;
++    final root = tree.root;
++    // One bucketing pass: the UNIT labels by owner, every other leaf by
++    // owner (a definition's leaves among them).
++    final labels = <Handle, List<(Handle, String)>>{};
++    final leaves = <Handle, List<int>>{};
++    for (final slot in entities.liveSlots) {
++      final owner = entities.ownerAt(slot);
++      if (entities.kindAt(slot) == EntityKind.attrib) {
++        if (entities.tagAt(slot) == kUnitLabelTag) {
++          (labels[owner] ??= [])
++              .add((entities.handleAt(slot), entities.textAt(slot)));
++        }
++        continue;
++      }
++      (leaves[owner] ??= []).add(slot);
++    }
++    final shapes = <Handle, (Aabb2, Aabb2)>{};
++    (Aabb2, Aabb2) shapeOf(Handle definition) =>
++        shapes.putIfAbsent(definition, () {
++          final slots = [...?leaves[definition]]..sort((a, b) =>
++              entities.handleAt(a).value.compareTo(entities.handleAt(b).value));
++          final list = [
++            for (final s in slots)
++              (
++                entities.kindAt(s),
++                document.geometry.read(entities.geomIndexAt(s))
++              ),
++          ];
++          final b = boxOfLeaves(list);
++          return (
++            unitTopOfLeaves(list),
++            b == null
++                ? Aabb2.empty()
++                : Aabb2.raw(b.left, b.front, b.right, b.back),
++          );
++        });
++
++    final units = <UnitInfo>[];
++    final nested = <Handle>[];
++    final extra = <Handle, List<Handle>>{};
++    final kept = <Handle>{};
++    final invalidColour = <Handle>{};
++    // `tree.nodes` is ascending by handle (its contract), so both lists are
++    // too.
++    for (final node in tree.nodes) {
++      if (node is! InstanceNode) continue;
++      if (tree.definition(node.definition) == null) continue;
++      final unit = document.components.get<UnitComponent>(node.definition);
++      if (unit == null) continue;
++      Handle? owner;
++      String? ownerType;
++      var toWorld = node.transform;
++      if (node.parent != root) {
++        final parent = tree[node.parent];
++        if (parent is! GroupNode || parent.parent != root) {
++          nested.add(node.handle);
++          continue;
++        }
++        final typeId = catalog.typeIdOf(document, parent.handle);
++        if (typeId == null && !locks.isLockedObject(parent.handle)) {
++          nested.add(node.handle);
++          continue;
++        }
++        owner = parent.handle;
++        ownerType = typeId ?? heldTypeOf(document, parent.handle);
++        toWorld = parent.transform.multiply(node.transform);
++      }
++      final own = labels[node.handle]
++        ?..sort((a, b) => a.$1.value.compareTo(b.$1.value));
++      if (own != null && own.length > 1) {
++        extra[node.handle] = [for (final l in own.skip(1)) l.$1];
++      }
++      final layer = document.tables.layers[node.layer];
++      final (top, box) = shapeOf(node.definition);
++      units.add(UnitInfo(
++        instance: node.handle,
++        definition: node.definition,
++        owner: owner,
++        ownerType: ownerType,
++        label: own?.first.$1,
++        // An empty label is no label (today's demo review F-7).
++        text: switch (own?.first.$2.trim()) {
++          null || '' => null,
++          final t => t,
++        },
++        kind: unit.kind,
++        capacity: unit.capacity,
++        labelling: unit.labelling,
++        symbolKey:
++            document.components.get<SymbolComponent>(node.definition)?.key,
++        locked: isLockedUnit(document, locks, node.handle),
++        visible: layer?.visible ?? true,
++        toWorld: toWorld,
++        top: top,
++        box: box,
++      ));
++      if (document.components.get<UnitData>(node.handle)?.isKept ?? false) {
++        kept.add(node.handle);
++      }
++      final colour = document.components.get<UnitColour>(node.handle);
++      if (colour != null && colour.swatch == null) {
++        invalidColour.add(node.handle);
++      }
++    }
++    return UnitIndex._(
++        List.unmodifiable(units),
++        List.unmodifiable(nested),
++        {for (final u in units) u.instance: u},
++        Map.unmodifiable(extra),
++        kept,
++        invalidColour);
++  }
++
++  /// Every unit, served or not, ascending by instance handle.
++  final List<UnitInfo> units;
++
++  /// Unit instances that are neither placed nor generated (`unit.nested`),
++  /// ascending.
++  final List<Handle> nested;
++
++  final Map<Handle, UnitInfo> _byInstance;
++  final Map<Handle, List<Handle>> _extraLabels;
++  final Set<Handle> _keptData;
++  final Set<Handle> _invalidColour;
++
++  UnitInfo? operator [](Handle instance) => _byInstance[instance];
++
++  /// The units labelled [label] (trimmed, exact `==`), ascending.
++  List<UnitInfo> withLabel(String label) {
++    final l = label.trim();
++    return [
++      for (final u in units)
++        if (u.text == l) u,
++    ];
++  }
++
++  /// The units' diagnostics (spec S2), in a stable order: duplicates by
++  /// first appearance; then per unit ascending: unlabelled or a bad label,
++  /// extra labels, invalid data, an invalid colour; then the nested ones.
++  List<Diagnostic> diagnostics() {
++    final out = <Diagnostic>[];
++    final byLabel = <String, List<Handle>>{};
++    for (final u in units) {
++      if (u.text case final t?) (byLabel[t] ??= []).add(u.instance);
++    }
++    for (final MapEntry(key: label, value: handles) in byLabel.entries) {
++      if (handles.length < 2) continue;
++      out.add(Diagnostic(
++        severity: DiagnosticSeverity.warning,
++        code: UnitProblem.duplicateLabel,
++        message: 'Label $label is used by ${handles.length} units',
++        handles: handles,
++      ));
++    }
++    for (final u in units) {
++      final h = u.instance;
++      final text = u.text;
++      if (text == null) {
++        out.add(Diagnostic(
++          severity: DiagnosticSeverity.warning,
++          code: UnitProblem.unlabelled,
++          message: 'Unit ${h.toHex()} has no label',
++          handles: [h],
++        ));
++      } else if (unitLabelError(text) case final error?) {
++        out.add(Diagnostic(
++          severity: DiagnosticSeverity.warning,
++          code: UnitProblem.badLabel,
++          message: 'Unit ${h.toHex()} is labelled "$text" ($error); it is '
++              'served by its text',
++          handles: [h],
++        ));
++      }
++      final more = _extraLabels[h];
++      if (more != null) {
++        out.add(Diagnostic(
++          severity: DiagnosticSeverity.warning,
++          code: UnitProblem.extraLabel,
++          message: 'Unit ${h.toHex()} has ${more.length + 1} labels; the '
++              'first is used',
++          handles: [h, ...more],
++        ));
++      }
++      if (_keptData.contains(h)) {
++        out.add(Diagnostic(
++          severity: DiagnosticSeverity.warning,
++          code: UnitProblem.invalidData,
++          message: 'Unit ${h.toHex()} carries host data outside the limits; '
++              'it is kept as read and reads as none',
++          handles: [h],
++        ));
++      }
++      if (_invalidColour.contains(h)) {
++        out.add(Diagnostic(
++          severity: DiagnosticSeverity.warning,
++          code: UnitProblem.invalidColour,
++          message: 'Unit ${h.toHex()} carries a colour this release cannot '
++              'read; it is kept as read and drawn as none',
++          handles: [h],
++        ));
++      }
++    }
++    for (final h in nested) {
++      out.add(Diagnostic(
++        severity: DiagnosticSeverity.info,
++        code: UnitProblem.nested,
++        message: '${h.toHex()} is neither at the root nor an object\'s and '
++            'is not a unit',
++        handles: [h],
++      ));
++    }
++    return out;
++  }
++
++  /// The label warnings a host sees (`labelWarnings`): [DuplicateLabel] in
++  /// first-appearance order, then [Unlabelled], then [BadLabel], ascending.
++  List<UnitLabelWarning> warnings() {
++    final counts = <String, int>{};
++    for (final u in units) {
++      if (u.text case final t?) counts[t] = (counts[t] ?? 0) + 1;
++    }
++    return List.unmodifiable(<UnitLabelWarning>[
++      for (final MapEntry(key: label, value: count) in counts.entries)
++        if (count > 1) DuplicateLabel(label: label, count: count),
++      for (final u in units)
++        if (u.text == null)
++          Unlabelled(
++              kind: u.kind, capacity: u.capacity, symbolKey: u.symbolKey),
++      for (final u in units)
++        if (u.text case final t?)
++          if (unitLabelProblem(t) case final p?) BadLabel(label: t, problem: p),
++    ]);
++  }
++}
++
++/// One session's [UnitIndex], rebuilt when the document's state id or its
++/// tables' revision moves, or when [locked] has notified (a freeze moves no
++/// state id, spec S2). A read with none of them moved returns the same
++/// index.
++final class UnitIndexCache {
++  UnitIndexCache(this.document,
++      {required this.catalog,
++      required this.locks,
++      required ValueListenable<Set<Handle>> locked})
++      : _locked = locked {
++    _locked.addListener(_lockedChanged);
++  }
++
++  final DraftDocument document;
++  final ParametricCatalog catalog;
++  final LockSet locks;
++  final ValueListenable<Set<Handle>> _locked;
++
++  UnitIndex? _index;
++  int? _state;
++  int? _revision;
++  bool _stale = true;
++
++  UnitIndex get current {
++    final state = document.commands.stateId;
++    final revision = document.tables.mutationRevision;
++    final index = _index;
++    if (index != null && !_stale && state == _state && revision == _revision) {
++      return index;
++    }
++    _state = state;
++    _revision = revision;
++    _stale = false;
++    return _index = UnitIndex.of(document, catalog: catalog, locks: locks);
++  }
++
++  void _lockedChanged() => _stale = true;
++
++  void dispose() => _locked.removeListener(_lockedChanged);
++}
+diff --git a/packages/jet_cad_2d_plan/lib/src/units/unit_label.dart b/packages/jet_cad_2d_plan/lib/src/units/unit_label.dart
+new file mode 100644
+index 00000000..0ae282da
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/units/unit_label.dart
+@@ -0,0 +1,203 @@
++// A unit's label (spec 2b S2 "The label"): the text rule (today's table
++// number rule, jet_cad_floor_plan/lib/src/tables/table_numbers.dart:5-46,
++// renamed), the label record and command of a placed unit
++// (table_label.dart:106-179), and how a unit's label and top are read. The
++// stamp, the height and the payload are the kit's (Task 3).
++//
++// No Flutter import: Dart over package:jet_cad_2d and the kit's model.
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart'
++    show kUnitLabelTag, kUnitLabelTextAttrs, unitLabelHeight, unitLabelPayload;
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../symbols/symbol_box.dart' show boxOfLeaves;
++
++/// A label's longest length, in UTF-16 code units.
++const int kUnitLabelMaxLength = 8;
++
++/// Why a text is not a unit label, as a value a UI words.
++enum UnitLabelProblem {
++  /// Empty, or longer than [kUnitLabelMaxLength] code units, trimmed.
++  length,
++
++  /// A control character, a line break among them.
++  control,
++}
++
++/// Whether the UTF-16 code unit [u] is a control character: below U+0020
++/// (C0, a line break among them) or U+007F to U+009F (DEL and C1). The one
++/// rule [unitLabelProblem] and the unit data limits share.
++bool isControlCodeUnit(int u) => u < 0x20 || (u >= 0x7F && u <= 0x9F);
++
++/// Why [raw], trimmed, is not a unit label, or null when it is one:
++/// non-empty, at most [kUnitLabelMaxLength] code units, no control
++/// character.
++UnitLabelProblem? unitLabelProblem(String raw) {
++  final n = raw.trim();
++  if (n.isEmpty || n.length > kUnitLabelMaxLength) {
++    return UnitLabelProblem.length;
++  }
++  if (n.codeUnits.any(isControlCodeUnit)) return UnitLabelProblem.control;
++  return null;
++}
++
++/// [unitLabelProblem] in English, or null (diagnostic messages; the UI's
++/// words are `PlanStrings.labelProblem`).
++String? unitLabelError(String raw) => switch (unitLabelProblem(raw)) {
++      null => null,
++      UnitLabelProblem.length => '1 to $kUnitLabelMaxLength characters',
++      UnitLabelProblem.control => 'No line breaks or control characters',
++    };
++
++/// The label record of a placed unit: owned by [instance], on layer 0 (so
++/// it follows the instance's layer, spec 12b S-2), BYBLOCK style, the
++/// standard text style, tag `UNIT`, text [text].
++EntityRecord unitLabelRecord(
++        {required Handle handle,
++        required Handle instance,
++        required String text}) =>
++    EntityRecord(
++      handle: handle,
++      owner: instance,
++      kind: EntityKind.attrib,
++      layer: ReservedHandles.layerZero,
++      linetype: ReservedHandles.byBlockLinetype,
++      linetypeScale: 1.0,
++      geomIndex: 0,
++      color: const ByBlockColor(),
++      lineweight: kByBlock,
++      transparency: kByBlock,
++      flags: 0,
++      text: text,
++      tag: kUnitLabelTag,
++      textStyle: ReservedHandles.standardTextStyle,
++      textAttrs: kUnitLabelTextAttrs,
++    );
++
++/// The lowest-handle leaf [owner] owns, or null. O(entities): at command
++/// or document-change rate, never per frame. With [leavesByOwner]
++/// ([DraftDocument.leavesByOwner], shared by a caller asking for many
++/// owners in one pass), only [owner]'s own leaves are visited.
++/// (`tables/table_label.dart:155-181`, `CommandTarget` for `DraftDocument`.)
++({EntityKind kind, GeometryPayload payload})? firstLeafOf(
++    CommandTarget target, Handle owner,
++    [Map<Handle, List<int>>? leavesByOwner]) {
++  final entities = target.entities;
++  int? best;
++  final slots = leavesByOwner == null
++      ? entities.liveSlots
++      : leavesByOwner[owner] ?? const <int>[];
++  for (final slot in slots) {
++    if (entities.ownerAt(slot) != owner) continue;
++    if (best == null ||
++        entities.handleAt(slot).value < entities.handleAt(best).value) {
++      best = slot;
++    }
++  }
++  if (best == null) return null;
++  return (
++    kind: entities.kindAt(best),
++    payload: target.geometry.read(entities.geomIndexAt(best)),
++  );
++}
++
++/// The top of a definition whose [leaves] are given ascending by handle
++/// (spec S2, `SymbolDefinitionRef.top`): the first leaf's box when it is a
++/// closed polyline or a circle, else the leaves' box (`boxOfLeaves`);
++/// empty for none.
++Aabb2 unitTopOfLeaves(List<(EntityKind, GeometryPayload)> leaves) {
++  if (leaves.isNotEmpty) {
++    final (kind, p) = leaves.first;
++    if (kind == EntityKind.circle) {
++      final r = p.scalars[0];
++      return Aabb2.raw(
++          p.coords[0] - r, p.coords[1] - r, p.coords[0] + r, p.coords[1] + r);
++    }
++    if (kind == EntityKind.polyline && isClosedPolyline(p)) {
++      final b = boxOfLeaves([leaves.first]);
++      if (b != null) return Aabb2.raw(b.left, b.front, b.right, b.back);
++    }
++  }
++  final b = boxOfLeaves(leaves);
++  return b == null
++      ? Aabb2.empty()
++      : Aabb2.raw(b.left, b.front, b.right, b.back);
++}
++
++/// The box a placed unit's label height reads (spec S2: today's stamp,
++/// `tables/table_label.dart:22-44`): the first leaf's box when it is a
++/// circle or a polyline, open or closed; else empty, which gives the full
++/// height. Not the unit's top ([unitTopOfLeaves], spec S2's rule for
++/// `SymbolDefinitionRef.top` and `UnitInfo.top`): today's label reads an
++/// open polyline's box and never the other leaves (controller ruling
++/// R-21; the placer, the unit API's new label and the fixtures read this).
++Aabb2 placedLabelTop(List<(EntityKind, GeometryPayload)> leaves) {
++  if (leaves.isEmpty) return Aabb2.empty();
++  final (kind, p) = leaves.first;
++  switch (kind) {
++    case EntityKind.circle:
++      final r = p.scalars[0];
++      return Aabb2.raw(
++          p.coords[0] - r, p.coords[1] - r, p.coords[0] + r, p.coords[1] + r);
++    case EntityKind.polyline:
++      final c = p.coords;
++      var minX = c[0], maxX = c[0], minY = c[1], maxY = c[1];
++      for (var i = 2; i + 1 < c.length; i += 2) {
++        if (c[i] < minX) minX = c[i];
++        if (c[i] > maxX) maxX = c[i];
++        if (c[i + 1] < minY) minY = c[i + 1];
++        if (c[i + 1] > maxY) maxY = c[i + 1];
++      }
++      return Aabb2.raw(minX, minY, maxX, maxY);
++    default:
++      return Aabb2.empty();
++  }
++}
++
++/// [placedLabelTop] of [definition]'s first leaf in [target].
++/// O(entities), at command rate.
++Aabb2 placedLabelTopOf(CommandTarget target, Handle definition) {
++  final leaf = firstLeafOf(target, definition);
++  return leaf == null
++      ? Aabb2.empty()
++      : placedLabelTop([(leaf.kind, leaf.payload)]);
++}
++
++/// The command that adds [text] as the label of [instance], an instance of
++/// [definition] placed by [placement]: anchored at the definition's base
++/// point, the height of its top, stamped upright. Allocates one handle.
++AddEntityCommand addUnitLabelCommand(
++  DraftDocument doc, {
++  required Handle instance,
++  required Handle definition,
++  required Transform2 placement,
++  required String text,
++}) {
++  final def = doc.tree.definition(definition);
++  return AddEntityCommand(
++    record: unitLabelRecord(
++        handle: doc.handleSeed.next(), instance: instance, text: text),
++    payload: unitLabelPayload(
++      anchor: def?.basePoint ?? Vector2.zero(),
++      height: unitLabelHeight(placedLabelTopOf(doc, definition)),
++      instanceToWorld: placement,
++    ),
++  );
++}
++
++/// The lowest-handle `UNIT` ATTRIB [instance] owns, or null. O(entities),
++/// at command rate.
++Handle? unitLabelOf(CommandTarget target, Handle instance) {
++  final e = target.entities;
++  Handle? best;
++  for (final slot in e.liveSlots) {
++    if (e.ownerAt(slot) != instance ||
++        e.kindAt(slot) != EntityKind.attrib ||
++        e.tagAt(slot) != kUnitLabelTag) {
++      continue;
++    }
++    final h = e.handleAt(slot);
++    if (best == null || h.value < best.value) best = h;
++  }
++  return best;
++}
+diff --git a/packages/jet_cad_2d_plan/lib/src/units/unit_locks.dart b/packages/jet_cad_2d_plan/lib/src/units/unit_locks.dart
+new file mode 100644
+index 00000000..b3358e8c
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/units/unit_locks.dart
+@@ -0,0 +1,35 @@
++// The one lock predicate of a unit (spec 2b S2 "Locked units"): its layer
++// is locked (today's locked table), or 2a's lock set covers it (a placed
++// unit of a missing kit's symbol, a frozen object's or a missing kit's
++// object's seat, a seat of a missing kit's definition). Used by the service
++// tool, unitDetails.locked, the record's strict match and the design writes.
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show isKitId;
++
++import '../kits/locks.dart';
++
++/// Whether the unit [instance] of [document] is locked.
++bool isLockedUnit(CommandTarget document, LockSet locks, Handle instance) {
++  final node = document.tree[instance];
++  if (node is InstanceNode &&
++      (document.tables.layers[node.layer]?.locked ?? false)) {
++    return true;
++  }
++  return locks.covers(document, instance);
++}
++
++/// The type id of the first unknown kit-namespaced component on [group] (a
++/// kit id, then a dot; not `jetcad`, not `plan`): what a group the lock set
++/// holds for a missing kit was, by the rule `LockSet` reads
++/// (`locks.dart:67-77`). Null when it carries none.
++String? heldTypeOf(CommandTarget document, Handle group) {
++  for (final payload in document.components.unknownOf(group)) {
++    final typeId = payload['typeId'];
++    if (typeId is! String) continue;
++    final dot = typeId.indexOf('.');
++    if (dot <= 0) continue;
++    final kit = typeId.substring(0, dot);
++    if (isKitId(kit) && kit != 'jetcad' && kit != 'plan') return typeId;
++  }
++  return null;
++}
+diff --git a/packages/jet_cad_2d_plan/lib/src/units/unit_numbers.dart b/packages/jet_cad_2d_plan/lib/src/units/unit_numbers.dart
+new file mode 100644
+index 00000000..587788ed
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/units/unit_numbers.dart
+@@ -0,0 +1,56 @@
++// The next number of a placed numbered unit (spec 2b S2 "Placed,
++// numbered"), today's nextTableNumber (jet_cad_floor_plan/lib/src/tables/
++// table_numbers.dart:48-73), skipping any unit's label.
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show UnitLabelling;
++
++import 'unit_index.dart';
++
++final RegExp _counted = RegExp(r'^[0-9]{1,8}$');
++
++/// The largest number written: eight digits.
++const int _kLargestCounted = 99999999;
++
++/// The value of [label] when it counts: 1 to 8 ASCII digits, leading zeros
++/// allowed (`"07"` is 7). Null otherwise.
++int? countedUnitNumber(String label) =>
++    _counted.hasMatch(label) ? int.parse(label) : null;
++
++/// `max + 1` over the counted [numbers] (trimmed), written without leading
++/// zeros, then up by one while that text is in [labels]; `"1"` when none
++/// counts. When that would take nine digits, the smallest positive integer
++/// that is neither a counted number nor in [labels]. With [labels] empty,
++/// today's nextTableNumber.
++String nextUnitNumberOf(Iterable<String> numbers,
++    [Set<String> labels = const {}]) {
++  final used = <int>{};
++  var max = 0;
++  for (final n in numbers) {
++    final v = countedUnitNumber(n.trim());
++    if (v == null) continue;
++    used.add(v);
++    if (v > max) max = v;
++  }
++  var candidate = max + 1;
++  while (candidate <= _kLargestCounted && labels.contains('$candidate')) {
++    candidate++;
++  }
++  if (candidate <= _kLargestCounted) return '$candidate';
++  candidate = 1;
++  while (used.contains(candidate) || labels.contains('$candidate')) {
++    candidate++;
++  }
++  return '$candidate';
++}
++
++/// The next number for a placed `numbered` unit of [index]: over the
++/// placed numbered units' labels, skipping every unit's label.
++String nextUnitNumber(UnitIndex index) => nextUnitNumberOf([
++      for (final u in index.units)
++        if (!u.generated &&
++            u.labelling == UnitLabelling.numbered &&
++            u.text != null)
++          u.text!,
++    ], {
++      for (final u in index.units)
++        if (u.text != null) u.text!,
++    });
+diff --git a/packages/jet_cad_2d_plan/lib/src/units/unit_problems.dart b/packages/jet_cad_2d_plan/lib/src/units/unit_problems.dart
+new file mode 100644
+index 00000000..3ff00551
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/units/unit_problems.dart
+@@ -0,0 +1,88 @@
++// The units' diagnostics and label warnings (spec 2b S2 "Diagnostics",
++// "Unlabelled, duplicate and bad labels"): today's table codes and
++// NumberingWarning (jet_cad_floor_plan/lib/src/tables/table_index.dart:
++// 228-243; host/floor_plan_types.dart:197-243), renamed, plus the bad label.
++import 'unit_label.dart' show UnitLabelProblem;
++
++/// The codes `UnitIndex.diagnostics` raises.
++abstract final class UnitProblem {
++  static const String duplicateLabel = 'unit.duplicate_label';
++  static const String unlabelled = 'unit.unlabelled';
++  static const String badLabel = 'unit.bad_label';
++  static const String extraLabel = 'unit.extra_label';
++  static const String nested = 'unit.nested';
++
++  /// Host data outside the limits: kept as read, reads as none.
++  static const String invalidData = 'unit.invalid_data';
++
++  /// A colour of another shape, or a swatch this release does not know:
++  /// kept as read, drawn as none.
++  static const String invalidColour = 'unit.invalid_colour';
++}
++
++/// A problem with the plan's unit labels, as a value the host words, or
++/// asks `PlanStrings.labelWarning` to. Never a handle.
++sealed class UnitLabelWarning {
++  const UnitLabelWarning();
++}
++
++/// [count] live units carry [label].
++final class DuplicateLabel extends UnitLabelWarning {
++  const DuplicateLabel({required this.label, required this.count});
++
++  final String label;
++  final int count;
++
++  @override
++  bool operator ==(Object other) =>
++      other is DuplicateLabel && other.label == label && other.count == count;
++
++  @override
++  int get hashCode => Object.hash(label, count);
++
++  @override
++  String toString() => 'DuplicateLabel($label, $count)';
++}
++
++/// A live unit carries no label. Two of one symbol read alike: the host
++/// sees how many there are.
++final class Unlabelled extends UnitLabelWarning {
++  const Unlabelled(
++      {required this.kind, required this.capacity, required this.symbolKey});
++
++  final String kind;
++  final int capacity;
++  final String? symbolKey;
++
++  @override
++  bool operator ==(Object other) =>
++      other is Unlabelled &&
++      other.kind == kind &&
++      other.capacity == capacity &&
++      other.symbolKey == symbolKey;
++
++  @override
++  int get hashCode => Object.hash(kind, capacity, symbolKey);
++
++  @override
++  String toString() => 'Unlabelled($kind, $capacity, $symbolKey)';
++}
++
++/// A live unit's [label] breaks the text rule ([problem]); it is still its
++/// label, served by its text.
++final class BadLabel extends UnitLabelWarning {
++  const BadLabel({required this.label, required this.problem});
++
++  final String label;
++  final UnitLabelProblem problem;
++
++  @override
++  bool operator ==(Object other) =>
++      other is BadLabel && other.label == label && other.problem == problem;
++
++  @override
++  int get hashCode => Object.hash(label, problem);
++
++  @override
++  String toString() => 'BadLabel($label, ${problem.name})';
++}
+diff --git a/packages/jet_cad_2d_plan/test/support/harness.dart b/packages/jet_cad_2d_plan/test/support/harness.dart
+index e284cbed..275babd8 100644
+--- a/packages/jet_cad_2d_plan/test/support/harness.dart
++++ b/packages/jet_cad_2d_plan/test/support/harness.dart
+@@ -4,42 +4,45 @@
+ // tasks add to it: Task 7 `planText`, Task 8 `controllerFor`.
+ import 'dart:typed_data';
+ 
+ import 'package:flutter/gestures.dart' show kPrimaryButton;
+ import 'package:flutter/material.dart';
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:jet_cad_2d_plan/src/units/unit_components.dart'
++    show registerUnitComponents;
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import 'test_kit.dart';
+ 
+ /// Every kit's types registered, in load order, without a guard.
+ ParametricCatalog catalogOf(List<PlanKit> kits) {
+   final catalog = ParametricCatalog();
+   for (final kit in kits) {
+     for (final type in kit.types) {
+       type.registerInto(catalog);
+     }
+   }
+   return catalog;
+ }
+ 
+-/// The page, the contract's four components and [catalog]'s: what a plan
+-/// document registers. Once per registry (`PageComponent.register` wipes
+-/// a live page).
++/// The page, the contract's four components, the unit components and
++/// [catalog]'s: what a plan document registers. Once per registry
++/// (`PageComponent.register` wipes a live page).
+ void registerPlanComponents(
+     ComponentRegistry registry, ParametricCatalog catalog) {
+   PageComponent.register(registry);
+   registerKitComponents(registry);
++  registerUnitComponents(registry);
+   catalog.registerComponents(registry);
+ }
+ 
+ /// A new plan's document over [kits]: millimetres, the default page (A4
+ /// landscape at 1:50, origin (-7425, -5250)) printing [separator], no
+ /// history. No system is installed.
+ DraftDocument planDocument(List<PlanKit> kits,
+     {TextMeasurer measurer = const InsertionPointMeasurer(),
+     DecimalSeparator separator = DecimalSeparator.point}) {
+   final d = DraftDocument.empty(measurer: measurer);
+diff --git a/packages/jet_cad_2d_plan/test/support/unit_fixtures.dart b/packages/jet_cad_2d_plan/test/support/unit_fixtures.dart
+new file mode 100644
+index 00000000..016e0673
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/support/unit_fixtures.dart
+@@ -0,0 +1,206 @@
++// The units' fixture (2b Task 6; Task 8 adds the picker's and the
++// editor's helpers, and Tasks 7, 9, 10, 14 and 15 reuse it), ported from
++// jet_cad_floor_plan's test/tables/table_fixture.dart: a servable table
++// symbol, a stool, a planter, a table with one chair and a trapezoid, and a
++// plan to place them in. A symbol is a CatalogSymbol; its SymbolEntry is
++// built by hand, never through a library, so a unit that breaks the
++// library's outline rule (Task 8's open table) can still be placed. The
++// keys are under the fixture kit `fx` with two segments (K2's key rule,
++// `isSymbolKey`; controller rulings R-10 P-1 and R-19). Base points and
++// placements are off the origin (the degenerate-fixture rule).
++import 'dart:math' as math;
++
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/authoring.dart'
++    show
++        CatalogCircle,
++        CatalogLine,
++        CatalogPolyline,
++        CatalogSymbol,
++        CatalogUnit;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:jet_cad_2d_plan/src/kits/locks.dart';
++import 'package:jet_cad_2d_plan/src/units/unit_index.dart';
++import 'package:jet_cad_2d_plan/src/units/unit_label.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import 'harness.dart';
++import 'symbol_fixtures.dart' show leafRecord;
++
++/// The fixtures' kit: no type, no tool, no library. Its symbols are placed
++/// by hand; a controller loads it so that LockSet leaves them unlocked.
++const String fxKitId = 'fx';
++
++PlanKit fxKit() => PlanKit(id: fxKitId, version: '1.0.0');
++
++/// A served unit of kind `table` seating [seats], the default labelling.
++CatalogUnit tableUnit(int seats) =>
++    CatalogUnit(kind: UnitKinds.table, capacity: seats);
++
++/// A 1200 x 800 top with two 450 x 450 chairs below and above it; the base
++/// point is the top's centre, (900, 700).
++CatalogSymbol tableSymbol({String key = 'fx.table.two', int seats = 2}) =>
++    CatalogSymbol(
++      key: key,
++      name: 'Test table',
++      category: 'Tests',
++      tags: const ['table', 'test'],
++      unit: tableUnit(seats),
++      base: (900, 700),
++      shapes: const [
++        CatalogPolyline([(300, 300), (1500, 300), (1500, 1100), (300, 1100)],
++            closed: true),
++        CatalogPolyline([(675, -50), (1125, -50), (1125, 400), (675, 400)],
++            closed: true),
++        CatalogPolyline([(675, 1000), (1125, 1000), (1125, 1450), (675, 1450)],
++            closed: true),
++      ],
++    );
++
++/// A Ø 380 stool, its seat first; base point at its centre.
++const CatalogSymbol stoolSymbol = CatalogSymbol(
++  key: 'fx.stool.round',
++  name: 'Test stool',
++  category: 'Tests',
++  tags: ['stool', 'test'],
++  unit: CatalogUnit(kind: UnitKinds.table, capacity: 1),
++  base: (400, 300),
++  shapes: [CatalogCircle((400, 300), 190), CatalogCircle((400, 300), 150)],
++);
++
++/// No unit.
++const CatalogSymbol planterSymbol = CatalogSymbol(
++  key: 'fx.planter.round',
++  name: 'Test planter',
++  category: 'Tests',
++  tags: ['planter', 'test'],
++  base: (250, 250),
++  shapes: [CatalogCircle((250, 250), 250)],
++);
++
++/// [tableSymbol]'s top with one chair, below it: the symbol's box centre,
++/// (900, 525), is not its base point, (900, 700).
++const CatalogSymbol oneChairTable = CatalogSymbol(
++  key: 'fx.table.one',
++  name: 'Test table, one chair',
++  category: 'Tests',
++  tags: ['table', 'test'],
++  unit: CatalogUnit(kind: UnitKinds.table, capacity: 1),
++  base: (900, 700),
++  shapes: [
++    CatalogPolyline([(300, 300), (1500, 300), (1500, 1100), (300, 1100)],
++        closed: true),
++    CatalogPolyline([(675, -50), (1125, -50), (1125, 400), (675, 400)],
++        closed: true),
++  ],
++);
++
++/// A unit whose top is an asymmetric trapezoid: a mirror about the base
++/// point changes where the top is.
++const CatalogSymbol trapezoidTable = CatalogSymbol(
++  key: 'fx.trapezoid.two',
++  name: 'Test trapezoid',
++  category: 'Tests',
++  tags: ['table', 'test'],
++  unit: CatalogUnit(kind: UnitKinds.table, capacity: 2),
++  base: (900, 650),
++  shapes: [
++    CatalogPolyline([(200, 300), (1600, 300), (1300, 1000), (500, 900)],
++        closed: true),
++  ],
++);
++
++/// [s] as a library entry, built by hand (no library rule is checked): its
++/// leaves ascending by handle in shape order, each a BYBLOCK leaf on layer
++/// 0; its unit when [CatalogSymbol.unit] is set.
++SymbolEntry entryOf(CatalogSymbol s) {
++  const definition = Handle(0x0F0);
++  final leaves = <SymbolLeaf>[];
++  var next = 0x100;
++  for (final shape in s.shapes) {
++    final (EntityKind kind, GeometryPayload payload) = switch (shape) {
++      CatalogPolyline(:final points, :final closed) => (
++          EntityKind.polyline,
++          polylinePayload([for (final (x, y) in points) Vector2(x, y)],
++              closed: closed)
++        ),
++      CatalogCircle(center: (final x, final y), :final radius) => (
++          EntityKind.circle,
++          circlePayload(Vector2(x, y), radius)
++        ),
++      CatalogLine(from: (final ax, final ay), to: (final bx, final by)) => (
++          EntityKind.line,
++          linePayload(Vector2(ax, ay), Vector2(bx, by))
++        ),
++      _ => throw UnsupportedError('no arc in the unit fixtures'),
++    };
++    leaves
++        .add((record: leafRecord(next++, definition, kind), payload: payload));
++  }
++  final unit = s.unit;
++  return SymbolEntry(
++    symbol: SymbolComponent(
++        key: s.key,
++        version: s.version,
++        name: s.name,
++        category: s.category,
++        tags: s.tags),
++    unit: unit == null
++        ? null
++        : UnitComponent(
++            kind: unit.kind,
++            capacity: unit.capacity,
++            labelling: unit.labelling),
++    definition: Definition(
++        handle: definition,
++        name: s.id,
++        basePoint: Vector2(s.base.$1, s.base.$2),
++        children: const []),
++    leaves: leaves,
++  );
++}
++
++/// An empty plan with the plan's components (the unit components among
++/// them) and [catalog]'s, in millimetres.
++DraftDocument plan({ParametricCatalog? catalog}) {
++  final doc = DraftDocument.empty();
++  registerPlanComponents(doc.components, catalog ?? ParametricCatalog());
++  doc.header.units = DrawingUnits.millimeters;
++  return doc;
++}
++
++const double kDeg37 = 37 * math.pi / 180;
++
++/// `translate(at) · R(theta) · (mirror x) · translate(-base)`.
++Transform2 placementAt(double x, double y, double theta,
++        {bool mirrored = false, double baseX = 900, double baseY = 700}) =>
++    Transform2.translation(x, y)
++        .multiply(Transform2.rotation(theta))
++        .multiply(Transform2.scale(mirrored ? -1 : 1, 1))
++        .multiply(Transform2.translation(-baseX, -baseY));
++
++/// [doc]'s units, every kit [loaded] unless told otherwise.
++UnitIndex unitIndexOf(DraftDocument doc,
++        {ParametricCatalog? catalog, bool Function(String kitId)? loaded}) =>
++    UnitIndex.of(doc,
++        catalog: catalog ?? ParametricCatalog(),
++        locks: LockSet.scan(doc, loaded ?? (_) => true));
++
++/// Adds [text] as the label of [i] (today's `addTableLabelCommand`),
++/// executed; the label's handle.
++Handle labelUnit(DraftDocument doc, InstanceNode i, String text) {
++  final command = addUnitLabelCommand(doc,
++      instance: i.handle,
++      definition: i.definition,
++      placement: i.transform,
++      text: text);
++  doc.commands.execute(command);
++  return command.record.handle;
++}
++
++/// The labels of [index]'s labelled units, one per unit (today's
++/// `TableSurvey.numbers`).
++List<String> labelsOf(UnitIndex index) => [
++      for (final u in index.units)
++        if (u.text != null) u.text!,
++    ];
+diff --git a/packages/jet_cad_2d_plan/test/units/unit_components_test.dart b/packages/jet_cad_2d_plan/test/units/unit_components_test.dart
+new file mode 100644
+index 00000000..b360a5b6
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/units/unit_components_test.dart
+@@ -0,0 +1,275 @@
++// Ported from jet_cad_floor_plan/test/tables/table_data_test.dart and test/host/table_color_test.dart; assertions unchanged.
++//
++// Spec 2b S2 "Per-unit data" (host embedding API spec E-6, plan colours
++// spec PC-4): the host's data on a unit -- the component, its limits, its
++// lenient read (spec point S-2) and its diagnostic (S-3) -- and the unit's
++// colour. Units are placed off the origin, turned and mirrored; data is
++// written with its keys out of order, a 64-character key, a 1024-unit
++// value and non-ASCII text.
++import 'dart:convert';
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show PlanSwatch;
++import 'package:jet_cad_2d_plan/src/symbols/symbol_placer.dart';
++import 'package:jet_cad_2d_plan/src/units/unit_components.dart';
++import 'package:jet_cad_2d_plan/src/units/unit_index.dart';
++import 'package:jet_cad_2d_plan/src/units/unit_problems.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/harness.dart';
++import '../support/unit_fixtures.dart';
++
++/// Data as a host writes it: keys out of order, a value with a space, a dot
++/// and a non-ASCII letter.
++Map<String, String> hostData() => {
++      'zeta': 'Masa 4.ğ',
++      'id': '7f3c-ä',
++      'alpha': '',
++    };
++
++/// A key of exactly 64 characters of the allowed set.
++final String key64 = 'k${'a_.-9' * 12}xyz';
++
++/// A value of exactly 1024 UTF-16 units, non-ASCII included.
++final String value1024 = '${'ş' * 1000}${'x' * 24}';
++
++/// A value of exactly 1024 UTF-16 units that is only 512 characters: each
++/// U+1F37D is a surrogate pair (E-6 counts units, review R-1).
++final String astral1024 = '\u{1F37D}' * 512;
++
++/// A value of 1025 UTF-16 units that is only 1024 characters.
++final String astral1025 = '${'x' * 1023}\u{1F37D}';
++
++/// The unit placed last in [doc].
++UnitInfo placeTable(DraftDocument doc, Vector2 at,
++    {int quarterTurns = 0, bool mirrored = false}) {
++  doc.commands.execute(placeSymbol(doc, entryOf(tableSymbol()),
++      at: at, quarterTurns: quarterTurns, mirrored: mirrored));
++  return unitIndexOf(doc)
++      .units
++      .reduce((a, b) => a.instance.value > b.instance.value ? a : b);
++}
++
++UnitData? dataOf(DraftDocument doc, Handle h) =>
++    doc.components.get<UnitData>(h);
++
++const PlanSwatch teal = PlanSwatch.teal;
++const PlanSwatch purple = PlanSwatch.purple;
++
++void main() {
++  group('the limits (E-6, S-6)', () {
++    test(
++        'TD1 accepted at the boundaries: 32 keys, a 64-character key, a '
++        '1024-unit value, an empty value, non-ASCII text', () {
++      expect(key64.length, 64);
++      expect(value1024.length, 1024);
++      final full = {
++        for (var i = 0; i < 31; i++) 'k${i.toString().padLeft(2, '0')}': '$i',
++        key64: value1024,
++      };
++      expect(full.length, 32);
++      expect(unitDataProblem(full), isNull);
++      expect(UnitData(full).data, full);
++      expect(unitDataProblem(hostData()), isNull);
++      expect(unitDataProblem(const {}), isNull,
++          reason: 'empty is within the limits: it removes the data');
++      expect(unitDataProblem({'a': ' ¡ é'}), isNull,
++          reason: 'U+00A0 is past the C1 range');
++      expect(unitDataProblem({'a': 'a~b'}), isNull,
++          reason: 'U+007E is below the DEL and C1 range');
++      expect(astral1024.length, 1024);
++      expect(astral1024.runes.length, 512);
++      expect(unitDataProblem({'a': astral1024}), isNull,
++          reason: '1024 UTF-16 units, though 512 characters');
++      expect(UnitData({'a': astral1024}).data, {'a': astral1024});
++    });
++
++    test(
++        'TD2 refused one past each boundary: 33 keys, a 65-character key, a '
++        '1025-unit value, each control character range, a bad key', () {
++      final over = {for (var i = 0; i < 33; i++) 'k$i': 'v'};
++      expect(astral1025.length, 1025);
++      expect(astral1025.runes.length, 1024,
++          reason: 'over in UTF-16 units, not in characters');
++      final refused = <Map<String, String>>[
++        over,
++        {'${key64}q': 'v'},
++        {'a': '${value1024}x'},
++        {'a': astral1025},
++        {'a': 'x\u0085y'},
++        {'a': '\u0000'},
++        {'a': 'line\nbreak'},
++        {'a': '\u001f'},
++        {'a': '\u007f'},
++        {'a': '\u009f'},
++        {'Bad': 'x'},
++        {'bad key': 'x'},
++        {'': 'x'},
++        {'ı': 'x'},
++      ];
++      for (final data in refused) {
++        expect(unitDataProblem(data), isNotNull, reason: '$data');
++        expect(() => UnitData(data), throwsArgumentError, reason: '$data');
++      }
++      expect(() => UnitData(const {}), throwsArgumentError,
++          reason: 'an empty map is no component');
++    });
++  });
++
++  group('the component', () {
++    test(
++        'TD3 M-H24: keys inserted as zeta, id, alpha are written sorted; '
++        'the data is unmodifiable and value-equal', () {
++      final c = UnitData(hostData());
++      expect(jsonEncode(c.toJson()),
++          '{"data":{"alpha":"","id":"7f3c-ä","zeta":"Masa 4.ğ"}}');
++      expect(c.data.keys, ['alpha', 'id', 'zeta']);
++      expect(() => c.data['x'] = 'y', throwsUnsupportedError);
++      expect(c.isKept, isFalse);
++      expect(c.typeId, 'jetcad.unit_data');
++      final same = UnitData({'alpha': '', 'zeta': 'Masa 4.ğ', 'id': '7f3c-ä'});
++      expect(same, c);
++      expect(same.hashCode, c.hashCode);
++      expect(UnitData({...hostData(), 'id': '7f3c-a'}), isNot(c));
++    });
++
++    test(
++        'TD4 M-H28: fromJson never throws; a payload of another shape or '
++        'outside the limits is kept verbatim and reads as empty data', () {
++      final payloads = <String>[
++        jsonEncode({
++          'data': {for (var i = 33; i > 0; i--) 'k$i': 'v$i'}
++        }),
++        '{"data":{"Bad Key":"x","alpha":"a"}}',
++        jsonEncode({
++          'data': {'a': '${value1024}x'}
++        }),
++        jsonEncode({
++          'data': {'a': astral1025}
++        }),
++        '{"data":{"zeta":"z","n":4}}',
++        '{"data":["1","2"]}',
++        '{"data":{}}',
++        '{}',
++        '{"data":{"a":"b"},"extra":1}',
++        jsonEncode({
++          'data': {'a': 'x\u0085'}
++        }),
++        '{"data":{"a":{"b":[1,2.5,null,true,{"z":"y","c":"d"}]}},"x":-0.5}',
++      ];
++      for (final text in payloads) {
++        final json = (jsonDecode(text) as Map).cast<String, Object?>();
++        final c = UnitData.fromJson(json);
++        expect(c.isKept, isTrue, reason: text);
++        expect(c.data, isEmpty, reason: text);
++        expect(jsonEncode(c.toJson()), text, reason: 'written back as read');
++        expect(UnitData.fromJson(json), c, reason: 'value-equal');
++      }
++      final deep = UnitData.fromJson(
++          (jsonDecode(payloads.last) as Map).cast<String, Object?>());
++      expect(
++          () => (deep.kept!['data']! as Map)['q'] = 1, throwsUnsupportedError,
++          reason: 'kept unmodifiable all the way down');
++      expect(
++          deep,
++          isNot(UnitData.fromJson(
++              (jsonDecode(payloads.first) as Map).cast<String, Object?>())));
++    });
++
++    test(
++        'TD5 a valid but unsorted stored payload is the data, re-sorted on '
++        'write (S-6)', () {
++      final c = UnitData.fromJson(
++          (jsonDecode('{"data":{"zeta":"Masa 4.ğ","id":"7f3c-ä","alpha":""}}')
++                  as Map)
++              .cast<String, Object?>());
++      expect(c.isKept, isFalse);
++      expect(c, UnitData(hostData()));
++      expect(jsonEncode(c.toJson()),
++          '{"data":{"alpha":"","id":"7f3c-ä","zeta":"Masa 4.ğ"}}');
++    });
++
++    test(
++        'TD6 registerPlanComponents registers it: a plan decodes it typed, '
++        'and one outside the limits decodes too, with a diagnostic', () {
++      final doc = plan();
++      final a = placeTable(doc, Vector2(41200, -27300), quarterTurns: 1);
++      final b = placeTable(doc, Vector2(-38900, 26100), mirrored: true);
++      doc.commands.execute(
++          SetComponentCommand<UnitData>(a.instance, UnitData(hostData())));
++      final json = (jsonDecode(DraftDocumentCodec.encodeToString(doc)) as Map)
++          .cast<String, Object?>();
++      doc.dispose();
++      ((json['components']! as Map)['jetcad.unit_data']
++              as Map)['${b.instance.value}'] =
++          jsonDecode('{"data":{"Bad Key":"x"}}');
++      final text = jsonEncode(json);
++      final back = DraftDocumentCodec.decodeString(text,
++          registerComponents: (r) =>
++              registerPlanComponents(r, ParametricCatalog()));
++      addTearDown(back.dispose);
++      expect(dataOf(back, a.instance), UnitData(hostData()));
++      expect(dataOf(back, b.instance)!.isKept, isTrue);
++      expect(DraftDocumentCodec.encodeToString(back), text,
++          reason: 'byte for byte');
++      final invalid = unitIndexOf(back)
++          .diagnostics()
++          .where((d) => d.code == UnitProblem.invalidData)
++          .toList();
++      expect(invalid.single.handles, [b.instance]);
++      expect(invalid.single.severity, DiagnosticSeverity.warning);
++      expect(UnitProblem.invalidData, 'unit.invalid_data');
++    });
++  });
++
++  test(
++      'TC1 M-C1 (tables) the component: teal encodes {"color":"teal"}; an '
++      'unknown name is stored as read; any other shape is kept verbatim; '
++      'nothing throws', () {
++    final made = UnitColour(teal);
++    expect(made.toJson(), {'color': 'teal'});
++    expect(jsonEncode(made.toJson()), '{"color":"teal"}');
++    expect(made.name, 'teal');
++    expect(made.swatch, teal);
++    expect(made.isKept, isFalse);
++    expect(UnitColour.fromJson({'color': 'teal'}), made);
++    expect(UnitColour.fromJson({'color': 'teal'}).hashCode, made.hashCode);
++    expect(UnitColour.fromJson({'color': 'purple'}) == made, isFalse);
++    expect(UnitColour(purple).swatch, purple);
++
++    final unknown = UnitColour.fromJson({'color': 'magenta'});
++    expect(unknown.name, 'magenta');
++    expect(unknown.swatch, isNull);
++    expect(unknown.isKept, isFalse);
++    expect(unknown.toJson(), {'color': 'magenta'});
++    expect(unknown == made, isFalse);
++
++    for (final raw in <Map<String, Object?>>[
++      {'color': 7},
++      {'hue': 'teal'},
++      {'color': 'teal', 'x': 1},
++      {'color': null},
++      {
++        'color': <Object?>['teal']
++      },
++      <String, Object?>{},
++    ]) {
++      final kept = UnitColour.fromJson(raw);
++      expect(kept.isKept, isTrue, reason: '$raw');
++      expect(kept.name, isNull, reason: '$raw');
++      expect(kept.swatch, isNull, reason: '$raw');
++      expect(kept.toJson(), raw, reason: '$raw');
++      expect(jsonEncode(kept.toJson()), jsonEncode(raw), reason: '$raw');
++      expect(kept == made, isFalse, reason: '$raw');
++      expect(UnitColour.fromJson(raw), kept, reason: '$raw');
++    }
++    final deep = UnitColour.fromJson({
++      'color': {
++        'a': [1, 2]
++      }
++    });
++    expect(() => (deep.kept!['color'] as Map)['b'] = 1, throwsUnsupportedError,
++        reason: 'unmodifiable all the way down');
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/units/unit_index_test.dart b/packages/jet_cad_2d_plan/test/units/unit_index_test.dart
+new file mode 100644
+index 00000000..3b8ce348
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/units/unit_index_test.dart
+@@ -0,0 +1,218 @@
++// Ported from jet_cad_floor_plan/test/tables/table_index_test.dart; assertions unchanged.
++//
++// Spec 14a T1, T2, T6, T15 (spec 2b S2 "A unit", "UnitIndex",
++// "Diagnostics"): which instances are units, the label each carries, and
++// the diagnostics of a plan's labels. Units are placed off the origin,
++// turned and mirrored; their labels are added by hand here.
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:jet_cad_2d_plan/src/symbols/symbol_placer.dart';
++import 'package:jet_cad_2d_plan/src/units/unit_label.dart';
++import 'package:jet_cad_2d_plan/src/units/unit_problems.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/unit_fixtures.dart';
++
++/// Places [entry] and returns its instance.
++InstanceNode place(DraftDocument doc, SymbolEntry entry, Vector2 at,
++    {int quarterTurns = 0, bool mirrored = false}) {
++  doc.commands.execute(placeSymbol(doc, entry,
++      at: at, quarterTurns: quarterTurns, mirrored: mirrored));
++  return doc.tree.nodes
++      .whereType<InstanceNode>()
++      .reduce((a, b) => a.handle.value > b.handle.value ? a : b);
++}
++
++void main() {
++  test(
++      'TI1 the tables are the live, root-level, servable instances, '
++      'ascending by handle whatever the tree order, with their numbers and '
++      'seats', () {
++    final doc = plan();
++    final early = doc.handleSeed.next();
++    final a = place(doc, entryOf(tableSymbol(seats: 2)), Vector2(-2100, 900),
++        quarterTurns: 1, mirrored: true);
++    final planter = place(doc, entryOf(planterSymbol), Vector2(400, -800));
++    final b =
++        place(doc, entryOf(stoolSymbol), Vector2(3300, 1700), quarterTurns: 3);
++    final c = place(doc, entryOf(tableSymbol(seats: 2)), Vector2(-700, -2600));
++    labelUnit(doc, b, ' B4 ');
++    labelUnit(doc, a, '12');
++    // Added last, with the lowest handle: the tree holds it after the rest.
++    doc.commands.execute(AddNodeCommand(InstanceNode(
++        handle: early,
++        parent: doc.rootHandle,
++        transform: placementAt(5100, -900, kDeg37, mirrored: true),
++        definition: b.definition,
++        layer: ReservedHandles.layerZero)));
++
++    final tables = unitIndexOf(doc).units;
++    expect([for (final t in tables) t.instance],
++        [early, a.handle, b.handle, c.handle]);
++    expect([for (final t in tables) t.text], [null, '12', 'B4', null]);
++    expect([for (final t in tables) t.capacity], [1, 2, 1, 2]);
++    // Finding P-1 (controller ruling R-10, R-19): the fixture's keys are
++    // under the fixture kit `fx` (K2's key rule refuses `test.stool`).
++    expect([for (final t in tables) t.symbolKey],
++        ['fx.stool.round', 'fx.table.two', 'fx.stool.round', 'fx.table.two']);
++    expect(tables.any((t) => t.instance == planter.handle), isFalse);
++  });
++
++  test('TI2 a removed instance is no table and its number is free', () {
++    final doc = plan();
++    final a = place(doc, entryOf(tableSymbol()), Vector2(-2100, 900));
++    final b = place(doc, entryOf(tableSymbol()), Vector2(2100, 900));
++    labelUnit(doc, a, '1');
++    final lb = labelUnit(doc, b, '2');
++    doc.commands.execute(CompoundCommand(
++        [RemoveEntityCommand(lb), RemoveNodeCommand(b.handle)],
++        label: 'Delete'));
++    final survey = unitIndexOf(doc);
++    expect([for (final t in survey.units) t.instance], [a.handle]);
++    expect(labelsOf(survey), ['1']);
++    expect(survey.withLabel('2'), isEmpty);
++  });
++
++  test('TI3 numbers compare trimmed and case-sensitively (M-14a-4)', () {
++    final doc = plan();
++    final a = place(doc, entryOf(tableSymbol()), Vector2(-2100, 900));
++    final b = place(doc, entryOf(tableSymbol()), Vector2(2100, 900));
++    labelUnit(doc, a, 'B4');
++    labelUnit(doc, b, 'b4');
++    final survey = unitIndexOf(doc);
++    expect([for (final t in survey.withLabel(' B4 ')) t.instance], [a.handle]);
++    expect([for (final t in survey.withLabel('b4')) t.instance], [b.handle]);
++    expect(survey.diagnostics(), isEmpty);
++  });
++
++  test(
++      'TI4 diagnostics: duplicate, unnumbered, extra label, nested, each with '
++      'its severity; the lowest-handle label is the number', () {
++    final doc = plan();
++    final earlyLabel = doc.handleSeed.next();
++    final earlyNested = doc.handleSeed.next();
++    final a = place(doc, entryOf(tableSymbol()), Vector2(-2100, 900));
++    final b =
++        place(doc, entryOf(tableSymbol()), Vector2(2100, 900), mirrored: true);
++    final c = place(doc, entryOf(stoolSymbol), Vector2(0, 3000));
++    final d = place(doc, entryOf(stoolSymbol), Vector2(0, -3000));
++    final planterEntry = entryOf(planterSymbol);
++    final planter = place(doc, planterEntry, Vector2(4000, 4000));
++    labelUnit(doc, a, '4');
++    labelUnit(doc, b, '4 ');
++    final firstOfD = labelUnit(doc, d, '9');
++    final secondOfD = labelUnit(doc, d, '10');
++    // A third label of d's, added last with the lowest handle.
++    final command = addUnitLabelCommand(doc,
++        instance: d.handle,
++        definition: d.definition,
++        placement: d.transform,
++        text: '11');
++    doc.commands.execute(AddEntityCommand(
++        record: command.record.copyWith(handle: earlyLabel),
++        payload: command.payload));
++    // Servable instances inside a group: not tables in v1; the one with the
++    // lower handle is added second. A planter there is nothing.
++    final group = doc.handleSeed.next();
++    doc.commands.execute(AddNodeCommand(GroupNode(
++        handle: group,
++        parent: doc.rootHandle,
++        transform: Transform2.translation(500, 500),
++        children: const [])));
++    InstanceNode inGroup(Handle h, Handle def) => InstanceNode(
++        handle: h,
++        parent: group,
++        transform: placementAt(100, 200, kDeg37),
++        definition: def,
++        layer: ReservedHandles.layerZero);
++    final lateNested = doc.handleSeed.next();
++    doc.commands.execute(AddNodeCommand(inGroup(lateNested, a.definition)));
++    doc.commands.execute(AddNodeCommand(inGroup(earlyNested, c.definition)));
++    doc.commands.execute(
++        AddNodeCommand(inGroup(doc.handleSeed.next(), planter.definition)));
++
++    final survey = unitIndexOf(doc);
++    expect([for (final t in survey.units) t.instance],
++        [a.handle, b.handle, c.handle, d.handle]);
++    expect(survey.units.last.label, earlyLabel);
++    expect(survey.units.last.text, '11');
++    expect(survey.nested, [earlyNested, lateNested]);
++    final diagnostics = survey.diagnostics();
++    expect([
++      for (final x in diagnostics) x.code
++    ], [
++      UnitProblem.duplicateLabel,
++      UnitProblem.unlabelled,
++      UnitProblem.extraLabel,
++      UnitProblem.nested,
++      UnitProblem.nested,
++    ]);
++    expect([
++      for (final x in diagnostics) x.severity
++    ], [
++      DiagnosticSeverity.warning,
++      DiagnosticSeverity.warning,
++      DiagnosticSeverity.warning,
++      DiagnosticSeverity.info,
++      DiagnosticSeverity.info,
++    ]);
++    expect(diagnostics[0].handles, [a.handle, b.handle]);
++    expect(diagnostics[1].handles, [c.handle]);
++    expect(diagnostics[2].handles, [d.handle, firstOfD, secondOfD]);
++    expect(diagnostics[3].handles, [earlyNested]);
++    expect(diagnostics[4].handles, [lateNested]);
++    expect(unitIndexOf(doc).diagnostics().length, 5);
++  });
++
++  test(
++      'TI4b an instance of a definition that is gone is no table, whatever '
++      'its components say', () {
++    final doc = plan();
++    final a = place(doc, entryOf(tableSymbol()), Vector2(-2100, 900));
++    labelUnit(doc, a, '1');
++    final orphan = doc.handleSeed.next();
++    final def = doc.handleSeed.next();
++    doc.commands.execute(SetComponentCommand<UnitComponent>(
++        def, UnitComponent(kind: UnitKinds.table, capacity: 3)));
++    doc.tree.addNode(InstanceNode(
++        handle: orphan,
++        parent: doc.rootHandle,
++        transform: placementAt(900, 900, kDeg37),
++        definition: def,
++        layer: ReservedHandles.layerZero));
++    expect([for (final t in unitIndexOf(doc).units) t.instance], [a.handle]);
++  });
++
++  test(
++      'TI5 a label that is not tagged TABLE, or not an ATTRIB, is no '
++      'number', () {
++    final doc = plan();
++    final a = place(doc, entryOf(tableSymbol()), Vector2(-2100, 900));
++    final command = addUnitLabelCommand(doc,
++        instance: a.handle,
++        definition: a.definition,
++        placement: a.transform,
++        text: '3');
++    doc.commands.execute(AddEntityCommand(
++        record: command.record.copyWith(tag: 'REF'), payload: command.payload));
++    doc.commands.execute(AddEntityCommand(
++        record: command.record.copyWith(
++            handle: doc.handleSeed.next(), kind: EntityKind.text, text: '5'),
++        payload: command.payload));
++    expect(unitIndexOf(doc).units.single.text, isNull);
++  });
++
++  test('TI6 an empty label is no number: the table is unnumbered', () {
++    final doc = plan();
++    final a = place(doc, entryOf(tableSymbol()), Vector2(-2100, 900),
++        quarterTurns: 3);
++    final b = place(doc, entryOf(stoolSymbol), Vector2(1900, -400));
++    labelUnit(doc, a, '  ');
++    labelUnit(doc, b, '');
++    final survey = unitIndexOf(doc);
++    expect([for (final t in survey.units) t.text], [null, null]);
++    expect([for (final d in survey.diagnostics()) d.code],
++        [UnitProblem.unlabelled, UnitProblem.unlabelled]);
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/units/unit_label_test.dart b/packages/jet_cad_2d_plan/test/units/unit_label_test.dart
+new file mode 100644
+index 00000000..556432e0
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/units/unit_label_test.dart
+@@ -0,0 +1,84 @@
++// Ported from jet_cad_floor_plan/test/tables/table_label_test.dart; assertions unchanged.
++//
++// Spec 14a T8 (spec 2b S2 "The label"): the label record of a placed unit,
++// its command, and the lowest-handle leaf. The stamp, the height and the
++// payload are the kit's (Task 3); the restamp is Task 7's.
++import 'dart:math' as math;
++import 'dart:typed_data';
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_plan/src/symbols/symbol_placer.dart';
++import 'package:jet_cad_2d_plan/src/units/unit_label.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/unit_fixtures.dart';
++
++void main() {
++  group('the label record (T8)', () {
++    test('TL5 tag, owner, layer 0, BYBLOCK, centred, width factor its own', () {
++      final r = unitLabelRecord(
++          handle: const Handle(0x5A0),
++          instance: const Handle(0x59F),
++          text: 'B4');
++      expect(r.kind, EntityKind.attrib);
++      // The tag renamed (spec S2: "today's TABLE, renamed").
++      expect(r.tag, 'UNIT');
++      expect(r.text, 'B4');
++      expect(r.owner, const Handle(0x59F));
++      expect(r.layer, ReservedHandles.layerZero);
++      expect(r.color, const ByBlockColor());
++      expect(r.textStyle, ReservedHandles.standardTextStyle);
++      expect(r.textAttrs & 0xF, TextJustifyH.centre.index);
++      expect((r.textAttrs >> 4) & 0xF, TextJustifyV.middle.index);
++      expect(r.textAttrs & (1 << 8), isNot(0),
++          reason: 'the width factor is read only with bit 8');
++    });
++
++    test(
++        'TL6 the command anchors at the base point, sized by the first leaf '
++        '(review F-1)', () {
++      final doc = plan();
++      final entry = entryOf(stoolSymbol);
++      doc.commands.execute(placeSymbol(doc, entry,
++          at: Vector2(-3100, 2200), quarterTurns: 1, mirrored: true));
++      final instance = doc.tree.nodes.whereType<InstanceNode>().single;
++      final command = addUnitLabelCommand(doc,
++          instance: instance.handle,
++          definition: instance.definition,
++          placement: instance.transform,
++          text: '7');
++      doc.commands.execute(command);
++      final slot = doc.entities.slotOf(command.record.handle)!;
++      expect(doc.entities.textAt(slot), '7');
++      expect(doc.entities.ownerAt(slot), instance.handle);
++      final payload = doc.geometry.read(doc.entities.geomIndexAt(slot));
++      expect(payload.coords, [400, 300]);
++      // L = R(90°) · diag(−1, 1) = [[0, −1], [−1, 0]]; the stamp
++      // R(90°) · diag(−1, 1) is the same matrix, and L · L = I.
++      expect(payload.scalars, [152, math.pi / 2, -1.0]);
++      expect(command.record.handle.value, greaterThan(instance.handle.value),
++          reason: 'drawn above its table');
++    });
++
++    test('TL7 firstLeafOf is the lowest handle, whatever the slot order', () {
++      final doc = plan();
++      final early = doc.handleSeed.next();
++      final owner = doc.handleSeed.next();
++      doc.tree.addDefinition(Definition(
++          handle: owner,
++          name: 'D',
++          basePoint: Vector2(10, 20),
++          children: const []));
++      AddEntityCommand line(Handle h, double y) => AddEntityCommand(
++          record: unitLabelRecord(handle: h, instance: owner, text: 'x')
++              .copyWith(kind: EntityKind.line),
++          payload: GeometryPayload(
++              coords: Float64List.fromList([0, y, 100, y]),
++              scalars: Float64List(0)));
++      doc.commands.execute(line(doc.handleSeed.next(), 5));
++      doc.commands.execute(line(early, 9));
++      expect(firstLeafOf(doc, owner)!.payload.coords, [0, 9, 100, 9]);
++    });
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/units/unit_numbers_test.dart b/packages/jet_cad_2d_plan/test/units/unit_numbers_test.dart
+new file mode 100644
+index 00000000..6b4b069f
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/units/unit_numbers_test.dart
+@@ -0,0 +1,83 @@
++// Ported from jet_cad_floor_plan/test/tables/table_numbers_test.dart; assertions unchanged.
++//
++// Spec 14a T4, T5 (spec 2b S2 "The label", "Placed, numbered"): what a
++// unit label may be, and the next number. Every expected value is written
++// out by hand.
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_plan/src/units/unit_label.dart';
++import 'package:jet_cad_2d_plan/src/units/unit_numbers.dart';
++
++void main() {
++  group('nextUnitNumberOf (S2)', () {
++    test('TN1 none counted gives "1"', () {
++      expect(nextUnitNumberOf(const []), '1');
++      expect(nextUnitNumberOf(const ['B4', 'Bahçe 3']), '1');
++    });
++
++    test('TN2 max + 1, not count + 1 (M-14a-1)', () {
++      expect(nextUnitNumberOf(const ['1', '3']), '4');
++      expect(nextUnitNumberOf(const ['12', '5', '9']), '13');
++    });
++
++    test(
++        'TN3 leading zeros read as decimal; letters, spaces inside and nine '
++        'digits or more do not count (M-14a-3)', () {
++      expect(nextUnitNumberOf(const ['07', 'B9', '1234567890']), '8');
++      expect(nextUnitNumberOf(const ['5', '1 2', '-3', '+9', '٣']), '6');
++      expect(nextUnitNumberOf(const ['100000000']), '1',
++          reason: 'nine digits are not a number this rule writes');
++    });
++
++    test('TN4 a number is trimmed before it is read', () {
++      expect(nextUnitNumberOf(const [' 41 ']), '42');
++    });
++
++    test(
++        'TN5 past eight digits, the smallest unused positive integer '
++        '(M-14a-18)', () {
++      expect(nextUnitNumberOf(const ['99999999', '1']), '2');
++      expect(nextUnitNumberOf(const ['99999999', '1', '2', '00000003']), '4');
++      expect(nextUnitNumberOf(const ['99999998']), '99999999');
++    });
++
++    test('TN6 counted values', () {
++      expect(countedUnitNumber('07'), 7);
++      expect(countedUnitNumber('12345678'), 12345678);
++      expect(countedUnitNumber('123456789'), isNull);
++      expect(countedUnitNumber('B4'), isNull);
++      expect(countedUnitNumber(''), isNull);
++    });
++  });
++
++  group('unitLabelError (S2)', () {
++    test('TN7 valid numbers, trimmed', () {
++      for (final n in const [
++        '1',
++        'B4',
++        'Bahçe 3',
++        '07',
++        '12345678',
++        ' 4 ',
++        'ÇİĞ',
++        ' 12345678 ',
++        'a b',
++      ]) {
++        expect(unitLabelError(n), isNull, reason: n);
++      }
++    });
++
++    test('TN8 refused: empty, too long, control characters', () {
++      expect(unitLabelError(''), '1 to 8 characters');
++      expect(unitLabelError('   '), '1 to 8 characters');
++      expect(unitLabelError('123456789'), '1 to 8 characters');
++      expect(unitLabelError('a\nb'), isNotNull);
++      expect(unitLabelError('a\tb'), isNotNull);
++      expect(unitLabelError('a\u0085b'), isNotNull);
++      // The edges (review F-7): DEL and the top of C1; nine UTF-16 code
++      // units though eight characters (a surrogate pair).
++      expect(unitLabelError('\u007F'), isNotNull);
++      expect(unitLabelError('a\u009Fb'), isNotNull);
++      expect(unitLabelError('1234567😀'), '1 to 8 characters');
++    });
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/units/units_test.dart b/packages/jet_cad_2d_plan/test/units/units_test.dart
+new file mode 100644
+index 00000000..2d92eab0
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/units/units_test.dart
+@@ -0,0 +1,529 @@
++// Spec 2b S2: placed and generated units in one index, locks (a frozen
++// row, a missing kit's rows, a seat of a missing kit's definition), a held
++// object's units, duplicate, unlabelled and bad labels, the next number,
++// and the unit components' registration. On the service fixture: a
++// mirrored, turned table; a turned row and a curved one, off the origin.
++import 'dart:convert';
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart' show PlanController;
++import 'package:jet_cad_2d_plan/src/kits/locks.dart';
++import 'package:jet_cad_2d_plan/src/symbols/symbol_placer.dart'
++    show definitionForEntry, placeSymbol;
++import 'package:jet_cad_2d_plan/src/units/unit_components.dart';
++import 'package:jet_cad_2d_plan/src/units/unit_index.dart';
++import 'package:jet_cad_2d_plan/src/units/unit_label.dart';
++import 'package:jet_cad_2d_plan/src/units/unit_numbers.dart';
++import 'package:jet_cad_2d_plan/src/units/unit_problems.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/harness.dart';
++import '../support/service_fixture.dart';
++import '../support/symbol_fixtures.dart' show symbolKit;
++import '../support/test_kit.dart';
++import '../support/unit_fixtures.dart';
++
++const Tolerance exact = Tolerance(linear: 0, angular: 0);
++
++List<double> boxOf(Aabb2 b) => [b.minX, b.minY, b.maxX, b.maxY];
++
++List<Handle> ascending(Iterable<Handle> hs) =>
++    hs.toList()..sort((a, b) => a.value.compareTo(b.value));
++
++/// A row of the fixture's seat: [prefix], [count] seats, at [at] turned
++/// [angle]; executed through [c]; its handle.
++Handle addSeatRow(PlanController c, ServiceFixture f, String prefix, int count,
++    {required Vector2 at, double angle = 0, double curve = 0}) {
++  final seat = testEntry(rowSeatKey);
++  final h = c.document.handleSeed.next();
++  expect(
++      c.execute(placeRowCommand(
++          c.document,
++          RowComponent(
++              prefix: prefix,
++              count: count,
++              spacing: 500,
++              curve: curve,
++              seat: f.seatDefinition,
++              base: seat.definition.basePoint,
++              top: entryTop(seat)),
++          at: at,
++          angle: angle,
++          handle: h)),
++      isTrue);
++  return h;
++}
++
++/// A plan text whose root holds a group G turned 0.4 rad at (3100.5,
++/// -1700.25), carrying a slab (the test kit's type) unless [plain], with
++/// one stool (a unit) under it, turned 37°.
++({String text, Handle group, Handle seat}) heldPlan({bool plain = false}) {
++  final d = plan(catalog: catalogOf([testKit()]));
++  final group = d.handleSeed.next();
++  d.commands.execute(CompoundCommand([
++    AddNodeCommand(GroupNode(
++        handle: group,
++        parent: d.rootHandle,
++        transform: Transform2.translation(3100.5, -1700.25)
++            .multiply(Transform2.rotation(0.4)),
++        children: const [])),
++    if (!plain)
++      SetComponentCommand<SlabComponent>(
++          group, SlabComponent(width: 1800, height: 900, angle: 0.4)),
++  ], label: 'Holder'));
++  final made = definitionForEntry(d, entryOf(stoolSymbol));
++  d.commands.execute(CompoundCommand(made.commands, label: 'Stool'));
++  final seat = d.handleSeed.next();
++  d.commands.execute(AddNodeCommand(InstanceNode(
++      handle: seat,
++      parent: group,
++      transform: placementAt(120, -80, kDeg37, baseX: 400, baseY: 300),
++      definition: made.definition,
++      layer: ReservedHandles.layerZero)));
++  final text = DraftDocumentCodec.encodeToString(d);
++  d.dispose();
++  return (text: text, group: group, seat: seat);
++}
++
++DraftDocument decodeWith(String text, ParametricCatalog catalog) {
++  final d = DraftDocumentCodec.decodeString(text,
++      registerComponents: (r) => registerPlanComponents(r, catalog));
++  addTearDown(d.dispose);
++  return d;
++}
++
++/// A plan over unitKit() whose row A (four seats, turned 0.5 rad, off the
++/// origin) seats a definition keyed under the kit `gone`.
++({String json, Handle row, List<Handle> seats}) goneSeatPlan() {
++  late Handle row;
++  late List<Handle> seats;
++  final json = planText([unitKit(), symbolKit('gone', const [])], (d) {
++    final def = d.handleSeed.next();
++    final leaf = d.handleSeed.next();
++    d.commands.execute(CompoundCommand([
++      AddDefinitionCommand(Definition(
++          handle: def,
++          name: 'gone.seat.basic.one@1',
++          basePoint: Vector2(250, 265),
++          children: const [])),
++      SetComponentCommand<SymbolComponent>(
++          def,
++          SymbolComponent(
++              key: 'gone.seat.basic.one',
++              version: 1,
++              name: 'Gone seat',
++              category: 'Gone',
++              tags: const ['seat'])),
++      SetComponentCommand<UnitComponent>(
++          def,
++          UnitComponent(
++              kind: UnitKinds.seat,
++              capacity: 1,
++              labelling: UnitLabelling.assigned)),
++      AddEntityCommand(
++          record: EntityRecord(
++            handle: leaf,
++            owner: def,
++            kind: EntityKind.polyline,
++            layer: ReservedHandles.layerZero,
++            linetype: ReservedHandles.byBlockLinetype,
++            linetypeScale: 1.0,
++            geomIndex: 0,
++            color: const ByBlockColor(),
++            lineweight: kByBlock,
++            transparency: kByBlock,
++            flags: 0,
++          ),
++          payload: polylinePayload([
++            Vector2(25, 40),
++            Vector2(475, 40),
++            Vector2(475, 490),
++            Vector2(25, 490),
++          ], closed: true)),
++    ], label: 'Gone seat'));
++    row = addRow(
++        d,
++        RowComponent(
++            prefix: 'A',
++            count: 4,
++            spacing: 600,
++            seat: def,
++            base: Vector2(250, 265),
++            top: const Aabb2.raw(25, 40, 475, 490)),
++        at: Vector2(-3900.25, 2700.5),
++        angle: 0.5);
++    seats = seatsOf(d, row);
++  });
++  return (json: json, row: row, seats: seats);
++}
++
++void main() {
++  TestWidgetsFlutterBinding.ensureInitialized();
++
++  test(
++      'UI-generated placed and generated units in one index, ascending: the '
++      'table placed; each seat generated by its row, labelled, with its '
++      'world transform, its top and its box (M-UI-generated)', () {
++    final f = serviceFixture();
++    final c = controllerFor(kits: [unitKit()], json: f.json);
++    final d = c.document;
++    final index = c.unitIndex;
++    expect([for (final u in index.units) u.instance],
++        ascending([f.table, ...f.seatsA, ...f.seatsB]));
++    final table = index[f.table]!;
++    expect(
++        (table.owner, table.ownerType, table.generated), (null, null, false));
++    expect((
++      table.label,
++      table.text,
++      table.kind,
++      table.capacity,
++      table.labelling,
++      table.symbolKey
++    ), (
++      f.tableLabel,
++      '12',
++      UnitKinds.table,
++      4,
++      UnitLabelling.numbered,
++      'test.table.square.four'
++    ));
++    expect(
++        table.toWorld
++            .equals((d.tree[f.table]! as InstanceNode).transform, exact),
++        isTrue);
++    expect(boxOf(table.top), [150, 150, 1050, 1050]);
++    expect(boxOf(table.box), [-150, -150, 1350, 1350]);
++    final groupA = (d.tree[f.rowA]! as GroupNode).transform;
++    for (final (i, s) in f.seatsA.indexed) {
++      final u = index[s]!;
++      expect((u.owner, u.ownerType, u.generated, u.text, u.kind, u.capacity),
++          (f.rowA, rowTypeId, true, 'A${i + 1}', UnitKinds.seat, 1));
++      expect(u.labelling, UnitLabelling.assigned);
++      expect(
++          u.toWorld.equals(
++              groupA.multiply((d.tree[s]! as InstanceNode).transform), exact),
++          isTrue,
++          reason: 'seat $i: group × instance');
++      expect((u.locked, u.visible), (false, true));
++      expect(boxOf(u.top), [25, 40, 475, 490]);
++    }
++    expect([for (final s in f.seatsB) index[s]!.text],
++        ['B1', 'B2', 'B3', 'B4', 'B5']);
++    expect(
++        [for (final u in index.withLabel(' A3 ')) u.instance], [f.seatsA[2]]);
++    expect(index.nested, isEmpty);
++    expect(index.diagnostics(), isEmpty);
++    expect(index.warnings(), isEmpty);
++  });
++
++  test(
++      'UI-missing-kit Review Focus 4: rows whose kit is missing: each seat a '
++      'unit of its row, served and locked; the table of the missing kit\'s '
++      'symbol locked; none nested (M-UI-held)', () {
++    final f = serviceFixture();
++    final c = controllerFor(kits: [discKit()], json: f.json);
++    expect(c.missingKits, {'test'});
++    final index = c.unitIndex;
++    expect([for (final u in index.units) u.instance],
++        ascending([f.table, ...f.seatsA, ...f.seatsB]));
++    for (final (row, seats) in [(f.rowA, f.seatsA), (f.rowB, f.seatsB)]) {
++      for (final s in seats) {
++        final u = index[s]!;
++        expect((
++          u.owner,
++          u.ownerType,
++          u.locked,
++          u.visible
++        ), (
++          row,
++          rowTypeId,
++          true,
++          true
++        ), reason: 'seat ${s.toHex()}');
++      }
++    }
++    expect(index[f.seatsA.first]!.text, 'A1');
++    expect(index[f.table]!.locked, isTrue);
++    expect(index.nested, isEmpty);
++  });
++
++  test(
++      'UI-frozen-no-edit a row frozen with no edit after it: its seats read '
++      'locked at once, the state id unmoved; the other row\'s and the table '
++      'do not (M-UI-locked-key)', () {
++    final f = serviceFixture();
++    final c = controllerFor(kits: [unitKit()], json: f.json);
++    final first = c.unitIndex;
++    expect(identical(c.unitIndex, first), isTrue,
++        reason: 'no change, no rebuild');
++    expect(first[f.seatsA.first]!.locked, isFalse);
++    final state = c.document.commands.stateId;
++    c.lockBroken({f.rowA});
++    expect(c.document.commands.stateId, state,
++        reason: 'premise: a freeze moves no state id');
++    final after = c.unitIndex;
++    for (final s in f.seatsA) {
++      expect(after[s]!.locked, isTrue, reason: 'seat ${s.toHex()}');
++    }
++    for (final s in f.seatsB) {
++      expect(after[s]!.locked, isFalse);
++    }
++    expect(after[f.table]!.locked, isFalse);
++  });
++
++  test(
++      'UI-flip a group the lock set holds for an unknown component stays '
++      'held: its unit served and locked, its kit missing or loaded; a plain '
++      'group: unit.nested (M-UI-held, M-UI-object)', () {
++    final held = heldPlan();
++    final missing = decodeWith(held.text, ParametricCatalog());
++    final locks = LockSet.scan(missing, (kit) => kit != 'test');
++    expect(locks.isLockedObject(held.group), isTrue, reason: 'premise');
++    final a = UnitIndex.of(missing,
++        catalog: ParametricCatalog(), locks: locks)[held.seat]!;
++    expect((a.owner, a.ownerType, a.locked), (held.group, 'test.slab', true));
++
++    // Spec S2 "A held object stays held" (controller ruling R-9): with its
++    // kit loaded, a group holding a component no loaded code knows keeps
++    // its lock (2a's rule, locks.dart:33-44).
++    final catalog = catalogOf([testKit()]);
++    final ghost = held.text.replaceAll('"$slabTypeId"', '"test.ghost"');
++    expect(ghost, isNot(held.text), reason: 'premise');
++    final loaded = decodeWith(ghost, catalog);
++    final loadedLocks = LockSet.scan(loaded, (_) => true);
++    expect(loadedLocks.isLockedObject(held.group), isTrue, reason: 'premise');
++    final b =
++        UnitIndex.of(loaded, catalog: catalog, locks: loadedLocks)[held.seat]!;
++    expect((b.owner, b.ownerType, b.locked), (held.group, 'test.ghost', true));
++
++    final plain = heldPlan(plain: true);
++    final c = unitIndexOf(decodeWith(plain.text, catalog), catalog: catalog);
++    expect(c[plain.seat], isNull);
++    expect(c.nested, [plain.seat]);
++    expect([for (final x in c.diagnostics()) x.code], [UnitProblem.nested]);
++  });
++
++  test(
++      'UI-def-kit-missing a seat whose definition\'s kit is missing, in a '
++      'loaded kit\'s row: covered and locked; the row is no locked object '
++      '(M-UI-covers)', () {
++    final g = goneSeatPlan();
++    final c = controllerFor(kits: [unitKit()], json: g.json);
++    expect(c.missingKits, {'gone'});
++    final index = c.unitIndex;
++    for (final s in g.seats) {
++      final u = index[s]!;
++      expect((u.owner, u.ownerType, u.locked), (g.row, rowTypeId, true));
++    }
++    expect(c.locked.value.contains(g.row), isFalse);
++    expect(c.isLocked(g.row), isFalse);
++  });
++
++  test(
++      'UI-held-seat-row-locked the row of such a seat is effectively locked: '
++      'an edit regenerating it is refused with PlanLocked, nothing changed '
++      '(M-UI-scan)', () {
++    final g = goneSeatPlan();
++    final c = controllerFor(kits: [unitKit()], json: g.json);
++    final d = c.document;
++    final params = d.components.get<RowComponent>(g.row)!;
++    final before = [
++      for (final s in g.seats) (d.tree[s]! as InstanceNode).transform,
++    ];
++    expect(
++        c.execute(SetComponentCommand<RowComponent>(
++            g.row, params.copyWith(spacing: 700))),
++        isFalse);
++    expect(c.lockHint.value, isTrue);
++    expect(d.components.get<RowComponent>(g.row), params);
++    for (final (i, s) in g.seats.indexed) {
++      expect((d.tree[s]! as InstanceNode).transform.equals(before[i], exact),
++          isTrue);
++    }
++  });
++
++  test(
++      'UI-dup a label a table and a seat share stays label-keyed: both carry '
++      'it, one DuplicateLabel, one duplicate diagnostic naming both '
++      '(M-UI-dup)', () {
++    final f = serviceFixture();
++    final c = controllerFor(kits: [unitKit()], json: f.json);
++    final row = addSeatRow(c, f, '', 13,
++        at: Vector2(1200.5, 5600.25), angle: -0.2, curve: -0.05);
++    final twelfth = seatsOf(c.document, row)[11];
++    final index = c.unitIndex;
++    expect([for (final u in index.withLabel('12')) u.instance],
++        [f.table, twelfth]);
++    expect(index.warnings(), [const DuplicateLabel(label: '12', count: 2)]);
++    final dup = index
++        .diagnostics()
++        .where((x) => x.code == UnitProblem.duplicateLabel)
++        .single;
++    expect(dup.handles, [f.table, twelfth]);
++    expect(dup.severity, DiagnosticSeverity.warning);
++  });
++
++  test(
++      'UI-unlabelled a placed unit with no label, or an empty one, is '
++      'unlabelled: Unlabelled with its kind, capacity and symbol, and '
++      'unit.unlabelled (M-UI-unlabelled)', () {
++    final f = serviceFixture();
++    final c = controllerFor(kits: [unitKit()], json: f.json);
++    final d = c.document;
++    InstanceNode place(String id, Vector2 at, int turns) {
++      final before = {for (final n in d.tree.nodes) n.handle};
++      expect(
++          c.execute(placeSymbol(d, testEntry(id), at: at, quarterTurns: turns)),
++          isTrue);
++      return d.tree.nodes
++          .whereType<InstanceNode>()
++          .singleWhere((n) => !before.contains(n.handle));
++    }
++
++    final table = place(tableSymbolId, Vector2(7100.25, 2300.5), 3);
++    labelPlacedUnit(d, table.handle, testEntry(tableSymbolId), '  ');
++    final booth = place(boothSymbolId, Vector2(-6400.5, 5100.75), 2);
++    final index = c.unitIndex;
++    expect(index[table.handle]!.label, isNotNull,
++        reason: 'premise: the table carries an empty label');
++    expect(index[table.handle]!.text, isNull);
++    expect(index.warnings(), const [
++      Unlabelled(
++          kind: 'table', capacity: 4, symbolKey: 'test.table.square.four'),
++      Unlabelled(
++          kind: 'booth', capacity: 6, symbolKey: 'test.booth.corner.six'),
++    ]);
++    final unlabelled = index
++        .diagnostics()
++        .where((x) => x.code == UnitProblem.unlabelled)
++        .toList();
++    expect([
++      for (final x in unlabelled) x.handles
++    ], [
++      [table.handle],
++      [booth.handle]
++    ]);
++  });
++
++  test(
++      'UI-bad a label outside the text rule is still a label, served by its '
++      'text: BadLabel and unit.bad_label, a generated one included '
++      '(M-UI-bad)', () {
++    final f = serviceFixture();
++    final c = controllerFor(kits: [unitKit()], json: f.json);
++    final row = addSeatRow(c, f, 'ABCDEFGH', 2,
++        at: Vector2(-1500.75, -6200.5), angle: 1.1);
++    expect(c.execute(SetEntityTextCommand(f.tableLabel, 'a\u0085b', 'UNIT')),
++        isTrue);
++    final seats = seatsOf(c.document, row);
++    final index = c.unitIndex;
++    expect(index[seats.first]!.text, 'ABCDEFGH1');
++    expect([for (final u in index.withLabel('ABCDEFGH2')) u.instance],
++        [seats.last]);
++    expect(index.warnings(), const [
++      BadLabel(label: 'a\u0085b', problem: UnitLabelProblem.control),
++      BadLabel(label: 'ABCDEFGH1', problem: UnitLabelProblem.length),
++      BadLabel(label: 'ABCDEFGH2', problem: UnitLabelProblem.length),
++    ]);
++    final bad = index
++        .diagnostics()
++        .where((x) => x.code == UnitProblem.badLabel)
++        .toList();
++    expect([
++      for (final x in bad) x.handles
++    ], [
++      [f.table],
++      [seats.first],
++      [seats.last],
++    ]);
++  });
++
++  test(
++      'UI-next the next number skips any unit\'s label, a seat\'s included; '
++      'past 99999999 it is the smallest number no unit holds '
++      '(M-UI-next-skip, M-UI-next-fallback)', () {
++    final f = serviceFixture();
++    final c = controllerFor(kits: [unitKit()], json: f.json);
++    expect(nextUnitNumber(c.unitIndex), '13');
++    addSeatRow(c, f, '', 14, at: Vector2(2100.25, 6300.5), angle: 0.25);
++    expect(nextUnitNumber(c.unitIndex), '15',
++        reason: '13 and 14 are seats\' labels');
++    expect(c.execute(SetEntityTextCommand(f.tableLabel, '99999999', 'UNIT')),
++        isTrue);
++    expect(nextUnitNumber(c.unitIndex), '15',
++        reason: '1 to 14 are seats\' labels, 99999999 the table\'s');
++  });
++
++  test(
++      'UI-registered the plan registers the unit components: data on the '
++      'table and a colour on a seat survive a save and a load, typed '
++      '(M-UI-registered)', () {
++    final f = serviceFixture();
++    final c = controllerFor(kits: [unitKit()], json: f.json);
++    expect(
++        c.execute(SetComponentCommand<UnitData>(
++            f.table, UnitData({'id': 'T-12', 'zone': 'Bahçe'}))),
++        isTrue);
++    expect(
++        c.execute(SetComponentCommand<UnitColour>(
++            f.seatsB[2], UnitColour(PlanSwatch.teal))),
++        isTrue);
++    final back = controllerFor(kits: [unitKit()], json: c.save());
++    expect(back.document.components.get<UnitData>(f.table)!.data,
++        {'id': 'T-12', 'zone': 'Bahçe'});
++    expect(back.document.components.get<UnitColour>(f.seatsB[2])!.swatch,
++        PlanSwatch.teal);
++    expect(back.unitIndex.diagnostics(), isEmpty);
++  });
++
++  test(
++      'UI-def-missing a row naming a definition that is gone is frozen on '
++      'load by the boundary: its seats stay units of their row, locked, '
++      'with their handles and labels; one diagnostic names the row '
++      '(controller ruling R-24, M-UI-def)', () {
++    final f = serviceFixture();
++    final catalog = catalogOf([unitKit()]);
++    final scratch = decodeWith(f.json, catalog);
++    final gone = scratch.handleSeed.next();
++    expect(scratch.tree.definition(gone), isNull, reason: 'premise');
++    final labels = {
++      for (final s in f.seatsA) s: unitLabelsOf(scratch, s),
++    };
++    final json = (jsonDecode(f.json) as Map).cast<String, Object?>();
++    final rows = (json['components']! as Map)[rowTypeId]! as Map;
++    final rowA = rows['${f.rowA.value}']! as Map;
++    expect(rowA['seat'], f.seatDefinition.value, reason: 'premise');
++    rowA['seat'] = gone.value;
++    final c = controllerFor(kits: [unitKit()], json: jsonEncode(json));
++    final d = c.document;
++    expect(c.frozen, {f.rowA});
++    expect(c.isLocked(f.rowA), isTrue);
++    expect(seatsOf(d, f.rowA), f.seatsA, reason: 'no regeneration ran');
++    final index = c.unitIndex;
++    for (final (i, s) in f.seatsA.indexed) {
++      final u = index[s]!;
++      expect((
++        u.owner,
++        u.ownerType,
++        u.locked,
++        u.text
++      ), (
++        f.rowA,
++        rowTypeId,
++        true,
++        'A${i + 1}'
++      ), reason: 'seat ${s.toHex()}');
++      expect(unitLabelsOf(d, s), labels[s]);
++    }
++    expect(index[f.seatsB.first]!.locked, isFalse);
++    final diagnostics = c.diagnostics.value;
++    expect(diagnostics, hasLength(1));
++    expect(diagnostics.single.subject, rowTypeId);
++    expect(diagnostics.single.code, KitDiagnosticCode.hookFailed);
++    expect(diagnostics.single.message, contains(f.rowA.toHex()));
++    expect(diagnostics.single.error, isA<GeneratedDefinitionError>());
++  });
++}

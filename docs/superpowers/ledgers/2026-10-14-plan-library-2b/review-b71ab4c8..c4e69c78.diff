@@ -1,0 +1,62 @@
+# Review package: b71ab4c8..HEAD
+
+## Commits
+c4e69c78 fix(kit): PlanServices keeps its doc comment
+
+## Files changed
+ packages/jet_cad_2d_kit/lib/src/kit/plan_services.dart | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_kit/lib/src/kit/plan_services.dart b/packages/jet_cad_2d_kit/lib/src/kit/plan_services.dart
+index 088a74b5..a8e016c2 100644
+--- a/packages/jet_cad_2d_kit/lib/src/kit/plan_services.dart
++++ b/packages/jet_cad_2d_kit/lib/src/kit/plan_services.dart
+@@ -44,23 +44,20 @@ final class KitNamesWords implements KitWords {
+   @override
+   String word(String wordId) => maybe(wordId) ?? wordId;
+ }
+ 
+ /// What a kit's `shared` object implements to be released with its
+ /// document (spec 2a P1, lifetimes).
+ abstract interface class Disposable {
+   void dispose();
+ }
+ 
+-/// One plan, as a kit's code sees it. Every member reads the current
+-/// document: a kit's factories run once per document (spec 2a P1,
+-/// lifetimes), so what they keep never outlives it.
+ /// A symbol definition a kit's code uses (spec 2b S2): a parametric type
+ /// generates instances of it (E5), a tool places it. Every value is in the
+ /// definition's space.
+ final class SymbolDefinitionRef {
+   const SymbolDefinitionRef(
+       {required this.handle,
+       required this.add,
+       required this.basePoint,
+       required this.top});
+ 
+@@ -76,20 +73,23 @@ final class SymbolDefinitionRef {
+ 
+   /// The definition's base point.
+   final Vector2 basePoint;
+ 
+   /// The definition's first leaf's box when that leaf is a closed
+   /// polyline or a circle (a unit's served top), else the definition's
+   /// box. `unitLabelAttrib`'s `top`.
+   final Aabb2 top;
+ }
+ 
++/// One plan, as a kit's code sees it. Every member reads the current
++/// document: a kit's factories run once per document (spec 2a P1,
++/// lifetimes), so what they keep never outlives it.
+ abstract interface class PlanServices {
+   /// The current document.
+   DraftDocument get document;
+ 
+   /// Its spatial index.
+   SpatialIndex get index;
+ 
+   /// The camera, for apertures in world units.
+   CameraController get camera;
+ 

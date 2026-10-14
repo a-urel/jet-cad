@@ -1,0 +1,4654 @@
+# Review package: dc2a5d70..HEAD
+
+## Commits
+d50976ed test(plan): PA4 and PA5 watch Transform2 over a no-pick baseline (M-PA-hall)
+23206e81 test(plan): pin a lone locked seat's tap in ST-locked-seat (M-ST-locked)
+fa4050e3 feat(plan): the service tool over units, placed and generated (2b S4)
+
+## Files changed
+ .github/workflows/ci.yml                           |   3 +
+ .../lib/src/controller/plan_controller.dart        |   4 +-
+ .../lib/src/service/service_session.dart           |  80 +-
+ .../lib/src/service/service_tool.dart              | 796 +++++++++++++++++++
+ packages/jet_cad_2d_plan/pubspec.yaml              |   1 +
+ .../test/controller/unit_changes_test.dart         |  77 +-
+ .../test/invariants/band_allocation_test.dart      | 251 ++++++
+ .../test/invariants/pick_allocation_test.dart      | 240 ++++++
+ .../test/invariants/vm_allocation_meter.dart       | 244 ++++++
+ .../test/service/service_band_test.dart            | 878 +++++++++++++++++++++
+ .../test/service/service_events_test.dart          | 692 ++++++++++++++++
+ .../test/service/service_tool_test.dart            | 477 +++++++++++
+ .../test/service/service_tool_units_test.dart      | 250 ++++++
+ .../jet_cad_2d_plan/test/support/service_rig.dart  | 221 ++++++
+ .../test/support/unit_fixtures.dart                |  24 +
+ tool/ci/test/scripts_test.dart                     |  13 +
+ 16 files changed, 4211 insertions(+), 40 deletions(-)
+
+## Diff
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index e9934d5f..01f7b90f 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -37,20 +37,23 @@ jobs:
+           - package: packages/jet_cad_2d
+             tool: dart
+           - package: packages/jet_cad_2d_flutter
+             tool: flutter
+           - package: packages/jet_cad_2d_gpu
+             tool: flutter
+           - package: packages/jet_cad_2d_kit
+             tool: flutter
+           - package: packages/jet_cad_2d_plan
+             tool: flutter
++            # The pick's and the band's allocation tests (2b Task 14) read
++            # the VM's allocation profiler, as the planner's do.
++            test_flags: --enable-vmservice
+           - package: packages/jet_cad_floor_plan
+             tool: flutter
+             # The pick's allocation test reads the VM's allocation profiler,
+             # which flutter_tester serves only with this flag (Slice 2's
+             # final review F-2): without it the test skips, and the
+             # comparison reads that skip as red.
+             test_flags: --enable-vmservice
+           - package: packages/jet_cad_restaurant_symbols
+             tool: flutter
+           - package: apps/floor_planner
+diff --git a/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart b/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
+index b77ecce6..4be9a65f 100644
+--- a/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
++++ b/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
+@@ -1610,21 +1610,23 @@ class PlanController extends ChangeNotifier {
+       return ServiceSession(
+           document: copy,
+           measurer: measurer,
+           catalog: catalog,
+           camera: camera,
+           locks: design.locks,
+           frozen: design.frozen,
+           locked: _locked,
+           log: _diagnostics,
+           lock: _lockFromCopy,
+-          damage: _damageCopy);
++          damage: _damageCopy,
++          groups: unitGroups,
++          moves: () => permissions.serviceMove);
+     } catch (_) {
+       // The decoded copy is let go as the decode failure's measurer is.
+       unawaited(copy.dispose());
+       measurer.clear();
+       rethrow;
+     }
+   }
+ 
+   /// The controller listens to [s]: its changes and its selection.
+   void _attachService(ServiceSession s) {
+diff --git a/packages/jet_cad_2d_plan/lib/src/service/service_session.dart b/packages/jet_cad_2d_plan/lib/src/service/service_session.dart
+index 8fedf6c7..c86ece92 100644
+--- a/packages/jet_cad_2d_plan/lib/src/service/service_session.dart
++++ b/packages/jet_cad_2d_plan/lib/src/service/service_session.dart
+@@ -2,30 +2,33 @@
+ // the design's text decoded under runtime permissions, its parametric
+ // system over the guarded catalog and the design's frozen set, its unit
+ // label system, its lock expander over the design's lock set, its own
+ // failure boundary, its index, page, selection, outlines, unit index and
+ // tool controller. Today's service copy and its systems
+ // (jet_cad_floor_plan's floor_plan_controller.dart:1305-1319,
+ // host/service_view.dart:124-130, :242-245), built like 2a's
+ // DocumentSession (controller/session.dart:29-89).
+ import 'dart:async';
+ 
+-import 'package:flutter/foundation.dart' show ValueListenable, VoidCallback;
+-import 'package:flutter/material.dart' show Canvas, KeyEventResult, Size;
+-import 'package:flutter/services.dart' show KeyEvent;
++import 'package:flutter/foundation.dart'
++    show ValueListenable, ValueNotifier, VoidCallback;
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:meta/meta.dart' show internal;
+ 
+ import '../kits/guard.dart';
+ import '../kits/locks.dart';
+ import '../units/unit_index.dart';
+ import '../units/unit_label_system.dart';
++import 'service_state.dart' show UnitGroup;
++import 'service_tool.dart';
++import 'unit_picker.dart' show UnitPicker;
+ 
+ /// The controller's two modes (spec S3).
+ enum PlanMode {
+   /// The editor over the plan the host loads and saves.
+   design,
+ 
+   /// A copy of the design under runtime permissions: units are tapped,
+   /// selected, given statuses, grouped and moved; nothing done here
+   /// reaches the design.
+   service,
+@@ -44,88 +47,119 @@ DraftDocument serviceCopyOf(DraftDocument design,
+         diagnostics: <Diagnostic>[],
+         keepUnreadableComponents: true,
+         registerComponents: register);
+ 
+ /// The service copy and its systems and views (spec S3). Made when service
+ /// is entered (and by a load, a new plan, a reset or a restore in
+ /// service), disposed after the frame that unmounts its view.
+ final class ServiceSession {
+   /// [locks] and [frozen] are the design session's own (the handles are
+   /// the same in both documents); [lock] and [damage] receive this
+-  /// session with what its boundary found. The copy's one tool is an idle
+-  /// placeholder until Task 14's `ServiceTool`.
++  /// session with what its boundary found. [groups] are the controller's
++  /// unit groups and [moves] its `serviceMove`, both read by the service
++  /// tool at each call; without them: no group, moves allowed (a session a
++  /// test builds).
+   ServiceSession({
+     required this.document,
+     required this.measurer,
+     required ParametricCatalog catalog,
+     required CameraController camera,
+     required LockSet locks,
+     required Set<Handle> frozen,
+     required ValueListenable<Set<Handle>> locked,
+     required DiagnosticsLog log,
+     required void Function(ServiceSession session, Set<Handle> objects) lock,
+     required void Function(ServiceSession session, PartialMutationError error)
+         damage,
++    ValueListenable<Map<String, UnitGroup>>? groups,
++    bool Function()? moves,
+   })  : page = PageNotifier(document),
+         index = SpatialIndex(document) {
+     // The selection before the outlines (it prunes a dead key first), as
+     // the design's (session.dart:49-56).
+     selection = SelectionController(document);
+     outlines = OutlineCache(document, selection);
+     toolContext = ToolContext(
+         document: document,
+         index: index,
+         camera: camera,
+         selection: selection,
+         page: page);
+-    tool = _IdleTool();
+-    tools = ToolController(initial: tool, context: toolContext);
+     // The design's stack (Task 7): parametric, unit labels, lock.
+     parametric = ParametricSystem(document, catalog, isFrozen: frozen.contains)
+       ..install();
+     labels = UnitLabelSystem(document)..install();
+     lockExpander = LockExpander(document, locks)..install();
+     boundary = FailureBoundary(
+         document: document,
+         catalog: catalog,
+         system: parametric,
+         frozen: frozen,
+         log: log,
+         lock: (objects) => lock(this, objects),
+         damage: (error) => damage(this, error));
+     // As the design's (plan_controller.dart's `_open`): a hook failure is
+     // probed, frozen and retried once.
+     lockExpander
+       ..onHookFailure = boundary.recover
+       ..onPartialMutation = boundary.partialMutation
+       ..onRefusedEdit = boundary.recoverRefused
+       ..onRetryFailed = boundary.retryFailed;
+-    // Last, as the design's (session.dart): it listens to [locked], so no
+-    // later step can throw and leak the listener.
++    // Last but the tool, as the design's (session.dart): it listens to
++    // [locked], so no later step can throw and leak the listener.
+     units = UnitIndexCache(document,
+         catalog: catalog, locks: locks, locked: locked);
++    // The picker reads [units], so the tool comes after it; neither
++    // constructor, nor the tool controller's, can throw.
++    picker = UnitPicker(document, units);
++    tool = ServiceTool(
++        picker: picker,
++        groups: groups ?? _noGroups,
++        callbacks: () => host.callbacks(),
++        options: () => host.options(),
++        moves: moves ?? _always,
++        userCamera: () => host.userCamera(),
++        toGlobal: (local) => host.toGlobal(local),
++        events: () => host.events(),
++        idleKeys: () => host.idleKeys());
++    tools = ToolController(initial: tool, context: toolContext);
+   }
+ 
+   /// The copy.
+   final DraftDocument document;
+   final FlutterTextMeasurer measurer;
+   final PageNotifier page;
+   final SpatialIndex index;
+   late final SelectionController selection;
+   late final OutlineCache outlines;
+ 
+   /// The copy's units: what everything in service reads.
+   late final UnitIndexCache units;
+   late final ToolContext toolContext;
+ 
+-  /// The copy's one tool, which [tools] holds.
+-  late final Tool tool;
++  /// The service tool (2b S4), the tool controller's one tool.
++  late final ServiceTool tool;
++
++  /// The copy's picker: a locked unit and a seat are picked (spec S2, S4).
++  @internal
++  late final UnitPicker picker;
++
++  /// What the tool reads from the view that shows this session, at each
++  /// call: the view sets it while its canvas is mounted and puts
++  /// [ServiceHost.none] back when it goes (Task 16).
++  @internal
++  ServiceHost host = ServiceHost.none;
++
++  static final ValueNotifier<Map<String, UnitGroup>> _noGroups =
++      ValueNotifier(const <String, UnitGroup>{});
++  static bool _always() => true;
++
+   late final ToolController tools;
+   late final ParametricSystem parametric;
+   late final UnitLabelSystem labels;
+   late final LockExpander lockExpander;
+   late final FailureBoundary boundary;
+ 
+   /// The controller's subscription to the copy's changes, and its
+   /// selection listener; [detach] drops both.
+   StreamSubscription<DocChange>? history;
+   VoidCallback? onSelection;
+@@ -154,34 +188,10 @@ final class ServiceSession {
+     page.dispose();
+     units.dispose();
+     lockExpander.dispose();
+     labels.dispose();
+     parametric.dispose();
+     index.dispose();
+     unawaited(document.dispose());
+     measurer.clear();
+   }
+ }
+-
+-/// The copy's tool until Task 14's service tool: it reacts to nothing.
+-final class _IdleTool extends Tool {
+-  @override
+-  String get name => 'plan.service';
+-  @override
+-  ToolPhase get phase => ToolPhase.idle;
+-  @override
+-  void onPointerDown(ToolPointerEvent e, ToolContext ctx) {}
+-  @override
+-  void onPointerMove(ToolPointerEvent e, ToolContext ctx) {}
+-  @override
+-  void onPointerUp(ToolPointerEvent e, ToolContext ctx) {}
+-  @override
+-  void onPointerExit(ToolContext ctx) {}
+-  @override
+-  KeyEventResult onKey(KeyEvent event, ToolContext ctx) =>
+-      KeyEventResult.ignored;
+-  @override
+-  void cancel(ToolContext ctx) {}
+-  @override
+-  void paintOverlay(Canvas canvas, ViewportTransform camera, Size viewport,
+-      PaperPalette paper) {}
+-}
+diff --git a/packages/jet_cad_2d_plan/lib/src/service/service_tool.dart b/packages/jet_cad_2d_plan/lib/src/service/service_tool.dart
+new file mode 100644
+index 00000000..472b4980
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/service/service_tool.dart
+@@ -0,0 +1,796 @@
++// The service mode's tool (2b spec S4 "The service tool", "A drag"):
++// today's TableSelectTool (jet_cad_floor_plan/lib/src/service/
++// table_select_tool.dart; spec 14c S3, S4, S8, R-1, R-5 to R-7, rubber-band
++// RB-2 to RB-5, table-groups G4) over units, placed and generated. A tap
++// selects a unit, a long press adds or removes one, a drag moves the
++// selected placed units (a seat stays), a floor drag pans or bands, and a
++// unit in a group acts with its whole group. It writes the copy's engine
++// selection with SelectionKey.root(unit), for a seat too. A locked unit
++// (isLockedUnit) is tapped and grouped, never selected or dragged.
++import 'dart:async';
++import 'dart:math' as math;
++import 'dart:ui' show Canvas, Offset, Rect, Size;
++
++import 'package:flutter/foundation.dart' show ValueListenable;
++import 'package:flutter/gestures.dart'
++    show
++        kDoubleTapSlop,
++        kDoubleTapTimeout,
++        kLongPressTimeout,
++        kPrimaryButton,
++        kTouchSlop;
++import 'package:flutter/services.dart';
++import 'package:flutter/widgets.dart' show KeyEventResult;
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../units/unit_index.dart' show UnitInfo;
++import 'service_state.dart' show GroupUnit, UnitGroup, UnitGroupLookup;
++import 'unit_picker.dart' show PickCandidate, UnitPicker;
++
++/// What a long press on a unit does in service (today's FloorPlanLongPress).
++enum PlanLongPress {
++  /// Adds the unit to the selection or removes it (a group whole).
++  toggleSelection,
++
++  /// Reports the unit to `onUnitContextMenu`, as a secondary click does.
++  contextMenu,
++}
++
++/// What a drag on the floor does in service (today's FloorPlanFloorDrag).
++enum PlanFloorDrag {
++  /// The camera pans; Shift, Ctrl or Cmd with a mouse or stylus bands.
++  pan,
++
++  /// A band selects: left to right the units wholly inside, right to left
++  /// those it touches. The camera pans with two fingers, a trackpad's
++  /// scroll or the middle button.
++  band,
++}
++
++/// What the tool and the service bar tell their host, read at each call
++/// (R-5). [onMergeRequested] and [onSplitRequested] are the service bar's.
++typedef ServiceCallbacks = ({
++  void Function(String label)? onUnitTap,
++  void Function()? onLayoutChanged,
++  void Function(String groupId, String label)? onGroupTap,
++  void Function(Set<String> labels)? onMergeRequested,
++  void Function(String groupId)? onSplitRequested,
++});
++
++/// No callback.
++const ServiceCallbacks kNoServiceCallbacks = (
++  onUnitTap: null,
++  onLayoutChanged: null,
++  onGroupTap: null,
++  onMergeRequested: null,
++  onSplitRequested: null,
++);
++
++/// The view's options for the tool, read at each press;
++/// [onUnitContextMenu] takes a global position. Moves are the permission
++/// `serviceMove` (spec S4), read through the tool's `moves`.
++typedef ServiceOptions = ({
++  PlanLongPress longPress,
++  void Function(String label, Offset globalPosition)? onUnitContextMenu,
++  PlanFloorDrag floorDrag,
++});
++
++/// Today's behaviour: a long press toggles, no menu, a floor drag pans.
++const ServiceOptions kDefaultServiceOptions = (
++  longPress: PlanLongPress.toggleSelection,
++  onUnitContextMenu: null,
++  floorDrag: PlanFloorDrag.pan,
++);
++
++/// The view events, read at each call (R-5). [M] is what a drag reports as
++/// moved: the live instances at the tool, the controller's fresh details at
++/// the view (Task 16).
++typedef ServiceEvents<M> = ({
++  void Function(List<M> moved)? onUnitsMoved,
++  void Function(String label)? onUnitDoubleTap,
++  void Function(Offset world)? onFloorTap,
++  void Function(String? label)? onUnitHover,
++});
++
++/// No view event. Its fields are `Null`, so it is a [ServiceEvents] whatever
++/// its type argument.
++const kNoServiceEvents = (
++  onUnitsMoved: null,
++  onUnitDoubleTap: null,
++  onFloorTap: null,
++  onUnitHover: null,
++);
++
++ServiceCallbacks _noCallbacks() => kNoServiceCallbacks;
++ServiceOptions _defaultOptions() => kDefaultServiceOptions;
++ServiceEvents<Handle> _noEvents() => kNoServiceEvents;
++Offset _sameOffset(Offset local) => local;
++bool _always() => true;
++
++/// What a service session's tool reads from the view that shows the
++/// session, at each call (2b; today's ServiceView closures,
++/// service_view.dart:133-142). The view sets one on `ServiceSession.host`
++/// while its canvas is mounted; [none] is today's behaviour with no view.
++final class ServiceHost {
++  const ServiceHost({
++    this.callbacks = _noCallbacks,
++    this.options = _defaultOptions,
++    this.userCamera = _always,
++    this.toGlobal = _sameOffset,
++    this.events = _noEvents,
++    this.idleKeys = _always,
++  });
++
++  /// No view: no callback, today's options, a free camera, the local
++  /// offset, the keys bound.
++  static const ServiceHost none = ServiceHost();
++
++  final ServiceCallbacks Function() callbacks;
++  final ServiceOptions Function() options;
++
++  /// Whether a drag on the floor pans (host embedding API spec G-3).
++  final bool Function() userCamera;
++
++  /// The layer's local point as a global one, for a context menu.
++  final Offset Function(Offset local) toGlobal;
++
++  /// Read at each button-less move: a view hands back a record it keeps.
++  final ServiceEvents<Handle> Function() events;
++
++  /// Whether the tool's idle Escape acts (spec C-7, S-16).
++  final bool Function() idleKeys;
++}
++
++/// A context gesture's selection (spec 14d S6): an unselected, unlocked
++/// unit becomes the selection alone -- or, a member of a group, its
++/// [group]'s selectable members -- a selected one keeps the selection, a
++/// locked one changes nothing. Returns the unit's label, which the host is
++/// told when it is not null.
++String? contextSelect(UnitInfo hit, SelectionController selection,
++    {Set<SelectionKey>? group}) {
++  if (!hit.locked) {
++    final key = SelectionKey.root(hit.instance);
++    if (!selection.keys.contains(key)) selection.replace(group ?? [key]);
++  }
++  return hit.text;
++}
++
++enum _Gesture { none, pressed, dragging, panning, banding, spent }
++
++/// The service mode's tool (S3). One per service session; disposed with it.
++class ServiceTool extends Tool {
++  ServiceTool(
++      {required this.picker,
++      required this.groups,
++      required this.callbacks,
++      this.options = _defaultOptions,
++      this.moves = _always,
++      this.userCamera = _always,
++      this.toGlobal = _sameOffset,
++      this.events = _noEvents,
++      this.idleKeys = _always});
++
++  final UnitPicker picker;
++
++  /// The host's unit groups, as `PlanController.unitGroups` holds them:
++  /// validated, ids trimmed.
++  final ValueListenable<Map<String, UnitGroup>> groups;
++
++  final ServiceCallbacks Function() callbacks;
++
++  /// The view's options (spec 14d S5-S7), read at each press.
++  final ServiceOptions Function() options;
++
++  /// Whether a drag on a unit moves it (spec S4: `PlanPermissions
++  /// .serviceMove`, today's view option `serviceMoves`), read at each press:
++  /// false makes it a pan, as on the floor.
++  final bool Function() moves;
++
++  /// The layer's local point as a global one, for a context menu (S7).
++  final Offset Function(Offset local) toGlobal;
++
++  /// Whether a drag on the floor pans (host embedding API spec G-3), read
++  /// at each press: false (a view with `userCamera: false`) spends it.
++  final bool Function() userCamera;
++
++  /// The view events (spec E-1 to E-4), read at each call (R-5). A hover
++  /// reads it at each button-less move, so the view hands in a record it
++  /// keeps, not one built per call.
++  final ServiceEvents<Handle> Function() events;
++
++  /// Whether the tool's idle key acts (host embedding API spec C-7, S-16),
++  /// read at each key: false leaves Escape, which clears the selection
++  /// while no gesture runs, to the host.
++  final bool Function() idleKeys;
++
++  /// [userCamera] as the press read it.
++  bool _pans = true;
++
++  /// [moves] as the press read it.
++  bool _moves = true;
++
++  /// The press's raw down time (spec E-2).
++  Duration _pressTime = Duration.zero;
++
++  /// The last tap that reported `onUnitTap` with no modifier (spec E-2):
++  /// its instance, its down's time and screen point; null when the next
++  /// tap cannot complete a double tap.
++  ({Handle instance, Duration time, Offset screen})? _lastTap;
++
++  /// The label last reported to `onUnitHover` (spec E-4).
++  String? _hovered;
++
++  ServiceOptions _options = kDefaultServiceOptions;
++
++  _Gesture _gesture = _Gesture.none;
++  int _pointer = -1;
++  Offset _pressScreen = Offset.zero;
++  Offset _lastScreen = Offset.zero;
++  final Vector2 _pressWorld = Vector2.zero();
++  UnitInfo? _hit;
++  bool _toggle = false;
++  Timer? _timer;
++
++  /// The drag's translation, in world units.
++  double _dx = 0, _dy = 0;
++
++  /// A finger's press that reached a unit by the reach only (14t R-11):
++  /// under PlanFloorDrag.band its drag is a band (rubber-band R-4).
++  bool _reachOnly = false;
++
++  /// The live band's mode (RB-3), from the press to the pointer's latest.
++  BandMode _bandMode = BandMode.window;
++
++  final SelectionBandPainter _bandPainter = SelectionBandPainter();
++
++  /// The units a drag moves: the selection when it began, with every
++  /// group it touches (G4).
++  List<Handle> _moving = const [];
++
++  /// The picker's candidates by instance (Z0: the units the picker can
++  /// hit, a locked one listed), rebuilt when the picker's list is a new one
++  /// (it is rebuilt only when the unit index is); never per pointer event.
++  Map<Handle, UnitInfo> _byHandle = const {};
++  List<PickCandidate>? _byHandleFor;
++
++  /// The groups resolved against the picker's candidates, and each visible
++  /// member's group by handle (G4). Rebuilt when the candidates list or the
++  /// groups map is replaced, so a `setUnitGroups` alone refreshes it.
++  UnitGroupLookup? _lookup;
++  Map<Handle, String> _groupByHandle = const {};
++  List<PickCandidate>? _lookupCandidates;
++  Map<String, UnitGroup>? _lookupGroups;
++
++  @override
++  String get name => 'Units';
++
++  /// A down only classifies a press and `cancel` executes nothing, so a
++  /// finger reaches this tool after the hold-back (spec 14t R-1).
++  @override
++  TouchPress get touchPress => TouchPress.press;
++
++  @override
++  ToolPhase get phase => switch (_gesture) {
++        _Gesture.none => ToolPhase.idle,
++        _Gesture.pressed || _Gesture.spent => ToolPhase.pressed,
++        _Gesture.dragging ||
++        _Gesture.panning ||
++        _Gesture.banding =>
++          ToolPhase.dragging,
++      };
++
++  /// The outlines follow the drag (F-2).
++  @override
++  Transform2? get selectionPreviewTransform =>
++      _gesture == _Gesture.dragging ? Transform2.translation(_dx, _dy) : null;
++
++  @override
++  void onPointerDown(ToolPointerEvent e, ToolContext ctx) {
++    if (e.buttons & kPrimaryButton == 0 || _gesture != _Gesture.none) return;
++    _pointer = e.pointer;
++    _pressTime = e.timeStamp;
++    _pressScreen = e.screen;
++    _lastScreen = e.screen;
++    _pressWorld.setFrom(e.world);
++    // A finger that misses every top reaches the nearest within 24 px
++    // (spec 14t R-11); a mouse picks by containment only.
++    _hit = picker.pick(e.world, reach: e.isTouch ? e.reachRadiusWorld : 0);
++    // A finger's hit found by the reach alone (RB-2): one more pick, a
++    // finger's down only.
++    _reachOnly = e.isTouch && _hit != null && picker.pick(e.world) == null;
++    _toggle = e.shift || e.control || e.meta;
++    _options = options();
++    _pans = userCamera();
++    _moves = moves();
++    _gesture = _Gesture.pressed;
++    _dx = _dy = 0;
++    final hit = _hit;
++    // Under a context menu a locked unit is reported too (S7, amending
++    // 14c R-1 for this mode only).
++    if (hit != null &&
++        (!hit.locked || _options.longPress == PlanLongPress.contextMenu)) {
++      // A finger's down arrives kTouchHoldBack after it touched, so the
++      // long press still falls 500 ms from contact (spec 14t T5, R-9f).
++      _timer = Timer(
++          e.isTouch ? kLongPressTimeout - kTouchHoldBack : kLongPressTimeout,
++          () => _longPress(ctx));
++    }
++    notifyListeners();
++  }
++
++  @override
++  void onPointerMove(ToolPointerEvent e, ToolContext ctx) {
++    // A hover (no button) is not a gesture (R-6); a mouse's or a stylus's
++    // is reported (spec E-4), a finger's never.
++    if (e.buttons == 0 && !e.isTouch) _hover(e);
++    if (e.pointer != _pointer || e.buttons & kPrimaryButton == 0) return;
++    switch (_gesture) {
++      case _Gesture.none || _Gesture.spent:
++        return;
++      case _Gesture.pressed:
++        if ((e.screen - _pressScreen).distance <= kTouchSlop) return;
++        _timer?.cancel();
++        _timer = null;
++        // A drag, a pan or a spent drag is no tap (spec E-2).
++        _lastTap = null;
++        if (_startsBand(e)) {
++          _gesture = _Gesture.banding;
++          _lastScreen = e.screen;
++          _bandMode = bandModeFor(_pressScreen, e.screen);
++          notifyListeners();
++          return;
++        }
++        final hit = _hit;
++        if (hit == null || !_moves) {
++          // Empty floor pans; so does any unit when moves are off (S5).
++          // Unless the host locked the camera (spec G-3): then the drag is
++          // spent, as on a locked unit.
++          if (!_pans) {
++            _gesture = _Gesture.spent;
++            notifyListeners();
++            return;
++          }
++          _gesture = _Gesture.panning;
++        } else if (hit.locked) {
++          // A locked unit is tapped only (R-1): no move, no pan.
++          _gesture = _Gesture.spent;
++          notifyListeners();
++          return;
++        } else if (!_startDrag(hit, ctx)) {
++          // A group with a locked member is never moved (G4).
++          _gesture = _Gesture.spent;
++          notifyListeners();
++          return;
++        }
++        _drag(e, ctx);
++      case _Gesture.dragging || _Gesture.panning:
++        _drag(e, ctx);
++      case _Gesture.banding:
++        _lastScreen = e.screen;
++        _bandMode = bandModeFor(_pressScreen, e.screen);
++        notifyListeners();
++    }
++  }
++
++  /// Whether this drag is a band (rubber-band RB-2): from the floor -- or,
++  /// under `band`, a finger's reach-only press -- when the host chose
++  /// `band`, or under `pan` with a modifier at the press and no finger.
++  bool _startsBand(ToolPointerEvent e) {
++    final band = _options.floorDrag == PlanFloorDrag.band;
++    if (_hit != null && !(band && _reachOnly)) return false;
++    return band || (_toggle && !e.isTouch);
++  }
++
++  /// The drag's start (S4, G4; 2b S4 "A drag"): an unselected unit, or its
++  /// whole group, replaces the selection; what moves is every selected
++  /// placed unit, each group having a member among them taken whole. A
++  /// selected seat stays where it is. False, with the selection untouched,
++  /// when such a group has a locked or a generated visible member, or when
++  /// no placed unit would move: the drag is then spent.
++  bool _startDrag(UnitInfo hit, ToolContext ctx) {
++    final key = SelectionKey.root(hit.instance);
++    // With no group every unit stands alone, as before groups (G7).
++    final lookup = _groupLookup();
++    final groupOf = lookup == null ? const <Handle, String>{} : _groupByHandle;
++    final hitGroup = groupOf[hit.instance];
++    final replace = !ctx.selection.keys.contains(key);
++    final selected = !replace
++        ? ctx.selection.keys
++        : hitGroup == null
++            ? {key}
++            : _memberKeys(lookup!, hitGroup);
++    final index = picker.units.current;
++    final roots = [
++      for (final k in selected)
++        if (k.chain.isEmpty && !(index[k.target]?.generated ?? false)) k.target
++    ];
++    final involved = <String>{
++      for (final h in roots)
++        if (groupOf[h] case final id?) id
++    };
++    if (roots.isEmpty ||
++        involved.any((id) =>
++            lookup!.hasLockedVisibleMember(id) ||
++            lookup.hasGeneratedVisibleMember(id))) {
++      return false;
++    }
++    if (replace) ctx.selection.replace(selected);
++    _moving = _sorted({
++      ...roots,
++      for (final id in involved)
++        for (final t in lookup!.selectableMembers(id)) t.handle,
++    });
++    _gesture = _Gesture.dragging;
++    return true;
++  }
++
++  static List<Handle> _sorted(Iterable<Handle> handles) =>
++      handles.toList()..sort((a, b) => a.value.compareTo(b.value));
++
++  void _drag(ToolPointerEvent e, ToolContext ctx) {
++    if (_gesture == _Gesture.panning) {
++      ctx.camera.panBy(e.screen - _lastScreen);
++    } else {
++      _dx = e.world.x - _pressWorld.x;
++      _dy = e.world.y - _pressWorld.y;
++    }
++    _lastScreen = e.screen;
++    notifyListeners();
++  }
++
++  @override
++  void onPointerUp(ToolPointerEvent e, ToolContext ctx) {
++    if (e.pointer != _pointer) return;
++    switch (_gesture) {
++      case _Gesture.pressed:
++        _tap(ctx);
++      case _Gesture.dragging:
++        _move(ctx);
++      case _Gesture.banding:
++        _band(e, ctx);
++      case _Gesture.none || _Gesture.panning || _Gesture.spent:
++        break;
++    }
++    _reset();
++    notifyListeners();
++  }
++
++  /// The band's end (RB-3, RB-4): both screen corners under the camera at
++  /// the up, the instances the band passes kept to the picker's
++  /// candidates, groups taken by the mode's rule; one `replace`.
++  void _band(ToolPointerEvent e, ToolContext ctx) {
++    final a = ctx.camera.value
++        .screenToWorld(Vector2(_pressScreen.dx, _pressScreen.dy));
++    final b = e.world;
++    final world = Aabb2.raw(math.min(a.x, b.x), math.min(a.y, b.y),
++        math.max(a.x, b.x), math.max(a.y, b.y));
++    final keys = _bandKeys(world, bandModeFor(_pressScreen, e.screen), ctx);
++    if (_toggle) {
++      if (keys.isEmpty) return;
++      ctx.selection.replace({...ctx.selection.keys, ...keys});
++    } else {
++      ctx.selection.replace(keys);
++    }
++  }
++
++  /// The band's keys (RB-3), ascending by handle: a seat's a root key too
++  /// (2b S4). `snapping`, not `picking`: a locked layer's unit reaches the
++  /// window's group rule (review V-1); a locked unit is never a key.
++  List<SelectionKey> _bandKeys(Aabb2 world, BandMode mode, ToolContext ctx) {
++    final byHandle = _units();
++    final passing = <Handle>{};
++    ctx.index.forEachInstanceInBand(world, mode, const QueryFilter.snapping(),
++        (h) {
++      if (byHandle.containsKey(h)) passing.add(h);
++    });
++    final lookup = _groupLookup();
++    final keys = <Handle>{};
++    final groups = <String>{};
++    for (final h in passing) {
++      final id = lookup == null ? null : _groupByHandle[h];
++      if (id != null) {
++        groups.add(id);
++      } else if (!byHandle[h]!.locked) {
++        keys.add(h);
++      }
++    }
++    for (final id in groups) {
++      final members = lookup!.visibleMembers(id);
++      final take = switch (mode) {
++        BandMode.crossing =>
++          members.any((t) => !t.locked && passing.contains(t.handle)),
++        BandMode.window => members.every((t) => passing.contains(t.handle)),
++      };
++      if (take) {
++        for (final t in lookup.selectableMembers(id)) {
++          keys.add(t.handle);
++        }
++      }
++    }
++    return [for (final h in _sorted(keys)) SelectionKey.root(h)];
++  }
++
++  /// The pointer's unit under a hover (spec E-4): picked with no reach,
++  /// only while the host listens; reported only when its label differs
++  /// from the last reported, null over the floor or an unlabelled unit.
++  void _hover(ToolPointerEvent e) {
++    final report = events().onUnitHover;
++    if (report == null) return;
++    final label = picker.pick(e.world)?.text;
++    if (label == _hovered) return;
++    _hovered = label;
++    report(label);
++  }
++
++  /// A tap (S3): a unit alone, or toggled with Shift or Ctrl/Cmd; empty
++  /// floor clears, unless a modifier is held (R-6). A member of a group
++  /// stands for the whole group (G4): it replaces the selection, or with a
++  /// modifier is added or removed whole. A locked unit selects nothing;
++  /// its tap is reported, a member's with its group.
++  ///
++  /// Then the view events (spec E-2, E-3): a miss reports the floor at the
++  /// down's world point, modifier or not (S-4); a labelled unit's tap with
++  /// no modifier on the same instance as the last such tap, its down at
++  /// most [kDoubleTapTimeout] after that one's and at most [kDoubleTapSlop]
++  /// screen pixels from it, is a double tap, reported after its own tap;
++  /// the chain then starts anew. Nothing is delayed (Q-H2).
++  void _tap(ToolContext ctx) {
++    final hit = _hit;
++    if (hit == null) {
++      if (!_toggle) ctx.selection.clear();
++      _lastTap = null;
++      events().onFloorTap?.call(Offset(_pressWorld.x, _pressWorld.y));
++      return;
++    }
++    final lookup = _groupLookup();
++    final group = lookup == null ? null : _groupByHandle[hit.instance];
++    if (!hit.locked) {
++      final key = SelectionKey.root(hit.instance);
++      if (group != null) {
++        ctx.selection.replace(_toggle
++            ? _addOrRemoveGroup(lookup!, group, key, ctx.selection.keys)
++            : _memberKeys(lookup!, group));
++      } else if (_toggle) {
++        ctx.selection.toggle([key]);
++      } else {
++        ctx.selection.replace([key]);
++      }
++    }
++    final label = hit.text;
++    if (label == null) {
++      _lastTap = null;
++      return;
++    }
++    final doubleTap = !_toggle && _completesDoubleTap(hit.instance);
++    _lastTap = _toggle || doubleTap
++        ? null
++        : (instance: hit.instance, time: _pressTime, screen: _pressScreen);
++    callbacks().onUnitTap?.call(label);
++    if (group != null) callbacks().onGroupTap?.call(group, label);
++    if (doubleTap) events().onUnitDoubleTap?.call(label);
++  }
++
++  /// Whether this press's down, on [instance], follows the kept tap's
++  /// closely enough (spec E-2): inclusive bounds, between the two downs.
++  bool _completesDoubleTap(Handle instance) {
++    final last = _lastTap;
++    if (last == null || last.instance != instance) return false;
++    final gap = _pressTime - last.time;
++    return gap >= Duration.zero &&
++        gap <= kDoubleTapTimeout &&
++        (_pressScreen - last.screen).distance <= kDoubleTapSlop;
++  }
++
++  /// The selectable members' keys of the group [hit] belongs to, or null:
++  /// what a context gesture selects for a member, as a tap would (G4).
++  Set<SelectionKey>? groupKeysOf(UnitInfo hit) {
++    final lookup = _groupLookup();
++    final group = lookup == null ? null : _groupByHandle[hit.instance];
++    return group == null ? null : _memberKeys(lookup!, group);
++  }
++
++  /// The group's selectable members' keys, ascending by handle (G4).
++  static Set<SelectionKey> _memberKeys(UnitGroupLookup lookup, String id) => {
++        for (final t in lookup.selectableMembers(id))
++          SelectionKey.root(t.handle)
++      };
++
++  /// [selection] with group [id] removed whole when [tapped] is in it,
++  /// else added whole: one set for one `replace`, never a per-key `toggle`,
++  /// which would flip a half-selected group the other way (F-5).
++  static Set<SelectionKey> _addOrRemoveGroup(UnitGroupLookup lookup, String id,
++      SelectionKey tapped, Set<SelectionKey> selection) {
++    if (selection.contains(tapped)) {
++      final members = {
++        for (final t in lookup.visibleMembers(id)) SelectionKey.root(t.handle)
++      };
++      return {
++        for (final k in selection)
++          if (!members.contains(k)) k
++      };
++    }
++    return {...selection, ..._memberKeys(lookup, id)};
++  }
++
++  /// The picker's candidates by instance (see [_byHandle]).
++  Map<Handle, UnitInfo> _units() {
++    final candidates = picker.candidates;
++    if (!identical(_byHandleFor, candidates)) {
++      _byHandle = {for (final c in candidates) c.unit.instance: c.unit};
++      _byHandleFor = candidates;
++    }
++    return _byHandle;
++  }
++
++  /// The group lookup over the picker's current candidates, or null while
++  /// the host has no group (then every gesture is as before groups).
++  UnitGroupLookup? _groupLookup() {
++    final map = groups.value;
++    if (map.isEmpty) return null;
++    final candidates = picker.candidates;
++    if (_lookup == null ||
++        !identical(_lookupCandidates, candidates) ||
++        !identical(_lookupGroups, map)) {
++      // The picker lists visible units only; a locked one is listed.
++      final lookup = UnitGroupLookup(map, [
++        for (final c in candidates)
++          GroupUnit(
++              handle: c.unit.instance,
++              label: c.unit.text,
++              visible: true,
++              locked: c.unit.locked,
++              generated: c.unit.generated),
++      ]);
++      _lookup = lookup;
++      _groupByHandle = {
++        for (final id in map.keys)
++          for (final t in lookup.visibleMembers(id)) t.handle: id,
++      };
++      _lookupCandidates = candidates;
++      _lookupGroups = map;
++    }
++    return _lookup;
++  }
++
++  /// The drag's one step (D16): each moved unit translated, as it is now,
++  /// and only if it is still live (R-6). Nothing for a zero translation.
++  void _move(ToolContext ctx) {
++    if (_dx == 0 && _dy == 0) return;
++    final t = Transform2.translation(_dx, _dy);
++    final commands = <DraftCommand>[
++      for (final h in _moving)
++        if (ctx.document.tree[h] case final InstanceNode node)
++          TransformNodeCommand(h, t.multiply(node.transform)),
++    ];
++    if (commands.isEmpty) return;
++    ctx.execute(CompoundCommand(commands, label: 'Move'));
++    callbacks().onLayoutChanged?.call();
++    // Spec E-1: the live instances moved, ascending, once per drag.
++    final moved = events().onUnitsMoved;
++    if (moved == null) return;
++    moved(List.unmodifiable([
++      for (final h in _moving)
++        if (ctx.document.tree[h] is InstanceNode) h
++    ]));
++  }
++
++  /// A long press (decision 9): the unit toggled, a member's group added
++  /// or removed whole as by a modifier tap (G4) -- or, under
++  /// [PlanLongPress.contextMenu], reported as a context menu at the
++  /// press (spec 14d S7), a member selecting its group as a tap does; the
++  /// gesture is spent, so moves and the up do nothing, and no tap is
++  /// reported (R-6).
++  void _longPress(ToolContext ctx) {
++    _timer = null;
++    final hit = _hit;
++    if (_gesture != _Gesture.pressed || hit == null) return;
++    // A long press is no tap (spec E-2).
++    _lastTap = null;
++    if (_options.longPress == PlanLongPress.contextMenu) {
++      final label = contextSelect(hit, ctx.selection, group: groupKeysOf(hit));
++      if (label != null) {
++        _options.onUnitContextMenu?.call(label, toGlobal(_pressScreen));
++      }
++    } else {
++      if (hit.locked) return;
++      final key = SelectionKey.root(hit.instance);
++      final lookup = _groupLookup();
++      final group = lookup == null ? null : _groupByHandle[hit.instance];
++      if (group == null) {
++        ctx.selection.toggle([key]);
++      } else {
++        ctx.selection.replace(
++            _addOrRemoveGroup(lookup!, group, key, ctx.selection.keys));
++      }
++    }
++    _gesture = _Gesture.spent;
++    notifyListeners();
++  }
++
++  /// The pointer left the canvas (spec E-4): the host hears null when the
++  /// last label it heard was not.
++  @override
++  void onPointerExit(ToolContext ctx) {
++    if (_hovered == null) return;
++    _hovered = null;
++    events().onUnitHover?.call(null);
++  }
++
++  /// A secondary click at [world] that the view's listener let through
++  /// (spec 14d S6; today's `ServiceView._onSecondaryUp`, service_view.dart:
++  /// 212-227): with no `onUnitContextMenu` nothing, not even a pick; else
++  /// the unit there takes [contextSelect]'s selection and, labelled, is
++  /// reported at [globalPosition].
++  void secondaryClick(
++      Vector2 world, Offset globalPosition, SelectionController selection) {
++    final report = options().onUnitContextMenu;
++    if (report == null) return;
++    final hit = picker.pick(world);
++    if (hit == null) return;
++    final label = contextSelect(hit, selection, group: groupKeysOf(hit));
++    if (label != null) report(label, globalPosition);
++  }
++
++  @override
++  KeyEventResult onKey(KeyEvent event, ToolContext ctx) {
++    // A band takes every key (RB-5): Escape ends it, whatever idleKeys
++    // says; no other shortcut lands in its middle.
++    if (_gesture == _Gesture.banding) {
++      if (event is KeyDownEvent &&
++          event.logicalKey == LogicalKeyboardKey.escape) {
++        _reset();
++        notifyListeners();
++      }
++      return KeyEventResult.handled;
++    }
++    if (event is KeyDownEvent &&
++        event.logicalKey == LogicalKeyboardKey.escape &&
++        _gesture == _Gesture.none &&
++        idleKeys()) {
++      ctx.selection.clear();
++      return KeyEventResult.handled;
++    }
++    return KeyEventResult.ignored;
++  }
++
++  /// A pointer cancel, a mode switch, a new copy: the drag is dropped and
++  /// nothing is executed (R-5).
++  @override
++  void cancel(ToolContext ctx) {
++    // A cancelled press is no tap (spec E-2).
++    _lastTap = null;
++    if (_gesture == _Gesture.none && _timer == null) return;
++    _reset();
++    notifyListeners();
++  }
++
++  void _reset() {
++    _timer?.cancel();
++    _timer = null;
++    _gesture = _Gesture.none;
++    _pointer = -1;
++    _hit = null;
++    _moving = const [];
++    _dx = _dy = 0;
++    _reachOnly = false;
++  }
++
++  /// The live band, from the press's screen point to the pointer's latest
++  /// (RB-6); nothing otherwise.
++  @override
++  void paintOverlay(Canvas canvas, ViewportTransform camera, Size viewport,
++      PaperPalette paper) {
++    if (_gesture != _Gesture.banding) return;
++    _bandPainter.paint(
++        canvas, Rect.fromPoints(_pressScreen, _lastScreen), _bandMode, paper);
++  }
++
++  @override
++  void dispose() {
++    _timer?.cancel();
++    _timer = null;
++    super.dispose();
++  }
++}
+diff --git a/packages/jet_cad_2d_plan/pubspec.yaml b/packages/jet_cad_2d_plan/pubspec.yaml
+index 2431d3d6..37fbd3da 100644
+--- a/packages/jet_cad_2d_plan/pubspec.yaml
++++ b/packages/jet_cad_2d_plan/pubspec.yaml
+@@ -28,15 +28,16 @@ dependencies:
+   jet_cad_2d_kit: ^0.1.0
+   meta: ^1.18.0
+   pdf: ^3.13.1
+   printing: ^5.15.1
+   vector_math: ^2.2.0
+ 
+ dev_dependencies:
+   flutter_test:
+     sdk: flutter
+   lints: ^6.1.0
++  vm_service: ^15.2.0
+ 
+ flutter:
+   assets:
+     - lib/fonts/Roboto-Regular.ttf
+     - assets/fonts/Roboto_LICENSE.txt
+diff --git a/packages/jet_cad_2d_plan/test/controller/unit_changes_test.dart b/packages/jet_cad_2d_plan/test/controller/unit_changes_test.dart
+index 0d4b1fef..592a49b5 100644
+--- a/packages/jet_cad_2d_plan/test/controller/unit_changes_test.dart
++++ b/packages/jet_cad_2d_plan/test/controller/unit_changes_test.dart
+@@ -1,42 +1,46 @@
+ // Ported from jet_cad_floor_plan test/host/design_changes_test.dart (2b
+ // Task 9, spec S3 `unitChanges`, S5): the design's unit changes. DC10 and
+ // DC16 (the service mode) are Task 11's; DC15 reads Task 13's
+ // `serviceEdited`, so Task 13 ported it; DC7 also reads Task 13's record and
+-// reset and drags with the service tool, so Task 14 ports it. DC8, DC9,
++// reset and drags with the service tool, so Task 14 ported it. DC8, DC9,
+ // DC11, DC12, DC13 and DC17 were ported by 2a for the object-level
+ // `changes` stream (plan_change_test.dart); they are ported again here for
+ // `unitChanges`, whose code is its own (controller ruling R-13, F-T9c).
+ // Today's header follows.
+ //
+ // Host embedding API spec E-5 (Slice 2 plan, Task 3): the controller's
+ // unitChanges -- a design edit, undo or redo reported as the tables
+ // added, removed and changed, by instance, in ascending instance order;
+ // PlanUnitsReplaced on load and newPlan in either mode, after the old
+ // design's last changes; nothing from the selection mode; nothing read while
+ // no one listens. On the embedding fixture: tables turned 30 degrees,
+ // mirrored at 90, scaled (1.5, 0.8), turned 180, all 40 m off the origin;
+ // `5` hidden, `L` locked; `7` and ` 7 ` sharing a number; an unnumbered
+ // table; `9` with no finite corner. The design view is mounted, so the
+ // shell's TableLabelSystem runs (the Delete's data expander, the labels).
+ // Expected centres come from the fixture's transforms, by the forward
+ // transform.
+ import 'dart:async';
+ 
++import 'package:flutter/gestures.dart' show PointerDeviceKind, kPrimaryButton;
+ import 'package:flutter/material.dart';
+ import 'package:flutter/services.dart' show LogicalKeyboardKey;
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show kUnitLabelTag;
+ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
++    show ToolPointerEvent;
+ import 'package:jet_cad_2d_plan/src/units/unit_detail.dart'
+     show diffUnitDetails;
++import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import '../support/unit_embedding_fixture.dart';
+ import '../support/unit_fixtures.dart' show fxKit;
+ 
+ /// Data as a host writes it: keys out of order, a value with a space, a dot
+ /// and a non-ASCII letter, an empty value.
+ Map<String, String> hostData() => {
+       'zeta': 'Masa 4.ğ',
+       'id': '7f3c-ä',
+       'alpha': '',
+@@ -307,23 +311,88 @@ void main() {
+         expect(change.before, before, reason: '"$label"');
+         expectNear(change.after.center,
+             boxCentre(shift.multiply(fixture.transform)), 'moved by the shift');
+         expect(change.after.mirrored, mirrored);
+         expect(change.after.rotation, closeTo(before.rotation, 1e-12));
+         expect(change.after.unit, before.unit);
+         expect(change.after, detailOf(c, instance));
+       }
+     });
+ 
+-    // DC7 (service moves report nothing): Task 14 ports it (it reads Task
+-    // 13's serviceEdited, record and reset, and drags with the service
+-    // tool).
++    testWidgets(
++        'DC7 M-H29(service moves): in the selection mode a service drag of '
++        '1, its Undo, its Redo, resetLayout and restoreServiceLayout '
++        'report nothing; back in the design mode an edit is reported',
++        (tester) async {
++      final c = await mounted(tester);
++      final seen = listen(c);
++      c.setMode(PlanMode.service);
++      await tester.pump();
++      await tester.pump();
++      final camera = embeddingCamera();
++      c.camera.value = camera;
++      await tester.pump();
++      final one = fixtureTable('1');
++      final w = boxCentre(one.transform);
++      final p = canvasOf(camera, w.dx, w.dy);
++      final before = c.unitDetails.first;
++      expect(before.unit.label, '1', reason: 'premise');
++
++      // 2b: the service view is Task 16's, so the drag reaches the
++      // session's service tool as explicit pointer events, at today's
++      // gesture's screen points (the canvas's own, its origin aside).
++      final s = c.serviceSession!;
++      ToolPointerEvent ev(Offset at, {int buttons = kPrimaryButton}) =>
++          ToolPointerEvent(
++            screen: at,
++            world: camera.screenToWorld(Vector2(at.dx, at.dy)),
++            pointer: 1,
++            buttons: buttons,
++            shift: false,
++            control: false,
++            meta: false,
++            alt: false,
++            pickRadiusWorld: 6 / camera.scale,
++            kind: PointerDeviceKind.mouse,
++          );
++      final start = Offset(p.x, p.y);
++      s.tool.onPointerDown(ev(start), s.toolContext);
++      s.tool.onPointerMove(ev(start + const Offset(40, 0)), s.toolContext);
++      s.tool.onPointerMove(ev(start + const Offset(80, 25)), s.toolContext);
++      s.tool.onPointerUp(
++          ev(start + const Offset(80, 25), buttons: 0), s.toolContext);
++      await tester.pump();
++      expect(c.serviceEdited, isTrue, reason: 'premise: a service move');
++      expect(c.unitDetails.first.center == before.center, isFalse,
++          reason: 'premise: 1 moved in the copy');
++      final layout = c.serviceJson()!;
++      c.undo();
++      await tester.pump();
++      expect(c.serviceEdited, isFalse, reason: 'premise: undone');
++      c.redo();
++      await tester.pump();
++      expect(c.serviceEdited, isTrue, reason: 'premise: redone');
++      c.resetService();
++      await tester.pump();
++      c.restoreService(layout);
++      await tester.pump();
++      expect(c.serviceEdited, isTrue, reason: 'premise: restored');
++      expect(seen, isEmpty);
++
++      c.setMode(PlanMode.design);
++      await tester.pump();
++      expect(seen, isEmpty, reason: 'a mode switch is no design change');
++      expect(c.setUnitData('1', hostData()), isTrue);
++      await tester.pump();
++      expect(seen, [PlanUnitChanged(before, copyOf(before, data: hostData()))],
++          reason: 'the listener is live; the design never moved');
++    });
+ 
+     testWidgets(
+         'DC8 newPlan: exactly [PlanUnitsReplaced()], no Removed per '
+         'table; a load: the same', (tester) async {
+       final c = await mounted(tester);
+       final seen = listen(c);
+       c.newPlan();
+       await tester.pump();
+       expect(seen, [const PlanUnitsReplaced()]);
+       expect(c.unitDetails, isEmpty, reason: 'premise: an empty plan');
+diff --git a/packages/jet_cad_2d_plan/test/invariants/band_allocation_test.dart b/packages/jet_cad_2d_plan/test/invariants/band_allocation_test.dart
+new file mode 100644
+index 00000000..0e04809d
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/invariants/band_allocation_test.dart
+@@ -0,0 +1,251 @@
++// Ported from jet_cad_floor_plan/test/invariants/band_allocation_test.dart; assertions unchanged.
++// What a live band builds per frame (rubber-band spec RB-6, RB16): the
++// selection mode's tool paints its band through one kept
++// `SelectionBandPainter`, so a band's frame builds no `Paint` and no `Path`.
++// Measured, not inferred: the Dart VM's own allocation profiler, through
++// `AllocationMeter` (`vm_allocation_meter.dart`), as `pick_allocation_test`
++// does.
++//
++// **Under `flutter test` the profiler needs `--enable-vmservice`**: CI runs
++// this package's tests with it. Without it the test skips with
++// [vmServiceUnavailableReason], and CI's standing comparison reads such a
++// skip as red.
++//
++// **What the VM sees.** `Paint` is a Dart class of `dart:ui`; `Path` is an
++// interface whose engine-backed implementation is the Dart wrapper class
++// `_NativePath`. The profiler counts those Dart wrappers (the engine's own
++// native memory is not on the Dart heap). A `Paint` holds its fields in a
++// `ByteData` (`_ByteDataView` to the VM) that the canvas hands the engine:
++// measured while building this test, the JIT may scalar-replace a `Paint`
++// built and drawn at once (M-RB19 once read 2 `Paint`s over 1,000 frames)
++// but never its escaping `_ByteDataView` (1,002 on every run), so both are
++// watched. `_Uint8List`, the view's buffer, is not: the meter's own round
++// trip makes some 900 of them per epoch. The test proves the meter sees a
++// paint and a path before it trusts a clean reading: a control loop that
++// builds a known number of each must read at least that many.
++//
++// **The fixture is not degenerate:** the camera is y-flipped, scaled and off
++// the origin; the plan holds a turned, mirrored table; the band's pointer
++// moves 1 px per frame on a triangle wave across the press, so the frames
++// alternate between window (a stroked rect) and crossing (a dashed path).
++library;
++
++import 'dart:ui' as ui;
++
++import 'package:flutter/gestures.dart' show PointerDeviceKind, kPrimaryButton;
++import 'package:flutter/foundation.dart' show ValueNotifier;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:jet_cad_2d_plan/src/service/service_state.dart' show UnitGroup;
++import 'package:jet_cad_2d_plan/src/service/service_tool.dart';
++import 'package:jet_cad_2d_plan/src/service/unit_picker.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/service_rig.dart' show hallController;
++import '../support/unit_fixtures.dart';
++import 'vm_allocation_meter.dart';
++
++/// The classes a per-frame paint or path would make, as the VM names them.
++const _watched = {'Paint', '_ByteDataView', 'Path', '_NativePath'};
++
++/// Instances admitted over the measured frames, all classes together, past
++/// the no-frame baseline.
++const int _budget = 2;
++
++const int _frames = 1000;
++
++/// The pointer's x at frame [i]: a triangle wave about the press's x, 1 px
++/// per frame, from 100 px left of it to 100 px right and back.
++double _x(double pressX, int i) => pressX + 100 - ((i % 400) - 200).abs();
++
++/// RB16's frames over a live band of [tool]: the measure, the control and
++/// the budget, from a band pressed at [press] (2b Task 14: shared with
++/// RB16-hall).
++Future<void> bandFrames(
++    AllocationMeter m,
++    Tool tool,
++    ToolContext ctx,
++    CameraController camera,
++    ui.Offset press,
++    ToolPointerEvent Function(ui.Offset s) ev) async {
++  final recorder = ui.PictureRecorder();
++  final canvas = ui.Canvas(recorder);
++  const viewport = ui.Size(1400, 900);
++  var windows = 0, crossings = 0;
++  void frames(int n) {
++    for (var i = 0; i < n; i++) {
++      final at = ui.Offset(_x(press.dx, i), 300 + (i % 2).toDouble());
++      tool.onPointerMove(ev(at), ctx);
++      tool.paintOverlay(canvas, camera.value, viewport, PaperPalette.light);
++    }
++  }
++
++  // Premise: the wave alternates the modes.
++  for (var i = 0; i < _frames; i++) {
++    if (bandModeFor(press, ui.Offset(_x(press.dx, i), 0)) == BandMode.window) {
++      windows++;
++    } else {
++      crossings++;
++    }
++  }
++  expect(windows, greaterThan(_frames ~/ 4));
++  expect(crossings, greaterThan(_frames ~/ 4));
++
++  // Warm: the JIT optimises the move and the paint before the count.
++  frames(4 * _frames);
++  // The baseline: an epoch with no frame. It reads the painter's own kept
++  // objects (two paints, their two data views, one path), live since the
++  // tool was built: the meter's failure mode 1, measured at 5 whatever
++  // the frame count (0 or 1,000). The frames are held to their excess
++  // over it.
++  await m.reset();
++  final baseline = await m.accumulatedInstances(_watched);
++  await m.reset();
++  frames(_frames);
++  final counts = await m.accumulatedInstances(_watched);
++  expect(tool.phase, ToolPhase.dragging, reason: 'premise: still banding');
++  recorder.endRecording().dispose();
++
++  // The meter sees both classes: a control loop builds 100 of each. Run
++  // after the measure, so its live objects never reach the measured
++  // epoch (the meter's failure mode 1).
++  await m.reset();
++  final kept = [
++    for (var i = 0; i < 100; i++) (ui.Paint(), ui.Path()),
++  ];
++  final control = await m.accumulatedInstances(_watched);
++  expect(kept, hasLength(100));
++  expect(control['Paint'], greaterThanOrEqualTo(100),
++      reason: 'premise: the meter sees a Paint ($control)');
++  expect(control['_ByteDataView'], greaterThanOrEqualTo(100),
++      reason: 'premise: the meter sees a Paint\'s data ($control)');
++  expect(control['_NativePath']! + control['Path']!, greaterThanOrEqualTo(100),
++      reason: 'premise: the meter sees a Path ($control)');
++
++  int sum(Map<String, int> c) => c.values.fold(0, (a, b) => a + b);
++  expect(sum(counts) - sum(baseline), lessThanOrEqualTo(_budget),
++      reason: '$counts over $_frames frames, $baseline with none');
++}
++
++void main() {
++  TestWidgetsFlutterBinding.ensureInitialized();
++  AllocationMeter? meter;
++
++  setUpAll(() async {
++    meter = await AllocationMeter.connect();
++  });
++
++  tearDownAll(() async {
++    await meter?.dispose();
++  });
++
++  test(
++      'RB16 a live band builds no Paint and no Path per frame, window and '
++      'crossing alike (M-RB19)', () async {
++    final m = meter;
++    if (m == null) {
++      markTestSkipped(vmServiceUnavailableReason);
++      return;
++    }
++    final doc = unitPlan();
++    placeAt(doc, tableSymbol(), Vector2(-2000, 1000),
++        quarterTurns: 1, mirrored: true);
++    final camera = CameraController(ViewportTransform(
++        worldToScreenMatrix: Transform2(0.1, 0, 0, -0.1, 700, 450)));
++    final index = SpatialIndex(doc);
++    final selection = SelectionController(doc);
++    final groups = ValueNotifier<Map<String, UnitGroup>>(const {});
++    final tool = ServiceTool(
++        picker: UnitPicker(doc, unitsOf(doc)),
++        groups: groups,
++        callbacks: () => kNoServiceCallbacks,
++        options: () => (
++              longPress: PlanLongPress.toggleSelection,
++              onUnitContextMenu: null,
++              floorDrag: PlanFloorDrag.band,
++            ));
++    addTearDown(() {
++      tool.dispose();
++      groups.dispose();
++      selection.dispose();
++      index.dispose();
++      camera.dispose();
++    });
++    final ctx = ToolContext(
++        document: doc, index: index, camera: camera, selection: selection);
++    ToolPointerEvent ev(ui.Offset s, {int buttons = kPrimaryButton}) =>
++        ToolPointerEvent(
++          screen: s,
++          world: camera.value.screenToWorld(Vector2(s.dx, s.dy)),
++          pointer: 1,
++          buttons: buttons,
++          shift: false,
++          control: false,
++          meta: false,
++          alt: false,
++          pickRadiusWorld: 6 / camera.value.scale,
++          kind: PointerDeviceKind.mouse,
++        );
++
++    const press = ui.Offset(900, 120);
++    tool.onPointerDown(ev(press), ctx);
++    tool.onPointerMove(ev(const ui.Offset(1100, 300)), ctx);
++    expect(tool.phase, ToolPhase.dragging, reason: 'premise: a live band');
++
++    await bandFrames(m, tool, ctx, camera, press, ev);
++  });
++
++  test(
++      'RB16-hall a live band over the hall (500 seats in 25 rows) builds no '
++      'Paint and no Path per frame (2b Review Focus 5)', () async {
++    final m = meter;
++    if (m == null) {
++      markTestSkipped(vmServiceUnavailableReason);
++      return;
++    }
++    final hall = hallController();
++    addTearDown(hall.dispose);
++    final s = hall.serviceSession!;
++    s.host = ServiceHost(
++        options: () => (
++              longPress: PlanLongPress.toggleSelection,
++              onUnitContextMenu: null,
++              floorDrag: PlanFloorDrag.band,
++            ));
++    hall.camera.value = ViewportTransform(
++        worldToScreenMatrix: Transform2(0.1, 0, 0, -0.1, -3300, -2250));
++    final camera = hall.camera;
++    final ctx = s.toolContext;
++    ToolPointerEvent ev(ui.Offset p) => ToolPointerEvent(
++          screen: p,
++          world: camera.value.screenToWorld(Vector2(p.dx, p.dy)),
++          pointer: 1,
++          buttons: kPrimaryButton,
++          shift: false,
++          control: false,
++          meta: false,
++          alt: false,
++          pickRadiusWorld: 6 / camera.value.scale,
++          kind: PointerDeviceKind.mouse,
++        );
++    const press = ui.Offset(900, 120);
++    expect(s.picker.pick(ev(press).world), isNull,
++        reason: 'premise: the press is on the floor');
++    expect(s.picker.candidates.where((c) => c.unit.generated), hasLength(500),
++        reason: 'premise: the hall');
++    s.tool.onPointerDown(ev(press), ctx);
++    s.tool.onPointerMove(ev(const ui.Offset(1100, 300)), ctx);
++    expect(s.tool.phase, ToolPhase.dragging, reason: 'premise: a live band');
++    // The controller refreshes its selected labels and group on every
++    // selection change (O(units)); a band changes it at its up only.
++    var notified = 0;
++    void count() => notified++;
++    s.selection.addListener(count);
++    addTearDown(() => s.selection.removeListener(count));
++    await bandFrames(m, s.tool, ctx, camera, press, ev);
++    expect(notified, 0,
++        reason: 'premise: no selection change, so no controller refresh, '
++            'per frame');
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/invariants/pick_allocation_test.dart b/packages/jet_cad_2d_plan/test/invariants/pick_allocation_test.dart
+new file mode 100644
+index 00000000..f2b2c1cf
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/invariants/pick_allocation_test.dart
+@@ -0,0 +1,240 @@
++// Ported from jet_cad_floor_plan/test/invariants/pick_allocation_test.dart; assertions unchanged.
++// What a pick allocates (host embedding API spec E-4, Slice 2's final
++// review F-2): a hover picks at every mouse move, so `TablePicker.pick`
++// must allocate nothing per table. Measured, not inferred: the Dart VM's
++// own allocation profiler, through `AllocationMeter` (a copy of the
++// engine's, `vm_allocation_meter.dart`), the mechanism of the engine's
++// `query_allocation_test.dart`.
++//
++// **Under `flutter test` the profiler needs `--enable-vmservice`**: CI runs
++// this package's tests with it. Without it every test here skips with
++// [vmServiceUnavailableReason], and CI's standing comparison
++// (`tool/ci/lib/standing.dart`) reads such a skip as red, listed or not.
++//
++// **What it catches.** Before the fix the JIT boxed doubles on every pick:
++// the review measured about two `_Double`s per table (120,055 per 1,000
++// picks over 60 tables, 2,055 over one), and this file's tests read up to
++// 62,058 per 1,000 picks on that code, one or two of the three red on each
++// of three runs. Two calls carried doubles the JIT may leave out of line,
++// boxing them: the `x` and `y` getters of the picked point (two per pick),
++// and the dynamic `TableTop.contains` (two per table). The pick now reads
++// the point's storage and hands a top its local point in a list it keeps
++// (`TableTop.containsAt`); the same measure reads 59 or 60 `_Double`s per
++// 1,000 picks, and 5 `Vector2`s, whatever the pass: the meter's own round
++// trip, not the picks. The budget below, half an object per pick, is two
++// orders of magnitude under one per table on this 60-table floor.
++//
++// **The fixture is not degenerate:** 60 tables 40 m off the origin, each
++// turned 37 degrees and mirrored, polygon tops and circle tops interleaved,
++// so both tops' `containsAt` run in the measured picks. The JIT may inline
++// the call to a top, and an inlined call boxes nothing: handing the local
++// point back to `contains` as two doubles, with the storage read kept, reads
++// clean here (it survives this file). `containsAt` makes the absence of
++// boxing hold whatever the inliner chooses; this file proves the whole pick.
++//
++// A clean reading proves the JIT boxed no double and made no `Vector2` on
++// this run's picks, as the engine's test's comment says of its own; it
++// proves nothing of AOT or the web, which this repository does not measure.
++library;
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_plan/src/controller/plan_controller.dart';
++import 'package:jet_cad_2d_plan/src/service/unit_picker.dart';
++import 'package:jet_cad_2d_plan/src/units/unit_index.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/service_rig.dart' show hallController;
++import '../support/unit_fixtures.dart';
++import 'vm_allocation_meter.dart';
++
++/// What a per-table regression makes: a boxed double, a point.
++const _watched = {'_Double', 'Vector2'};
++
++/// The hall's watch (2b Task 14): [_watched] and the transform a per-seat
++/// inverse would make (M-PA-hall: `Transform2` holds its doubles unboxed,
++/// so [_watched] alone misses it). The hall's live transforms (its
++/// candidates' inverses, its nodes') read in every epoch, picks or none
++/// (the meter's failure mode 1: some 3,500 measured), so the hall's
++/// picks are held to their excess over an epoch with none, as RB16's
++/// frames are.
++const _hallWatched = {..._watched, 'Transform2'};
++
++/// Instances per pick admitted: the meter's own noise (0.055 measured) but
++/// not one object per pick, let alone one per table.
++const double _perPickBudget = 0.5;
++
++const int _tableCount = 60;
++
++/// [_tableCount] tables in rows 40 m off the origin, each turned 37 degrees
++/// about its place and mirrored: stools (circle tops) at the even places,
++/// the first included, trapezoids (polygon tops) at the odd ones.
++DraftDocument _floor() {
++  final doc = unitPlan();
++  for (var i = 0; i < _tableCount; i++) {
++    final at = Vector2(40000.0 + 2500 * (i % 10), -27000.0 - 2500 * (i ~/ 10));
++    placeAt(doc, i.isEven ? stoolSymbol : trapezoidTable, at, mirrored: true);
++    final node = doc.tree.nodes
++        .whereType<InstanceNode>()
++        .reduce((a, b) => a.handle.value > b.handle.value ? a : b);
++    final turn = Transform2.translation(at.x, at.y)
++        .multiply(Transform2.rotation(kDeg37))
++        .multiply(Transform2.translation(-at.x, -at.y));
++    doc.commands.execute(
++        TransformNodeCommand(node.handle, turn.multiply(node.transform)));
++  }
++  return doc;
++}
++
++void main() {
++  TestWidgetsFlutterBinding.ensureInitialized();
++  AllocationMeter? meter;
++
++  setUpAll(() async {
++    meter = await AllocationMeter.connect();
++  });
++
++  tearDownAll(() async {
++    await meter?.dispose();
++  });
++
++  late UnitPicker picker;
++  late List<PickCandidate> list;
++  late PickCandidate first;
++  late Transform2 toWorld;
++  late CircleTop circle;
++  late Vector2 topPoint;
++  late Vector2 boxPoint;
++  final floorPoint = Vector2(-9000, 13000);
++
++  setUpAll(() {
++    final doc = _floor();
++    picker = UnitPicker(doc, unitsOf(doc));
++    list = picker.candidates;
++    // The lowest handle: every pass visits every table before it.
++    first = list.first;
++    toWorld = first.inverse.invert();
++    circle = first.top! as CircleTop;
++    topPoint = toWorld.transformPoint(Vector2(circle.cx, circle.cy));
++    // Inside the stool's box, off its round top: its box's corner, nudged
++    // in.
++    boxPoint = toWorld
++        .transformPoint(Vector2(first.box.minX + 10, first.box.minY + 10));
++  });
++
++  /// [picks] picks of [world] with [reach], warmed first, measured by
++  /// [meter]; [expected] the premise each pick must answer.
++  Future<void> measure(Vector2 world,
++      {required double reach, required UnitInfo? expected}) async {
++    final m = meter;
++    if (m == null) {
++      markTestSkipped(vmServiceUnavailableReason);
++      return;
++    }
++    expect(list, hasLength(_tableCount), reason: 'premise: every table');
++    expect(list.map((c) => c.top.runtimeType).toSet(), {CircleTop, PolygonTop},
++        reason: 'premise: both kinds of top at the one call site');
++    expect(identical(picker.pick(world, reach: reach), expected), isTrue,
++        reason: 'premise: the pick answers');
++    // Warm: the JIT optimises the pick and the tops before the count, as
++    // the engine's test warms its queries (20,000 calls).
++    for (var i = 0; i < 20000; i++) {
++      picker.pick(world, reach: reach);
++    }
++    await m.reset();
++    const picks = 1000;
++    for (var i = 0; i < picks; i++) {
++      picker.pick(world, reach: reach);
++    }
++    final accumulated = await m.accumulatedInstances(_watched);
++    expect(identical(picker.candidates, list), isTrue,
++        reason: 'premise: the candidates were not rebuilt');
++    for (final MapEntry(key: name, value: count) in accumulated.entries) {
++      expect(count / picks, lessThan(_perPickBudget),
++          reason: '$name: $count over $picks picks of $_tableCount tables '
++              '(${count / picks} per pick): one per table would be '
++              '$_tableCount per pick');
++    }
++  }
++
++  test(
++      'PA1 a pick on the floor, with a finger\'s reach, allocates nothing '
++      'per table: every table visited by all three passes', () async {
++    await measure(floorPoint, reach: 150, expected: null);
++  });
++
++  test(
++      'PA2 a pick on the lowest table\'s top allocates nothing per table: '
++      'every top visited', () async {
++    await measure(topPoint, reach: 0, expected: first.unit);
++  });
++
++  test(
++      'PA3 a pick in the lowest table\'s box, off its top, allocates nothing '
++      'per table: every top, then every box visited', () async {
++    await measure(boxPoint, reach: 0, expected: first.unit);
++  });
++
++  // 2b Review Focus 5: a dense hall, 500 generated seats in 25 rows (even
++  // rows turned 37 degrees, odd rows curved), 40 m off the origin.
++  group('the hall', () {
++    late PlanController hall;
++    late UnitPicker hallPicker;
++    late List<PickCandidate> hallList;
++
++    setUpAll(() {
++      hall = hallController();
++      hallPicker = hall.serviceSession!.picker;
++      hallList = hallPicker.candidates;
++    });
++
++    tearDownAll(() => hall.dispose());
++
++    Future<void> measureHall(Vector2 world,
++        {required double reach, required UnitInfo? expected}) async {
++      final m = meter;
++      if (m == null) {
++        markTestSkipped(vmServiceUnavailableReason);
++        return;
++      }
++      expect(hallList.where((c) => c.unit.generated), hasLength(500),
++          reason: 'premise: every seat a candidate');
++      expect(identical(hallPicker.pick(world, reach: reach), expected), isTrue,
++          reason: 'premise: the pick answers');
++      for (var i = 0; i < 20000; i++) {
++        hallPicker.pick(world, reach: reach);
++      }
++      await m.reset();
++      final baseline = await m.accumulatedInstances(_hallWatched);
++      await m.reset();
++      const picks = 1000;
++      for (var i = 0; i < picks; i++) {
++        hallPicker.pick(world, reach: reach);
++      }
++      final accumulated = await m.accumulatedInstances(_hallWatched);
++      expect(identical(hallPicker.candidates, hallList), isTrue,
++          reason: 'premise: the candidates were not rebuilt');
++      for (final MapEntry(key: name, value: count) in accumulated.entries) {
++        expect((count - baseline[name]!) / picks, lessThan(_perPickBudget),
++            reason: '$name: $count over $picks picks of 500 seats, '
++                '${baseline[name]} with none');
++      }
++    }
++
++    test(
++        'PA4 a pick on the hall\'s floor, with a finger\'s reach, allocates '
++        'nothing per seat: every seat visited by all three passes', () async {
++      await measureHall(Vector2(-9000, 13000), reach: 150, expected: null);
++    });
++
++    test(
++        'PA5 a pick on the lowest seat\'s top allocates nothing per seat: '
++        'every top above it visited', () async {
++      final first = hallList.firstWhere((c) => c.unit.generated);
++      final t = first.unit.top;
++      final world = first.unit.toWorld.transformPoint(
++          Vector2((t.minX + t.maxX) / 2, (t.minY + t.maxY) / 2));
++      await measureHall(world, reach: 0, expected: first.unit);
++    });
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/invariants/vm_allocation_meter.dart b/packages/jet_cad_2d_plan/test/invariants/vm_allocation_meter.dart
+new file mode 100644
+index 00000000..ef945731
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/invariants/vm_allocation_meter.dart
+@@ -0,0 +1,244 @@
++// Copied from jet_cad_floor_plan/test/invariants/vm_allocation_meter.dart (itself the engine's).
++// A copy of `packages/jet_cad_2d/test/invariants/vm_allocation_meter.dart`,
++// for `pick_allocation_test.dart`: a test file is not a library another
++// package may import, and the engine's `testing.dart` cannot carry it without
++// making `vm_service` a dependency of every host. The class is the engine's,
++// unchanged; only [vmServiceUnavailableReason] differs, because under
++// `flutter test` the VM service is reachable only with `--enable-vmservice`
++// (`flutter_tester` is started with the service disabled otherwise, and
++// `Service.controlWebServer` then hands back no URI). The engine file's
++// own comment below is kept whole: it records why the mechanism is this one.
++//
++// A thin wrapper around the Dart VM's own allocation profiler, shared by
++// every allocation-measuring test in this suite (`query_allocation_test.dart`
++// and the un-skipped tree test in `test/index/packed_rtree_test.dart`).
++//
++// **Mechanism, chosen deliberately over the alternatives:**
++//
++// - `ProcessInfo.currentRss` deltas (`dart:io`) were tried first, since the
++//   task brief suggested them as a fallback and they need no dependency at
++//   all. Measured directly: a synthetic loop that allocates nothing showed a
++//   *larger* RSS delta than one that allocates a `Vector2` on every one of
++//   five million iterations (753 KB vs 82 KB, in one run). RSS is a
++//   whole-process, page-granular metric driven by the OS and the GC's own
++//   scavenge/decommit behaviour, not by how many bytes the mutator actually
++//   asked for -- it cannot resolve a per-call budget measured in tens of
++//   bytes. Rejected.
++// - `dart:developer`'s `Service` plus `package:vm_service`'s
++//   `getAllocationProfile`, the same mechanism a prior review used by hand
++//   (see the Task 17 brief) to find `Vector2` and `Function` at roughly
++//   0.0023 instances per pick. This is what [AllocationMeter] wraps.
++//
++// **Getting it to run under plain `dart test`, no flags:** `getInfo()` off
++// the box reports no service URI unless the process was started with
++// `--enable-vm-service` or `--observe`, which would make this gate the kind
++// nobody runs by hand. `dart:developer`'s `Service.controlWebServer(enable:
++// true)` starts the service *at runtime*, from inside the very isolate under
++// test, with no such flag -- confirmed by inspecting `serverUri` before and
++// after the call under an ordinary `dart test test/invariants/...` run. That
++// is the trick this file relies on.
++//
++// **Two failure modes found and designed around while building this:**
++//
++// 1. `getAllocationProfile(reset: true)` does not retroactively zero a
++//    class's *already-promoted, still-live* instances -- a document built
++//    entirely before `reset` can still report thousands of "accumulated"
++//    instances of its own record types afterward, with zero further calls in
++//    between. `gc: true` on the surrounding calls fixes it in isolation, but
++//    was measured to occasionally hang this specific harness for the full
++//    30-second test timeout when issued back-to-back on this isolate -- a
++//    hang is worse than a flaky number, so `gc` is not used here at all.
++//    The workaround is `_watchedClasses`: every class this file (or its
++//    caller) asks about is one the query methods under test do not build in
++//    bulk anywhere else (a `SpatialIndex`'s own document, entity, and
++//    geometry storage never touch `Vector2` or `Transform2`), so the
++//    stale-promotion artefact never has anything to trigger on.
++// 2. Summing `accumulatedSize`/`instancesAccumulated` across *every* class
++//    the profile reports -- the shape of the task brief's own sample
++//    assertion -- was measured to carry 20-70 MB of noise from a single
++//    reset-then-read round trip with *no* work done in between at all
++//    (`_List`, `_OneByteString`, `_Map`, `_Double`, `Code`/`Instructions`
++//    from ongoing JIT tiering, `Context`/`_Closure` from the async
++//    machinery ferrying the RPC itself). That noise floor is four to five
++//    orders of magnitude past the tens-of-bytes budget this suite cares
++//    about, so a whole-heap sum cannot resolve it at any iteration count
++//    this suite can afford to run. The fix is the same one as above: name a
++//    small set of classes the code path is not expected to touch, and sum
++//    only those.
++// 3. **`getAllocationProfile` without `reset` is not a repeatable snapshot
++//    read.** Calling it a second time, with no work done in between, was
++//    measured to report near-zero for every class -- as if the *first* call
++//    had silently re-based the "since reset" baseline to itself. Confirmed
++//    directly with an order-swap: whichever of two back-to-back reads runs
++//    first sees the true accumulated count; whichever runs second reads
++//    near-zero, regardless of which named classes either one asks about.
++//    This was the actual cause of what first looked like several different,
++//    increasingly strange escape-analysis failures while calibrating a
++//    depth-bound budget for `pickInto`/`snapInto` in the task-17 report's
++//    round-2 section -- every mutation *had* materialized correctly (and
++//    was confirmed to, via a debug read of the mutated value itself), but
++//    the *second* of two `accumulatedInstances` calls made against the same
++//    `reset` epoch was reading a baseline the first call had already reset
++//    out from under it. [accumulatedInstances] enforces this at runtime
++//    (see its own doc comment) rather than leaving it as a trap the next
++//    caller has to already know about.
++//
++// **What a clean reading here proves, and what it does not:** a near-zero
++// count for a named class means the JIT, for *this* run, on *this* machine,
++// did not observe that class being instantiated on the timed path -- it is
++// evidence the code is allocation-free in the configuration actually tested,
++// not a proof that hold under AOT or that no allocation of some *other,
++// unwatched* class occurred. See each call site's own comment for which
++// classes it watches and why those are the ones that would move if the
++// method under test regressed.
++library;
++
++import 'dart:developer' as dev;
++import 'dart:isolate' as iso;
++
++import 'package:vm_service/vm_service.dart' as vm_service;
++import 'package:vm_service/vm_service_io.dart' as vm_service_io;
++
++/// A live connection to this isolate's own VM allocation profiler.
++///
++/// [connect] returns `null`, rather than throwing, when the service cannot
++/// be started or reached -- a sandboxed CI runner that blocks the loopback
++/// socket a `dart:developer` web server needs is a real environment, and a
++/// test built on this class is expected to skip itself with a stated reason
++/// in that case rather than report a false pass. See `query_allocation_test
++/// .dart` and `packed_rtree_test.dart` for that skip path.
++class AllocationMeter {
++  AllocationMeter._(this._service, this._isolateId);
++
++  final vm_service.VmService _service;
++  final String _isolateId;
++
++  /// Guards against the trap documented in this file's failure mode 3:
++  /// a second [accumulatedInstances] call against the same [reset] epoch
++  /// silently reads near-zero rather than the true count. Set by
++  /// [accumulatedInstances], cleared by [reset].
++  bool _consumedSinceReset = false;
++
++  static Future<AllocationMeter?> connect() async {
++    try {
++      final info = await dev.Service.controlWebServer(enable: true);
++      final serverUri = info.serverUri;
++      if (serverUri == null) return null;
++      // vm_service_io wants a ws:// URI; controlWebServer hands back the
++      // http:// one the DevTools link is built from.
++      final wsUri = Uri(
++        scheme: 'ws',
++        host: serverUri.host,
++        port: serverUri.port,
++        path: '${serverUri.path}ws',
++      ).toString();
++      final service = await vm_service_io.vmServiceConnectUri(wsUri);
++      // `Isolate.current`, not `getVM().isolates.first`: this isolate is not
++      // guaranteed to be the only or the first one the service lists, and
++      // asking for *this* isolate's own id directly is exact where picking
++      // "the first one" would only usually be right.
++      final isolateId = dev.Service.getIsolateId(iso.Isolate.current);
++      if (isolateId == null) {
++        await service.dispose();
++        return null;
++      }
++      // Round-trip once before handing this back: a socket that connects
++      // but whose first real RPC hangs or errors is exactly the case a
++      // caller needs to fall back on, not discover mid-measurement.
++      await service.getAllocationProfile(isolateId);
++      return AllocationMeter._(service, isolateId);
++    } catch (_) {
++      return null;
++    }
++  }
++
++  /// Settles the heap (one full GC, no reset) and then zeroes the
++  /// accumulator. Everything a watched class allocates from this point until
++  /// [accumulatedInstances] is called next counts.
++  ///
++  /// The settle step matters more than it looks: `getAllocationProfile(reset:
++  /// true)` alone does not retroactively zero a class's already-live
++  /// instances (see failure mode 1 in this file's doc comment) -- and that
++  /// is not scoped to the current test. Every test in a file shares one
++  /// isolate, so an object left behind by an *earlier* test can still be
++  /// attributed to "since reset" here, whenever the VM's own bookkeeping
++  /// next gets around to scanning it. Measured directly while building
++  /// this: a second test in the same file reading a clean `Vector2` class it
++  /// never touches at ~10 instances per call, entirely explained by the
++  /// *previous* test's now-garbage `Vector2`s, and settling immediately
++  /// before every reset -- not once at file start -- was what made both
++  /// tests read near zero independently.
++  ///
++  /// Two separate RPCs, not one `getAllocationProfile(reset: true, gc:
++  /// true)` call: back-to-back `gc: true` calls on this isolate were
++  /// measured, while prototyping this file, to occasionally hang for the
++  /// full 30-second test timeout against a heavier fixture. A single settle
++  /// call immediately followed by a single, separate reset call was not
++  /// observed to hang in the same testing (including against the
++  /// heaviest fixtures this suite uses) and is what this method does; do not
++  /// add a second settle call in front of it "for extra safety" -- that is
++  /// closer to the shape that hung.
++  Future<void> reset() async {
++    await _service.getAllocationProfile(_isolateId, gc: true);
++    await _service.getAllocationProfile(_isolateId, reset: true);
++    _consumedSinceReset = false;
++  }
++
++  /// Instances accumulated since the last [reset], per name in
++  /// [classNames].
++  ///
++  /// Summed across every class on the heap sharing that name, rather than
++  /// picking one: `Aabb2` is defined both by this package and, unused but
++  /// still loaded, by `package:vector_math` (hidden from every import in
++  /// this codebase, but not unloaded from the VM's own class table). Both
++  /// are expected to sit at zero on every path this file measures, so
++  /// summing them is harmless when the reading is clean and conservative
++  /// (counts, rather than hides, a hit) when it is not.
++  ///
++  /// **Call this at most once per [reset].** A second call against the
++  /// same epoch was measured to read near-zero for every class rather than
++  /// the true accumulated count -- see this file's doc comment, failure
++  /// mode 3. Enforced here rather than left as a trap: a caller that needs
++  /// several classes' worth of budgets after one measured loop must request
++  /// the union of every class it cares about in a single call, then apply
++  /// different thresholds to the entries of the one returned map -- see
++  /// `query_allocation_test.dart`'s `pickInto`/`snapInto` tests for the
++  /// pattern.
++  Future<Map<String, int>> accumulatedInstances(
++    Set<String> classNames,
++  ) async {
++    if (_consumedSinceReset) {
++      throw StateError(
++        'AllocationMeter.accumulatedInstances() was already called once '
++        'since the last reset() -- a second call in the same epoch reads '
++        'near-zero instead of the true accumulated count (see this file\'s '
++        'doc comment, failure mode 3), so this would silently produce a '
++        'false pass rather than a real measurement. Request every class '
++        'this measurement needs in one call instead.',
++      );
++    }
++    _consumedSinceReset = true;
++    final profile = await _service.getAllocationProfile(_isolateId);
++    final out = <String, int>{for (final name in classNames) name: 0};
++    for (final member
++        in profile.members ?? const <vm_service.ClassHeapStats>[]) {
++      final name = member.classRef?.name;
++      if (name == null || !classNames.contains(name)) continue;
++      out[name] = (out[name] ?? 0) + (member.instancesAccumulated ?? 0);
++    }
++    return out;
++  }
++
++  Future<void> dispose() => _service.dispose();
++}
++
++/// The reason string every allocation test in this suite skips with when
++/// [AllocationMeter.connect] returns `null`. One shared string, so a run
++/// that cannot reach the VM service reports the same, greppable line from
++/// every test it skips rather than a slightly different one per call site.
++const String vmServiceUnavailableReason =
++    'the VM allocation profiler could not be started or reached from this '
++    'process (Service.controlWebServer failed, or its first RPC did not '
++    'round-trip): under flutter test the VM service exists only with '
++    '--enable-vmservice, which CI passes for this package. Run '
++    'flutter test --enable-vmservice.';
+diff --git a/packages/jet_cad_2d_plan/test/service/service_band_test.dart b/packages/jet_cad_2d_plan/test/service/service_band_test.dart
+new file mode 100644
+index 00000000..34aeb406
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/service/service_band_test.dart
+@@ -0,0 +1,878 @@
++// Ported from jet_cad_floor_plan/test/service/table_band_test.dart; assertions unchanged.
++// Rubber-band spec RB-2 to RB-6 at the selection mode's tool: when a band
++// starts (the host's `floorDrag`, the modifier read at the down, a finger's
++// reach-only press), what it takes (the band query kept to the picker's
++// candidates, groups by the mode's rule, locks), what it does to the
++// selection (one `replace`), Escape and cancel, and its painting. Under fake
++// time (testWidgets). The camera is y-flipped, scaled and off the origin;
++// tables are turned and mirrored, one L-shaped table is turned 37 degrees;
++// the plan holds a group of three, a locked table, a group with a locked
++// member, an unnumbered table, a hidden one and a planter. Band rects are
++// computed from the tables' leaves under their transforms, never read from
++// the code.
++import 'dart:ui' show Canvas, Offset, Paint, PaintingStyle, Rect, Size;
++
++import 'package:flutter/foundation.dart' show ValueNotifier;
++import 'package:flutter/gestures.dart' show PointerDeviceKind, kPrimaryButton;
++import 'package:flutter/services.dart';
++import 'package:flutter/widgets.dart' show KeyEventResult;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:jet_cad_2d_kit/authoring.dart'
++    show CatalogPolyline, CatalogSymbol;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show kUnitLabelTag;
++import 'package:jet_cad_2d_plan/src/service/service_state.dart'
++    show UnitGroup, validateUnitGroups;
++import 'package:jet_cad_2d_plan/src/service/service_tool.dart';
++import 'package:jet_cad_2d_plan/src/service/unit_picker.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/unit_fixtures.dart';
++
++/// An L-shaped top, its empty quadrant at the upper right of its
++/// 1200 x 1200 box (review V-5): turned 37 degrees, a corner of its
++/// bounding box lies off every leaf.
++///
++/// Two leaves, not the plan's one L polyline: the index's window encloses
++/// each leaf's own box lifted to the world (`SpatialIndex._leafPasses`), and
++/// one L polyline's box is the whole 1200 x 1200 square, so no band could
++/// enclose the leaf and miss the box's corner. Two bars keep the same L and
++/// make RB6's premise reachable.
++final CatalogSymbol ellTable = CatalogSymbol(
++  key: 'fx.ell.three',
++  name: 'Test L table',
++  category: 'Tests',
++  tags: const ['table', 'test'],
++  unit: tableUnit(3),
++  base: (600, 600),
++  shapes: const [
++    CatalogPolyline([(0, 0), (1200, 0), (1200, 500), (0, 500)], closed: true),
++    CatalogPolyline([(0, 500), (500, 500), (500, 1200), (0, 1200)],
++        closed: true),
++  ],
++);
++
++/// [ellTable]'s leaves, in its definition.
++const List<List<(double, double)>> _ellLeaves = [
++  [(0, 0), (1200, 0), (1200, 500), (0, 500)],
++  [(0, 500), (500, 500), (500, 1200), (0, 1200)],
++];
++
++/// [tableSymbol]'s top and chairs, in its definition.
++const List<List<(double, double)>> _tableLeaves = [
++  [(300, 300), (1500, 300), (1500, 1100), (300, 1100)],
++  [(675, -50), (1125, -50), (1125, 400), (675, 400)],
++  [(675, 1000), (1125, 1000), (1125, 1450), (675, 1450)],
++];
++
++/// [trapezoidTable]'s top, in its definition.
++const List<List<(double, double)>> _trapezoidLeaves = [
++  [(200, 300), (1600, 300), (1300, 1000), (500, 900)],
++];
++
++const KeyDownEvent _escape = KeyDownEvent(
++    physicalKey: PhysicalKeyboardKey.escape,
++    logicalKey: LogicalKeyboardKey.escape,
++    timeStamp: Duration.zero);
++
++const KeyDownEvent _z = KeyDownEvent(
++    physicalKey: PhysicalKeyboardKey.keyZ,
++    logicalKey: LogicalKeyboardKey.keyZ,
++    timeStamp: Duration.zero);
++
++/// A canvas that records every call.
++final class RecordingCanvas implements Canvas {
++  final List<Invocation> calls = [];
++
++  Iterable<Invocation> named(String name) =>
++      calls.where((c) => c.memberName == Symbol(name));
++
++  @override
++  dynamic noSuchMethod(Invocation invocation) {
++    calls.add(invocation);
++    return null;
++  }
++}
++
++List<double> parts(Transform2 t) => [t.a, t.b, t.c, t.d, t.e, t.f];
++
++/// The world box of [points].
++Aabb2 boxOf(Iterable<Vector2> points) => Aabb2.fromPoints(points);
++
++/// [box] grown by [pad] on every side.
++Aabb2 padded(Aabb2 box, double pad) =>
++    Aabb2.raw(box.minX - pad, box.minY - pad, box.maxX + pad, box.maxY + pad);
++
++bool encloses(Aabb2 outer, Vector2 p) =>
++    p.x > outer.minX &&
++    p.x < outer.maxX &&
++    p.y > outer.minY &&
++    p.y < outer.maxY;
++
++bool overlaps(Aabb2 a, Aabb2 b) =>
++    a.minX <= b.maxX &&
++    a.maxX >= b.minX &&
++    a.minY <= b.maxY &&
++    a.maxY >= b.minY;
++
++final class Rig {
++  /// Tables 1 (at -2000, 1000, a quarter turn, mirrored), 2 (a trapezoid at
++  /// 2500, 1000, mirrored), 3 (at 0, -2500, on a locked layer), 4, 5, 6 (at
++  /// 6000, 7600 and 9200 by 1000: group 'g'), 7, 8 (at 6000 and 7600 by
++  /// -3000: group 'h', 8 on the locked layer), 9 (the L at -6000, -3000,
++  /// turned 37 degrees), 10 (at -6000, 2500, its label emptied), 11 (at
++  /// -9000, 2500, on a hidden layer) and a planter (at -3500, -1000),
++  /// decoded as a service copy.
++  Rig() {
++    final design = unitPlan();
++    // Today's numbering placer: 1, 2, ... in placement order among the
++    // units, a planter none.
++    var numbered = 0;
++    void put(CatalogSymbol s, double x, double y,
++        {int quarterTurns = 0, bool mirrored = false}) {
++      final h = placeAt(design, s, Vector2(x, y),
++          quarterTurns: quarterTurns, mirrored: mirrored);
++      if (s.unit != null) addUnitLabel(design, h, '${++numbered}');
++    }
++
++    Handle newest() => design.tree.nodes
++        .whereType<InstanceNode>()
++        .reduce((a, b) => a.handle.value > b.handle.value ? a : b)
++        .handle;
++
++    final zero = design.tables.layers[ReservedHandles.layerZero]!;
++    Handle layer(String name) {
++      final h = design.handleSeed.next();
++      design.commands.execute(AddLayerCommand(LayerRecord(
++          handle: h,
++          name: name,
++          color: const IndexedColor(1),
++          linetype: zero.linetype,
++          lineweight: zero.lineweight,
++          transparency: zero.transparency,
++          visible: true,
++          locked: false)));
++      return h;
++    }
++
++    final locked = layer('Locked');
++    final hidden = layer('Hidden');
++    put(tableSymbol(), -2000, 1000, quarterTurns: 1, mirrored: true); // 1
++    put(trapezoidTable, 2500, 1000, mirrored: true); // 2
++    put(tableSymbol(), 0, -2500); // 3
++    design.commands.execute(SetInstanceLayerCommand(newest(), locked));
++    put(tableSymbol(), 6000, 1000); // 4
++    put(tableSymbol(), 7600, 1000); // 5
++    put(tableSymbol(), 9200, 1000); // 6
++    put(tableSymbol(), 6000, -3000); // 7
++    put(tableSymbol(), 7600, -3000); // 8
++    design.commands.execute(SetInstanceLayerCommand(newest(), locked));
++    put(ellTable, -6000, -3000); // 9
++    design.commands.execute(TransformNodeCommand(
++        newest(), placementAt(-6000, -3000, kDeg37, baseX: 600, baseY: 600)));
++    put(tableSymbol(), -6000, 2500); // 10
++    final tenth = newest();
++    put(tableSymbol(), -9000, 2500); // 11
++    design.commands.execute(SetInstanceLayerCommand(newest(), hidden));
++    put(planterSymbol, -3500, -1000);
++    final planter = newest();
++    final survey = unitsOf(design).current;
++    final tenthLabel =
++        survey.units.singleWhere((t) => t.instance == tenth).label!;
++    expect(survey.units.singleWhere((t) => t.instance == tenth).text, '10',
++        reason: 'premise: placed tenth');
++    design.commands
++        .execute(SetEntityTextCommand(tenthLabel, '', kUnitLabelTag));
++    design.commands.execute(
++        SetLayerCommand(design.tables.layers[locked]!.copyWith(locked: true)));
++    design.commands.execute(SetLayerCommand(
++        design.tables.layers[hidden]!.copyWith(visible: false)));
++
++    doc = copyForService(design);
++    final units = unitsOf(doc);
++    final tables = units.current.units;
++    handles = {
++      for (final t in tables)
++        if (t.text case final n?) n: t.instance,
++    };
++    handles['10'] = tenth;
++    handles['planter'] = planter;
++    expect(tables.singleWhere((t) => t.instance == tenth).text, isNull,
++        reason: 'premise: 10 is unnumbered after the round trip');
++    expect(doc.tree[planter], isA<InstanceNode>());
++    expect(
++        handles.keys.toSet(), {for (var i = 1; i <= 11; i++) '$i', 'planter'});
++
++    camera = CameraController(ViewportTransform(
++        worldToScreenMatrix: Transform2(0.1, 0, 0, -0.1, 700, 450)));
++    index = SpatialIndex(doc);
++    selection = SelectionController(doc);
++    picker = UnitPicker(doc, units);
++    tool = ServiceTool(
++        picker: picker,
++        groups: groups,
++        callbacks: () => (
++              onUnitTap: taps.add,
++              onLayoutChanged: null,
++              onGroupTap: null,
++              onMergeRequested: null,
++              onSplitRequested: null,
++            ),
++        options: () => options,
++        moves: () => moves,
++        events: () => events,
++        idleKeys: () => idleKeys);
++    ctx = ToolContext(
++        document: doc, index: index, camera: camera, selection: selection);
++  }
++
++  late final DraftDocument doc;
++  late final CameraController camera;
++  late final SpatialIndex index;
++  late final SelectionController selection;
++  late final UnitPicker picker;
++  late final ServiceTool tool;
++  late final ToolContext ctx;
++  late final Map<String, Handle> handles;
++
++  /// The host's groups: 'g' of three, 'h' of two with 8 locked.
++  final ValueNotifier<Map<String, UnitGroup>> groups =
++      ValueNotifier<Map<String, UnitGroup>>(validateUnitGroups({
++    'g': UnitGroup(members: {'4', '5', '6'}),
++    'h': UnitGroup(members: {'7', '8'}),
++  }));
++
++  /// What the tool reads at each press.
++  ServiceOptions options = kDefaultServiceOptions;
++  bool moves = true;
++  bool idleKeys = true;
++
++  final List<String> taps = [];
++  final List<String> doubleTaps = [];
++  final List<Offset> floors = [];
++  final List<String?> hovers = [];
++
++  late final ServiceEvents<Handle> events = (
++    onUnitsMoved: null,
++    onUnitDoubleTap: doubleTaps.add,
++    onFloorTap: floors.add,
++    onUnitHover: hovers.add,
++  );
++
++  void drag(PlanFloorDrag floorDrag, {bool serviceMoves = true}) {
++    options = (
++      longPress: PlanLongPress.toggleSelection,
++      onUnitContextMenu: null,
++      floorDrag: floorDrag,
++    );
++    moves = serviceMoves;
++  }
++
++  void dispose() {
++    tool.dispose();
++    selection.dispose();
++    index.dispose();
++    camera.dispose();
++    groups.dispose();
++  }
++
++  InstanceNode node(String n) => doc.tree[handles[n]!]! as InstanceNode;
++
++  SelectionKey key(String n) => SelectionKey.root(handles[n]!);
++
++  Set<SelectionKey> keys(List<String> ns) => {for (final n in ns) key(n)};
++
++  /// The leaves of table [n] in its definition.
++  List<List<(double, double)>> leavesOf(String n) => switch (n) {
++        '2' => _trapezoidLeaves,
++        '9' => _ellLeaves,
++        _ => _tableLeaves,
++      };
++
++  /// Local ([x], [y]) of table [n] in the world.
++  Vector2 world(String n, double x, double y) =>
++      node(n).transform.transformPoint(Vector2(x, y));
++
++  /// The world box of every leaf of tables [ns].
++  Aabb2 leafBox(List<String> ns) => boxOf([
++        for (final n in ns)
++          for (final leaf in leavesOf(n))
++            for (final (x, y) in leaf) world(n, x, y)
++      ]);
++
++  Offset screen(Vector2 w) {
++    final s = camera.value.worldToScreen(w);
++    return Offset(s.x, s.y);
++  }
++
++  Vector2 toWorld(Offset s) => camera.value.screenToWorld(Vector2(s.dx, s.dy));
++
++  /// The screen point of local ([x], [y]) of table [n].
++  Offset at(String n, double x, double y) => screen(world(n, x, y));
++
++  ToolPointerEvent ev(Offset screen,
++          {int buttons = kPrimaryButton,
++          bool shift = false,
++          bool control = false,
++          bool meta = false,
++          bool touch = false}) =>
++      ToolPointerEvent(
++        screen: screen,
++        world: camera.value.screenToWorld(Vector2(screen.dx, screen.dy)),
++        pointer: 1,
++        buttons: buttons,
++        shift: shift,
++        control: control,
++        meta: meta,
++        alt: false,
++        pickRadiusWorld: 6 / camera.value.scale,
++        kind: touch ? PointerDeviceKind.touch : PointerDeviceKind.mouse,
++        reachRadiusWorld: touch ? 24 / camera.value.scale : null,
++      );
++
++  void down(Offset s,
++          {bool shift = false,
++          bool control = false,
++          bool meta = false,
++          bool touch = false}) =>
++      tool.onPointerDown(
++          ev(s, shift: shift, control: control, meta: meta, touch: touch), ctx);
++  void move(Offset s,
++          {bool shift = false,
++          bool control = false,
++          bool meta = false,
++          bool touch = false}) =>
++      tool.onPointerMove(
++          ev(s, shift: shift, control: control, meta: meta, touch: touch), ctx);
++  void up(Offset s,
++          {bool shift = false,
++          bool control = false,
++          bool meta = false,
++          bool touch = false}) =>
++      tool.onPointerUp(
++          ev(s,
++              buttons: 0,
++              shift: shift,
++              control: control,
++              meta: meta,
++              touch: touch),
++          ctx);
++
++  void tap(Offset s, {bool touch = false}) {
++    down(s, touch: touch);
++    up(s, touch: touch);
++  }
++
++  /// A band over world [box]: a window from its upper left to its lower
++  /// right, or a crossing from its upper right to its lower left. Its press
++  /// is asserted off every table (a mouse's pick, no reach).
++  void band(Aabb2 box,
++      {bool crossing = false,
++      bool shift = false,
++      bool control = false,
++      bool meta = false,
++      bool touch = false}) {
++    final start = Vector2(crossing ? box.maxX : box.minX, box.maxY);
++    final end = Vector2(crossing ? box.minX : box.maxX, box.minY);
++    expect(picker.pick(start), isNull, reason: 'premise: pressed on the floor');
++    final s = screen(start), e = screen(end);
++    down(s, shift: shift, control: control, meta: meta, touch: touch);
++    move(Offset.lerp(s, e, 0.5)!,
++        shift: shift, control: control, meta: meta, touch: touch);
++    move(e, shift: shift, control: control, meta: meta, touch: touch);
++    up(e, shift: shift, control: control, meta: meta, touch: touch);
++  }
++
++  /// What the overlay paints now.
++  RecordingCanvas paint() {
++    final canvas = RecordingCanvas();
++    tool.paintOverlay(
++        canvas, camera.value, const Size(1400, 900), PaperPalette.light);
++    return canvas;
++  }
++}
++
++Rig rig(WidgetTester tester) {
++  final r = Rig();
++  addTearDown(r.dispose);
++  return r;
++}
++
++void main() {
++  testWidgets(
++      'RB1 under pan a plain mouse drag on the floor pans: the selection '
++      'unchanged, no band (M-RB1)', (tester) async {
++    final r = rig(tester);
++    r.selection.replace([r.key('1')]);
++    final before = r.camera.value.worldToScreenMatrix;
++    const a = Offset(1000, 120), b = Offset(1060, 160);
++    expect(r.picker.pick(r.toWorld(a)), isNull, reason: 'premise: the floor');
++    r.down(a);
++    r.move(const Offset(1030, 140));
++    r.move(b);
++    expect(r.paint().calls, isEmpty, reason: 'no band painted');
++    r.up(b);
++    final after = r.camera.value.worldToScreenMatrix;
++    expect(after.e, closeTo(before.e + 60, 1e-9));
++    expect(after.f, closeTo(before.f + 40, 1e-9));
++    expect(r.selection.keys, {r.key('1')});
++  });
++
++  testWidgets(
++      'RB2 under pan a Shift, Ctrl or Cmd mouse drag bands and adds; a Shift '
++      'touch drag pans (M-RB2)', (tester) async {
++    final r = rig(tester);
++    // Padded 600 mm: the press is past a finger's 24 px reach too.
++    final box = padded(r.leafBox(['1', '2']), 600);
++    for (final (shift, control, meta) in [
++      (true, false, false),
++      (false, true, false),
++      (false, false, true),
++    ]) {
++      r.selection.replace([r.key('9')]);
++      r.band(box, shift: shift, control: control, meta: meta);
++      expect(r.selection.keys, r.keys(['1', '2', '9']),
++          reason: 'shift $shift, control $control, meta $meta');
++    }
++    r.selection.replace([r.key('9')]);
++    final before = r.camera.value.worldToScreenMatrix;
++    expect(r.picker.pick(Vector2(box.minX, box.maxY), reach: 240), isNull,
++        reason: 'premise: out of a finger\'s reach');
++    r.band(box, shift: true, touch: true);
++    final after = r.camera.value.worldToScreenMatrix;
++    expect(after.e, isNot(closeTo(before.e, 1)), reason: 'a finger pans');
++    expect(r.selection.keys, {r.key('9')});
++  });
++
++  testWidgets(
++      'RB2b the modifier is read at the down (R-1): under pan Shift at the '
++      'down only still bands and adds; under band Shift on the moves and the '
++      'up only still replaces (M-RB24, M-RB25)', (tester) async {
++    final r = rig(tester);
++    final box = padded(r.leafBox(['1', '2']), 600);
++    final s = r.screen(Vector2(box.minX, box.maxY));
++    final e = r.screen(Vector2(box.maxX, box.minY));
++    expect(r.picker.pick(r.toWorld(s)), isNull, reason: 'premise: the floor');
++    expect(r.options.floorDrag, PlanFloorDrag.pan, reason: 'premise');
++
++    // Under pan: Shift at the down only. Read at the first move (M-RB25) the
++    // drag would pan; read at the up (M-RB24) it would replace.
++    r.selection.replace([r.key('9')]);
++    final before = parts(r.camera.value.worldToScreenMatrix);
++    r.down(s, shift: true);
++    r.move(Offset.lerp(s, e, 0.5)!);
++    r.move(e);
++    r.up(e);
++    expect(r.selection.keys, r.keys(['1', '2', '9']), reason: 'a band adds');
++    expect(parts(r.camera.value.worldToScreenMatrix), before, reason: 'no pan');
++
++    // Under band: a plain down, Shift on the moves and the up. Read at the
++    // up (M-RB24) it would add 9 to the band's keys.
++    r.drag(PlanFloorDrag.band);
++    r.selection.replace([r.key('9')]);
++    r.down(s);
++    r.move(Offset.lerp(s, e, 0.5)!, shift: true);
++    r.move(e, shift: true);
++    r.up(e, shift: true);
++    expect(r.selection.keys, r.keys(['1', '2']), reason: 'a band replaces');
++  });
++
++  testWidgets(
++      'RB5 under band a drag from a table moves it, from a locked one is '
++      'spent; with serviceMoves false it pans (M-RB5)', (tester) async {
++    final r = rig(tester);
++    r.drag(PlanFloorDrag.band);
++    final before = parts(r.node('2').transform);
++    final p = r.at('2', 900, 650);
++    r.down(p);
++    r.move(p + const Offset(40, 0));
++    expect(r.paint().calls, isEmpty);
++    r.up(p + const Offset(40, 0));
++    expect(r.doc.commands.undoDepth, 1, reason: 'one step');
++    expect(parts(r.node('2').transform)[4], closeTo(before[4] + 400, 1e-6));
++    expect(r.selection.keys, {r.key('2')});
++
++    final cam = parts(r.camera.value.worldToScreenMatrix);
++    final q = r.at('3', 900, 700);
++    r.down(q);
++    r.move(q + const Offset(-60, 30));
++    expect(r.tool.phase, ToolPhase.pressed, reason: 'spent');
++    expect(r.paint().calls, isEmpty);
++    r.up(q + const Offset(-60, 30));
++    expect(r.selection.keys, {r.key('2')});
++    expect(r.doc.commands.undoDepth, 1);
++    expect(parts(r.camera.value.worldToScreenMatrix), cam);
++
++    r.drag(PlanFloorDrag.band, serviceMoves: false);
++    final s = r.at('2', 900, 650);
++    r.down(s);
++    r.move(s + const Offset(30, 20));
++    r.up(s + const Offset(30, 20));
++    final after = r.camera.value.worldToScreenMatrix;
++    expect(after.e, closeTo(cam[4] + 30, 1e-9), reason: 'pans (R-3)');
++    expect(after.f, closeTo(cam[5] + 20, 1e-9));
++    expect(r.doc.commands.undoDepth, 1);
++    expect(r.selection.keys, {r.key('2')});
++  });
++
++  testWidgets(
++      'RB5b under band a finger 10 px outside a table\'s box bands when '
++      'dragged and selects the table when tapped (R-4, M-RB5b)',
++      (tester) async {
++    final r = rig(tester);
++    r.drag(PlanFloorDrag.band);
++    r.selection.replace([r.key('1')]);
++    final before = parts(r.node('2').transform);
++    // 100 mm below the trapezoid's box (y 300): 10 px.
++    final p = r.at('2', 900, 200);
++    expect(r.picker.pick(r.toWorld(p)), isNull, reason: 'premise: off it');
++    expect(r.picker.pick(r.toWorld(p), reach: 240)?.text, '2',
++        reason: 'premise: within a finger\'s reach');
++    r.down(p, touch: true);
++    r.move(p + const Offset(40, 60), touch: true);
++    expect(r.tool.phase, ToolPhase.dragging);
++    expect(r.tool.selectionPreviewTransform, isNull, reason: 'no move');
++    expect(r.paint().named('drawRect'), hasLength(2), reason: 'a band');
++    r.up(p + const Offset(40, 60), touch: true);
++    expect(parts(r.node('2').transform), before);
++    expect(r.doc.commands.undoDepth, 0);
++    expect(r.selection.isEmpty, isTrue, reason: 'a plain band over nothing');
++    r.tap(p, touch: true);
++    expect(r.selection.keys, {r.key('2')});
++    expect(r.taps, ['2']);
++  });
++
++  testWidgets(
++      'RB6 a window takes the turned L when every leaf is inside, a corner '
++      'of its box outside (M-RB6)', (tester) async {
++    final r = rig(tester);
++    r.drag(PlanFloorDrag.band);
++    final band = padded(r.leafBox(['9']), 50);
++    // Each leaf is a rectangle: its vertices' world box is its own box
++    // lifted to the world, what the index's window encloses.
++    for (final leaf in _ellLeaves) {
++      final leafBox = boxOf([for (final (x, y) in leaf) r.world('9', x, y)]);
++      for (final corner in [
++        Vector2(leafBox.minX, leafBox.minY),
++        Vector2(leafBox.maxX, leafBox.maxY),
++      ]) {
++        expect(encloses(band, corner), isTrue,
++            reason: 'premise: leaf $leaf\'s box inside');
++      }
++    }
++    final box = boxOf([
++      for (final (x, y) in const [(0.0, 0.0), (1200.0, 0.0), (0.0, 1200.0)])
++        r.world('9', x, y),
++      r.world('9', 1200, 1200),
++    ]);
++    expect(encloses(band, r.world('9', 1200, 1200)), isFalse,
++        reason: 'premise: the empty quadrant\'s corner is outside');
++    expect(box.maxY, greaterThan(band.maxY),
++        reason: 'premise: the instance\'s world box is not enclosed');
++    r.band(band);
++    expect(r.selection.keys, {r.key('9')});
++  });
++
++  testWidgets(
++      'RB7 a crossing takes a table it touches by a chair, nothing over the '
++      'L\'s empty quadrant; turned back mid-drag it crosses (M-RB7, M-RB7b)',
++      (tester) async {
++    final r = rig(tester);
++    r.drag(PlanFloorDrag.band);
++    // Off table 1's top (local y 300 up) and box (y -50 up), over its chair
++    // (local y -50 to 400): a quarter turn keeps the box exact.
++    final chair = boxOf([
++      for (final (x, y) in const [(600.0, -300.0), (1200.0, 0.0)])
++        r.world('1', x, y)
++    ]);
++    final top =
++        boxOf([for (final (x, y) in _tableLeaves[0]) r.world('1', x, y)]);
++    expect(overlaps(chair, top), isFalse, reason: 'premise: off the top');
++    r.band(chair, crossing: true);
++    expect(r.selection.keys, {r.key('1')}, reason: 'touched by its chair');
++
++    // Above the L's leaves, inside its turned box only near the empty
++    // quadrant's corner.
++    final leaves = r.leafBox(['9']);
++    final corner = r.world('9', 1200, 1200);
++    final quadrant = Aabb2.raw(
++        corner.x - 400, leaves.maxY + 230, corner.x + 400, leaves.maxY + 330);
++    expect(r.picker.candidates.where((c) => c.unit.text == '9'), hasLength(1));
++    expect(quadrant.maxY, lessThan(corner.y),
++        reason: 'premise: under the box\'s top corner');
++    r.band(quadrant, crossing: true);
++    expect(r.selection.isEmpty, isTrue, reason: 'no leaf touched');
++
++    // Right of the press, then back left past it.
++    final s = r.screen(Vector2(chair.maxX, chair.maxY));
++    final e = r.screen(Vector2(chair.minX, chair.minY));
++    r.down(s);
++    r.move(s + const Offset(40, 10));
++    final window = r.paint();
++    expect(window.named('drawRect'), hasLength(2));
++    expect(window.named('drawPath'), isEmpty);
++    r.move(e);
++    final crossing = r.paint();
++    expect(crossing.named('drawRect'), hasLength(1));
++    expect(crossing.named('drawPath'), hasLength(1));
++    r.up(e);
++    expect(r.selection.keys, {r.key('1')}, reason: 'taken by crossing');
++  });
++
++  testWidgets(
++      'RB8 a zoom during a band: the corners are converted under the camera '
++      'at the up (M-RB8)', (tester) async {
++    final r = rig(tester);
++    r.drag(PlanFloorDrag.band);
++    final target = padded(r.leafBox(['2']), 100);
++    const f = Offset(200, 700);
++    final fw = r.toWorld(f);
++    // The world points that, after a 1.5x zoom about f, lie under the
++    // band's corners: farther from f's world point by 1.5.
++    Vector2 before(Vector2 w) => fw + (w - fw) * 1.5;
++    final a = before(Vector2(target.minX, target.maxY));
++    final b = before(Vector2(target.maxX, target.minY));
++    final s0 = r.screen(a), s1 = r.screen(b);
++    final mixed = boxOf([a, Vector2(target.maxX, target.minY)]);
++    expect(
++        encloses(mixed, Vector2(target.minX + 100, target.maxY - 100)), isFalse,
++        reason: 'premise: the press\'s old world point misses 2');
++    r.down(s0);
++    r.move(Offset.lerp(s0, s1, 0.5)!);
++    r.camera.value = ViewportTransform(
++        worldToScreenMatrix: Transform2.translation(f.dx, f.dy)
++            .multiply(Transform2.scale(1.5, 1.5))
++            .multiply(Transform2.translation(-f.dx, -f.dy))
++            .multiply(r.camera.value.worldToScreenMatrix));
++    final w0 = r.toWorld(s0);
++    expect(w0.x, closeTo(target.minX, 1e-6), reason: 'premise: the zoom');
++    expect(w0.y, closeTo(target.maxY, 1e-6));
++    r.move(s1);
++    r.up(s1);
++    expect(r.selection.keys, {r.key('2')});
++  });
++
++  testWidgets(
++      'RB9 a window over the whole floor: the hidden table and the planter '
++      'are not selected, the unnumbered one is (M-RB9)', (tester) async {
++    final r = rig(tester);
++    r.drag(PlanFloorDrag.band);
++    final all = padded(r.leafBox([for (var i = 1; i <= 11; i++) '$i']), 500);
++    expect(
++        encloses(
++            all, r.node('planter').transform.transformPoint(Vector2(250, 250))),
++        isTrue,
++        reason: 'premise: the planter inside');
++    r.band(all);
++    expect(r.selection.keys, r.keys(['1', '2', '4', '5', '6', '7', '9', '10']));
++    expect(r.selection.keys, isNot(contains(r.key('11'))));
++    expect(r.selection.keys, isNot(contains(r.key('planter'))));
++  });
++
++  testWidgets(
++      'RB10 locks and groups: a lone locked table is not taken; a window '
++      'round a group with a locked member takes its unlocked one; crossing '
++      'one member takes its group; a window with one member out takes none '
++      '(M-RB10, M-RB10b, M-RB11, M-RB12, M-RB26)', (tester) async {
++    final r = rig(tester);
++    r.drag(PlanFloorDrag.band);
++    r.selection.replace([r.key('1')]);
++    r.band(padded(r.leafBox(['3']), 100));
++    expect(r.selection.isEmpty, isTrue, reason: 'locked: nothing');
++
++    r.band(padded(r.leafBox(['7', '8']), 100));
++    expect(r.selection.keys, {r.key('7')});
++
++    // Over 5's upper chair only (local y 1000 to 1450).
++    final chair = boxOf([r.world('5', 800, 1300), r.world('5', 1000, 1650)]);
++    for (final n in ['4', '6']) {
++      expect(overlaps(chair, r.leafBox([n])), isFalse,
++          reason: 'premise: $n untouched');
++    }
++    r.band(chair, crossing: true);
++    expect(r.selection.keys, r.keys(['4', '5', '6']));
++
++    final two = padded(r.leafBox(['4', '5']), 100);
++    expect(two.maxX, lessThan(r.leafBox(['6']).minX),
++        reason: 'premise: 6 outside');
++    r.band(two);
++    expect(r.selection.isEmpty, isTrue);
++
++    // A crossing takes a group only through an unlocked member (RB-3): over
++    // the right edge of 8 (h's locked member) alone, off 7, it takes nothing
++    // and a plain band replaces the selection with that empty set.
++    r.selection.replace([r.key('1')]);
++    final eight = r.leafBox(['8']);
++    final edge = Aabb2.raw(
++        eight.maxX - 200, eight.minY - 100, eight.maxX + 300, eight.maxY + 100);
++    expect(overlaps(edge, eight), isTrue, reason: 'premise: touches 8');
++    expect(overlaps(edge, r.leafBox(['7'])), isFalse,
++        reason: 'premise: off 7\'s leaves');
++    expect(r.node('8').layer, isNot(r.node('7').layer),
++        reason: 'premise: 8 is on the locked layer, 7 not');
++    r.band(edge, crossing: true);
++    expect(r.selection.isEmpty, isTrue, reason: 'locked member alone: none');
++  });
++
++  testWidgets(
++      'RB11 a plain band replaces; a Ctrl band adds and keeps a selected '
++      'table inside (M-RB13)', (tester) async {
++    final r = rig(tester);
++    r.drag(PlanFloorDrag.band);
++    r.selection.replace([r.key('1')]);
++    r.band(padded(r.leafBox(['2']), 100));
++    expect(r.selection.keys, {r.key('2')});
++    r.selection.replace([r.key('1')]);
++    r.band(padded(r.leafBox(['1', '2']), 600), control: true);
++    expect(r.selection.keys, r.keys(['1', '2']));
++  });
++
++  testWidgets(
++      'RB12 a plain band over nothing clears; a Shift band over nothing keeps '
++      '(R-2, M-RB14)', (tester) async {
++    final r = rig(tester);
++    r.drag(PlanFloorDrag.band);
++    const empty = Aabb2.raw(2000, 2000, 4000, 3500);
++    r.selection.replace([r.key('1')]);
++    r.band(empty, shift: true);
++    expect(r.selection.keys, {r.key('1')});
++    r.band(empty);
++    expect(r.selection.isEmpty, isTrue);
++  });
++
++  testWidgets(
++      'RB13 one notification for a band that changes the selection, none '
++      'for one that does not; a band reports no tap, double tap, floor tap '
++      'or hover (M-RB15, M-RB16, M-RB27)', (tester) async {
++    final r = rig(tester);
++    r.drag(PlanFloorDrag.band);
++    var notified = 0;
++    r.selection.addListener(() => notified++);
++    final both = padded(r.leafBox(['1', '2']), 600);
++    r.band(both);
++    expect(notified, 1);
++    expect(r.selection.keys, r.keys(['1', '2']));
++    r.band(both);
++    expect(notified, 1, reason: 'the same keys: silent');
++    expect(r.selection.keys, r.keys(['1', '2']));
++
++    // A tap on 2, then a band from the floor beside it ending over it.
++    final top = r.at('2', 900, 650);
++    r.tap(top);
++    expect(r.taps, ['2']);
++    final start = top + const Offset(0, -200);
++    expect(r.picker.pick(r.toWorld(start)), isNull, reason: 'premise');
++    r.down(start);
++    r.move(top);
++    r.up(top);
++    expect(r.taps, ['2'], reason: 'no tap');
++    expect(r.doubleTaps, isEmpty);
++    expect(r.floors, isEmpty);
++    expect(r.hovers, isEmpty);
++    // The rig's events are all stamped zero: were the first tap still
++    // remembered, this one would complete a double tap (M-RB27).
++    r.tap(top);
++    expect(r.taps, ['2', '2']);
++    expect(r.doubleTaps, isEmpty, reason: 'the band broke the tap chain');
++  });
++
++  testWidgets('RB13b a band, then at once a tap on a table: the tap acts',
++      (tester) async {
++    final r = rig(tester);
++    r.drag(PlanFloorDrag.band);
++    r.band(padded(r.leafBox(['2']), 100));
++    expect(r.selection.keys, {r.key('2')});
++    r.tap(r.at('1', 900, 700));
++    expect(r.selection.keys, {r.key('1')});
++    expect(r.taps, ['1']);
++  });
++
++  testWidgets(
++      'RB14 Escape ends a band whatever idleKeys says; every key is handled '
++      'mid-band; cancel ends it; the next tap acts (M-RB17, M-RB17b)',
++      (tester) async {
++    final r = rig(tester);
++    r.drag(PlanFloorDrag.band);
++    r.idleKeys = false;
++    r.selection.replace([r.key('1')]);
++    final box = padded(r.leafBox(['2']), 100);
++    final s = r.screen(Vector2(box.minX, box.maxY));
++    final e = r.screen(Vector2(box.maxX, box.minY));
++    r.down(s);
++    r.move(e);
++    expect(r.tool.phase, ToolPhase.dragging);
++    expect(r.tool.onKey(_z, r.ctx), KeyEventResult.handled);
++    expect(r.tool.phase, ToolPhase.dragging, reason: 'a key ends nothing');
++    expect(r.tool.onKey(_escape, r.ctx), KeyEventResult.handled);
++    expect(r.tool.phase, ToolPhase.idle);
++    expect(r.paint().calls, isEmpty);
++    r.up(e);
++    expect(r.selection.keys, {r.key('1')});
++
++    r.down(s);
++    r.move(e);
++    r.tool.cancel(r.ctx);
++    expect(r.tool.phase, ToolPhase.idle);
++    r.up(e);
++    expect(r.selection.keys, {r.key('1')});
++    r.tap(r.at('2', 900, 650));
++    expect(r.selection.keys, {r.key('2')});
++    expect(r.taps, ['2']);
++  });
++
++  testWidgets(
++      'RB15 the band painted at the screen rect: a window\'s fill and '
++      'outline, a crossing\'s dashes; nothing when idle (M-RB18b)',
++      (tester) async {
++    final r = rig(tester);
++    r.drag(PlanFloorDrag.band);
++    expect(r.paint().calls, isEmpty, reason: 'idle');
++    const a = Offset(900, 120), b = Offset(1100, 300), c = Offset(800, 300);
++    expect(r.picker.pick(r.toWorld(a)), isNull, reason: 'premise');
++    r.down(a);
++    expect(r.paint().calls, isEmpty, reason: 'a press is no band');
++    r.move(b);
++    final window = r.paint();
++    expect(
++        [for (final i in window.calls) i.memberName], [#drawRect, #drawRect]);
++    final rect = Rect.fromPoints(a, b);
++    final [fill, stroke] = window.calls;
++    expect(fill.positionalArguments[0], rect);
++    expect((fill.positionalArguments[1] as Paint).style, PaintingStyle.fill);
++    expect(stroke.positionalArguments[0], rect);
++    expect(
++        (stroke.positionalArguments[1] as Paint).style, PaintingStyle.stroke);
++    r.move(c);
++    final crossing = r.paint();
++    expect(
++        [for (final i in crossing.calls) i.memberName], [#drawRect, #drawPath]);
++    expect(crossing.calls.first.positionalArguments[0], Rect.fromPoints(a, c));
++    r.up(c);
++    expect(r.paint().calls, isEmpty, reason: 'idle again');
++  });
++
++  testWidgets(
++      'RB15b the tool notifies as a band grows and when Escape ends it, so '
++      'the overlay repaints (M-RB22, M-RB23)', (tester) async {
++    final r = rig(tester);
++    r.drag(PlanFloorDrag.band);
++    var n = 0;
++    r.tool.addListener(() => n++);
++    const a = Offset(900, 120), b = Offset(1100, 300), c = Offset(1150, 320);
++    expect(r.picker.pick(r.toWorld(a)), isNull, reason: 'premise');
++    r.down(a);
++    r.move(b);
++    expect(r.tool.phase, ToolPhase.dragging, reason: 'premise: banding');
++    final started = n;
++    expect(started, greaterThan(0), reason: 'the band starting repaints');
++    r.move(c);
++    expect(n, greaterThan(started), reason: 'a further move repaints');
++    final grown = n;
++    expect(r.paint().calls, isNotEmpty, reason: 'premise: a band is painted');
++    expect(r.tool.onKey(_escape, r.ctx), KeyEventResult.handled);
++    expect(r.tool.phase, ToolPhase.idle);
++    expect(n, greaterThan(grown), reason: 'Escape repaints');
++    expect(r.paint().calls, isEmpty);
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/service/service_events_test.dart b/packages/jet_cad_2d_plan/test/service/service_events_test.dart
+new file mode 100644
+index 00000000..86277afa
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/service/service_events_test.dart
+@@ -0,0 +1,692 @@
++// Ported from jet_cad_floor_plan/test/service/service_events_test.dart; assertions unchanged.
++// Host embedding API spec E-1 to E-4 at the selection mode's tool, with
++// explicit `ToolPointerEvent`s (Slice 2 plan, Task 4): the moved instances
++// a drag reports, the double tap timed and measured from the raw downs'
++// stamps and screen points, the floor tap's world point, the hover. On the
++// shared non-degenerate fixture (embedding_fixture) decoded as a service
++// copy, under its panned 0.37 px/mm camera. Screen points are computed here
++// by the forward transform of the fixture's placements; expected world
++// points by the camera's inverse written out, never read from the code.
++import 'package:flutter/foundation.dart' show ValueNotifier;
++import 'package:flutter/gestures.dart'
++    show
++        PointerDeviceKind,
++        kDoubleTapSlop,
++        kDoubleTapTimeout,
++        kLongPressTimeout,
++        kPrimaryButton;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:jet_cad_2d_plan/src/controller/plan_controller.dart';
++import 'package:jet_cad_2d_plan/src/service/service_state.dart' show UnitGroup;
++import 'package:jet_cad_2d_plan/src/service/service_tool.dart';
++import 'package:jet_cad_2d_plan/src/service/unit_picker.dart';
++import 'package:jet_cad_2d_plan/src/units/unit_index.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/unit_embedding_fixture.dart';
++import '../support/unit_fixtures.dart';
++
++/// A picker that counts its picks.
++class CountingPicker extends UnitPicker {
++  CountingPicker(super.document, super.units);
++
++  int picks = 0;
++
++  @override
++  UnitInfo? pick(Vector2 world, {double reach = 0}) {
++    picks++;
++    return super.pick(world, reach: reach);
++  }
++}
++
++final class Rig {
++  Rig() {
++    final design = PlanController(kits: [fxKit()], json: embeddingPlanJson());
++    doc = copyForService(design.document);
++    design.dispose();
++    units = unitsOf(doc);
++    camera = CameraController(embeddingCamera());
++    index = SpatialIndex(doc);
++    selection = SelectionController(doc);
++    picker = CountingPicker(doc, units);
++    tool = ServiceTool(
++        picker: picker,
++        groups: ValueNotifier(const <String, UnitGroup>{}),
++        callbacks: () => (
++              onUnitTap: (n) => log.add('tap $n'),
++              onLayoutChanged: () => log.add('layout'),
++              onGroupTap: null,
++              onMergeRequested: null,
++              onSplitRequested: null,
++            ),
++        events: () => events);
++    ctx = ToolContext(
++        document: doc, index: index, camera: camera, selection: selection);
++  }
++
++  late final DraftDocument doc;
++  late final UnitIndexCache units;
++  late final CameraController camera;
++  late final SpatialIndex index;
++  late final SelectionController selection;
++  late final CountingPicker picker;
++  late final ServiceTool tool;
++  late final ToolContext ctx;
++
++  /// What the host heard, in order.
++  final List<String> log = [];
++  final List<List<Handle>> moved = [];
++  final List<Offset> floors = [];
++  final List<String?> hovers = [];
++
++  /// The events the tool reads at each call; every one logged.
++  late ServiceEvents<Handle> events = (
++    onUnitsMoved: (m) {
++      moved.add(m);
++      log.add('moved ${m.length}');
++    },
++    onUnitDoubleTap: (n) => log.add('double $n'),
++    onFloorTap: (w) {
++      floors.add(w);
++      log.add('floor');
++    },
++    onUnitHover: hovers.add,
++  );
++
++  void dispose() {
++    tool.dispose();
++    selection.dispose();
++    index.dispose();
++    camera.dispose();
++    doc.dispose();
++  }
++
++  /// Instance of the [i]th table of [embeddingTables] (survey order).
++  Handle instance(int i) => units.current.units[i].instance;
++
++  /// The screen point of local ([x], [y]) of [t], by the forward transform.
++  Offset at(EmbeddingTable t, [double x = 700, double y = 100]) {
++    final m = t.transform;
++    final p = canvasOf(
++        camera.value, m.a * x + m.c * y + m.e, m.b * x + m.d * y + m.f);
++    return Offset(p.x, p.y);
++  }
++
++  ToolPointerEvent ev(Offset screen,
++          {int buttons = kPrimaryButton,
++          bool shift = false,
++          PointerDeviceKind kind = PointerDeviceKind.mouse,
++          Duration time = Duration.zero}) =>
++      ToolPointerEvent(
++        screen: screen,
++        world: camera.value.screenToWorld(Vector2(screen.dx, screen.dy)),
++        pointer: 1,
++        buttons: buttons,
++        shift: shift,
++        control: false,
++        meta: false,
++        alt: false,
++        pickRadiusWorld: 6 / camera.value.scale,
++        kind: kind,
++        reachRadiusWorld:
++            kind == PointerDeviceKind.touch ? 24 / camera.value.scale : null,
++        timeStamp: time,
++      );
++
++  /// A tap whose down is stamped [down] (the up 40 ms later).
++  void tap(Offset s, Duration down, {bool shift = false}) {
++    tool.onPointerDown(ev(s, shift: shift, time: down), ctx);
++    tool.onPointerUp(
++        ev(s, buttons: 0, time: down + const Duration(milliseconds: 40)), ctx);
++  }
++
++  void hover(Offset s, {PointerDeviceKind kind = PointerDeviceKind.mouse}) =>
++      tool.onPointerMove(ev(s, buttons: 0, kind: kind), ctx);
++
++  void drag(Offset from, Offset to, Duration down) {
++    tool.onPointerDown(ev(from, time: down), ctx);
++    tool.onPointerMove(ev(Offset.lerp(from, to, 0.5)!, time: down), ctx);
++    tool.onPointerMove(ev(to, time: down), ctx);
++    tool.onPointerUp(ev(to, buttons: 0, time: down), ctx);
++  }
++}
++
++Rig rig() {
++  final r = Rig();
++  addTearDown(r.dispose);
++  return r;
++}
++
++EmbeddingTable table(String n) =>
++    embeddingTables.firstWhere((t) => t.number == n);
++
++Duration ms(int n) => Duration(milliseconds: n);
++
++/// A floor point: inside the page, between `1` and `2`'s row and the next,
++/// on no table's box.
++const double kFloorX = 41500, kFloorY = -29300;
++
++void main() {
++  group('double tap (E-2)', () {
++    testWidgets(
++        'SE1 two taps on one table within the timeout and the slop: two taps, '
++        'then the double tap; a third tap starts anew', (tester) async {
++      final r = rig();
++      final p = r.at(table('1'));
++      r.tap(p, ms(5000));
++      r.tap(p + const Offset(3, 2), ms(5200));
++      expect(r.log, ['tap 1', 'tap 1', 'double 1']);
++      r.tap(p, ms(5300));
++      expect(r.log, ['tap 1', 'tap 1', 'double 1', 'tap 1'],
++          reason: 'the chain reset: a third tap is a first');
++      r.tap(p, ms(5400));
++      expect(r.log.last, 'double 1', reason: 'the fourth completes anew');
++    });
++
++    testWidgets(
++        'SE2 the bounds are inclusive and measured between the two downs '
++        '(S-6): exactly kDoubleTapTimeout and exactly kDoubleTapSlop fire; '
++        'one millisecond or a pixel more does not', (tester) async {
++      expect(kDoubleTapTimeout, ms(300));
++      expect(kDoubleTapSlop, 100);
++      // Table 4 is turned 180 degrees: its local x is the screen's -x, and
++      // its box is 800 mm = 296 px wide, so 100 px fit inside it.
++      // Whole pixels, so the differences below are exact.
++      final r = rig();
++      final near = r.at(table('4'), 450, 100);
++      final a = Offset(near.dx.roundToDouble(), near.dy.roundToDouble());
++      final b = a + const Offset(-100, 0);
++      final c = a + const Offset(-101, 0);
++      expect((b - a).distance, 100, reason: 'premise');
++      for (final p in [a, b, c]) {
++        expect(r.picker.pick(r.ev(p).world)?.instance, r.instance(3),
++            reason: 'premise: on 4');
++      }
++      r.tap(a, ms(1000));
++      r.tap(a, ms(1300));
++      expect(r.log, ['tap 4', 'tap 4', 'double 4'], reason: 'exactly 300');
++      r.log.clear();
++      r.tap(a, ms(2000));
++      r.tap(a, ms(2301));
++      expect(r.log, ['tap 4', 'tap 4'], reason: '301 ms');
++      r.log.clear();
++      // The second tap of 301 ms is kept: one 300 ms after it completes.
++      r.tap(a, ms(2601));
++      expect(r.log, ['tap 4', 'double 4']);
++      r.log.clear();
++      r.tap(a, ms(4000));
++      r.tap(b, ms(4100));
++      expect(r.log, ['tap 4', 'tap 4', 'double 4'], reason: 'exactly 100 px');
++      r.log.clear();
++      r.tap(a, ms(6000));
++      r.tap(c, ms(6100));
++      expect(r.log, ['tap 4', 'tap 4'], reason: '101 px');
++    });
++
++    testWidgets(
++        'SE3 the time is the downs\' stamps: the ups\' and the clock\'s are '
++        'not read', (tester) async {
++      final r = rig();
++      final p = r.at(table('2'));
++      r.tool.onPointerDown(r.ev(p, time: ms(1000)), r.ctx);
++      r.tool.onPointerUp(r.ev(p, buttons: 0, time: ms(1250)), r.ctx);
++      await tester.pump(const Duration(seconds: 2));
++      r.tool.onPointerDown(r.ev(p, time: ms(1290)), r.ctx);
++      r.tool.onPointerUp(r.ev(p, buttons: 0, time: ms(9000)), r.ctx);
++      expect(r.log, ['tap 2', 'tap 2', 'double 2']);
++    });
++
++    testWidgets(
++        'SE4 a modifier on either tap prevents it; a modifier tap breaks the '
++        'chain', (tester) async {
++      final r = rig();
++      final p = r.at(table('1'));
++      r.tap(p, ms(1000), shift: true);
++      r.tap(p, ms(1100));
++      expect(r.log.where((l) => l.startsWith('double')), isEmpty,
++          reason: 'Shift on the first');
++      r.tap(p, ms(1200), shift: true);
++      expect(r.log.where((l) => l.startsWith('double')), isEmpty,
++          reason: 'Shift on the second');
++      r.tap(p, ms(1300));
++      expect(r.log.where((l) => l.startsWith('double')), isEmpty,
++          reason: 'the Shift tap broke the chain: this is a first tap');
++      r.tap(p, ms(1400));
++      expect(r.log.last, 'double 1');
++    });
++
++    testWidgets(
++        'SE5 another instance sharing the number, the unnumbered table, the '
++        'floor, a drag and a long press each reset the chain; another '
++        'instance\'s tap is kept', (tester) async {
++      final r = rig();
++      // At 0.025 px/mm the two 7s' centres are within the slop.
++      r.camera.value = ViewportTransform(
++          worldToScreenMatrix: Transform2(0.025, 0, 0, -0.025, -425, -375));
++      final seven = r.at(table('7'));
++      final sevenB = r.at(embeddingTables[7]);
++      expect(embeddingTables[7].number, '7', reason: 'premise: " 7 "');
++      expect((sevenB - seven).distance, lessThan(kDoubleTapSlop),
++          reason: 'premise: within the slop');
++      for (final (p, i) in [(seven, 6), (sevenB, 7)]) {
++        expect(r.picker.pick(r.ev(p).world)?.instance, r.instance(i),
++            reason: 'premise: on its own 7');
++      }
++      r.tap(seven, ms(1000));
++      r.tap(sevenB, ms(1100));
++      expect(r.log, ['tap 7', 'tap 7'], reason: 'two instances (M-H20)');
++      r.tap(sevenB, ms(1200));
++      expect(r.log.last, 'double 7', reason: 'the other instance was kept');
++      r.log.clear();
++      r.camera.value = embeddingCamera();
++
++      final one = r.at(table('1'));
++      final unnumbered = r.at(embeddingTables[8]);
++      final floor = canvasOf(r.camera.value, kFloorX, kFloorY);
++      for (final (what, between) in <(String, void Function(Duration))>[
++        ('the unnumbered table', (t) => r.tap(unnumbered, t)),
++        ('the floor', (t) => r.tap(Offset(floor.x, floor.y), t)),
++        ('a drag', (t) => r.drag(one, one + const Offset(0, 60), t)),
++      ]) {
++        r.log.clear();
++        r.tap(one, ms(20000));
++        between(ms(20050));
++        // The table may have moved: tap where it is now.
++        final node = r.doc.tree[r.instance(0)]! as InstanceNode;
++        final m = node.transform;
++        final now = canvasOf(r.camera.value, m.a * 700 + m.c * 100 + m.e,
++            m.b * 700 + m.d * 100 + m.f);
++        r.tap(Offset(now.x, now.y), ms(20100));
++        expect(r.log.where((l) => l.startsWith('double')), isEmpty,
++            reason: what);
++        if (r.doc.commands.undoDepth > 0) r.doc.commands.undo();
++      }
++
++      r.log.clear();
++      final p = r.at(table('1'));
++      // The stamps stay within the timeout while the fake clock runs the
++      // long press: only the reset tells the last tap from a double tap.
++      r.tap(p, ms(30000));
++      r.tool.onPointerDown(r.ev(p, time: ms(30050)), r.ctx);
++      await tester.pump(kLongPressTimeout + ms(10));
++      r.tool.onPointerUp(r.ev(p, buttons: 0, time: ms(30090)), r.ctx);
++      r.tap(p, ms(30200));
++      expect(r.log, ['tap 1', 'tap 1'], reason: 'a long press');
++    });
++
++    testWidgets('SE6 a cancelled press resets the chain', (tester) async {
++      final r = rig();
++      final p = r.at(table('1'));
++      r.tap(p, ms(1000));
++      r.tool.onPointerDown(r.ev(p, time: ms(1050)), r.ctx);
++      r.tool.cancel(r.ctx);
++      r.tap(p, ms(1100));
++      expect(r.log, ['tap 1', 'tap 1']);
++    });
++
++    testWidgets('SE7 a locked table reports its double tap', (tester) async {
++      final r = rig();
++      final p = r.at(table('L'));
++      r.tap(p, ms(1000));
++      r.tap(p, ms(1100));
++      expect(r.log, ['tap L', 'tap L', 'double L']);
++      expect(r.selection.isEmpty, isTrue, reason: 'locked: never selected');
++    });
++    testWidgets(
++        'SE14 with a group: tap, then groupTap, then the double tap, which '
++        'reports the member\'s own number; taps on two members of one '
++        'group are no double tap', (tester) async {
++      final r = rig();
++      // At 0.025 px/mm the members 1 and 2, 3 m apart, are within the slop.
++      r.camera.value = ViewportTransform(
++          worldToScreenMatrix: Transform2(0.025, 0, 0, -0.025, -425, -375));
++      final groups = ValueNotifier<Map<String, UnitGroup>>({
++        'g': UnitGroup(members: {'1', '2'})
++      });
++      addTearDown(groups.dispose);
++      final tool = ServiceTool(
++          picker: r.picker,
++          groups: groups,
++          callbacks: () => (
++                onUnitTap: (n) => r.log.add('tap $n'),
++                onLayoutChanged: null,
++                onGroupTap: (g, n) => r.log.add('group $g $n'),
++                onMergeRequested: null,
++                onSplitRequested: null,
++              ),
++          events: () => r.events);
++      addTearDown(tool.dispose);
++      void tap(Offset s, Duration down) {
++        tool.onPointerDown(r.ev(s, time: down), r.ctx);
++        tool.onPointerUp(r.ev(s, buttons: 0, time: down + ms(40)), r.ctx);
++      }
++
++      final one = r.at(table('1'));
++      final two = r.at(table('2'));
++      expect((two - one).distance, lessThan(kDoubleTapSlop),
++          reason: 'premise: within the slop');
++      for (final (p, i) in [(one, 0), (two, 1)]) {
++        expect(r.picker.pick(r.ev(p).world)?.instance, r.instance(i),
++            reason: 'premise: on its own table');
++      }
++      tap(one, ms(1000));
++      tap(one, ms(1100));
++      expect(r.log, ['tap 1', 'group g 1', 'tap 1', 'group g 1', 'double 1']);
++      expect(r.selection.keys, hasLength(2),
++          reason: 'premise: a member stands for its group');
++      r.log.clear();
++      tap(two, ms(3000));
++      tap(two, ms(3100));
++      expect(r.log, ['tap 2', 'group g 2', 'tap 2', 'group g 2', 'double 2'],
++          reason: 'the member\'s number, not the first member\'s');
++      r.log.clear();
++      tap(one, ms(5000));
++      tap(two, ms(5100));
++      tap(one, ms(5200));
++      expect(
++          r.log,
++          [
++            'tap 1', 'group g 1', 'tap 2', 'group g 2', 'tap 1', 'group g 1' //
++          ],
++          reason: 'one group, two tables: each tap keeps its own table');
++    });
++  });
++
++  group('floor tap (E-3)', () {
++    testWidgets(
++        'SE8 a miss reports the down\'s world point after the selection '
++        'logic, with or without a modifier (S-4)', (tester) async {
++      final r = rig();
++      r.tap(r.at(table('1')), ms(1000));
++      expect(r.selection.isEmpty, isFalse, reason: 'premise');
++      final down = canvasOf(r.camera.value, kFloorX, kFloorY);
++      final cam = r.camera.value.worldToScreenMatrix;
++      var emptyInCallback = false;
++      r.events = (
++        onUnitsMoved: null,
++        onUnitDoubleTap: null,
++        onFloorTap: (w) {
++          r.floors.add(w);
++          emptyInCallback = r.selection.isEmpty;
++        },
++        onUnitHover: null,
++      );
++      // The up lands elsewhere: the down's point is the one reported.
++      r.tool.onPointerDown(r.ev(Offset(down.x, down.y), time: ms(2000)), r.ctx);
++      r.tool.onPointerUp(
++          r.ev(Offset(down.x + 4, down.y - 3), buttons: 0, time: ms(2040)),
++          r.ctx);
++      expect(r.floors, hasLength(1));
++      // The camera's inverse, written out: x = (sx - e) / a, y = (sy - f) / d.
++      expect(r.floors.single.dx,
++          closeTo((down.x - cam.e) / cam.a, kFloorX.abs() * 1e-12));
++      expect(r.floors.single.dy,
++          closeTo((down.y - cam.f) / cam.d, kFloorY.abs() * 1e-12));
++      expect(r.floors.single.dx, closeTo(kFloorX, kFloorX.abs() * 1e-12));
++      expect(r.floors.single.dy, closeTo(kFloorY, kFloorY.abs() * 1e-12));
++      expect(emptyInCallback, isTrue, reason: 'the selection already cleared');
++
++      r.tap(r.at(table('1')), ms(3000));
++      r.tap(Offset(down.x, down.y), ms(4000), shift: true);
++      expect(r.floors, hasLength(2), reason: 'a modifier miss reports too');
++      expect(r.selection.isEmpty, isFalse, reason: 'and keeps the selection');
++    });
++
++    testWidgets(
++        'SE9 a tap on the unnumbered table reports neither a tap nor the '
++        'floor', (tester) async {
++      final r = rig();
++      r.tap(r.at(embeddingTables[8]), ms(1000));
++      expect(r.log, isEmpty);
++      expect(r.selection.keys, {SelectionKey.root(r.instance(8))},
++          reason: 'premise: it was hit');
++    });
++  });
++
++  group('moved (E-1)', () {
++    testWidgets(
++        'SE10 a drag reports the moved live instances once, ascending, after '
++        'onLayoutChanged; a zero drag reports nothing', (tester) async {
++      final r = rig();
++      r.tap(r.at(table('4')), ms(1000));
++      r.tap(r.at(table('1')), ms(2000), shift: true);
++      r.log.clear();
++      final from = r.at(table('4'));
++      r.drag(from, from + const Offset(40, 25), ms(3000));
++      expect(r.log, ['layout', 'moved 2']);
++      expect(r.moved.single, [r.instance(0), r.instance(3)]);
++      expect(r.moved.single[0].value < r.moved.single[1].value, isTrue);
++      expect(() => r.moved.single.add(r.instance(1)), throwsUnsupportedError);
++      r.log.clear();
++      final two = r.at(table('2'));
++      r.tool.onPointerDown(r.ev(two, time: ms(5000)), r.ctx);
++      r.tool.onPointerMove(r.ev(two + const Offset(40, 0)), r.ctx);
++      r.tool.onPointerMove(r.ev(two), r.ctx);
++      r.tool.onPointerUp(r.ev(two, buttons: 0), r.ctx);
++      expect(r.log, isEmpty, reason: 'a zero drag: nothing');
++      expect(r.doc.commands.undoDepth, 1, reason: 'premise: no step');
++    });
++  });
++
++  group('hover (E-4)', () {
++    testWidgets(
++        'SE11 a mouse hover reports on change only; an exit reports null when '
++        'the last was not (M-H29 hover per move)', (tester) async {
++      final r = rig();
++      final one = table('1');
++      r.hover(r.at(one, 600, 0));
++      r.hover(r.at(one, 700, 100));
++      r.hover(r.at(one, 800, 50));
++      expect(r.hovers, ['1']);
++      final floor = canvasOf(r.camera.value, kFloorX, kFloorY);
++      r.hover(Offset(floor.x, floor.y));
++      r.hover(Offset(floor.x + 5, floor.y));
++      expect(r.hovers, ['1', null]);
++      r.hover(r.at(one));
++      r.hover(r.at(one, 650, 120));
++      expect(r.hovers, ['1', null, '1']);
++      r.hover(r.at(embeddingTables[8]));
++      expect(r.hovers, ['1', null, '1', null], reason: 'unnumbered: null');
++      r.tool.onPointerExit(r.ctx);
++      expect(r.hovers, ['1', null, '1', null], reason: 'already null');
++      r.hover(r.at(table('L')));
++      r.tool.onPointerExit(r.ctx);
++      r.tool.onPointerExit(r.ctx);
++      expect(r.hovers, ['1', null, '1', null, 'L', null]);
++    });
++
++    testWidgets(
++        'SE12 a stylus hovers; a finger never does (M-H29 hover for touch)',
++        (tester) async {
++      final r = rig();
++      r.hover(r.at(table('1')), kind: PointerDeviceKind.touch);
++      expect(r.hovers, isEmpty, reason: 'touch');
++      r.hover(r.at(table('1')), kind: PointerDeviceKind.stylus);
++      expect(r.hovers, ['1'], reason: 'stylus');
++      r.hover(r.at(table('2')), kind: PointerDeviceKind.invertedStylus);
++      expect(r.hovers, ['1', '2']);
++    });
++
++    testWidgets('SE13 no callback: no pick at all; a press\'s move is no hover',
++        (tester) async {
++      final r = rig();
++      r.events = kNoServiceEvents;
++      r.hover(r.at(table('1')));
++      r.hover(r.at(table('2')));
++      expect(r.picker.picks, 0, reason: 'no pick without the callback');
++      r.events = (
++        onUnitsMoved: null,
++        onUnitDoubleTap: null,
++        onFloorTap: null,
++        onUnitHover: r.hovers.add,
++      );
++      r.hover(r.at(table('1')));
++      expect(r.picker.picks, 1);
++      expect(r.hovers, ['1']);
++      final p = r.at(table('2'));
++      r.tool.onPointerDown(r.ev(p), r.ctx);
++      r.tool.onPointerMove(r.ev(p + const Offset(2, 1)), r.ctx);
++      r.tool.onPointerUp(r.ev(p, buttons: 0), r.ctx);
++      expect(r.hovers, ['1'], reason: 'a pressed move is not a hover');
++    });
++
++    testWidgets(
++        'SE15 with onTableHover set, hovers over 60 tables\' tops, their '
++        'boxes and the floor between them allocate nothing per table: no '
++        'inverse is asked for a point, no candidate is rebuilt (CLAUDE.md; '
++        'Task 4 review R-5)', (tester) async {
++      // Trapezoid tables in rows 40 m off the origin, each turned 37
++      // degrees and mirrored, numbered 1..60, the base point (900, 650) of
++      // each at its row's place.
++      final doc = numberedRowOfTables(60);
++      final units = unitsOf(doc);
++      final made = Tally();
++      final inverses = <CountingTransform>[];
++      final picker = UnitPicker(doc, units, invert: (m) {
++        final inverse = CountingTransform(m.invert(), made);
++        inverses.add(inverse);
++        return inverse;
++      });
++      final hovers = <String?>[];
++      final ServiceEvents<Handle> events = (
++        onUnitsMoved: null,
++        onUnitDoubleTap: null,
++        onFloorTap: null,
++        onUnitHover: hovers.add,
++      );
++      final tool = ServiceTool(
++          picker: picker,
++          groups: ValueNotifier(const <String, UnitGroup>{}),
++          callbacks: () => (
++                onUnitTap: null,
++                onLayoutChanged: null,
++                onGroupTap: null,
++                onMergeRequested: null,
++                onSplitRequested: null,
++              ),
++          events: () => events);
++      // 0.1 px/mm, y up, panned: a mouse's 6 px are 60 mm.
++      const view = Transform2(0.1, 0, 0, -0.1, -3900, -2600);
++      final camera =
++          CameraController(ViewportTransform(worldToScreenMatrix: view));
++      final index = SpatialIndex(doc);
++      final selection = SelectionController(doc);
++      final ctx = ToolContext(
++          document: doc, index: index, camera: camera, selection: selection);
++      addTearDown(() {
++        tool.dispose();
++        selection.dispose();
++        index.dispose();
++        camera.dispose();
++        doc.dispose();
++      });
++      void hover(double x, double y) => tool.onPointerMove(
++          ToolPointerEvent(
++              screen: Offset(view.a * x + view.e, view.d * y + view.f),
++              world: Vector2(x, y),
++              pointer: 1,
++              buttons: 0,
++              shift: false,
++              control: false,
++              meta: false,
++              alt: false,
++              pickRadiusWorld: 60),
++          ctx);
++
++      final tables = units.current.units;
++      expect([
++        for (final t in tables) t.text
++      ], [
++        for (var k = 1; k <= 60; k++) '$k'
++      ], reason: 'premise');
++      final placements = [
++        for (final t in tables)
++          (doc.tree[t.instance]! as InstanceNode).transform
++      ];
++      (double, double) on(Transform2 m, double x, double y) =>
++          (m.a * x + m.c * y + m.e, m.b * x + m.d * y + m.f);
++      // Per table, by the forward transform: a point of its top; a point
++      // of its box off its top (the second pass); the floor beyond its
++      // base point, 1.77 m from every base and so off every box (each box
++      // reaches 0.79 m from its base), where both passes run in full.
++      final round = [
++        for (final m in placements) ...[
++          on(m, 900, 600),
++          on(m, 250, 950),
++          (on(m, 900, 650).$1 + 1250, on(m, 900, 650).$2 - 1250),
++        ]
++      ];
++      final candidates = picker.candidates;
++      expect(inverses, hasLength(60), reason: 'one inverse per candidate');
++      for (final c in candidates) {
++        expect(c.top!.contains(250, 950, UnitPicker.tolerance), isFalse,
++            reason: 'premise: the box point is off the top');
++      }
++      final heard = [
++        for (var k = 1; k <= 60; k++) ...['$k', null]
++      ];
++      for (final (x, y) in round) {
++        hover(x, y); // warm-up
++      }
++      expect(hovers, heard, reason: 'premise: each pick lands');
++
++      made.count = 0;
++      for (var pass = 0; pass < 5; pass++) {
++        for (final (x, y) in round) {
++          hover(x, y);
++        }
++      }
++      expect(hovers, [for (var pass = 0; pass < 6; pass++) ...heard]);
++      expect(made.count, 0,
++          reason: '900 hovers asked no inverse for a new object');
++      expect(inverses, hasLength(60), reason: 'no inverse built anew');
++      expect(identical(picker.candidates, candidates), isTrue,
++          reason: 'the candidates are cached, not rebuilt per move');
++    });
++  });
++
++  group('double tap slop (final review F-6)', () {
++    testWidgets(
++        'SE16 the slop is measured from the first tap\'s down, not where it '
++        'came up: a first tap that drifts 15 px (within kTouchSlop) before '
++        'its up neither breaks a double tap 99 px from its down nor makes '
++        'one 101 px from it', (tester) async {
++      final r = rig();
++      final near = r.at(table('4'), 450, 100);
++      final a = Offset(near.dx.roundToDouble(), near.dy.roundToDouble());
++      const drift = Offset(15, 0);
++      final points = [
++        a,
++        a + drift,
++        a - drift,
++        a + const Offset(-99, 0),
++        a + const Offset(-101, 0)
++      ];
++      for (final p in points) {
++        expect(r.picker.pick(r.ev(p).world)?.instance, r.instance(3),
++            reason: 'premise: on 4');
++      }
++
++      /// A tap down at [down], moved to [up] before it comes up there.
++      void drifting(Offset down, Offset up, Duration at) {
++        r.tool.onPointerDown(r.ev(down, time: at), r.ctx);
++        r.tool.onPointerMove(r.ev(up, time: at + ms(20)), r.ctx);
++        r.tool.onPointerUp(r.ev(up, buttons: 0, time: at + ms(40)), r.ctx);
++      }
++
++      // 99 px from the first down, 114 px from its up: a double tap. The
++      // drifting tap is logged as a tap: 15 px is within kTouchSlop.
++      drifting(a, a + drift, ms(1000));
++      r.tap(a + const Offset(-99, 0), ms(1100));
++      expect(r.log, ['tap 4', 'tap 4', 'double 4'], reason: '99 px');
++      r.log.clear();
++
++      // 101 px from the first down, 86 px from its up: two taps.
++      drifting(a, a - drift, ms(3000));
++      r.tap(a + const Offset(-101, 0), ms(3100));
++      expect(r.log, ['tap 4', 'tap 4'], reason: '101 px');
++    });
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/service/service_tool_test.dart b/packages/jet_cad_2d_plan/test/service/service_tool_test.dart
+new file mode 100644
+index 00000000..f0de21a5
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/service/service_tool_test.dart
+@@ -0,0 +1,477 @@
++// Ported from jet_cad_floor_plan/test/service/table_select_tool_test.dart; assertions unchanged.
++// Spec 14c S3, S4, S8, R-1, R-5, R-6: the selection mode's tool -- taps,
++// modifier taps, long presses, drags that move the selection in one step,
++// pans on the floor, locked tables tapped only, cancel and Escape. Under
++// fake time (testWidgets), so the long press is driven by pumps. Tables are
++// off the origin, turned and mirrored, on a service copy (runtime).
++import 'dart:convert';
++
++import 'package:flutter/foundation.dart' show ValueNotifier;
++import 'package:flutter/gestures.dart'
++    show PointerDeviceKind, kLongPressTimeout, kPrimaryButton;
++import 'package:flutter/services.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:jet_cad_2d_plan/src/service/service_state.dart' show UnitGroup;
++import 'package:jet_cad_2d_plan/src/service/service_tool.dart';
++import 'package:jet_cad_2d_plan/src/service/unit_picker.dart';
++import 'package:jet_cad_2d_plan/src/units/unit_index.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/unit_fixtures.dart';
++
++/// World (0, 0) at screen (700, 450), 0.1 px per mm, y up.
++CameraController newCamera() => CameraController(ViewportTransform(
++    worldToScreenMatrix: Transform2(0.1, 0, 0, -0.1, 700, 450)));
++
++final class Rig {
++  Rig._(this.doc, this.units, this.camera, this.index, this.selection,
++      this.tool, this.ctx);
++
++  /// Tables 1 (at -2000, 1000, turned, mirrored), 2 (at 2500, 1000) and 3
++  /// (at 0, -2500, on a locked layer), decoded as a service copy.
++  factory Rig() {
++    final design = unitPlan();
++    addUnitLabel(
++        design,
++        placeAt(design, tableSymbol(), Vector2(-2000, 1000),
++            quarterTurns: 1, mirrored: true),
++        '1');
++    addUnitLabel(
++        design,
++        placeAt(design, trapezoidTable, Vector2(2500, 1000), mirrored: true),
++        '2');
++    final locked = addLayer(design, 'Locked');
++    addUnitLabel(
++        design, placeAt(design, tableSymbol(), Vector2(0, -2500)), '3');
++    final third = unitsOf(design).current.withLabel('3').single.instance;
++    design.commands.execute(SetInstanceLayerCommand(third, locked));
++    design.commands.execute(
++        SetLayerCommand(design.tables.layers[locked]!.copyWith(locked: true)));
++    final doc = copyForService(design);
++    final units = unitsOf(doc);
++    final cam = newCamera();
++    final index = SpatialIndex(doc);
++    final selection = SelectionController(doc);
++    final taps = <String>[];
++    var layouts = 0;
++    final tool = ServiceTool(
++        picker: UnitPicker(doc, units),
++        groups: ValueNotifier(const <String, UnitGroup>{}),
++        callbacks: () => (
++              onUnitTap: taps.add,
++              onLayoutChanged: () => layouts++,
++              onGroupTap: null,
++              onMergeRequested: null,
++              onSplitRequested: null,
++            ));
++    final rig = Rig._(
++        doc,
++        units,
++        cam,
++        index,
++        selection,
++        tool,
++        ToolContext(
++            document: doc, index: index, camera: cam, selection: selection));
++    rig._taps = taps;
++    rig._layouts = () => layouts;
++    return rig;
++  }
++
++  final DraftDocument doc;
++  final UnitIndexCache units;
++  final CameraController camera;
++  final SpatialIndex index;
++  final SelectionController selection;
++  final ServiceTool tool;
++  final ToolContext ctx;
++  late final List<String> _taps;
++  late final int Function() _layouts;
++
++  List<String> get taps => _taps;
++  int get layouts => _layouts();
++
++  void dispose() {
++    tool.dispose();
++    selection.dispose();
++    index.dispose();
++    camera.dispose();
++  }
++
++  InstanceNode node(String n) =>
++      doc.tree[units.current.withLabel(n).single.instance]! as InstanceNode;
++
++  SelectionKey key(String n) => SelectionKey.root(node(n).handle);
++
++  /// The screen point of local ([x], [y]) of table [n].
++  Offset at(String n, double x, double y) {
++    final w = node(n).transform.transformPoint(Vector2(x, y));
++    final s = camera.value.worldToScreen(w);
++    return Offset(s.x, s.y);
++  }
++
++  ToolPointerEvent ev(Offset screen,
++          {int buttons = kPrimaryButton,
++          bool shift = false,
++          bool control = false,
++          bool meta = false,
++          bool touch = false}) =>
++      ToolPointerEvent(
++        screen: screen,
++        world: camera.value.screenToWorld(Vector2(screen.dx, screen.dy)),
++        pointer: 1,
++        buttons: buttons,
++        shift: shift,
++        control: control,
++        meta: meta,
++        alt: false,
++        pickRadiusWorld: 6 / camera.value.scale,
++        kind: touch ? PointerDeviceKind.touch : PointerDeviceKind.mouse,
++        reachRadiusWorld: touch ? 24 / camera.value.scale : null,
++      );
++
++  void down(Offset s,
++          {bool shift = false, bool control = false, bool meta = false}) =>
++      tool.onPointerDown(
++          ev(s, shift: shift, control: control, meta: meta), ctx);
++  void move(Offset s) => tool.onPointerMove(ev(s), ctx);
++  void up(Offset s) => tool.onPointerUp(ev(s, buttons: 0), ctx);
++
++  void tap(Offset s,
++      {bool shift = false, bool control = false, bool meta = false}) {
++    down(s, shift: shift, control: control, meta: meta);
++    up(s);
++  }
++}
++
++List<double> parts(Transform2 t) => [t.a, t.b, t.c, t.d, t.e, t.f];
++
++Rig rig(WidgetTester tester) {
++  final r = Rig();
++  addTearDown(r.dispose);
++  return r;
++}
++
++void main() {
++  testWidgets(
++      'ST1 a tap selects a table alone and reports its number; another tap '
++      'replaces; a tap on the floor clears (M-14c2-9)', (tester) async {
++    final r = rig(tester);
++    r.tap(r.at('1', 900, 700));
++    expect(r.selection.keys, {r.key('1')});
++    r.tap(r.at('2', 900, 400));
++    expect(r.selection.keys, {r.key('2')});
++    expect(r.taps, ['1', '2']);
++    r.tap(const Offset(40, 40));
++    expect(r.selection.isEmpty, isTrue);
++    expect(r.taps, ['1', '2'], reason: 'the floor reports nothing');
++    expect(r.doc.commands.undoDepth, 0);
++  });
++
++  testWidgets(
++      'ST2 a Shift tap toggles; a Shift tap on the floor keeps the selection',
++      (tester) async {
++    final r = rig(tester);
++    r.tap(r.at('1', 900, 700));
++    r.tap(r.at('2', 900, 400), shift: true);
++    expect(r.selection.keys, {r.key('1'), r.key('2')});
++    r.tap(const Offset(40, 40), shift: true);
++    expect(r.selection.keys, hasLength(2));
++    r.tap(r.at('1', 900, 700), shift: true);
++    expect(r.selection.keys, {r.key('2')});
++  });
++
++  testWidgets(
++      'ST3 a drag on a selected table moves the selection: one step, '
++      'translation only, the drag\'s delta (M-14c2-3, M-14c2-4)',
++      (tester) async {
++    final r = rig(tester);
++    r.tap(r.at('1', 900, 700));
++    r.tap(r.at('2', 900, 400), shift: true);
++    final before1 = parts(r.node('1').transform);
++    final before2 = parts(r.node('2').transform);
++    final start = r.at('2', 900, 400);
++    r.down(start);
++    r.move(start + const Offset(30, 0));
++    r.move(start + const Offset(60, -20));
++    // 60 px right, 20 px up: +600, +200 in world (review F-6).
++    expect(parts(r.tool.selectionPreviewTransform!),
++        [1, 0, 0, 1, closeTo(600, 1e-6), closeTo(200, 1e-6)]);
++    r.move(start + const Offset(85, -35));
++    r.up(start + const Offset(85, -35));
++    expect(r.doc.commands.undoDepth, 1, reason: 'one step per drag');
++    expect(r.layouts, 1);
++    // 85 px right, 35 px up at 0.1 px/mm: +850, +350 in world.
++    for (final (n, before) in [('1', before1), ('2', before2)]) {
++      final after = parts(r.node(n).transform);
++      expect(after.sublist(0, 4), before.sublist(0, 4), reason: 'linear');
++      expect(after[4], closeTo(before[4] + 850, 1e-6));
++      expect(after[5], closeTo(before[5] + 350, 1e-6));
++    }
++    expect(r.taps, ['1', '2'], reason: 'a drag reports no tap');
++    r.doc.commands.undo();
++    expect(parts(r.node('1').transform), before1);
++  });
++
++  testWidgets('ST4 a drag on an unselected table selects it alone and moves it',
++      (tester) async {
++    final r = rig(tester);
++    r.tap(r.at('1', 900, 700));
++    final before1 = parts(r.node('1').transform);
++    final before = parts(r.node('2').transform);
++    final start = r.at('2', 900, 400);
++    r.down(start);
++    r.move(start + const Offset(-40, 40));
++    r.up(start + const Offset(-40, 40));
++    expect(r.selection.keys, {r.key('2')});
++    expect(parts(r.node('2').transform)[4], closeTo(before[4] - 400, 1e-6));
++    expect(parts(r.node('1').transform), before1,
++        reason: 'the previous selection stays where it was (review F-1)');
++  });
++
++  testWidgets(
++      'ST5 a long press toggles and spends the gesture: no tap, no move '
++      '(M-14c2-5)', (tester) async {
++    final r = rig(tester);
++    r.tap(r.at('1', 900, 700));
++    final p = r.at('2', 900, 400);
++    r.down(p);
++    await tester.pump(const Duration(milliseconds: 499));
++    expect(r.selection.keys, {r.key('1')});
++    await tester.pump(const Duration(milliseconds: 2));
++    expect(r.selection.keys, {r.key('1'), r.key('2')}, reason: 'added');
++    r.move(p + const Offset(80, 0));
++    r.up(p + const Offset(80, 0));
++    expect(r.doc.commands.undoDepth, 0, reason: 'spent: no move');
++    expect(r.taps, ['1'], reason: 'a long press reports no tap');
++    r.down(p);
++    await tester.pump(const Duration(milliseconds: 501));
++    r.up(p);
++    expect(r.selection.keys, {r.key('1')}, reason: 'removed');
++  });
++
++  testWidgets(
++      'ST6 a press that drags before the long press never toggles; a short '
++      'press is a tap (M-14c2-6)', (tester) async {
++    final r = rig(tester);
++    final p = r.at('1', 900, 700);
++    r.down(p);
++    await tester.pump(const Duration(milliseconds: 300));
++    r.move(p + const Offset(40, 0));
++    await tester.pump(const Duration(milliseconds: 400));
++    r.up(p + const Offset(40, 0));
++    expect(r.selection.keys, {r.key('1')}, reason: 'dragged, selected');
++    expect(r.doc.commands.undoDepth, 1);
++    r.down(r.at('2', 900, 400));
++    await tester.pump(const Duration(milliseconds: 450));
++    r.up(r.at('2', 900, 400));
++    expect(r.selection.keys, {r.key('2')}, reason: 'a tap, not a toggle');
++    await tester.pump(const Duration(milliseconds: 200));
++    expect(r.selection.keys, {r.key('2')}, reason: 'the timer was cancelled');
++  });
++
++  testWidgets(
++      'ST7 a locked table is tapped only: reported, never selected, toggled '
++      'or moved (M-14l)', (tester) async {
++    final r = rig(tester);
++    r.tap(r.at('1', 900, 700));
++    final before = parts(r.node('3').transform);
++    final p = r.at('3', 900, 700);
++    r.tap(p);
++    expect(r.taps, ['1', '3']);
++    expect(r.selection.keys, {r.key('1')});
++    r.down(p);
++    await tester.pump(const Duration(milliseconds: 600));
++    r.up(p);
++    expect(r.selection.keys, {r.key('1')}, reason: 'no toggle');
++    final cam = parts(r.camera.value.worldToScreenMatrix);
++    r.down(p);
++    r.move(p + const Offset(60, 60));
++    r.up(p + const Offset(60, 60));
++    expect(parts(r.node('3').transform), before);
++    expect(parts(r.camera.value.worldToScreenMatrix), cam, reason: 'no pan');
++    expect(r.doc.commands.undoDepth, 0);
++  });
++
++  testWidgets('ST8 a drag on the floor pans and keeps the selection',
++      (tester) async {
++    final r = rig(tester);
++    r.tap(r.at('1', 900, 700));
++    final before = r.camera.value.worldToScreenMatrix;
++    r.down(const Offset(40, 40));
++    r.move(const Offset(70, 50));
++    r.move(const Offset(100, 90));
++    r.up(const Offset(100, 90));
++    final after = r.camera.value.worldToScreenMatrix;
++    expect(after.e, closeTo(before.e + 60, 1e-9));
++    expect(after.f, closeTo(before.f + 50, 1e-9));
++    expect(r.selection.keys, {r.key('1')});
++    expect(r.doc.commands.undoDepth, 0);
++  });
++
++  testWidgets(
++      'ST9 cancel mid-drag executes nothing and stops the timer; hover moves '
++      'are ignored; Escape clears (R-5, R-6)', (tester) async {
++    final r = rig(tester);
++    final p = r.at('2', 900, 400);
++    r.down(p);
++    r.move(p + const Offset(50, 0));
++    r.tool.cancel(r.ctx);
++    r.up(p + const Offset(50, 0));
++    expect(r.doc.commands.undoDepth, 0);
++    r.down(p);
++    r.tool.cancel(r.ctx);
++    await tester.pump(const Duration(milliseconds: 600));
++    expect(r.selection.keys, {r.key('2')}, reason: 'no toggle after cancel');
++
++    r.tool.onPointerMove(r.ev(p + const Offset(90, 0), buttons: 0), r.ctx);
++    expect(r.tool.phase, ToolPhase.idle);
++    r.tool.onKey(
++        const KeyDownEvent(
++            physicalKey: PhysicalKeyboardKey.escape,
++            logicalKey: LogicalKeyboardKey.escape,
++            timeStamp: Duration.zero),
++        r.ctx);
++    expect(r.selection.isEmpty, isTrue);
++  });
++
++  testWidgets(
++      'ST10 the asymmetric, mirrored top: picked where it is, and off it '
++      'inside its box', (tester) async {
++    final r = rig(tester);
++    r.tap(r.at('2', 1250, 950));
++    expect(r.selection.keys, {r.key('2')});
++    r.tap(r.at('2', 1700, 700));
++    expect(r.selection.isEmpty, isTrue, reason: 'outside the box');
++    r.tap(r.at('2', 1500, 950));
++    expect(r.selection.keys, {r.key('2')},
++        reason: 'outside the trapezoid, inside its box: no line hit');
++    expect(jsonEncode(r.taps), '["2","2"]');
++  });
++
++  testWidgets(
++      'ST11 a cancelled press leaves no timer behind: a later press is not '
++      'toggled early (R-5, review F-2)', (tester) async {
++    final r = rig(tester);
++    r.down(r.at('1', 900, 700));
++    await tester.pump(const Duration(milliseconds: 300));
++    r.tool.cancel(r.ctx);
++    final b = r.at('2', 900, 400);
++    r.down(b);
++    await tester.pump(const Duration(milliseconds: 250));
++    expect(r.selection.keys, isEmpty, reason: 'the old timer did not fire');
++    r.up(b);
++    expect(r.selection.keys, {r.key('2')}, reason: 'a tap');
++    expect(r.taps, ['2']);
++  });
++
++  testWidgets(
++      'ST12 within the touch slop a press stays a tap; past it, a drag '
++      '(R-7, review F-6)', (tester) async {
++    final r = rig(tester);
++    final p = r.at('2', 900, 400);
++    r.down(p);
++    r.move(p + const Offset(12, 0));
++    r.up(p + const Offset(12, 0));
++    expect(r.taps, ['2'], reason: '12 px is within kTouchSlop');
++    expect(r.doc.commands.undoDepth, 0);
++    r.down(p);
++    r.move(p + const Offset(19, 0));
++    r.up(p + const Offset(19, 0));
++    expect(r.taps, ['2'], reason: '19 px is past it: no tap');
++    expect(r.doc.commands.undoDepth, 1);
++  });
++
++  testWidgets(
++      'ST13 a drag back to its start executes nothing and reports no layout '
++      'change (review F-6)', (tester) async {
++    final r = rig(tester);
++    final p = r.at('2', 900, 400);
++    r.down(p);
++    r.move(p + const Offset(60, 30));
++    r.move(p);
++    r.up(p);
++    expect(r.doc.commands.undoDepth, 0);
++    expect(r.layouts, 0);
++    expect(r.taps, isEmpty, reason: 'a drag, not a tap');
++  });
++
++  testWidgets('ST14 Ctrl and Cmd toggle as Shift does (S3, review F-6)',
++      (tester) async {
++    final r = rig(tester);
++    r.tap(r.at('1', 900, 700));
++    r.tap(r.at('2', 900, 400), control: true);
++    expect(r.selection.keys, {r.key('1'), r.key('2')});
++    r.tap(r.at('1', 900, 700), meta: true);
++    expect(r.selection.keys, {r.key('2')});
++    r.tap(const Offset(40, 40), meta: true);
++    expect(r.selection.keys, {r.key('2')}, reason: 'the floor keeps it');
++    r.tap(const Offset(40, 40), control: true);
++    expect(r.selection.keys, {r.key('2')});
++  });
++
++  testWidgets(
++      'ST15 an undo mid-drag: the step applies to each transform as it is at '
++      'release (R-6, review F-6)', (tester) async {
++    final r = rig(tester);
++    final before = parts(r.node('2').transform);
++    final p = r.at('2', 900, 400);
++    r.down(p);
++    r.move(p + const Offset(-50, 0));
++    r.up(p + const Offset(-50, 0));
++    expect(r.doc.commands.undoDepth, 1);
++    final q = r.at('2', 900, 400);
++    r.down(q);
++    r.move(q + const Offset(0, -30));
++    r.doc.commands.undo(); // the first move, while the second drags
++    r.up(q + const Offset(0, -30));
++    final after = parts(r.node('2').transform);
++    expect(after.sublist(0, 4), before.sublist(0, 4));
++    expect(after[4], closeTo(before[4], 1e-6), reason: 'the undone -500 x');
++    expect(after[5], closeTo(before[5] + 300, 1e-6), reason: 'the +300 y');
++  });
++
++  testWidgets(
++      'ST16 a finger 15 px outside a table selects it; a mouse there does '
++      'not (spec 14t R-11, M-14t-26)', (tester) async {
++    final r = rig(tester);
++    // 150 mm below the trapezoid's bottom edge (y 300): 15 px.
++    final p = r.at('2', 900, 150);
++    r.tap(p);
++    expect(r.selection.isEmpty, isTrue);
++    expect(r.taps, isEmpty);
++    r.tap(r.at('2', 900, 260)); // 40 mm, 4 px: a mouse has no reach
++    expect(r.selection.isEmpty, isTrue, reason: 'review F-5');
++    r.tool.onPointerDown(r.ev(p, touch: true), r.ctx);
++    r.tool.onPointerUp(r.ev(p, touch: true, buttons: 0), r.ctx);
++    expect(r.selection.keys, {r.key('2')});
++    expect(r.taps, ['2']);
++    // 300 mm: past a finger's reach.
++    final far = r.at('2', 900, 0);
++    r.tool.onPointerDown(r.ev(far, touch: true), r.ctx);
++    r.tool.onPointerUp(r.ev(far, touch: true, buttons: 0), r.ctx);
++    expect(r.selection.isEmpty, isTrue);
++  });
++
++  testWidgets(
++      'ST17 a finger\'s long press toggles kTouchHoldBack sooner than a '
++      'mouse\'s: 500 ms from contact (T5, M-14t-15)', (tester) async {
++    final r = rig(tester);
++    final p = r.at('2', 900, 400);
++    final early = kLongPressTimeout - kTouchHoldBack;
++    r.tool.onPointerDown(r.ev(p, touch: true), r.ctx);
++    await tester.pump(early - const Duration(milliseconds: 1));
++    expect(r.selection.isEmpty, isTrue);
++    await tester.pump(const Duration(milliseconds: 2));
++    expect(r.selection.keys, {r.key('2')});
++    r.tool.onPointerUp(r.ev(p, touch: true, buttons: 0), r.ctx);
++    r.down(p);
++    await tester.pump(early + const Duration(milliseconds: 1));
++    expect(r.selection.keys, {r.key('2')}, reason: 'a mouse waits 500 ms');
++    await tester.pump(kTouchHoldBack);
++    expect(r.selection.isEmpty, isTrue);
++    r.up(p);
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/service/service_tool_units_test.dart b/packages/jet_cad_2d_plan/test/service/service_tool_units_test.dart
+new file mode 100644
+index 00000000..e28b820f
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/service/service_tool_units_test.dart
+@@ -0,0 +1,250 @@
++// 2b spec S4 "The service tool", "A drag"; S2 "Locked units", "Unlabelled,
++// duplicate and bad labels"; Review Focus 4: the service tool over placed
++// and generated units, on the controller's service copy. The fixture is
++// Task 5's serviceFixture(): a table a quarter turn and mirrored off the
++// origin, row A (six seats) turned, row B (five seats) curved, all off the
++// origin.
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show PlanKit, kUnitLabelTag;
++import 'package:jet_cad_2d_plan/src/controller/plan_controller.dart';
++import 'package:jet_cad_2d_plan/src/service/service_state.dart' show UnitGroup;
++import 'package:jet_cad_2d_plan/src/service/service_tool.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/service_fixture.dart';
++import '../support/service_rig.dart';
++
++/// [json] in service over `unitKit()`, or over no kit ([missingKit]: the
++/// table and both rows are then held by the lock set).
++ServiceRig rig(String json,
++    {bool missingKit = false, void Function(PlanController c)? design}) {
++  final r = ServiceRig(json,
++      kits: missingKit ? const <PlanKit>[] : null, design: design);
++  addTearDown(r.dispose);
++  return r;
++}
++
++void main() {
++  testWidgets(
++      'ST-seat a seat is picked, selected alone and reported by its label; '
++      'a seat in a group selects the group and reports it (M-ST-seat)',
++      (tester) async {
++    final f = serviceFixture();
++    final r = rig(f.json);
++    final a3 = f.seatsA[2], b2 = f.seatsB[1], b3 = f.seatsB[2];
++    expect(r.c.unitIndex[a3]!.generated, isTrue, reason: 'premise: a seat');
++    r.c.setUnitGroups({
++      'g': UnitGroup(members: {'B2', 'B3'})
++    });
++
++    r.tap(r.inside(a3));
++    expect(r.keys, {r.key(a3)});
++    expect(r.taps, ['A3']);
++    expect(r.c.selectedUnits.value, {'A3'});
++
++    r.tap(r.inside(b2), time: const Duration(seconds: 1));
++    expect(r.keys, {r.key(b2), r.key(b3)});
++    expect(r.taps, ['A3', 'B2']);
++    expect(r.groupTaps, ['g:B2']);
++  });
++
++  testWidgets(
++      'ST-mixed-drag a drag from the table with two seats selected moves the '
++      'table alone, translation only, one step; the seats stay '
++      '(M-ST-mixed)', (tester) async {
++    final f = serviceFixture();
++    final r = rig(f.json);
++    final t = f.table, a1 = f.seatsA[0], a2 = f.seatsA[1];
++    r.tap(r.inside(t));
++    r.tap(r.inside(a1), shift: true);
++    r.tap(r.inside(a2), shift: true);
++    expect(r.keys, {r.key(t), r.key(a1), r.key(a2)}, reason: 'premise');
++    final table0 = parts(r.node(t).transform);
++    final seats0 = [parts(r.node(a1).transform), parts(r.node(a2).transform)];
++    final from = r.inside(t);
++    final by = Vector2(600, -300);
++    final dx = (from.x + by.x) - from.x, dy = (from.y + by.y) - from.y;
++
++    r.drag(from, by);
++    expect(parts(r.node(t).transform),
++        [...table0.take(4), table0[4] + dx, table0[5] + dy]);
++    expect(parts(r.node(a1).transform), seats0[0]);
++    expect(parts(r.node(a2).transform), seats0[1]);
++    expect(r.layouts, 1);
++    expect(r.moved, [
++      [t]
++    ]);
++    expect(r.keys, {r.key(t), r.key(a1), r.key(a2)},
++        reason: 'the selection is kept');
++  });
++
++  testWidgets(
++      'ST-group-seat a group mixing the table and a seat is never dragged: '
++      'the drag is spent, nothing moves, the selection is kept '
++      '(M-ST-group)', (tester) async {
++    final f = serviceFixture();
++    final r = rig(f.json);
++    final t = f.table, a1 = f.seatsA[0];
++    final label = r.c.unitIndex[t]!.text!;
++    r.c.setUnitGroups({
++      'g': UnitGroup(members: {label, 'A1'})
++    });
++    r.tap(r.inside(t));
++    expect(r.keys, {r.key(t), r.key(a1)}, reason: 'premise: the group');
++    final table0 = parts(r.node(t).transform);
++
++    r.drag(r.inside(t), Vector2(600, -300));
++    expect(parts(r.node(t).transform), table0);
++    expect(r.layouts, 0);
++    expect(r.moved, isEmpty);
++    expect(r.keys, {r.key(t), r.key(a1)});
++  });
++
++  testWidgets(
++      'ST-locked-seat Review Focus 4: the kit missing, a seat is tapped and '
++      'reported with its group, never selected by a tap, a long press, a '
++      'band or a context click, never dragged (M-ST-locked)', (tester) async {
++    final f = serviceFixture();
++    final r = rig(f.json, missingKit: true);
++    final a2 = f.seatsA[1];
++    expect(r.c.unitIndex[a2]!.locked, isTrue, reason: 'premise: locked');
++    expect(r.c.unitIndex[a2]!.generated, isTrue, reason: 'premise: a seat');
++    r.c.setUnitGroups({
++      'g': UnitGroup(members: {'A2', 'A3'})
++    });
++
++    r.tap(r.inside(a2));
++    expect(r.taps, ['A2']);
++    expect(r.groupTaps, ['g:A2']);
++    expect(r.keys, isEmpty, reason: 'a tap selects nothing');
++    // A group's selectable members exclude a locked one, so a grouped tap
++    // selects nothing either way: a lone locked seat pins the rule itself.
++    r.tap(r.inside(f.seatsA[4]), time: const Duration(seconds: 1));
++    expect(r.taps, ['A2', 'A5']);
++    expect(r.keys, isEmpty, reason: 'a lone locked seat\'s tap selects none');
++
++    // Under toggle a locked press starts no timer (T:236-243): held past
++    // the long press, it is a tap.
++    r.down(r.inside(a2), time: const Duration(seconds: 2));
++    await tester.pump(const Duration(seconds: 1));
++    r.up(r.inside(a2), time: const Duration(seconds: 3));
++    expect(r.keys, isEmpty, reason: 'a long press selects nothing');
++
++    r.band(padded(unionOf([for (final s in f.seatsA) r.worldBox(s)]), 400),
++        crossing: true);
++    expect(r.keys, isEmpty, reason: 'a band selects nothing');
++
++    r.withMenu();
++    r.tool.secondaryClick(r.inside(a2), const Offset(12, 34), r.ctx.selection);
++    expect(r.menus, [('A2', const Offset(12, 34))]);
++    expect(r.keys, isEmpty, reason: 'a context click selects nothing');
++
++    r.options = kDefaultServiceOptions;
++    final seat0 = parts(r.node(a2).transform);
++    r.drag(r.inside(a2), Vector2(600, -300));
++    expect(parts(r.node(a2).transform), seat0);
++    expect(r.layouts, 0);
++    expect(r.moved, isEmpty);
++  });
++
++  testWidgets(
++      'ST-unlabelled an unlabelled table is selected by a tap and dragged, '
++      'reported by onUnitsMoved, never by a label-keyed callback '
++      '(M-ST-unlabelled)', (tester) async {
++    final f = serviceFixture();
++    final r = rig(f.json, design: (c) {
++      for (final (label, _) in unitLabelsOf(c.document, f.table)) {
++        expect(
++            c.execute(SetEntityTextCommand(label, '', kUnitLabelTag)), isTrue);
++      }
++    });
++    final t = f.table;
++    expect(r.c.unitIndex[t]!.text, isNull, reason: 'premise: unlabelled');
++
++    r.tap(r.inside(t));
++    r.tap(r.inside(t), time: const Duration(milliseconds: 100));
++    expect(r.keys, {r.key(t)});
++    expect(r.taps, isEmpty);
++    expect(r.doubleTaps, isEmpty);
++
++    r.drag(r.inside(t), Vector2(600, -300));
++    expect(r.layouts, 1);
++    expect(r.moved, [
++      [t]
++    ]);
++  });
++
++  testWidgets(
++      'ST-band-two-rows a crossing band over both rows takes every seat of '
++      'both as a root key and not the table; a window round row B takes row '
++      'B\'s seats alone (M-ST-band)', (tester) async {
++    final f = serviceFixture();
++    final r = rig(f.json);
++    final rows = unionOf([
++      for (final s in [...f.seatsA, ...f.seatsB]) r.worldBox(s)
++    ]);
++    final rowB = unionOf([for (final s in f.seatsB) r.worldBox(s)]);
++    expect(overlaps(padded(rows, 50), r.worldBox(f.table)), isFalse,
++        reason: 'premise: the table lies off both rows');
++    for (final s in f.seatsA) {
++      expect(overlaps(padded(rowB, 50), r.worldBox(s)), isFalse,
++          reason: 'premise: row A lies off row B\'s window');
++    }
++
++    r.band(padded(rows, 50), crossing: true);
++    expect(r.keys, {
++      for (final s in [...f.seatsA, ...f.seatsB]) r.key(s)
++    });
++
++    r.band(padded(rowB, 50));
++    expect(r.keys, {for (final s in f.seatsB) r.key(s)});
++  });
++
++  testWidgets(
++      'ST-secondary a context click on an unselected seat selects it alone '
++      'and reports its label; on a selected unit it keeps the selection; '
++      'with no menu it does nothing (M-ST-secondary)', (tester) async {
++    final f = serviceFixture();
++    final r = rig(f.json);
++    final a1 = f.seatsA[0], t = f.table;
++    r.withMenu();
++    r.tool.secondaryClick(r.inside(a1), const Offset(5, 6), r.ctx.selection);
++    expect(r.keys, {r.key(a1)});
++    expect(r.menus, [('A1', const Offset(5, 6))]);
++
++    r.tap(r.inside(t), shift: true);
++    final label = r.c.unitIndex[t]!.text!;
++    r.tool.secondaryClick(r.inside(t), const Offset(7, 8), r.ctx.selection);
++    expect(r.keys, {r.key(a1), r.key(t)}, reason: 'a selected unit keeps it');
++    expect(r.menus.last, (label, const Offset(7, 8)));
++
++    r.options = kDefaultServiceOptions;
++    r.ctx.selection.clear();
++    r.tool.secondaryClick(r.inside(a1), const Offset(5, 6), r.ctx.selection);
++    expect(r.keys, isEmpty, reason: 'no menu: nothing');
++    expect(r.menus, hasLength(2));
++  });
++
++  testWidgets(
++      'ST-move-gate serviceMove false: a drag from the table pans, the '
++      'table stays; the permission is read at each press (M-ST-gate)',
++      (tester) async {
++    final f = serviceFixture();
++    final r = rig(f.json);
++    final t = f.table;
++    final table0 = parts(r.node(t).transform);
++    r.c.permissions = r.c.permissions.copyWith(serviceMove: false);
++    final camera0 = parts(r.c.camera.value.worldToScreenMatrix);
++
++    r.drag(r.inside(t), Vector2(600, -300));
++    expect(parts(r.node(t).transform), table0);
++    expect(r.layouts, 0);
++    expect(parts(r.c.camera.value.worldToScreenMatrix), isNot(camera0),
++        reason: 'the drag panned');
++
++    r.c.permissions = r.c.permissions.copyWith(serviceMove: true);
++    r.drag(r.inside(t), Vector2(600, -300));
++    expect(r.layouts, 1, reason: 'read again at the next press');
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/support/service_rig.dart b/packages/jet_cad_2d_plan/test/support/service_rig.dart
+new file mode 100644
+index 00000000..d1e9b1bf
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/support/service_rig.dart
+@@ -0,0 +1,221 @@
++// Drives a controller's service tool with explicit ToolPointerEvents (2b
++// Task 14): the controller in service over a plan text, a y-up camera that
++// is not the identity (0.1 px/mm, panned), and the host's callbacks logged
++// through the session's ServiceHost. World points are the inputs; the
++// expectations are the fixture's handles and labels.
++import 'dart:math' as math;
++
++import 'package:flutter/gestures.dart' show PointerDeviceKind, kPrimaryButton;
++import 'package:flutter/painting.dart' show Offset;
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show PlanKit;
++import 'package:jet_cad_2d_plan/src/controller/plan_controller.dart';
++import 'package:jet_cad_2d_plan/src/service/service_session.dart';
++import 'package:jet_cad_2d_plan/src/service/service_tool.dart';
++import 'package:jet_cad_2d_plan/src/symbols/symbol_placer.dart'
++    show definitionForEntry;
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import 'harness.dart' show planText;
++import 'service_fixture.dart' show addRow, testEntry;
++import 'test_kit.dart';
++
++// `parts` is Task 11's (`service_plans.dart`), re-exported for the tool
++// and paint tests (one owner per helper, controller ruling R-19).
++export 'service_plans.dart' show parts;
++
++final class ServiceRig {
++  /// [json] loaded over [kits] (`unitKit()` by default); [design] runs on
++  /// the design before service is entered.
++  ServiceRig(String json,
++      {List<PlanKit>? kits, void Function(PlanController c)? design})
++      : c = PlanController(kits: kits ?? [unitKit()], json: json) {
++    design?.call(c);
++    c.setMode(PlanMode.service);
++    c.camera.value = ViewportTransform(
++        worldToScreenMatrix: const Transform2(0.1, 0, 0, -0.1, 700, 450));
++    session.host = ServiceHost(
++        callbacks: () => callbacks,
++        options: () => options,
++        events: () => events);
++  }
++
++  final PlanController c;
++  ServiceSession get session => c.serviceSession!;
++  ServiceTool get tool => session.tool;
++  ToolContext get ctx => session.toolContext;
++  DraftDocument get doc => session.document;
++  Set<SelectionKey> get keys => ctx.selection.keys;
++
++  final List<String> taps = [];
++  final List<String> doubleTaps = [];
++  final List<String> groupTaps = [];
++  final List<(String, Offset)> menus = [];
++  final List<List<Handle>> moved = [];
++  int layouts = 0;
++
++  late final ServiceCallbacks callbacks = (
++    onUnitTap: taps.add,
++    onLayoutChanged: () => layouts++,
++    onGroupTap: (id, label) => groupTaps.add('$id:$label'),
++    onMergeRequested: null,
++    onSplitRequested: null,
++  );
++
++  ServiceOptions options = kDefaultServiceOptions;
++
++  late final ServiceEvents<Handle> events = (
++    onUnitsMoved: moved.add,
++    onUnitDoubleTap: doubleTaps.add,
++    onFloorTap: null,
++    onUnitHover: null,
++  );
++
++  /// [options] with a context menu that logs into [menus].
++  void withMenu() => options = (
++        longPress: options.longPress,
++        onUnitContextMenu: (l, p) => menus.add((l, p)),
++        floorDrag: options.floorDrag,
++      );
++
++  void dispose() => c.dispose();
++
++  InstanceNode node(Handle h) => doc.tree[h]! as InstanceNode;
++
++  SelectionKey key(Handle h) => SelectionKey.root(h);
++
++  /// A world point inside unit [h]'s top: its top box's centre through its
++  /// world transform (the fixture's tops are convex).
++  Vector2 inside(Handle h) {
++    final u = c.unitIndex[h]!;
++    final t = u.top;
++    return u.toWorld
++        .transformPoint(Vector2((t.minX + t.maxX) / 2, (t.minY + t.maxY) / 2));
++  }
++
++  /// [h]'s symbol box through its world transform, axis-aligned.
++  Aabb2 worldBox(Handle h) {
++    final u = c.unitIndex[h]!;
++    final b = u.box;
++    return Aabb2.fromPoints([
++      for (final (x, y) in [
++        (b.minX, b.minY),
++        (b.maxX, b.minY),
++        (b.maxX, b.maxY),
++        (b.minX, b.maxY)
++      ])
++        u.toWorld.transformPoint(Vector2(x, y)),
++    ]);
++  }
++
++  Offset screen(Vector2 w) {
++    final s = c.camera.value.worldToScreen(w);
++    return Offset(s.x, s.y);
++  }
++
++  ToolPointerEvent ev(Vector2 world,
++          {int buttons = kPrimaryButton,
++          bool shift = false,
++          Duration time = Duration.zero}) =>
++      ToolPointerEvent(
++        screen: screen(world),
++        world: world.clone(),
++        pointer: 1,
++        buttons: buttons,
++        shift: shift,
++        control: false,
++        meta: false,
++        alt: false,
++        pickRadiusWorld: 6 / c.camera.value.scale,
++        kind: PointerDeviceKind.mouse,
++        timeStamp: time,
++      );
++
++  void down(Vector2 w, {bool shift = false, Duration time = Duration.zero}) =>
++      tool.onPointerDown(ev(w, shift: shift, time: time), ctx);
++  void move(Vector2 w) => tool.onPointerMove(ev(w), ctx);
++  void up(Vector2 w, {Duration time = Duration.zero}) =>
++      tool.onPointerUp(ev(w, buttons: 0, time: time), ctx);
++
++  void tap(Vector2 w, {bool shift = false, Duration time = Duration.zero}) {
++    down(w, shift: shift, time: time);
++    up(w, time: time + const Duration(milliseconds: 40));
++  }
++
++  /// A drag from [from] by [by], in two moves, past the touch slop.
++  void drag(Vector2 from, Vector2 by) {
++    down(from);
++    move(from + by * 0.5);
++    move(from + by);
++    up(from + by);
++  }
++
++  /// A band over world [box] under `PlanFloorDrag.band`: a window from its
++  /// upper left to its lower right, or a crossing from its upper right to
++  /// its lower left. Its press is on the floor (the caller pads the box off
++  /// every unit).
++  void band(Aabb2 box, {bool crossing = false}) {
++    options = (
++      longPress: options.longPress,
++      onUnitContextMenu: options.onUnitContextMenu,
++      floorDrag: PlanFloorDrag.band,
++    );
++    final start = Vector2(crossing ? box.maxX : box.minX, box.maxY);
++    final end = Vector2(crossing ? box.minX : box.maxX, box.minY);
++    down(start);
++    move(Vector2((start.x + end.x) / 2, (start.y + end.y) / 2));
++    move(end);
++    up(end);
++  }
++}
++
++/// [a] grown by [pad] on every side.
++Aabb2 padded(Aabb2 a, double pad) =>
++    Aabb2.raw(a.minX - pad, a.minY - pad, a.maxX + pad, a.maxY + pad);
++
++/// The union of [boxes].
++Aabb2 unionOf(Iterable<Aabb2> boxes) => Aabb2.fromPoints([
++      for (final b in boxes) ...[
++        Vector2(b.minX, b.minY),
++        Vector2(b.maxX, b.maxY)
++      ]
++    ]);
++
++bool overlaps(Aabb2 a, Aabb2 b) =>
++    a.minX <= b.maxX &&
++    a.maxX >= b.minX &&
++    a.minY <= b.maxY &&
++    a.maxY >= b.minY;
++
++/// 2b Review Focus 5: a hall of 25 rows of 20 seats (500 generated units),
++/// rows 1.5 m apart from 40 m off the origin, the even rows turned 37
++/// degrees, the odd ones curved 0.03 rad a seat; a plan text over
++/// [unitKit], every seat generated by the row type (planText installs the
++/// kit's system).
++String hallJson() => planText([unitKit()], (d) {
++      final seat = testEntry(rowSeatKey);
++      final made = definitionForEntry(d, seat);
++      d.commands.execute(CompoundCommand(made.commands, label: 'Seat'));
++      for (var i = 0; i < 25; i++) {
++        addRow(
++            d,
++            RowComponent(
++                prefix: String.fromCharCode(0x41 + i),
++                count: 20,
++                spacing: 600,
++                curve: i.isOdd ? 0.03 : 0,
++                seat: made.definition,
++                base: seat.definition.basePoint,
++                top: entryTop(seat)),
++            at: Vector2(40000, -27000 - 1500.0 * i),
++            angle: i.isEven ? 37 * math.pi / 180 : 0);
++      }
++    });
++
++/// A controller over [hallJson], in service. The caller disposes it.
++PlanController hallController() {
++  final c = PlanController(kits: [unitKit()], json: hallJson());
++  c.setMode(PlanMode.service);
++  return c;
++}
+diff --git a/packages/jet_cad_2d_plan/test/support/unit_fixtures.dart b/packages/jet_cad_2d_plan/test/support/unit_fixtures.dart
+index 94164b45..1c305070 100644
+--- a/packages/jet_cad_2d_plan/test/support/unit_fixtures.dart
++++ b/packages/jet_cad_2d_plan/test/support/unit_fixtures.dart
+@@ -17,20 +17,22 @@ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_kit/authoring.dart'
+     show
+         CatalogCircle,
+         CatalogLine,
+         CatalogPolyline,
+         CatalogSymbol,
+         CatalogUnit;
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+ import 'package:jet_cad_2d_plan/src/kits/locks.dart';
++import 'package:jet_cad_2d_plan/src/service/service_session.dart'
++    show serviceCopyOf;
+ import 'package:jet_cad_2d_plan/src/service/unit_picker.dart';
+ import 'package:jet_cad_2d_plan/src/symbols/symbol_placer.dart'
+     show definitionForEntry, placementTransform;
+ import 'package:jet_cad_2d_plan/src/units/unit_index.dart';
+ import 'package:jet_cad_2d_plan/src/units/unit_label.dart';
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import 'harness.dart';
+ import 'symbol_fixtures.dart' show leafRecord;
+ 
+@@ -403,10 +405,32 @@ final class CountingTransform extends Transform2 {
+ 
+   @override
+   String toString() {
+     made.count++;
+     return super.toString();
+   }
+ }
+ 
+ /// [values] as a Float64List (the tops' expectations).
+ Float64List f64(List<double> values) => Float64List.fromList(values);
++
++/// [rowOfTables] numbered as today's placer numbered them: `1` … `n` in
++/// placement order (`floor_plan/test/service/table_status_painter_test.dart:
++/// 59-79` placed them through the numbering placer).
++DraftDocument numberedRowOfTables(int n) {
++  final doc = rowOfTables(n);
++  final instances = [
++    for (final node in doc.tree.nodes)
++      if (node is InstanceNode) node.handle
++  ]..sort((a, b) => a.value.compareTo(b.value));
++  for (final (i, h) in instances.indexed) {
++    addUnitLabel(doc, h, '${i + 1}');
++  }
++  return doc;
++}
++
++/// [design] decoded as a service copy (Task 11's `serviceCopyOf`, today's
++/// `_copyOf`): runtime permissions, the plan's components, the handles the
++/// design's.
++DraftDocument copyForService(DraftDocument design) => serviceCopyOf(design,
++    register: (r) => registerPlanComponents(r, ParametricCatalog()),
++    measurer: const InsertionPointMeasurer());
+diff --git a/tool/ci/test/scripts_test.dart b/tool/ci/test/scripts_test.dart
+index 9fafe1be..3c422949 100644
+--- a/tool/ci/test/scripts_test.dart
++++ b/tool/ci/test/scripts_test.dart
+@@ -424,20 +424,33 @@ void main() {
+     );
+     expect(
+       workflow,
+       contains(
+         'run: \${{ matrix.tool }} test \${{ matrix.test_flags }} '
+         '--file-reporter "json:\$RUNNER_TEMP/tests.json" || true\n',
+       ),
+     );
+   });
+ 
++  // 2b Task 14: the plan library's pick and band allocation tests read the
++  // VM's allocation profiler too; without the flag they skip, which the
++  // standing comparison reads as red.
++  test('SC20b the plan library\'s tests run with --enable-vmservice', () {
++    final entry = workflow.indexOf('- package: packages/jet_cad_2d_plan');
++    expect(entry, isNot(-1));
++    final next = workflow.indexOf('- package: ', entry + 1);
++    expect(
++      workflow.substring(entry, next),
++      contains('\n            test_flags: --enable-vmservice\n'),
++    );
++  });
++
+   // The script itself, run by bash in a scratch repository with the tag
+   // and a stand-in `flutter` that records what it analysed.
+   group('SC19 old_host_probe.sh', () {
+     late Directory repo;
+     late File main;
+     late File seen;
+     const tagged = 'void main() {} // as v0.3.0 had it\n';
+     const current = 'void main() {} // this commit\n';
+ 
+     /// Runs git in the scratch repository with automatic maintenance off,

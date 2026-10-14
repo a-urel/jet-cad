@@ -1,0 +1,2130 @@
+# Review package: 352b3936..844431ba
+
+## Commits
+844431ba test(plan): pin serviceEdited after a load in service; name M-NS5, M-DC15 (2b Task 13)
+0e6ab3cf feat(plan): the service record, jet_cad.service v1 (2b S3)
+
+## Files changed
+ packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart  |   1 +
+ .../lib/src/controller/plan_controller.dart        | 143 +++-
+ .../lib/src/service/service_record.dart            | 299 ++++++++
+ packages/jet_cad_2d_plan/test/barrel_test.dart     |   2 +
+ .../test/controller/locale_separator_test.dart     |  42 +-
+ .../controller/service_record_controller_test.dart | 798 +++++++++++++++++++++
+ .../test/controller/unit_changes_test.dart         |  35 +-
+ .../controller/unit_groups_controller_test.dart    |  57 ++
+ .../test/service/service_record_test.dart          | 318 ++++++++
+ 9 files changed, 1688 insertions(+), 7 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart b/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart
+index bdf6abb3..71941749 100644
+--- a/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart
++++ b/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart
+@@ -57,20 +57,21 @@ export 'src/kits/locks.dart' show PlanLocked;
+ export 'src/l10n/localizations.dart'
+     show PlanLocalizations, planLocalizationsDelegates, planSupportedLocales;
+ export 'src/l10n/strings.dart' show PlanStrings;
+ export 'src/l10n/strings_de.dart' show PlanStringsDe;
+ export 'src/l10n/strings_en.dart' show PlanStringsEn;
+ export 'src/l10n/strings_tr.dart' show PlanStringsTr;
+ export 'src/panels/plan_layer_panel.dart' show PlanLayerPanel;
+ export 'src/panels/plan_page_panel.dart' show PlanPagePanel;
+ export 'src/panels/plan_property_panel.dart' show PlanPropertyPanel;
+ export 'src/panels/plan_symbol_gallery.dart' show PlanSymbolGallery;
++export 'src/service/service_record.dart' show ServiceRestore;
+ export 'src/service/service_session.dart' show PlanMode;
+ export 'src/service/service_state.dart' show UnitGroup, UnitStatus;
+ export 'src/shortcuts/plan_shortcut_guard.dart' show PlanShortcutGuard;
+ export 'src/shortcuts/plan_shortcuts.dart' show PlanShortcuts;
+ export 'src/symbols/plan_symbol.dart' show PlanSymbol;
+ export 'src/symbols/plan_symbol_loader.dart'
+     show PlanSymbolLoad, PlanSymbolLoader;
+ export 'src/theme/plan_theme.dart' show PlanTheme;
+ export 'src/units/unit_detail.dart'
+     show
+diff --git a/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart b/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
+index 34df4133..b77ecce6 100644
+--- a/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
++++ b/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
+@@ -19,20 +19,21 @@ import '../file/manifest.dart';
+ import '../file/plan_file.dart';
+ import '../file/plan_format_exception.dart';
+ import '../kits/guard.dart';
+ import '../kits/kit_set.dart';
+ import '../kits/locks.dart';
+ import '../l10n/document_separator.dart';
+ import '../l10n/strings.dart';
+ import '../export/page_flows.dart';
+ import '../export/page_printer.dart';
+ import '../export/registries.dart';
++import '../service/service_record.dart';
+ import '../service/service_session.dart';
+ import '../service/service_state.dart';
+ import '../service/unit_picker.dart';
+ import '../shortcuts/tool_letters.dart';
+ import '../symbols/plan_symbol.dart';
+ import '../symbols/plan_symbol_loader.dart';
+ import '../tools/generic_tools.dart';
+ import '../tools/move_resolver.dart';
+ import '../tools/plan_select_gates.dart';
+ import '../tools/plan_symbol_tool.dart';
+@@ -802,21 +803,21 @@ class PlanController extends ChangeNotifier {
+ 
+   /// The active document's unit index (`@internal`): the panels, the
+   /// inspector and the tests read it.
+   @internal
+   UnitIndex get unitIndex => _activeUnits.current;
+ 
+   final ValueNotifier<int> _revision = ValueNotifier(0);
+ 
+   /// Moves whenever the active plan changes: an edit, an undo or a redo of
+   /// it (the design's in design, the copy's in service), a mode switch,
+-  /// [load], [newPlan] (Task 13 adds the reset and the restore). A host
++  /// [load], [newPlan], [resetService], [restoreService]. A host
+   /// re-reads [units] and [labelWarnings] on it.
+   ValueListenable<int> get revision => _revision;
+ 
+   late final _PlanCameraValue _cameraValue = _PlanCameraValue(camera);
+ 
+   /// Where the plan is on the canvas: a new [PlanCamera] at every pan, zoom
+   /// and fit; two reads with no camera change in between are identical.
+   ValueListenable<PlanCamera> get cameraValue => _cameraValue;
+ 
+   /// The global point that shows [world], or null with no canvas mounted.
+@@ -1037,25 +1038,28 @@ class PlanController extends ChangeNotifier {
+   }
+ 
+   /// The unit groups by trimmed id, as [setUnitGroups] last set them; they
+   /// act in service only.
+   ValueListenable<Map<String, UnitGroup>> get unitGroups => _groups;
+ 
+   /// Replaces every group at once: ids trimmed. Throws an [ArgumentError]
+   /// for a blank id, two ids the same after trimming, a group with no
+   /// member after trimming, or a label in two groups; then nothing is
+   /// assigned and no listener is notified. A member label with no live
+-  /// unit is kept; a shared label is allowed; a group may mix kinds.
++  /// unit is kept; a shared label is allowed; a group may mix kinds. In
++  /// service it fires [serviceChanges] (the groups are in the record); in
++  /// design it notifies [unitGroups] only.
+   void setUnitGroups(Map<String, UnitGroup> groups) {
+     final valid = validateUnitGroups(groups);
+     _groups.value = valid;
+     _refreshSelectedGroup();
++    if (_service != null) _serviceChanges.bump();
+   }
+ 
+   /// The groups' statuses by trimmed id, as [setGroupStatus] last set them.
+   ValueListenable<Map<String, UnitStatus>> get groupStatuses => _groupStatuses;
+ 
+   /// Replaces every group status at once: ids trimmed. A group's status
+   /// fills every visible member and overrides each member's own status
+   /// while it is set. A status whose id has no group is kept, draws
+   /// nothing, and applies again when a group with that id comes back.
+   void setGroupStatus(Map<String, UnitStatus> statuses) {
+@@ -1493,20 +1497,21 @@ class PlanController extends ChangeNotifier {
+     old.disposeKitProducts();
+     old.detach();
+     _open(document, measurer, loadDiagnostics);
+     // In service the copy is rebuilt from the new design, the mode kept
+     // (today's `_replaceDesign`).
+     final service = _service;
+     if (service != null) {
+       final copy = _buildService();
+       _attachService(copy);
+       _service = copy;
++      _groupsAtEnter = _groups.value;
+       _dropService(service);
+     }
+     _tracker.replaced();
+     if (_unitBaseline != null) {
+       _unitOut.add(const PlanUnitsReplaced());
+       _unitBaseline = _unitsNow();
+     }
+     _atPicker = null;
+     _refreshSelected();
+     _revision.value++;
+@@ -1569,20 +1574,21 @@ class PlanController extends ChangeNotifier {
+     // The settle may have relabelled a selected unit: read it now.
+     _refreshSelected();
+     final labels = _selectedUnits.value;
+     if (next == PlanMode.service) {
+       final design = _session;
+       // `_onTools` moves `activeTool` back to plan.select.
+       design.tools.activate(design.toolById(planSelectToolId)!);
+       final copy = _buildService();
+       _attachService(copy);
+       _service = copy;
++      _groupsAtEnter = _groups.value;
+     } else {
+       final old = _service!;
+       _service = null;
+       _dropService(old);
+     }
+     _mode.value = next;
+     _select(labels);
+     _refreshFlags();
+     _revision.value++;
+     notifyListeners();
+@@ -1625,27 +1631,29 @@ class PlanController extends ChangeNotifier {
+     s.history = s.document.commands.changes.listen((_) {
+       if (_disposed || !identical(s, _service)) return;
+       _onServiceChanged();
+     });
+     void onSelection() {
+       if (!_disposed && identical(s, _service)) _refreshSelected();
+     }
+ 
+     s.onSelection = onSelection;
+     s.selection.addListener(onSelection);
++    _announced = s.document.commands.stateId;
+   }
+ 
+   /// The active copy changed (a move, an undo or a redo of one).
+   void _onServiceChanged() {
+     _refreshFlags();
+     _revision.value++;
+     _refreshSelected();
++    _announceService();
+   }
+ 
+   /// Lets [s] go (R-2): its listeners now, the session after the frame
+   /// that unmounts its view.
+   void _dropService(ServiceSession s) {
+     s.detach();
+     _droppedServices.add(s);
+     SchedulerBinding.instance
+       ..addPostFrameCallback((_) {
+         if (_droppedServices.remove(s)) s.dispose();
+@@ -1695,20 +1703,21 @@ class PlanController extends ChangeNotifier {
+   void undo() {
+     if (_service == null && _midShape) return;
+     settlePendingInput();
+     final commands = activeDocument.commands;
+     if (!commands.canUndo) return;
+     try {
+       _unrestricted(commands, commands.undo);
+     } on PartialMutationError catch (error) {
+       (_service?.boundary ?? _session.boundary).partialMutation(error);
+     }
++    _announceService();
+   }
+ 
+   /// Runs [step] with [commands]' engine permissions lifted, then puts
+   /// them back: a host's undo or redo is not gated (spec P2), and the
+   /// dispatcher checks permissions on undo and redo too (undo.dart:213).
+   void _unrestricted(CommandDispatcher commands, void Function() step) {
+     final saved = commands.permissions;
+     commands.permissions = DraftPermissions.all;
+     try {
+       step();
+@@ -1721,20 +1730,149 @@ class PlanController extends ChangeNotifier {
+   void redo() {
+     if (_service == null && _midShape) return;
+     settlePendingInput();
+     final commands = activeDocument.commands;
+     if (!commands.canRedo) return;
+     try {
+       _unrestricted(commands, commands.redo);
+     } on PartialMutationError catch (error) {
+       (_service?.boundary ?? _session.boundary).partialMutation(error);
+     }
++    _announceService();
++  }
++
++  // ---------------------------------------------------------------------
++  // The service record (spec 2b S3, decision 4).
++
++  final _Requests _serviceChanges = _Requests();
++
++  /// The active copy's history state last announced on [serviceChanges]:
++  /// an undo is announced at once and again by the change stream, which is
++  /// heard once.
++  int? _announced;
++
++  /// The groups held when service was entered (or the copy rebuilt by a
++  /// load or a new plan; none after a reset): what [serviceEdited]
++  /// compares the groups with.
++  Map<String, UnitGroup> _groupsAtEnter = const {};
++
++  /// Whether service has something to record: the copy has a placed unit
++  /// away from its design place, or the groups differ from those held when
++  /// service was entered. Not the undo depth. Surveys the copy at each
++  /// read: read it on a change, not per frame. False in design.
++  bool get serviceEdited {
++    final s = _service;
++    if (s == null) return false;
++    return serviceMovesOf(document, s.document, s.units.current).isNotEmpty ||
++        !mapEquals(_groups.value, _groupsAtEnter);
++  }
++
++  /// Fires after a move, an undo or a redo of the copy (for [undo] and
++  /// [redo], before they return), [resetService], [restoreService], and
++  /// [setUnitGroups] in service. Never on [setMode], [load] or [newPlan],
++  /// so a host that saves [serviceJson] on it never overwrites its record
++  /// with the empty one a new copy starts with.
++  Listenable get serviceChanges => _serviceChanges;
++
++  /// The service record as JSON (spec S3): the placed units moved away
++  /// from the design, ascending by handle, and the groups. Null in design.
++  String? serviceJson() {
++    settlePendingInput();
++    final s = _service;
++    if (s == null) return null;
++    return encodeServiceRecord(
++        serviceMovesOf(document, s.document, s.units.current), _groups.value);
++  }
++
++  /// Puts a stored record back (spec S3): service only (a [StateError] in
++  /// design). A [json] that is not a version-1 `jet_cad.service` record
++  /// throws a [FormatException] and changes nothing. Otherwise the copy is
++  /// rebuilt from the design, every move of the strict match applied and
++  /// the copy's history cleared (Undo does not remove them), and the
++  /// groups **replaced** by the record's that apply, each whole or not at
++  /// all. The focus is kept; the selection is selected again by label;
++  /// [revision] moves; [serviceChanges] fires.
++  ServiceRestore restoreService(String json) {
++    final old = _service;
++    if (old == null) {
++      throw StateError('restoreService needs the service mode (spec 2b S3)');
++    }
++    final record = decodeServiceRecord(json);
++    settlePendingInput();
++    _refreshSelected();
++    final labels = _selectedUnits.value;
++    final designUnits = _session.units.current;
++    final moves = matchServiceMoves(document, designUnits, record.moves);
++    final groups = matchServiceGroups(record.groups, designUnits);
++    final next = _buildService();
++    if (moves.applied.isNotEmpty) {
++      final commands = next.document.commands;
++      try {
++        commands.execute(CompoundCommand([
++          for (final m in moves.applied) TransformNodeCommand(m.handle, m.to)
++        ], label: 'Restore'));
++      } catch (_) {
++        next.dispose();
++        rethrow;
++      }
++      // The restore is the copy's floor, no step (today's C16).
++      commands.clearHistory();
++    }
++    _attachService(next);
++    _service = next;
++    _dropService(old);
++    _groups.value = groups.applied;
++    _select(labels);
++    _refreshFlags();
++    _revision.value++;
++    _serviceChanges.bump();
++    notifyListeners();
++    return ServiceRestore(
++        appliedMoves: [for (final m in moves.applied) m.label],
++        droppedMoves: [for (final m in moves.dropped) m.label],
++        appliedGroups: groups.appliedIds,
++        droppedGroups: groups.droppedIds);
++  }
++
++  /// Service only: the copy rebuilt from the design, every service move
++  /// gone, and the groups cleared (today's `resetLayout` kept them: spec
++  /// S5). The selection is kept by label. A silent no-op in design.
++  void resetService() {
++    final old = _service;
++    if (old == null) return;
++    settlePendingInput();
++    _refreshSelected();
++    final labels = _selectedUnits.value;
++    final next = _buildService();
++    _attachService(next);
++    _service = next;
++    _dropService(old);
++    _groups.value = const <String, UnitGroup>{};
++    _groupsAtEnter = const <String, UnitGroup>{};
++    _select(labels);
++    _refreshFlags();
++    _revision.value++;
++    _serviceChanges.bump();
++    notifyListeners();
++  }
++
++  /// Fires [serviceChanges] if the active copy's history moved since it
++  /// last did. The change stream is asynchronous: without this, a host
++  /// that calls [undo] and then [setMode] in one synchronous step would
++  /// never hear the undo (review 14d-2).
++  void _announceService() {
++    final s = _service;
++    if (s == null) return;
++    final state = s.document.commands.stateId;
++    if (state == _announced) return;
++    _announced = state;
++    _serviceChanges.bump();
+   }
+ 
+   // ---------------------------------------------------------------------
+   // Tools and the selection.
+ 
+   /// The active tool's id (`plan.select`, a kit's `<kit>.<tool>`).
+   ValueListenable<String> get activeTool => _activeTool;
+ 
+   void _onTools() {
+     _activeTool.value = _session.idOf(_session.tools.active);
+@@ -2292,20 +2430,21 @@ class PlanController extends ChangeNotifier {
+     _diagnostics.dispose();
+     _locale.dispose();
+     _symbolsState.dispose();
+     _dirty.dispose();
+     _canUndo.dispose();
+     _canRedo.dispose();
+     _activeTool.dispose();
+     _fill.dispose();
+     _locked.dispose();
+     _mode.dispose();
++    _serviceChanges.dispose();
+     _statuses.dispose();
+     _groups.dispose();
+     _groupStatuses.dispose();
+     _selectedGroup.dispose();
+     _mergeCandidate.dispose();
+     _focus.dispose();
+     lockHint.dispose();
+     _damaged.dispose();
+     _canvasRect.dispose();
+     _fits.dispose();
+diff --git a/packages/jet_cad_2d_plan/lib/src/service/service_record.dart b/packages/jet_cad_2d_plan/lib/src/service/service_record.dart
+new file mode 100644
+index 00000000..74729797
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/service/service_record.dart
+@@ -0,0 +1,299 @@
++// The service record (spec 2b S3 "The service record", decision 4): the
++// moves the service copy made and the host's groups, as a small JSON a
++// host stores apart from the design, and the strict match that decides
++// which of a stored record's moves and groups still apply to the design.
++// Ported from jet_cad_floor_plan's lib/src/host/service_layout.dart (the
++// whole file), keyed by label, with groups added; today's
++// `jet_cad.service_layout` text is refused (no compatibility, spec S5).
++import 'dart:convert';
++
++import 'package:flutter/foundation.dart' show immutable;
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++
++import '../units/unit_index.dart';
++import 'service_state.dart';
++
++/// The record's `format` value.
++const String kServiceFormat = 'jet_cad.service';
++
++/// The record's `version` value.
++const int kServiceVersion = 1;
++
++/// One moved unit: its instance, its label when it had one, its transform
++/// in the design ([from]) and in the copy ([to]).
++final class ServiceMove {
++  const ServiceMove(
++      {required this.handle,
++      required this.label,
++      required this.from,
++      required this.to});
++
++  final Handle handle;
++  final String? label;
++  final Transform2 from;
++  final Transform2 to;
++
++  @override
++  String toString() => 'ServiceMove(${handle.toHex()}, $label)';
++}
++
++/// One group as a record holds it, before any check: its id, its members
++/// and its label as written.
++final class RecordGroup {
++  const RecordGroup(
++      {required this.id, required this.members, required this.label});
++
++  final String id;
++  final List<String> members;
++  final String? label;
++}
++
++/// A decoded record.
++final class ServiceRecord {
++  const ServiceRecord({required this.moves, required this.groups});
++
++  final List<ServiceMove> moves;
++  final List<RecordGroup> groups;
++}
++
++/// Whether [a] and [b] are the same stored value: `Transform2` has no
++/// `==` on purpose, and a record compares stored transforms exactly.
++bool sameTransform(Transform2 a, Transform2 b) =>
++    a.a == b.a &&
++    a.b == b.b &&
++    a.c == b.c &&
++    a.d == b.d &&
++    a.e == b.e &&
++    a.f == b.f;
++
++/// The placed units of [copy] (as [copyUnits] lists them) whose transform
++/// differs from the same instance's in [design], ascending by handle.
++/// Generated units never move alone, so none is listed.
++List<ServiceMove> serviceMovesOf(
++    DraftDocument design, DraftDocument copy, UnitIndex copyUnits) {
++  final out = <ServiceMove>[];
++  for (final u in copyUnits.units) {
++    if (u.generated) continue;
++    final moved = copy.tree[u.instance];
++    final designed = design.tree[u.instance];
++    if (moved is! InstanceNode || designed is! InstanceNode) continue;
++    if (sameTransform(moved.transform, designed.transform)) continue;
++    out.add(ServiceMove(
++        handle: u.instance,
++        label: u.text,
++        from: designed.transform,
++        to: moved.transform));
++  }
++  return out;
++}
++
++/// [moves] and [groups] as the record's JSON, in the given orders.
++String encodeServiceRecord(
++        List<ServiceMove> moves, Map<String, UnitGroup> groups) =>
++    jsonEncode({
++      'format': kServiceFormat,
++      'version': kServiceVersion,
++      'moves': [
++        for (final m in moves)
++          {
++            'handle': m.handle.toHex(),
++            'label': m.label,
++            'from': m.from.toJson(),
++            'to': m.to.toJson(),
++          }
++      ],
++      'groups': [
++        for (final MapEntry(key: id, value: g) in groups.entries)
++          {
++            'id': id,
++            'members': [...g.members],
++            'label': g.label,
++          }
++      ],
++    });
++
++/// The record [text]. Throws a [FormatException] unless it is a version-1
++/// `jet_cad.service` record: its moves as today's layout entries (a
++/// hexadecimal handle, a string or null label, six numbers in each of
++/// `from` and `to`, no handle twice), its groups objects with a string
++/// `id`, a list of string `members` and a string or null `label`. Values
++/// are not checked for finiteness, nor groups against the validation:
++/// [matchServiceMoves] and [matchServiceGroups] drop such entries.
++ServiceRecord decodeServiceRecord(String text) {
++  Never bad(String why) => throw FormatException('Not a service record: $why');
++  final Object? json;
++  try {
++    json = jsonDecode(text);
++  } on FormatException catch (e) {
++    bad(e.message);
++  }
++  if (json is! Map<String, Object?>) bad('not an object');
++  if (json['format'] != kServiceFormat) bad('format');
++  if (json['version'] != kServiceVersion) bad('version');
++  final moves = json['moves'];
++  if (moves is! List<Object?>) bad('moves');
++  final groups = json['groups'];
++  if (groups is! List<Object?>) bad('groups');
++  Transform2 transform(Object? v, String name) {
++    if (v is! List<Object?> || v.length != 6 || v.any((x) => x is! num)) {
++      bad(name);
++    }
++    // The web writes `1` where the VM writes `1.0` (V-21).
++    final d = [for (final x in v) (x! as num).toDouble()];
++    return Transform2(d[0], d[1], d[2], d[3], d[4], d[5]);
++  }
++
++  final seen = <Handle>{};
++  final outMoves = <ServiceMove>[];
++  for (final m in moves) {
++    if (m is! Map<String, Object?>) bad('a move');
++    final hex = m['handle'];
++    if (hex is! String) bad('a handle');
++    final Handle handle;
++    try {
++      handle = Handle.parseHex(hex);
++    } on HandleRangeError {
++      bad('a handle');
++    }
++    if (!seen.add(handle)) bad('handle $hex twice');
++    final label = m['label'];
++    if (label != null && label is! String) bad('a label');
++    outMoves.add(ServiceMove(
++        handle: handle,
++        label: label as String?,
++        from: transform(m['from'], 'from'),
++        to: transform(m['to'], 'to')));
++  }
++  final outGroups = <RecordGroup>[];
++  for (final g in groups) {
++    if (g is! Map<String, Object?>) bad('a group');
++    final id = g['id'];
++    if (id is! String) bad('a group id');
++    final members = g['members'];
++    if (members is! List<Object?> || members.any((m) => m is! String)) {
++      bad('a group\'s members');
++    }
++    final label = g['label'];
++    if (label != null && label is! String) bad('a group label');
++    outGroups.add(RecordGroup(
++        id: id,
++        members: List.unmodifiable(members.cast<String>()),
++        label: label as String?));
++  }
++  return ServiceRecord(
++      moves: List.unmodifiable(outMoves), groups: List.unmodifiable(outGroups));
++}
++
++/// The moves of a record that apply to a design, and those dropped.
++typedef ServiceMoveMatch = ({
++  List<ServiceMove> applied,
++  List<ServiceMove> dropped,
++});
++
++/// Splits [moves] by the strict match against [design] (spec S3): a move
++/// applies iff its handle is a placed unit of [designUnits] that no lock
++/// covers (`isLockedUnit`), on a visible, unlocked layer (a missing layer
++/// counts as visible), carrying the same label, at exactly
++/// [ServiceMove.from], and [ServiceMove.to] only translates it (the same
++/// linear part) with every value finite.
++ServiceMoveMatch matchServiceMoves(
++    DraftDocument design, UnitIndex designUnits, List<ServiceMove> moves) {
++  final applied = <ServiceMove>[];
++  final dropped = <ServiceMove>[];
++  for (final e in moves) {
++    final unit = designUnits[e.handle];
++    final node = design.tree[e.handle];
++    final layer =
++        node is InstanceNode ? design.tables.layers[node.layer] : null;
++    final ok = unit != null &&
++        !unit.generated &&
++        !unit.locked &&
++        node is InstanceNode &&
++        (layer == null || (layer.visible && !layer.locked)) &&
++        unit.text == e.label &&
++        sameTransform(node.transform, e.from) &&
++        _finite(e.from) &&
++        _finite(e.to) &&
++        e.to.a == e.from.a &&
++        e.to.b == e.from.b &&
++        e.to.c == e.from.c &&
++        e.to.d == e.from.d;
++    (ok ? applied : dropped).add(e);
++  }
++  return (applied: applied, dropped: dropped);
++}
++
++bool _finite(Transform2 t) =>
++    t.a.isFinite &&
++    t.b.isFinite &&
++    t.c.isFinite &&
++    t.d.isFinite &&
++    t.e.isFinite &&
++    t.f.isFinite;
++
++/// The groups of a record that apply, and the ids applied and dropped.
++typedef ServiceGroupMatch = ({
++  Map<String, UnitGroup> applied,
++  List<String> appliedIds,
++  List<String> droppedIds,
++});
++
++/// Applies [groups] in record order, each whole or not at all (spec S3):
++/// a group is dropped when its trimmed id is blank or that of a group
++/// applied before it, when it has no member after trimming, when a member
++/// names no unit of [designUnits] (any unit carrying the label), or when a
++/// member is in a group applied before it. The ids are trimmed.
++ServiceGroupMatch matchServiceGroups(
++    List<RecordGroup> groups, UnitIndex designUnits) {
++  final applied = <String, UnitGroup>{};
++  final owner = <String, String>{};
++  final appliedIds = <String>[];
++  final droppedIds = <String>[];
++  for (final r in groups) {
++    final id = r.id.trim();
++    final group = UnitGroup(members: r.members.toSet(), label: r.label);
++    final ok = id.isNotEmpty &&
++        !applied.containsKey(id) &&
++        group.members.isNotEmpty &&
++        group.members.every((m) => designUnits.withLabel(m).isNotEmpty) &&
++        group.members.every((m) => !owner.containsKey(m));
++    if (!ok) {
++      droppedIds.add(id);
++      continue;
++    }
++    applied[id] = group;
++    appliedIds.add(id);
++    for (final m in group.members) {
++      owner[m] = id;
++    }
++  }
++  return (
++    applied: Map.unmodifiable(applied),
++    appliedIds: appliedIds,
++    droppedIds: droppedIds,
++  );
++}
++
++/// What `PlanController.restoreService` did (spec S3): the labels of the
++/// moves it applied and dropped, in record order (an unlabelled unit's is
++/// null, so a label may repeat and the lengths are the counts), and the
++/// ids of the groups it applied and dropped, in record order.
++@immutable
++final class ServiceRestore {
++  ServiceRestore(
++      {required List<String?> appliedMoves,
++      required List<String?> droppedMoves,
++      required List<String> appliedGroups,
++      required List<String> droppedGroups})
++      : appliedMoves = List.unmodifiable(appliedMoves),
++        droppedMoves = List.unmodifiable(droppedMoves),
++        appliedGroups = List.unmodifiable(appliedGroups),
++        droppedGroups = List.unmodifiable(droppedGroups);
++
++  final List<String?> appliedMoves, droppedMoves;
++  final List<String> appliedGroups, droppedGroups;
++
++  @override
++  String toString() => 'ServiceRestore(moves: $appliedMoves, dropped '
++      '$droppedMoves; groups: $appliedGroups, dropped $droppedGroups)';
++}
+diff --git a/packages/jet_cad_2d_plan/test/barrel_test.dart b/packages/jet_cad_2d_plan/test/barrel_test.dart
+index 70890658..c2f33d7e 100644
+--- a/packages/jet_cad_2d_plan/test/barrel_test.dart
++++ b/packages/jet_cad_2d_plan/test/barrel_test.dart
+@@ -62,20 +62,22 @@ void main() {
+       // 2b Task 8
+       'isUnitSymbol',
+       // 2b Task 9
+       'BadLabel', 'DuplicateLabel', 'PlanCamera', 'PlanUnit', 'PlanUnitAdded',
+       'PlanUnitChange', 'PlanUnitChanged', 'PlanUnitDetail', 'PlanUnitRemoved',
+       'PlanUnitsReplaced', 'Unlabelled', 'UnitLabelProblem', 'UnitLabelWarning',
+       // 2b Task 11
+       'PlanMode',
+       // 2b Task 12
+       'UnitGroup', 'UnitStatus',
++      // 2b Task 13
++      'ServiceRestore',
+     });
+   });
+ 
+   testWidgets('ED-9b the editor\'s names, through the barrel alone',
+       (tester) async {
+     final c = PlanController(kits: const []);
+     addTearDown(c.dispose);
+     PlanExport? last;
+     const PagePrinter printer = PrintingPagePrinter();
+     await tester.pumpWidget(MaterialApp(
+diff --git a/packages/jet_cad_2d_plan/test/controller/locale_separator_test.dart b/packages/jet_cad_2d_plan/test/controller/locale_separator_test.dart
+index a1bfe30c..fa69b662 100644
+--- a/packages/jet_cad_2d_plan/test/controller/locale_separator_test.dart
++++ b/packages/jet_cad_2d_plan/test/controller/locale_separator_test.dart
+@@ -1,29 +1,35 @@
+ // Spec 2a P2 (newPlan: "default: the locale's, as today"), today's Q0 N1,
+ // N2: the constructor's empty plan is settled by the first locale reported
+ // -- as if made so: no undo step, clean -- unless something read or edited
+ // it first; newPlan() takes the locale last reported; a loaded plan is
+ // never settled. Ported from jet_cad_floor_plan's
+ // new_plan_separator_test.dart (NS1, NS3, NS4, NS6, NS8, NS9) with the view
+-// replaced by the report it makes (`reportLocale`); the Page panel's and
+-// the service layout's assertions are left out (Task 18; 2b).
++// replaced by the report it makes (`reportLocale`); the Page panel's
++// assertions are left out (Task 18). 2b Task 13 adds NS1's service layout
++// assertions (`serviceChanges`) and NS5 (a plan first shown in service).
+ import 'package:flutter/widgets.dart' show Locale;
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+ 
+ import '../support/harness.dart';
+ import '../support/test_kit.dart';
+ 
+ DecimalSeparator separatorOf(DraftDocument doc) =>
+     doc.components.get<PageComponent>(doc.rootHandle)!.decimalSeparator;
+ 
++/// The separator the plan [text] prints (today's `separatorIn`): read
++/// back by a controller of its own.
++DecimalSeparator separatorIn(String text) =>
++    separatorOf(controllerFor(kits: [testKit()], json: text).document);
++
+ /// A design edit before any report: a layer added, one command.
+ void addLayer(PlanController c) {
+   final doc = c.document;
+   final zero = doc.tables.layers[ReservedHandles.layerZero]!;
+   doc.commands.execute(AddLayerCommand(LayerRecord(
+       handle: doc.handleSeed.next(),
+       name: 'Bar',
+       color: const IndexedColor(5),
+       linetype: zero.linetype,
+       lineweight: zero.lineweight,
+@@ -32,35 +38,40 @@ void addLayer(PlanController c) {
+       locked: false)));
+ }
+ 
+ void main() {
+   testWidgets(
+       "NS1 the constructor's empty plan, reported Turkish, prints comma as if "
+       'made so: no undo step, clean; English keeps it; newPlan() in English '
+       'is point and stays point when Turkish comes; newPlan() in Turkish is '
+       'comma', (tester) async {
+     final c = controllerFor(kits: [testKit()]);
++    var layoutFired = 0;
++    c.serviceChanges.addListener(() => layoutFired++);
+     final made = c.document;
+     expect(separatorOf(made), DecimalSeparator.point,
+         reason: "premise: unsettled, the engine's default");
+     c.reportLocale(const Locale('tr'));
+     expect(identical(c.document, made), isTrue,
+         reason: 'the plan is settled in place, not replaced');
+     expect(separatorOf(made), DecimalSeparator.comma);
+     // M-NS1: the settle's step not cleared.
+     expect(made.commands.undoDepth, 0);
+     expect(made.commands.canRedo, isFalse);
+     expect(c.canUndo.value, isFalse);
+     expect(c.dirty.value, isFalse);
++    // M-NS5: the settle bumps serviceChanges.
++    expect(layoutFired, 0);
+     await tester.pump();
+     expect(c.canUndo.value, isFalse);
+     expect(c.dirty.value, isFalse);
++    expect(layoutFired, 0);
+     addLayer(c);
+     await tester.pump();
+     expect(c.dirty.value, isTrue, reason: 'premise: an edit');
+     c.undo();
+     await tester.pump();
+     expect(c.dirty.value, isFalse, reason: 'the save point moved with it');
+ 
+     c.reportLocale(const Locale('en'));
+     expect(separatorOf(c.document), DecimalSeparator.comma);
+ 
+@@ -195,11 +206,38 @@ void main() {
+     final comma = c.document;
+     expect(separatorOf(comma), DecimalSeparator.comma);
+     c.reportLocale(const Locale('en'));
+     expect(separatorOf(comma), DecimalSeparator.comma, reason: 'settled');
+     expect(() => c.newPlan(decimalSeparator: ';'), throwsArgumentError);
+     expect(c.document, same(comma));
+     c.newPlan(decimalSeparator: '.');
+     expect(separatorOf(c.document), DecimalSeparator.point);
+     await tester.pump();
+   });
++
++  testWidgets(
++      'NS5 reported first in service: the design settles to comma, the '
++      'service copy taken before keeps its page, nothing fires (2b Task 13)',
++      (tester) async {
++    final c = controllerFor(kits: [testKit()]);
++    var layoutFired = 0;
++    c.serviceChanges.addListener(() => layoutFired++);
++    c.setMode(PlanMode.service);
++    final copy = c.activeDocument;
++    c.reportLocale(const Locale('tr'));
++    await tester.pump();
++    expect(identical(c.activeDocument, copy), isTrue);
++    expect(separatorOf(copy), DecimalSeparator.point,
++        reason: 'a copy taken before is not changed');
++    // M-NS5: the settle bumps serviceChanges.
++    expect(layoutFired, 0);
++    expect(c.dirty.value, isFalse);
++    expect(c.serviceEdited, isFalse);
++    expect(separatorIn(c.save()), DecimalSeparator.comma);
++    c.setMode(PlanMode.design);
++    await tester.pump();
++    expect(separatorOf(c.activeDocument), DecimalSeparator.comma);
++    expect(c.activeDocument.commands.undoDepth, 0);
++    expect(c.canUndo.value, isFalse);
++    expect(c.dirty.value, isFalse);
++  });
+ }
+diff --git a/packages/jet_cad_2d_plan/test/controller/service_record_controller_test.dart b/packages/jet_cad_2d_plan/test/controller/service_record_controller_test.dart
+new file mode 100644
+index 00000000..3ff13978
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/controller/service_record_controller_test.dart
+@@ -0,0 +1,798 @@
++// The service record at the controller (spec 2b S3 "The service record",
++// `serviceEdited`, `serviceChanges`, `resetService`; decision 4; S5 rows
++// 3-8). Ported from jet_cad_floor_plan's test/host/controller_test.dart
++// (C2, C10, C14, C16-C20, CF3, CF4) with assertions unchanged but where the
++// format itself is the premise (ruling R13-a: C16, C20) and today's names
++// renamed (R13-b); the new SR- tests pin the groups in the record, the
++// strict match over locked and generated units, today's format refused,
++// `serviceEdited` against the groups held on entering, `resetService`
++// clearing the groups and `serviceChanges` on `setUnitGroups` in service.
++// Units are turned, mirrored and off the origin; moves are off-grid.
++import 'dart:convert';
++import 'dart:ui' show Color;
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
++    show ViewportTransform;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:jet_cad_2d_plan/src/service/service_record.dart';
++
++import '../support/harness.dart' show controllerFor;
++import '../support/service_plans.dart';
++import '../support/test_kit.dart' show testKit, unitKit;
++
++/// A version-1 record of [moves] and [groups], as a host would store one.
++String record(
++        {List<Map<String, Object?>> moves = const [],
++        List<Map<String, Object?>> groups = const []}) =>
++    jsonEncode({
++      'format': 'jet_cad.service',
++      'version': 1,
++      'moves': moves,
++      'groups': groups,
++    });
++
++/// A record's move of [node] (labelled [label]) by ([dx], [dy]).
++Map<String, Object?> moveOf(
++        InstanceNode node, String? label, double dx, double dy) =>
++    {
++      'handle': node.handle.toHex(),
++      'label': label,
++      'from': node.transform.toJson(),
++      'to': Transform2.translation(dx, dy).multiply(node.transform).toJson(),
++    };
++
++/// A record's group.
++Map<String, Object?> groupOf(String id, List<String> members,
++        [String? label]) =>
++    {'id': id, 'members': members, 'label': label};
++
++/// Today's `zoned(tester)`: a controller over the service plan with a
++/// turned-off-origin camera of its own.
++PlanController zoned() {
++  final c = controllerFor(kits: [testKit()], json: servicePlanText());
++  c.camera.value = ViewportTransform(
++      worldToScreenMatrix:
++          const Transform2(0.0375, 0, 0, -0.0375, 612.5, 431.25));
++  return c;
++}
++
++void main() {
++  testWidgets(
++      'SR-C2 the barrier: service edits never reach the design, and the '
++      'service mode\'s Undo and Redo never reach a design edit (M-14f, '
++      'M-14b2-1)', (tester) async {
++    final c = controllerFor(kits: [testKit()], json: servicePlanText());
++    drawLine(c);
++    drawLine(c);
++    c.undo(); // one design step on the redo stack
++    await tester.pump();
++    final design = c.save();
++    final depth = c.activeDocument.commands.undoDepth;
++    expect(c.canRedo.value, isTrue);
++    expect(c.dirty.value, isTrue);
++    c.markSaved();
++    await tester.pump();
++    expect(c.dirty.value, isFalse);
++
++    c.setMode(PlanMode.service);
++    expect(c.canUndo.value, isFalse, reason: 'the copy has no history');
++    expect(c.canRedo.value, isFalse);
++    move(c, '1', 750, -250);
++    move(c, '2', -125, 400);
++    await tester.pump();
++    expect(c.save(), design, reason: 'the design is untouched');
++    expect(c.dirty.value, isFalse);
++    expect(c.serviceEdited, isTrue);
++
++    for (var k = 0; k < 5; k++) {
++      c.undo();
++    }
++    await tester.pump();
++    expect(c.canUndo.value, isFalse);
++    expect(c.save(), design);
++    for (var k = 0; k < 5; k++) {
++      c.redo();
++    }
++    await tester.pump();
++    expect(c.canRedo.value, isFalse);
++    expect(c.save(), design, reason: 'Redo never redoes a design edit');
++
++    c.setMode(PlanMode.design);
++    await tester.pump();
++    expect(c.activeDocument.commands.undoDepth, depth,
++        reason: 'the design\'s history is the same');
++    expect(c.canRedo.value, isTrue);
++    expect(c.save(), design);
++  });
++
++  testWidgets(
++      'SR-C10 the selection survives a mode switch and resetService; a '
++      'hidden or locked unit cannot be selected (H13)', (tester) async {
++    final c = controllerFor(kits: [testKit()], json: servicePlanText());
++    c.select({'1', '3'});
++    c.setMode(PlanMode.service);
++    expect(c.selectedUnits.value, {'1', '3'});
++    move(c, '1', 600, 0);
++    c.resetService();
++    expect(c.selectedUnits.value, {'1', '3'});
++    expect(c.serviceEdited, isFalse);
++    c.setMode(PlanMode.design);
++    expect(c.selectedUnits.value, {'1', '3'});
++
++    // Unit 2 on a locked layer.
++    final doc = c.activeDocument;
++    final locked = addLayer(doc, 'Locked', visible: true, locked: true);
++    doc.commands
++        .execute(SetInstanceLayerCommand(unitNode(doc, '2').handle, locked));
++    c.select({'2', '3'});
++    expect(c.selectedUnits.value, {'3'});
++    await tester.pump();
++  });
++
++  testWidgets(
++      'SR-C14 revision moves on every change of the active plan, and only of '
++      'it (demo review F-1)', (tester) async {
++    final c = controllerFor(kits: [testKit()], json: servicePlanText());
++    var r = c.revision.value;
++    int moved() {
++      final d = c.revision.value - r;
++      r = c.revision.value;
++      return d;
++    }
++
++    drawLine(c);
++    await tester.pump();
++    expect(moved(), 1);
++    c.undo();
++    await tester.pump();
++    expect(moved(), 1);
++    c.setMode(PlanMode.service);
++    expect(moved(), 1);
++    move(c, '1', 300, 0);
++    await tester.pump();
++    expect(moved(), 1);
++    c.resetService();
++    expect(moved(), 1);
++    c.load(servicePlanText());
++    expect(moved(), 1);
++    c.select({'1'});
++    await tester.pump();
++    expect(moved(), 0, reason: 'a selection is not a change of the plan');
++  });
++
++  testWidgets(
++      'SR-C16 the service record: null in design; a restore puts the moves '
++      'back as the copy\'s floor, re-selects by label, and no Undo removes '
++      'it (spec 14d S1-S3, M-14d-m, M-14d-t)', (tester) async {
++    final c = controllerFor(kits: [testKit()], json: servicePlanText());
++    expect(c.serviceJson(), isNull);
++    c.setMode(PlanMode.service);
++    // Ruling R13-a: today's ['tables'].
++    expect((jsonDecode(c.serviceJson()!) as Map)['moves'], isEmpty);
++    move(c, '1', 750.25, -250.5);
++    move(c, '3', -125.125, 400.75);
++    final want1 = parts(unitNode(c.activeDocument, '1').transform);
++    final want3 = parts(unitNode(c.activeDocument, '3').transform);
++    final json = c.serviceJson()!;
++    await tester.pump();
++
++    c.setMode(PlanMode.design);
++    c.setMode(PlanMode.service);
++    expect(c.serviceEdited, isFalse, reason: 'premise: a fresh copy');
++    c.select({'2'});
++    final copy = c.activeDocument;
++    final restored = c.restoreService(json);
++    expect(restored.appliedMoves, ['1', '3']);
++    expect(restored.droppedMoves, isEmpty);
++    expect(identical(c.activeDocument, copy), isFalse, reason: 'a new copy');
++    expect(parts(unitNode(c.activeDocument, '1').transform), want1);
++    expect(parts(unitNode(c.activeDocument, '3').transform), want3);
++    expect(c.selectedUnits.value, {'2'});
++    expect(c.serviceEdited, isTrue);
++    // M-SR9: the restore's command is left in the copy's history.
++    expect(c.canUndo.value, isFalse, reason: 'the restore is no step');
++    c.undo();
++    expect(parts(unitNode(c.activeDocument, '1').transform), want1);
++    expect(c.serviceJson(), json);
++    await tester.pump();
++  });
++
++  testWidgets(
++      'SR-C17 serviceEdited is the record, not the depth: a unit dragged '
++      'back exactly is no edit; a restore, a move and its undo still are '
++      '(spec 14d S3, M-14d-m)', (tester) async {
++    final c = controllerFor(kits: [testKit()], json: servicePlanText());
++    c.setMode(PlanMode.service);
++    move(c, '2', 333.5, -71.25);
++    move(c, '2', -333.5, 71.25);
++    expect(c.activeDocument.commands.undoDepth, 2, reason: 'premise');
++    expect(c.serviceEdited, isFalse);
++
++    move(c, '1', 90.5, 12.75);
++    final json = c.serviceJson()!;
++    c.resetService();
++    expect(c.serviceEdited, isFalse);
++    c.restoreService(json);
++    move(c, '3', 15.5, 15.5);
++    c.undo();
++    expect(c.activeDocument.commands.undoDepth, 0, reason: 'premise');
++    expect(c.serviceEdited, isTrue);
++    await tester.pump();
++  });
++
++  testWidgets(
++      'SR-C18 serviceChanges fires on a move, Undo, Redo, resetService and '
++      'a restore, never on a mode switch or a load (spec 14d S4, M-14d-r)',
++      (tester) async {
++    final c = controllerFor(kits: [testKit()], json: servicePlanText());
++    var heard = 0;
++    c.serviceChanges.addListener(() => heard++);
++    Future<int> after(void Function() act) async {
++      final before = heard;
++      act();
++      await tester.pump();
++      return heard - before;
++    }
++
++    expect(await after(() => move(c, '1', 10.5, 0)), 0,
++        reason: 'a design edit is not the service record');
++    expect(await after(() => c.setMode(PlanMode.service)), 0);
++    expect(await after(() => move(c, '1', 20.25, 5)), 1);
++    final json = c.serviceJson()!;
++    expect(await after(c.undo), 1);
++    expect(await after(c.redo), 1);
++    expect(await after(c.resetService), 1);
++    expect(await after(() => c.restoreService(json)), 1);
++    expect(await after(() => c.load(servicePlanText())), 0);
++    expect(await after(() => c.setMode(PlanMode.design)), 0);
++  });
++
++  testWidgets(
++      'SR-C20 an Undo followed at once by a switch to design is heard, '
++      'before the switch: a host saving on it keeps the undone record '
++      '(review 14d-2)', (tester) async {
++    final c = controllerFor(kits: [testKit()], json: servicePlanText());
++    c.setMode(PlanMode.service);
++    await tester.pump();
++    final saved = <String?>[];
++    c.serviceChanges.addListener(() => saved.add(c.serviceJson()));
++    move(c, '1', 20.25, 5);
++    await tester.pump();
++    expect(saved, hasLength(1), reason: 'premise: the move is heard');
++    // Ruling R13-a: today's '"tables":[{' and '"tables":[]'.
++    expect(saved.last, contains('"moves":[{'), reason: 'premise: a move');
++    c.undo();
++    c.setMode(PlanMode.design);
++    // M-SR20: undo's announce deleted.
++    expect(saved, hasLength(2), reason: 'heard before the switch');
++    expect(saved.last, contains('"moves":[]'));
++    await tester.pump();
++    expect(saved, hasLength(2), reason: 'and only once');
++  });
++
++  testWidgets(
++      'SR-C19 a restore in design is a StateError; a text that is not a '
++      'record changes nothing; a stale entry is dropped (spec 14d S2)',
++      (tester) async {
++    final c = controllerFor(kits: [testKit()], json: servicePlanText());
++    expect(() => c.restoreService('{}'), throwsStateError);
++    c.setMode(PlanMode.service);
++    move(c, '1', 44.5, 0);
++    move(c, '2', 0, -61.75);
++    final json = c.serviceJson()!;
++    final copy = c.activeDocument;
++    final revision = c.revision.value;
++    expect(() => c.restoreService('{"format":"x"}'), throwsFormatException);
++    expect(identical(c.activeDocument, copy), isTrue);
++    expect(c.revision.value, revision);
++
++    // The design moves unit 2 after the record was stored.
++    c.setMode(PlanMode.design);
++    move(c, '2', 5, 5);
++    final designed2 = parts(unitNode(c.activeDocument, '2').transform);
++    c.setMode(PlanMode.service);
++    final r = c.restoreService(json);
++    expect(r.appliedMoves, ['1']);
++    expect(r.droppedMoves, ['2']);
++    expect(parts(unitNode(c.activeDocument, '2').transform), designed2,
++        reason: 'a dropped entry leaves the unit at its designed place');
++    await tester.pump();
++  });
++
++  testWidgets(
++      'SR-CF3 the focus is kept, by label, across setMode, resetService, '
++      'restoreService, load and newPlan (M-Z20)', (tester) async {
++    final c = zoned();
++    c.setUnitFocus({'7'});
++    final focus = c.unitFocus.value;
++    void kept(String after) =>
++        expect(c.unitFocus.value, same(focus), reason: after);
++    c.setMode(PlanMode.service);
++    kept('setMode');
++    move(c, '3', 410.5, -95.25);
++    final json = c.serviceJson()!;
++    c.resetService();
++    kept('resetService');
++    expect(c.restoreService(json).appliedMoves, ['3']);
++    kept('restoreService');
++    c.load(servicePlanText());
++    kept('load');
++    c.newPlan();
++    kept('newPlan');
++    c.setMode(PlanMode.design);
++    kept('setMode back');
++    await tester.pump();
++  });
++
++  testWidgets(
++      'SR-CF4 the focus is not plan state: no json, dirty, undo depth, '
++      'revision, record change, notification or settle, in either mode '
++      '(M-Z27)', (tester) async {
++    final c = zoned();
++    drawLine(c);
++    await tester.pump();
++    var notified = 0, layouts = 0, settled = 0;
++    c.addListener(() => notified++);
++    c.serviceChanges.addListener(() => layouts++);
++    final withdraw = c.registerSettle(() => settled++);
++    addTearDown(withdraw);
++
++    void expectUnmoved(void Function() act) {
++      final json = c.save();
++      final dirty = c.dirty.value;
++      final depth = c.activeDocument.commands.undoDepth;
++      final redo = c.activeDocument.commands.canRedo;
++      final revision = c.revision.value;
++      final before = (notified, layouts, settled);
++      act();
++      expect((notified, layouts, settled), before);
++      expect(c.activeDocument.commands.undoDepth, depth);
++      expect(c.activeDocument.commands.canRedo, redo);
++      expect(c.revision.value, revision);
++      expect(c.dirty.value, dirty);
++      expect(c.save(), json);
++    }
++
++    expect(c.dirty.value, isTrue, reason: 'premise');
++    expectUnmoved(() => c.setUnitFocus({'3', '7'}));
++    expectUnmoved(() => c.setUnitFocus(null));
++    c.setMode(PlanMode.service);
++    move(c, '3', 410.5, -95.25);
++    await tester.pump();
++    expect(c.activeDocument.commands.undoDepth, 1, reason: 'premise');
++    expectUnmoved(() => c.setUnitFocus({}));
++    expectUnmoved(() => c.setUnitFocus({'2'}));
++    await tester.pump();
++    expect((notified, layouts), (1, 1), reason: 'the switch, the move');
++  });
++
++  testWidgets(
++      'SR-state-kept statuses, group statuses and the focus are kept, '
++      'identical, across a mode switch, resetService, restoreService, load '
++      'and newPlan; the groups across a mode switch, load and newPlan (a '
++      'reset clears them, a restore replaces them); the selection is kept '
++      'by label by a reset and a restore, cleared by load and newPlan '
++      '(spec S3, S5; Task 12 review)', (tester) async {
++    final c = controllerFor(kits: [testKit()], json: servicePlanText());
++    c.setUnitStatus({
++      '1': bill,
++      '3': UnitStatus(color: const Color(0x8043A047), caption: 'Paid')
++    });
++    c.setUnitGroups({
++      'g': UnitGroup(members: {'1', '2'}, label: 'Smith')
++    });
++    c.setGroupStatus({'g': bill});
++    c.setUnitFocus({'1', '3'});
++    final statuses = c.unitStatuses.value;
++    final groupStatuses = c.groupStatuses.value;
++    final focus = c.unitFocus.value;
++    var groups = c.unitGroups.value;
++    void kept(String after, {bool andGroups = true}) {
++      expect(c.unitStatuses.value, same(statuses), reason: after);
++      expect(c.groupStatuses.value, same(groupStatuses), reason: after);
++      expect(c.unitFocus.value, same(focus), reason: after);
++      if (andGroups) {
++        expect(c.unitGroups.value, same(groups), reason: after);
++      }
++    }
++
++    c.setMode(PlanMode.service);
++    kept('setMode');
++    move(c, '3', 410.5, -95.25);
++    final json = c.serviceJson()!;
++    c.select({'3'});
++    // M-SR21: resetService clears the statuses.
++    c.resetService();
++    kept('resetService', andGroups: false);
++    expect(c.unitGroups.value, isEmpty, reason: 'premise: SR-reset');
++    expect(c.selectedUnits.value, {'3'});
++    // M-SR22: restoreService clears the focus.
++    expect(c.restoreService(json).appliedGroups, ['g']);
++    kept('restoreService', andGroups: false);
++    expect(c.unitGroups.value, groups, reason: 'the record\'s, equal');
++    expect(c.selectedUnits.value, {'3'});
++    groups = c.unitGroups.value;
++    // M-SR23: a load or a new plan clears the groups.
++    c.load(servicePlanText());
++    kept('load');
++    expect(c.selectedUnits.value, isEmpty, reason: 'a load clears it');
++    c.select({'3'});
++    expect(c.selectedUnits.value, {'3'}, reason: 'premise');
++    c.newPlan();
++    kept('newPlan');
++    expect(c.selectedUnits.value, isEmpty, reason: 'a new plan clears it');
++    c.setMode(PlanMode.design);
++    kept('setMode back');
++    await tester.pump();
++  });
++
++  testWidgets(
++      'SR-roundtrip moves and groups saved, then restored into a fresh copy: '
++      'every move and group applied, the host\'s groups replaced by the '
++      'record\'s in its order, and the record written again byte for byte',
++      (tester) async {
++    final c = controllerFor(kits: [testKit()], json: servicePlanText());
++    c.setMode(PlanMode.service);
++    move(c, '3', -125.125, 400.75);
++    move(c, '1', 750.25, -250.5);
++    c.setUnitGroups({
++      'g2': UnitGroup(members: {'3', '2'}, label: 'Smith'),
++      'g1': UnitGroup(members: {'1'}),
++    });
++    final json = c.serviceJson()!;
++    final decoded = jsonDecode(json) as Map<String, Object?>;
++    expect(decoded['format'], 'jet_cad.service');
++    expect(decoded['version'], 1);
++    expect([
++      for (final m in decoded['moves']! as List) (m as Map)['label']
++    ], [
++      '1',
++      '3'
++    ], reason: 'ascending by handle');
++    // M-SR1: the encoding drops a group's label.
++    expect(decoded['groups'], [
++      {
++        'id': 'g2',
++        'members': ['3', '2'],
++        'label': 'Smith'
++      },
++      {
++        'id': 'g1',
++        'members': ['1'],
++        'label': null
++      },
++    ]);
++    final want1 = parts(unitNode(c.activeDocument, '1').transform);
++    final want3 = parts(unitNode(c.activeDocument, '3').transform);
++    c.setMode(PlanMode.design);
++    c.setUnitGroups({
++      'gX': UnitGroup(members: {'2'})
++    });
++    c.setMode(PlanMode.service);
++    final r = c.restoreService(json);
++    expect(r.appliedMoves, ['1', '3']);
++    expect(r.droppedMoves, isEmpty);
++    expect(r.appliedGroups, ['g2', 'g1']);
++    expect(r.droppedGroups, isEmpty);
++    expect(c.unitGroups.value.keys, ['g2', 'g1']);
++    expect(c.unitGroups.value['g2'],
++        UnitGroup(members: {'3', '2'}, label: 'Smith'));
++    expect(parts(unitNode(c.activeDocument, '1').transform), want1);
++    expect(parts(unitNode(c.activeDocument, '3').transform), want3);
++    expect(c.serviceJson(), json, reason: 'byte for byte');
++    await tester.pump();
++  });
++
++  testWidgets(
++      'SR-design-edited (Review Focus 2) a record saved, the design edited '
++      '(table 2 relabelled 9), the record restored: the unchanged table\'s '
++      'move applies, the relabelled one\'s drops, a group naming the old '
++      'label drops whole and is reported, the copy\'s history is cleared',
++      (tester) async {
++    final c = controllerFor(kits: [testKit()], json: servicePlanText());
++    c.setMode(PlanMode.service);
++    move(c, '1', 750.25, -250.5);
++    move(c, '2', -125.125, 400.75);
++    c.setUnitGroups({
++      'g1': UnitGroup(members: {'2', '3'}),
++      'g2': UnitGroup(members: {'1'}),
++    });
++    final json = c.serviceJson()!;
++    final want1 = parts(unitNode(c.activeDocument, '1').transform);
++    c.setMode(PlanMode.design);
++    final two = unitNode(c.document, '2');
++    c.document.commands.execute(SetEntityTextCommand(
++        labelEntityOf(c.document, two.handle)!, '9', kUnitLabelTag));
++    c.setMode(PlanMode.service);
++    move(c, '3', 15.5, 15.5);
++    await tester.pump();
++    expect(c.canUndo.value, isTrue, reason: 'premise: a service step');
++    final r = c.restoreService(json);
++    // M-SR7: the strict match ignores the label.
++    expect(r.appliedMoves, ['1']);
++    expect(r.droppedMoves, ['2']);
++    // M-SR8: a group whose label names no unit is applied.
++    expect(r.appliedGroups, ['g2']);
++    expect(r.droppedGroups, ['g1']);
++    expect(c.unitGroups.value.keys, ['g2']);
++    expect(parts(unitNode(c.activeDocument, '1').transform), want1);
++    expect(
++        parts(unitNode(c.activeDocument, '9').transform), parts(two.transform),
++        reason: 'the relabelled table at its design place');
++    expect(parts(unitNode(c.activeDocument, '3').transform),
++        parts(unitNode(c.document, '3').transform),
++        reason: 'a new copy: the move of 3 is gone');
++    // M-SR9: the restore's command is left in the copy's history.
++    expect(c.canUndo.value, isFalse);
++    await tester.pump();
++  });
++
++  testWidgets(
++      'SR-groups-replaced restoreService replaces the groups a host set in '
++      'design with the record\'s; a record with none clears them',
++      (tester) async {
++    final c = controllerFor(kits: [testKit()], json: servicePlanText());
++    c.setUnitGroups({
++      'gX': UnitGroup(members: {'2', '3'})
++    });
++    c.setMode(PlanMode.service);
++    final r = c.restoreService(record(groups: [
++      groupOf('g1', ['1'])
++    ]));
++    // M-SR3: the record's groups merged into the host's.
++    expect(c.unitGroups.value.keys, ['g1']);
++    expect(r.appliedGroups, ['g1']);
++    final none = c.restoreService(record());
++    expect(c.unitGroups.value, isEmpty);
++    expect(none.appliedGroups, isEmpty);
++    expect(none.droppedGroups, isEmpty);
++    await tester.pump();
++  });
++
++  testWidgets(
++      'SR-invalid-groups groups breaking the validation are dropped and '
++      'reported, never a FormatException: a blank id, an id equal after '
++      'trimming, an empty group, a label already in a group, a label naming '
++      'no unit (dropped whole); a shared label is kept', (tester) async {
++    final c = controllerFor(
++        kits: [testKit()], json: servicePlanText(duplicate: true));
++    c.setMode(PlanMode.service);
++    late ServiceRestore r;
++    // M-SR4: the restore validates the groups with validateUnitGroups.
++    expect(
++        () => r = c.restoreService(record(groups: [
++              groupOf('', ['1']),
++              groupOf('g1', ['1']),
++              groupOf(' g1 ', ['2']),
++              groupOf('g2', [' ', '']),
++              groupOf('g3', ['1', '2']),
++              groupOf('g5', ['2', '99']),
++              groupOf('g4', ['2'], 'Pair'),
++            ])),
++        returnsNormally);
++    // M-SR5: a member naming no unit is dropped from its group instead.
++    expect(r.appliedGroups, ['g1', 'g4']);
++    expect(r.droppedGroups, ['', 'g1', 'g2', 'g3', 'g5']);
++    expect(c.unitGroups.value, {
++      'g1': UnitGroup(members: {'1'}),
++      'g4': UnitGroup(members: {'2'}, label: 'Pair'),
++    });
++    expect(c.selectableMembers('g4'), {'2'},
++        reason: 'the label two units share');
++    await tester.pump();
++  });
++
++  testWidgets(
++      'SR-locked-move-dropped a move of a locked unit (a missing kit\'s '
++      'table) and a move of a seat are dropped; the unlocked table\'s '
++      'applies', (tester) async {
++    final c = controllerFor(kits: [testKit()], json: lockedPlanText());
++    final one = unitNode(c.document, '1');
++    final five = unitNode(c.document, '5');
++    final moves = [
++      moveOf(one, '1', 410.5, -95.25),
++      moveOf(five, '5', 120.25, 33.5),
++    ];
++    // M-SR10: the strict match ignores isLockedUnit.
++    final m = matchServiceMoves(c.document, c.unitIndex,
++        decodeServiceRecord(record(moves: moves)).moves);
++    expect([for (final e in m.applied) e.label], ['1']);
++    expect([for (final e in m.dropped) e.label], ['5']);
++    c.setMode(PlanMode.service);
++    final r = c.restoreService(record(moves: moves));
++    expect(r.appliedMoves, ['1']);
++    expect(r.droppedMoves, ['5']);
++    expect(parts(unitNode(c.activeDocument, '5').transform),
++        parts(five.transform));
++
++    final h = hall();
++    final c2 = controllerFor(kits: [unitKit()], json: h.json);
++    final seat = c2.document.tree[h.seats[0][0]]! as InstanceNode;
++    final label = labelOf(c2.document, seat.handle);
++    c2.setMode(PlanMode.service);
++    // M-SR11: the strict match lets a generated unit move.
++    final r2 =
++        c2.restoreService(record(moves: [moveOf(seat, label, 300.5, 0)]));
++    expect(r2.appliedMoves, isEmpty);
++    expect(r2.droppedMoves, [label], reason: 'only placed units move');
++    await tester.pump();
++  });
++
++  testWidgets(
++      'SR-old-format-refused today\'s jet_cad.service_layout text, and that '
++      'format with the new keys, are FormatExceptions; nothing changes',
++      (tester) async {
++    final c = controllerFor(kits: [testKit()], json: servicePlanText());
++    c.setUnitGroups({
++      'g': UnitGroup(members: {'1'})
++    });
++    c.setMode(PlanMode.service);
++    move(c, '1', 44.5, 0);
++    await tester.pump();
++    final copy = c.activeDocument;
++    final revision = c.revision.value;
++    final groups = c.unitGroups.value;
++    final one = unitNode(c.document, '1');
++    final today = jsonEncode({
++      'format': 'jet_cad.service_layout',
++      'version': 1,
++      'tables': [
++        {
++          'handle': one.handle.toHex(),
++          'number': '1',
++          'from': one.transform.toJson(),
++          'to':
++              Transform2.translation(44.5, 0).multiply(one.transform).toJson(),
++        }
++      ],
++    });
++    final disguised = jsonEncode({
++      'format': 'jet_cad.service_layout',
++      'version': 1,
++      'moves': <Object?>[],
++      'groups': <Object?>[],
++    });
++    // M-SR12: the format is not checked.
++    for (final text in [today, disguised]) {
++      expect(() => c.restoreService(text), throwsFormatException, reason: text);
++      expect(c.activeDocument, same(copy));
++      expect(c.revision.value, revision);
++      expect(c.unitGroups.value, same(groups));
++      expect(c.serviceEdited, isTrue, reason: 'the move is kept');
++    }
++  });
++
++  testWidgets(
++      'SR-edited-after-enter serviceEdited compares the groups with those '
++      'held on entering: false right after entering with groups set in '
++      'design, true once they differ, false again when they are equal',
++      (tester) async {
++    final c = controllerFor(kits: [testKit()], json: servicePlanText());
++    c.setUnitGroups({
++      'g': UnitGroup(members: {'1', '2'})
++    });
++    c.setMode(PlanMode.service);
++    // M-SR13: entering service does not take the groups held then.
++    expect(c.serviceEdited, isFalse, reason: 'groups set in design, no move');
++    c.setUnitGroups({
++      'g': UnitGroup(members: {'2', '1'})
++    });
++    expect(c.serviceEdited, isFalse, reason: 'equal groups');
++    c.setUnitGroups({
++      'g': UnitGroup(members: {'1'})
++    });
++    expect(c.serviceEdited, isTrue);
++    c.setUnitGroups({
++      'g': UnitGroup(members: {'1', '2'})
++    });
++    expect(c.serviceEdited, isFalse);
++    c.setMode(PlanMode.design);
++    expect(c.serviceEdited, isFalse, reason: 'design');
++    c.setUnitGroups(const {});
++    c.setMode(PlanMode.service);
++    expect(c.serviceEdited, isFalse, reason: 'the groups held on entering');
++    await tester.pump();
++  });
++
++  testWidgets(
++      'SR-edited-after-load a load or a new plan in service rebuilds the copy '
++      'and takes the groups held then: the groups changed since entering '
++      'read as an edit before, as none after (spec S3 serviceEdited)',
++      (tester) async {
++    final c = controllerFor(kits: [testKit()], json: servicePlanText());
++    c.setUnitGroups({
++      'g': UnitGroup(members: {'1', '2'})
++    });
++    c.setMode(PlanMode.service);
++    c.setUnitGroups({
++      'g': UnitGroup(members: {'1', '3'})
++    });
++    expect(c.serviceEdited, isTrue, reason: 'premise: groups changed');
++    c.load(servicePlanText());
++    // M-SR24: a load or a new plan keeps the groups held on entering.
++    expect(c.serviceEdited, isFalse, reason: 'a load: a fresh copy');
++    c.setUnitGroups({
++      'g': UnitGroup(members: {'2'})
++    });
++    expect(c.serviceEdited, isTrue, reason: 'premise: groups changed');
++    c.newPlan();
++    expect(c.serviceEdited, isFalse, reason: 'a new plan: a fresh copy');
++    await tester.pump();
++  });
++
++  testWidgets(
++      'SR-reset resetService rebuilds the copy and clears the groups in '
++      'service; in design it is a silent no-op', (tester) async {
++    final c = controllerFor(kits: [testKit()], json: servicePlanText());
++    c.setUnitGroups({
++      'g': UnitGroup(members: {'1', '2'})
++    });
++    var heard = 0;
++    c.serviceChanges.addListener(() => heard++);
++    final revision = c.revision.value;
++    // M-SR15: resetService clears the groups in design.
++    c.resetService();
++    expect(c.unitGroups.value.keys, ['g']);
++    expect(heard, 0);
++    expect(c.revision.value, revision);
++    c.setMode(PlanMode.service);
++    move(c, '1', 600, 0);
++    c.setUnitGroups({
++      'g': UnitGroup(members: {'1', '3'})
++    });
++    await tester.pump();
++    heard = 0;
++    final copy = c.activeDocument;
++    c.resetService();
++    // M-SR16: resetService keeps the groups (today's resetLayout).
++    expect(c.unitGroups.value, isEmpty);
++    expect(c.activeDocument, isNot(same(copy)));
++    expect(parts(unitNode(c.activeDocument, '1').transform),
++        parts(unitNode(c.document, '1').transform));
++    expect(c.serviceEdited, isFalse);
++    expect(heard, 1);
++    await tester.pump();
++  });
++
++  testWidgets(
++      'SR-changes-timing setUnitGroups fires serviceChanges in service only; '
++      'statuses, group statuses and the focus never; nor setMode, load or '
++      'newPlan', (tester) async {
++    final c = controllerFor(kits: [testKit()], json: servicePlanText());
++    var heard = 0, groups = 0;
++    c.serviceChanges.addListener(() => heard++);
++    c.unitGroups.addListener(() => groups++);
++    c.setUnitGroups({
++      'g': UnitGroup(members: {'1'})
++    });
++    // M-SR17: setUnitGroups fires serviceChanges in design too.
++    expect((heard, groups), (0, 1));
++    c.setMode(PlanMode.service);
++    expect(heard, 0, reason: 'never on setMode');
++    c.setUnitGroups({
++      'g': UnitGroup(members: {'1', '2'})
++    });
++    // M-SR18: setUnitGroups does not fire serviceChanges.
++    expect((heard, groups), (1, 2));
++    c.setUnitStatus({'1': bill});
++    c.setGroupStatus({'g': bill});
++    c.setUnitFocus({'1'});
++    expect(heard, 1, reason: 'not in the record');
++    expect(
++        () => c.setUnitGroups({
++              '': UnitGroup(members: {'1'})
++            }),
++        throwsArgumentError);
++    expect(heard, 1, reason: 'a refused set fires nothing');
++    c.load(servicePlanText());
++    expect(heard, 1, reason: 'never on load');
++    c.newPlan();
++    expect(heard, 1, reason: 'never on newPlan');
++    c.setMode(PlanMode.design);
++    await tester.pump();
++    expect(heard, 1);
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/controller/unit_changes_test.dart b/packages/jet_cad_2d_plan/test/controller/unit_changes_test.dart
+index 2d52eca9..0d4b1fef 100644
+--- a/packages/jet_cad_2d_plan/test/controller/unit_changes_test.dart
++++ b/packages/jet_cad_2d_plan/test/controller/unit_changes_test.dart
+@@ -1,14 +1,14 @@
+ // Ported from jet_cad_floor_plan test/host/design_changes_test.dart (2b
+ // Task 9, spec S3 `unitChanges`, S5): the design's unit changes. DC10 and
+ // DC16 (the service mode) are Task 11's; DC15 reads Task 13's
+-// `serviceEdited`, so Task 13 ports it; DC7 also reads Task 13's record and
++// `serviceEdited`, so Task 13 ported it; DC7 also reads Task 13's record and
+ // reset and drags with the service tool, so Task 14 ports it. DC8, DC9,
+ // DC11, DC12, DC13 and DC17 were ported by 2a for the object-level
+ // `changes` stream (plan_change_test.dart); they are ported again here for
+ // `unitChanges`, whose code is its own (controller ruling R-13, F-T9c).
+ // Today's header follows.
+ //
+ // Host embedding API spec E-5 (Slice 2 plan, Task 3): the controller's
+ // unitChanges -- a design edit, undo or redo reported as the tables
+ // added, removed and changed, by instance, in ascending instance order;
+ // PlanUnitsReplaced on load and newPlan in either mode, after the old
+@@ -547,22 +547,51 @@ void main() {
+         [t('7'), t(null), t('8'), t('7', layer: 'B')]);
+     expect(changes, [
+       PlanUnitRemoved(t('7')),
+       PlanUnitChanged(t('8'), t('7')),
+       PlanUnitAdded(t('8')),
+       PlanUnitChanged(t('7'), t('7', layer: 'B')),
+     ]);
+     expect(diffUnitDetails(const [], const [], const [], const []), isEmpty);
+   });
+ 
+-  // DC15 (a listen in service after a service move): Task 13 ports it (it
+-  // reads Task 13's serviceEdited as a premise).
++  testWidgets(
++      'DC15 O7: a listen in service after a service move of 1 takes the '
++      'design\'s units, not the copy\'s: back in design, nothing; then '
++      'setUnitData on 2 is exactly one Changed for 2 (2b Task 13)',
++      (tester) async {
++    final c = fixtureController();
++    final b2 = detailOf(c, instancesOf(c, '2').single);
++    final b1 = detailOf(c, instancesOf(c, '1').single);
++    c.setMode(PlanMode.service);
++    await tester.pump();
++    final one = instancesOf(c, '1').single;
++    final fixture = fixtureTable('1');
++    final shift = Transform2.translation(1200, -700);
++    c.activeDocument.commands
++        .execute(TransformNodeCommand(one, shift.multiply(fixture.transform)));
++    await tester.pump();
++    expect(c.serviceEdited, isTrue, reason: 'premise: a service move');
++    expectNear(detailOf(c, one).center,
++        boxCentre(shift.multiply(fixture.transform)), 'premise: 1 moved');
++    final seen = listen(c);
++
++    c.setMode(PlanMode.design);
++    await tester.pump();
++    expect(seen, isEmpty, reason: 'a mode switch is no design change');
++    expect(detailOf(c, one), b1, reason: 'premise: the design never moved');
++    expect(c.setUnitData('2', hostData()), isTrue);
++    await tester.pump();
++    // M-DC15: the baseline taken from the active (the copy's) units.
++    expect(seen, [PlanUnitChanged(b2, copyOf(b2, data: hostData()))],
++        reason: 'the service move of 1 is no design change');
++  });
+ 
+   testWidgets(
+       'DC16 M-H29(service moves), the trigger alone: an edit then '
+       'setMode(service) in one synchronous step is reported at the next '
+       'pump, not withheld until the design moves again', (tester) async {
+     final c = fixtureController();
+     final b2 = detailOf(c, instancesOf(c, '2').single);
+     final seen = listen(c);
+ 
+     expect(c.setUnitData('2', hostData()), isTrue);
+diff --git a/packages/jet_cad_2d_plan/test/controller/unit_groups_controller_test.dart b/packages/jet_cad_2d_plan/test/controller/unit_groups_controller_test.dart
+index 9a60c58c..5641b867 100644
+--- a/packages/jet_cad_2d_plan/test/controller/unit_groups_controller_test.dart
++++ b/packages/jet_cad_2d_plan/test/controller/unit_groups_controller_test.dart
+@@ -242,20 +242,77 @@ void main() {
+     c.setUnitGroups({
+       'G2': UnitGroup(members: {'20', '3'})
+     });
+     c.setMode(PlanMode.design);
+     expect(c.selectedUnits.value, {'3', '20'});
+     expect(c.selectedGroup.value, isNull, reason: 'groups do not act here');
+     expect(heard, ['G2', null, 'G2', null]);
+     await tester.pump();
+   });
+ 
++  testWidgets(
++      'TG-C10 groups never reach the document: save() and the service copy '
++      'are byte-identical with and without them (M-TG-19, invariant)',
++      (tester) async {
++    final c = controllerFor(kits: [testKit()], json: groupsPlanText());
++    final design = c.save();
++    c.setMode(PlanMode.service);
++    final copy = DraftDocumentCodec.encodeToString(c.activeDocument);
++    c.setUnitGroups({
++      'G7': UnitGroup(members: {'12', '3', '7'}, label: 'Window bay')
++    });
++    c.setGroupStatus({'G7': bill});
++    c.select({'3'});
++    expect(DraftDocumentCodec.encodeToString(c.activeDocument), copy);
++    expect(c.save(), design);
++    // Today's `isFalse` (2b Task 13).
++    expect(c.serviceEdited, isTrue,
++        reason: 'ruling R13-c: groups count (spec S3, S5)');
++    await tester.pump();
++  });
++
++  testWidgets(
++      'TG-C11 groups and group statuses survive a mode round trip and a '
++      'load of the same plan, and still act (M-TG-20; today\'s resetLayout '
++      'step retired by ruling R13-d: resetService clears the groups, '
++      'SR-reset)', (tester) async {
++    final json = groupsPlanText();
++    final c = controllerFor(kits: [testKit()], json: json);
++    c.setUnitGroups({
++      'G7': UnitGroup(members: {'12', '3', '7'})
++    });
++    c.setGroupStatus({'G7': bill});
++    final groups = c.unitGroups.value;
++    final statuses = c.groupStatuses.value;
++    void expectKept(String reason) {
++      expect(c.unitGroups.value, same(groups), reason: reason);
++      expect(c.groupStatuses.value, same(statuses), reason: reason);
++    }
++
++    c.setMode(PlanMode.service);
++    c.setMode(PlanMode.design);
++    c.setMode(PlanMode.service);
++    expectKept('a mode round trip');
++    c.select({'7'});
++    expect(c.selectedUnits.value, {'3', '7', '12'});
++    expect(c.selectedGroup.value, 'G7');
++
++    c.load(json);
++    expectKept('load');
++    expect(c.selectedGroup.value, isNull,
++        reason: 'a load clears the selection');
++    c.select({'12'});
++    expect(c.selectedUnits.value, {'3', '7', '12'});
++    expect(c.selectedGroup.value, 'G7');
++    await tester.pump();
++  });
++
+   testWidgets(
+       'TG-C12 selectedGroup reads the active plan as it is: after a load of '
+       'another plan, and after a layer edit that made no command (M-C1-16, '
+       'M-C1-17)', (tester) async {
+     final c = controllerFor(kits: [testKit()], json: groupsPlanText());
+     c.setMode(PlanMode.service);
+     c.setUnitGroups({
+       'G9': UnitGroup(members: {'9', '5'})
+     });
+     c.select({'5'});
+diff --git a/packages/jet_cad_2d_plan/test/service/service_record_test.dart b/packages/jet_cad_2d_plan/test/service/service_record_test.dart
+new file mode 100644
+index 00000000..28a52701
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/service/service_record_test.dart
+@@ -0,0 +1,318 @@
++// jet_cad_floor_plan's test/host/service_layout_test.dart (LC1-LC6),
++// ported to the service record (spec 2b S3 "The service record"):
++// assertions unchanged but where the format itself is the premise
++// (ruling R13-a). Units are turned, mirrored and off the origin; moves are
++// off-grid; the copy is a decoded copy of the design under runtime
++// permissions, as the controller makes it.
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:jet_cad_2d_plan/src/kits/locks.dart' show LockSet;
++import 'package:jet_cad_2d_plan/src/service/service_record.dart';
++import 'package:jet_cad_2d_plan/src/symbols/symbol_placer.dart'
++    show placementTransform;
++import 'package:jet_cad_2d_plan/src/units/unit_index.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/harness.dart'
++    show catalogOf, planDocument, registerPlanComponents;
++import '../support/service_plans.dart';
++import '../support/test_kit.dart' show testKit;
++
++/// Units 1 (a quarter turn, mirrored), 2, 3 (a stool, half-turned) and 4
++/// (on layer `L`), and a planter (today's `design()`,
++/// service_layout_test.dart:16-45).
++DraftDocument design() {
++  final d = planDocument([testKit()]);
++  final table = unitDefinition(d, key: 'test.table.square.four');
++  final stool = unitDefinition(d,
++      key: 'test.stool.round.one', name: 'Stool', capacity: 1, round: true);
++  final planter = unitDefinition(d,
++      key: 'test.planter.square.one', name: 'Planter', unit: false);
++  placeDef(
++      d,
++      table,
++      placementTransform(
++          at: Vector2(-2600.25, 1400.5),
++          basePoint: table.base,
++          quarterTurns: 1,
++          mirrored: true),
++      label: '1');
++  placeDef(d, table,
++      placementTransform(at: Vector2(2300.75, 1400), basePoint: table.base),
++      label: '2');
++  placeDef(
++      d,
++      stool,
++      placementTransform(
++          at: Vector2(300, -2100.125), basePoint: stool.base, quarterTurns: 2),
++      label: '3');
++  final four = placeDef(
++      d,
++      table,
++      placementTransform(
++          at: Vector2(5100.5, -3300.25),
++          basePoint: table.base,
++          quarterTurns: 3),
++      label: '4');
++  placeDef(d, planter,
++      placementTransform(at: Vector2(4100, -900), basePoint: planter.base));
++  final layer = addLayer(d, 'L', visible: true, locked: false);
++  d.commands.execute(SetInstanceLayerCommand(four, layer));
++  return d;
++}
++
++DraftDocument copyOf(DraftDocument doc) =>
++    DraftDocumentCodec.decodeString(DraftDocumentCodec.encodeToString(doc),
++        permissions: DraftPermissions.runtime,
++        registerComponents: (r) =>
++            registerPlanComponents(r, catalogOf([testKit()])));
++
++/// [d]'s units, every kit but the test kit missing.
++UnitIndex unitsOf(DraftDocument d) => UnitIndex.of(d,
++    catalog: catalogOf([testKit()]),
++    locks: LockSet.scan(d, (kit) => kit == 'test'));
++
++InstanceNode table(DraftDocument doc, String label) => unitNode(doc, label);
++
++void moveIn(DraftDocument doc, String label, double dx, double dy) {
++  final node = table(doc, label);
++  doc.commands.execute(TransformNodeCommand(
++      node.handle, Transform2.translation(dx, dy).multiply(node.transform)));
++}
++
++/// [d]'s copy with every unit moved, the highest handle first.
++DraftDocument movedCopy(DraftDocument d) {
++  final copy = copyOf(d);
++  for (final (l, dx, dy) in const [
++    ('4', 111.125, -37.5),
++    ('3', -250.5, 75.25),
++    ('2', 640.375, 12.5),
++    ('1', -95.75, -410.625),
++  ]) {
++    moveIn(copy, l, dx, dy);
++  }
++  return copy;
++}
++
++List<ServiceMove> movesOf(DraftDocument d, DraftDocument copy) =>
++    serviceMovesOf(d, copy, unitsOf(copy));
++
++void main() {
++  test(
++      'LC1 the record lists the moved units, ascending by handle although '
++      'moved highest first; a unit moved back exactly is not listed (S1, '
++      'M-14d-n)', () {
++    final d = design();
++    final copy = movedCopy(d);
++    moveIn(copy, '2', -640.375, -12.5);
++    final entries = movesOf(d, copy);
++    expect([for (final e in entries) e.label], ['1', '3', '4']);
++    final handles = [for (final e in entries) e.handle.value];
++    expect(handles, [...handles]..sort());
++    expect(handles.first < handles.last, isTrue, reason: 'premise');
++    for (final e in entries) {
++      expect(parts(e.from), parts(table(d, e.label!).transform));
++      expect(parts(e.to), parts(table(copy, e.label!).transform));
++    }
++    expect(parts(entries.first.to)[4],
++        closeTo(parts(entries.first.from)[4] - 95.75, 1e-9));
++  });
++
++  test(
++      'LC2 the encoding round-trips, and is byte-equal twice and after the '
++      'design is encoded and decoded (S1, M-14d-n)', () {
++    final d = design();
++    final copy = movedCopy(d);
++    final text = encodeServiceRecord(movesOf(d, copy), const {});
++    expect(encodeServiceRecord(movesOf(d, copy), const {}), text);
++    expect(encodeServiceRecord(movesOf(copyOf(d), copy), const {}), text);
++    final back = decodeServiceRecord(text);
++    expect(encodeServiceRecord(back.moves, const {}), text);
++    // Ruling R13-a: today's 'jet_cad.service_layout'.
++    expect(text, contains('"format":"jet_cad.service"'));
++    expect(text, contains('"version":1'));
++  });
++
++  test('LC3 a text that is not a version-1 record is refused (S2, R13-a)', () {
++    String record(String moves, {String format = 'jet_cad.service'}) =>
++        '{"format":"$format","version":1,"moves":$moves,"groups":[]}';
++    const ok = '[1,0,0,1,10.5,-3]';
++    String entry(
++            {String handle = '"2F"',
++            String label = '"1"',
++            String from = ok,
++            String to = ok}) =>
++        '{"handle":$handle,"label":$label,"from":$from,"to":$to}';
++    expect(decodeServiceRecord(record('[${entry()}]')).moves, hasLength(1));
++    expect(
++        decodeServiceRecord(record('[${entry(label: 'null')}]'))
++            .moves
++            .single
++            .label,
++        isNull);
++    for (final bad in [
++      'not json',
++      '[]',
++      record('[]', format: 'other'),
++      '{"format":"jet_cad.service","version":2,"moves":[],"groups":[]}',
++      record('{}'),
++      record('[3]'),
++      record('[${entry(handle: '"XYZ"')}]'),
++      record('[${entry(handle: '47')}]'),
++      record('[${entry(label: '5')}]'),
++      record('[${entry(from: '[1,0,0,1,10]')}]'),
++      record('[${entry(to: '[1,0,0,1,10,"x"]')}]'),
++      record('[${entry()},${entry(label: '"2"')}]'),
++    ]) {
++      expect(() => decodeServiceRecord(bad), throwsFormatException,
++          reason: bad);
++    }
++  });
++
++  test('LC4 `1` and `1.0` read alike (V-21, R13-a)', () {
++    final a = decodeServiceRecord('{"format":"jet_cad.service",'
++        '"version":1,"moves":[{"handle":"A","label":null,'
++        '"from":[1,0,0,1,2,3],"to":[1,0,0,1,4,5]}],"groups":[]}');
++    final b = decodeServiceRecord('{"format":"jet_cad.service",'
++        '"version":1,"moves":[{"handle":"A","label":null,'
++        '"from":[1.0,0.0,0.0,1.0,2.0,3.0],"to":[1.0,0.0,0.0,1.0,4.0,5.0]}],'
++        '"groups":[]}');
++    expect(parts(a.moves.single.to), parts(b.moves.single.to));
++    expect(sameTransform(a.moves.single.from, b.moves.single.from), isTrue);
++  });
++
++  test(
++      'LC6 an unlabelled unit moved is listed with a null label and '
++      'applied by the match (S1, S2, review F-3)', () {
++    final d = design();
++    final spare = table(d, '2');
++    d.commands.execute(SetEntityTextCommand(
++        labelEntityOf(d, spare.handle)!, '', kUnitLabelTag));
++    expect(unitsOf(d).units.where((u) => u.text == null), hasLength(1),
++        reason: 'premise: one unlabelled unit');
++    final copy = copyOf(d);
++    final node = copy.tree[spare.handle]! as InstanceNode;
++    copy.commands.execute(TransformNodeCommand(node.handle,
++        Transform2.translation(-310.375, 58.25).multiply(node.transform)));
++    final entries =
++        decodeServiceRecord(encodeServiceRecord(movesOf(d, copy), const {}))
++            .moves;
++    expect([for (final e in entries) e.label], [null]);
++    expect(entries.single.handle, spare.handle);
++    final m = matchServiceMoves(d, unitsOf(d), entries);
++    expect([for (final e in m.applied) e.label], [null]);
++    expect(m.dropped, isEmpty);
++  });
++
++  group('LC5 the strict match (S2, M-14d-l)', () {
++    late DraftDocument d;
++    late List<ServiceMove> entries;
++    setUp(() {
++      d = design();
++      entries = decodeServiceRecord(
++          encodeServiceRecord(movesOf(d, movedCopy(d)), const {})).moves;
++    });
++    List<String?> dropped() => [
++          for (final e in matchServiceMoves(d, unitsOf(d), entries).dropped)
++            e.label
++        ];
++
++    test('an unchanged design applies every entry', () {
++      final m = matchServiceMoves(d, unitsOf(d), entries);
++      expect([for (final e in m.applied) e.label], ['1', '2', '3', '4']);
++      expect(m.dropped, isEmpty);
++    });
++
++    test('a unit moved in the design since is dropped', () {
++      moveIn(d, '2', 0.5, 0);
++      expect(dropped(), ['2']);
++    });
++
++    test('a unit relabelled in the design since is dropped', () {
++      d.commands.execute(SetEntityTextCommand(
++          labelEntityOf(d, table(d, '3').handle)!, '9', kUnitLabelTag));
++      expect(dropped(), ['3']);
++    });
++
++    test('a unit locked or hidden in the design since is dropped', () {
++      final layer = d.tables.layers[table(d, '4').layer]!;
++      d.commands.execute(SetLayerCommand(layer.copyWith(locked: true)));
++      expect(dropped(), ['4']);
++      d.commands.execute(
++          SetLayerCommand(layer.copyWith(locked: false, visible: false)));
++      expect(dropped(), ['4']);
++    });
++
++    test(
++        'an entry for a missing node, a non-unit, or another unit with the '
++        'label of the first is dropped', () {
++      final first = entries.first;
++      final units = unitsOf(d);
++      final planter = d.tree.nodes
++          .whereType<InstanceNode>()
++          .where((n) => units[n.handle] == null)
++          .single
++          .handle;
++      entries = [
++        for (final h in [
++          Handle(d.handleSeed.current.value + 50),
++          planter,
++          table(d, '2').handle,
++        ])
++          ServiceMove(
++              handle: h, label: first.label, from: first.from, to: first.to),
++      ];
++      expect(matchServiceMoves(d, unitsOf(d), entries).applied, isEmpty);
++    });
++
++    test(
++        'an entry that turns the unit, shears it in one term, or holds a '
++        'NaN or an infinity, is dropped (review F-5)', () {
++      final e = entries.first;
++      final t = e.to;
++      for (final to in [
++        Transform2.rotation(0.25).multiply(t),
++        Transform2(t.a, t.b + 0.25, t.c, t.d, t.e, t.f),
++        Transform2(t.a, t.b, t.c, t.d, double.nan, t.f),
++        Transform2(t.a, t.b, t.c, t.d, t.e, double.infinity),
++      ]) {
++        final one = [
++          ServiceMove(handle: e.handle, label: e.label, from: e.from, to: to)
++        ];
++        expect(matchServiceMoves(d, unitsOf(d), one).applied, isEmpty,
++            reason: '$to');
++      }
++      expect(matchServiceMoves(d, unitsOf(d), [e]).applied, hasLength(1),
++          reason: 'premise: the entry itself applies');
++    });
++  });
++
++  test(
++      'SR-codec-shapes the groups: a list of objects with a string id, a list '
++      'of string members and a string or null label; anything else is a '
++      'FormatException; a group the validation would refuse decodes as '
++      'written', () {
++    String record(String groups) =>
++        '{"format":"jet_cad.service","version":1,"moves":[],"groups":$groups}';
++    final ok = decodeServiceRecord(record(
++        '[{"id":" ","members":[],"label":null},{"id":"g1","members":["1"," 1 "]}]'));
++    expect([for (final g in ok.groups) g.id], [' ', 'g1']);
++    expect(ok.groups.last.members, ['1', ' 1 ']);
++    expect(ok.groups.last.label, isNull);
++    for (final bad in [
++      // M-SR19: `groups` missing read as none.
++      '{"format":"jet_cad.service","version":1,"moves":[]}',
++      record('{}'),
++      record('[3]'),
++      record('[{"members":["1"]}]'),
++      record('[{"id":3,"members":["1"]}]'),
++      record('[{"id":"g","members":"1"}]'),
++      record('[{"id":"g","members":[1]}]'),
++      record('[{"id":"g","members":["1"],"label":5}]'),
++    ]) {
++      expect(() => decodeServiceRecord(bad), throwsFormatException,
++          reason: bad);
++    }
++  });
++}

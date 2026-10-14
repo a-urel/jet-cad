@@ -1,0 +1,280 @@
+# Review package: 85065219..HEAD
+
+## Commits
+abbc9612 fix(plan): units review round 1: NBSP inputs, one unknown-kit rule
+
+## Files changed
+ .../lib/src/controller/session.dart                |  9 +++---
+ packages/jet_cad_2d_plan/lib/src/kits/locks.dart   | 32 ++++++++++++++--------
+ .../jet_cad_2d_plan/lib/src/units/unit_locks.dart  | 21 ++++----------
+ .../test/units/unit_components_test.dart           |  5 ++--
+ .../test/units/unit_index_test.dart                |  3 +-
+ .../test/units/unit_numbers_test.dart              |  2 +-
+ 6 files changed, 37 insertions(+), 35 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_plan/lib/src/controller/session.dart b/packages/jet_cad_2d_plan/lib/src/controller/session.dart
+index d3a53ebd..1be49630 100644
+--- a/packages/jet_cad_2d_plan/lib/src/controller/session.dart
++++ b/packages/jet_cad_2d_plan/lib/src/controller/session.dart
+@@ -40,24 +40,20 @@ final class DocumentSession {
+       required PlanPermissions Function() permissions,
+       required ValueListenable<bool> fill,
+       required Tool Function(String kitId, String toolId, Tool tool) guard,
+       MoveResolver? moveResolver})
+       : _log = log,
+         _guard = guard,
+         page = PageNotifier(document),
+         index = SpatialIndex(document),
+         dispatch = GripDispatch(catalog) {
+     locks = LockSet.scan(document, kitLoaded);
+-    // Spec 2b S2: the document's units, rebuilt on its state id, its
+-    // layers' revision and the controller's locked set.
+-    units = UnitIndexCache(document,
+-        catalog: catalog, locks: locks, locked: locked);
+     // planner_shell.dart:625-671, the order load-bearing: the selection
+     // prunes a dead key before the outline cache walks it; the gates
+     // listen to the selection before the outline and grip caches do; the
+     // grip cache rebuilds after the outlines.
+     selection = SelectionController(document);
+     gates = PlanSelectGates(
+         permissions: permissions, selection: selection, locked: locked);
+     outlines = OutlineCache(document, selection);
+     grips = GripCache(document, selection, outlines,
+         objects: LockedGrips(locks,
+@@ -84,20 +80,25 @@ final class DocumentSession {
+     // The other generic tools, before any kit's (runKitFactories runs
+     // later, from the controller's _open). The map owns and disposes them.
+     for (final e in generic.byId.entries) {
+       if (e.key != planSelectToolId) addTool(e.key, e.value);
+     }
+     // :1050-1057: the document arrives built; the system installs last,
+     // and the lock expander stacks after it.
+     parametric = ParametricSystem(document, catalog, isFrozen: frozen.contains)
+       ..install();
+     lockExpander = LockExpander(document, locks)..install();
++    // Spec 2b S2: the document's units, rebuilt on its state id, its
++    // layers' revision and the controller's locked set. Last: it listens to
++    // [locked], so no later step can throw and leak the listener.
++    units = UnitIndexCache(document,
++        catalog: catalog, locks: locks, locked: locked);
+   }
+ 
+   final DraftDocument document;
+   final FlutterTextMeasurer measurer;
+   final DiagnosticsLog _log;
+   final Tool Function(String kitId, String toolId, Tool tool) _guard;
+ 
+   /// The failure boundary of this document (spec P4; set once by the
+   /// controller's `_open`). It holds no resource: it goes with its session.
+   late final FailureBoundary boundary;
+diff --git a/packages/jet_cad_2d_plan/lib/src/kits/locks.dart b/packages/jet_cad_2d_plan/lib/src/kits/locks.dart
+index a4099402..22d97b1b 100644
+--- a/packages/jet_cad_2d_plan/lib/src/kits/locks.dart
++++ b/packages/jet_cad_2d_plan/lib/src/kits/locks.dart
+@@ -17,20 +17,37 @@ import 'guard.dart' show KitHookFailure;
+ 
+ /// The refusal of a command that would change a locked object. A refusal,
+ /// not a kit diagnostic: the canvas shows a short hint.
+ final class PlanLocked implements Exception {
+   const PlanLocked();
+ 
+   @override
+   String toString() => 'PlanLocked: the edit would change a locked object';
+ }
+ 
++/// The type id of the first unknown component on [h] whose type id is
++/// kit-namespaced (a kit id, then a dot; not `jetcad`, not `plan`), or
++/// null: the component that locks [h] (spec P4), and what a held group was
++/// (spec 2b S2, `heldTypeOf`). The one reading of the rule.
++@internal
++String? unknownKitTypeIdOf(CommandTarget document, Handle h) {
++  for (final payload in document.components.unknownOf(h)) {
++    final typeId = payload['typeId'];
++    if (typeId is! String) continue;
++    final dot = typeId.indexOf('.');
++    if (dot <= 0) continue;
++    final kit = typeId.substring(0, dot);
++    if (isKitId(kit) && kit != 'jetcad' && kit != 'plan') return typeId;
++  }
++  return null;
++}
++
+ /// The locked objects of one document, and what they contain.
+ final class LockSet {
+   LockSet._(this._missing, this._definitions, CommandTarget target) {
+     _refresh(target);
+   }
+ 
+   /// Scans [document] once (spec P4 "Which objects are locked"):
+   /// - a node other than the root that carries an unknown component whose
+   ///   type id is kit-namespaced (a kit id, then a dot; not `jetcad`, not
+   ///   `plan`), whatever [loaded] says: no loaded code knows the type;
+@@ -55,32 +72,25 @@ final class LockSet {
+     for (final node in document.tree.nodes) {
+       if (node.handle == document.rootHandle) continue;
+       if (unknown(node.handle) ||
+           (node is InstanceNode && definitions.contains(node.definition))) {
+         missing.add(node.handle);
+       }
+     }
+     return LockSet._(missing, definitions, document);
+   }
+ 
+-  /// The kit id of an unknown, kit-namespaced component on [h] (a kit id,
+-  /// then a dot; not `jetcad`, not `plan`), or null.
++  /// The kit id of an unknown, kit-namespaced component on [h]
++  /// ([unknownKitTypeIdOf]), or null.
+   static String? _unknownKit(DraftDocument d, Handle h) {
+-    for (final payload in d.components.unknownOf(h)) {
+-      final typeId = payload['typeId'];
+-      if (typeId is! String) continue;
+-      final dot = typeId.indexOf('.');
+-      if (dot <= 0) continue;
+-      final kit = typeId.substring(0, dot);
+-      if (isKitId(kit) && kit != 'jetcad' && kit != 'plan') return kit;
+-    }
+-    return null;
++    final typeId = unknownKitTypeIdOf(d, h);
++    return typeId?.substring(0, typeId.indexOf('.'));
+   }
+ 
+   /// Whether an unknown component of [kit] locks its holder: always (plan
+   /// decision), whether or not [kit] is loaded, since no loaded code knows
+   /// the type.
+   static bool _locksUnknown(String kit, bool Function(String) loaded) => true;
+ 
+   /// Past this many containers a chain is taken as no lock's (the tree
+   /// refuses cycles; this only bounds a malformed one).
+   static const int _maxDepth = 4096;
+diff --git a/packages/jet_cad_2d_plan/lib/src/units/unit_locks.dart b/packages/jet_cad_2d_plan/lib/src/units/unit_locks.dart
+index b3358e8c..1a6a8243 100644
+--- a/packages/jet_cad_2d_plan/lib/src/units/unit_locks.dart
++++ b/packages/jet_cad_2d_plan/lib/src/units/unit_locks.dart
+@@ -1,35 +1,24 @@
+ // The one lock predicate of a unit (spec 2b S2 "Locked units"): its layer
+ // is locked (today's locked table), or 2a's lock set covers it (a placed
+ // unit of a missing kit's symbol, a frozen object's or a missing kit's
+ // object's seat, a seat of a missing kit's definition). Used by the service
+ // tool, unitDetails.locked, the record's strict match and the design writes.
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+-import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show isKitId;
+ 
+ import '../kits/locks.dart';
+ 
+ /// Whether the unit [instance] of [document] is locked.
+ bool isLockedUnit(CommandTarget document, LockSet locks, Handle instance) {
+   final node = document.tree[instance];
+   if (node is InstanceNode &&
+       (document.tables.layers[node.layer]?.locked ?? false)) {
+     return true;
+   }
+   return locks.covers(document, instance);
+ }
+ 
+-/// The type id of the first unknown kit-namespaced component on [group] (a
+-/// kit id, then a dot; not `jetcad`, not `plan`): what a group the lock set
+-/// holds for a missing kit was, by the rule `LockSet` reads
+-/// (`locks.dart:67-77`). Null when it carries none.
+-String? heldTypeOf(CommandTarget document, Handle group) {
+-  for (final payload in document.components.unknownOf(group)) {
+-    final typeId = payload['typeId'];
+-    if (typeId is! String) continue;
+-    final dot = typeId.indexOf('.');
+-    if (dot <= 0) continue;
+-    final kit = typeId.substring(0, dot);
+-    if (isKitId(kit) && kit != 'jetcad' && kit != 'plan') return typeId;
+-  }
+-  return null;
+-}
++/// The type id of the first unknown kit-namespaced component on [group]:
++/// what a group the lock set holds for a missing kit was, by the rule
++/// `LockSet` reads ([unknownKitTypeIdOf]). Null when it carries none.
++String? heldTypeOf(CommandTarget document, Handle group) =>
++    unknownKitTypeIdOf(document, group);
+diff --git a/packages/jet_cad_2d_plan/test/units/unit_components_test.dart b/packages/jet_cad_2d_plan/test/units/unit_components_test.dart
+index b360a5b6..1bde04dc 100644
+--- a/packages/jet_cad_2d_plan/test/units/unit_components_test.dart
++++ b/packages/jet_cad_2d_plan/test/units/unit_components_test.dart
+@@ -1,11 +1,12 @@
+-// Ported from jet_cad_floor_plan/test/tables/table_data_test.dart and test/host/table_color_test.dart; assertions unchanged.
++// Ported from jet_cad_floor_plan/test/tables/table_data_test.dart and
++// test/host/table_color_test.dart; assertions unchanged.
+ //
+ // Spec 2b S2 "Per-unit data" (host embedding API spec E-6, plan colours
+ // spec PC-4): the host's data on a unit -- the component, its limits, its
+ // lenient read (spec point S-2) and its diagnostic (S-3) -- and the unit's
+ // colour. Units are placed off the origin, turned and mirrored; data is
+ // written with its keys out of order, a 64-character key, a 1024-unit
+ // value and non-ASCII text.
+ import 'dart:convert';
+ 
+ import 'package:flutter_test/flutter_test.dart';
+@@ -67,21 +68,21 @@ void main() {
+       final full = {
+         for (var i = 0; i < 31; i++) 'k${i.toString().padLeft(2, '0')}': '$i',
+         key64: value1024,
+       };
+       expect(full.length, 32);
+       expect(unitDataProblem(full), isNull);
+       expect(UnitData(full).data, full);
+       expect(unitDataProblem(hostData()), isNull);
+       expect(unitDataProblem(const {}), isNull,
+           reason: 'empty is within the limits: it removes the data');
+-      expect(unitDataProblem({'a': ' ¡ é'}), isNull,
++      expect(unitDataProblem({'a': '\u00A0¡ é'}), isNull,
+           reason: 'U+00A0 is past the C1 range');
+       expect(unitDataProblem({'a': 'a~b'}), isNull,
+           reason: 'U+007E is below the DEL and C1 range');
+       expect(astral1024.length, 1024);
+       expect(astral1024.runes.length, 512);
+       expect(unitDataProblem({'a': astral1024}), isNull,
+           reason: '1024 UTF-16 units, though 512 characters');
+       expect(UnitData({'a': astral1024}).data, {'a': astral1024});
+     });
+ 
+diff --git a/packages/jet_cad_2d_plan/test/units/unit_index_test.dart b/packages/jet_cad_2d_plan/test/units/unit_index_test.dart
+index 3b8ce348..f6881b8d 100644
+--- a/packages/jet_cad_2d_plan/test/units/unit_index_test.dart
++++ b/packages/jet_cad_2d_plan/test/units/unit_index_test.dart
+@@ -1,11 +1,12 @@
+-// Ported from jet_cad_floor_plan/test/tables/table_index_test.dart; assertions unchanged.
++// Ported from jet_cad_floor_plan/test/tables/table_index_test.dart;
++// assertions unchanged.
+ //
+ // Spec 14a T1, T2, T6, T15 (spec 2b S2 "A unit", "UnitIndex",
+ // "Diagnostics"): which instances are units, the label each carries, and
+ // the diagnostics of a plan's labels. Units are placed off the origin,
+ // turned and mirrored; their labels are added by hand here.
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+ import 'package:jet_cad_2d_plan/src/symbols/symbol_placer.dart';
+ import 'package:jet_cad_2d_plan/src/units/unit_label.dart';
+diff --git a/packages/jet_cad_2d_plan/test/units/unit_numbers_test.dart b/packages/jet_cad_2d_plan/test/units/unit_numbers_test.dart
+index 6b4b069f..28640a02 100644
+--- a/packages/jet_cad_2d_plan/test/units/unit_numbers_test.dart
++++ b/packages/jet_cad_2d_plan/test/units/unit_numbers_test.dart
+@@ -53,21 +53,21 @@ void main() {
+     test('TN7 valid numbers, trimmed', () {
+       for (final n in const [
+         '1',
+         'B4',
+         'Bahçe 3',
+         '07',
+         '12345678',
+         ' 4 ',
+         'ÇİĞ',
+         ' 12345678 ',
+-        'a b',
++        'a\u00A0b',
+       ]) {
+         expect(unitLabelError(n), isNull, reason: n);
+       }
+     });
+ 
+     test('TN8 refused: empty, too long, control characters', () {
+       expect(unitLabelError(''), '1 to 8 characters');
+       expect(unitLabelError('   '), '1 to 8 characters');
+       expect(unitLabelError('123456789'), '1 to 8 characters');
+       expect(unitLabelError('a\nb'), isNotNull);

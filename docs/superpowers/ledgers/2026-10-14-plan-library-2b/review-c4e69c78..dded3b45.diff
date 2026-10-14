@@ -1,0 +1,1833 @@
+# Review package: c4e69c78..HEAD
+
+## Commits
+dded3b45 feat(plan): the 2b plumbing: instances guarded, symbol definitions, host words
+
+## Files changed
+ packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart  |   3 +-
+ .../lib/src/controller/plan_controller.dart        |  82 +++++++--
+ .../lib/src/controller/services.dart               |  47 +++++-
+ .../lib/src/editor/plan_tool_palette.dart          |   7 +-
+ .../jet_cad_2d_plan/lib/src/panels/kit_lookup.dart |   9 +-
+ .../lib/src/panels/plan_property_panel.dart        |   9 +-
+ .../lib/src/panels/plan_symbol_gallery.dart        |   8 +-
+ .../lib/src/symbols/plan_symbol_loader.dart        |   7 +-
+ .../lib/src/symbols/plan_symbols_state.dart        |   4 -
+ .../lib/src/symbols/symbol_box.dart                |  19 +++
+ packages/jet_cad_2d_plan/test/barrel_test.dart     |   2 +-
+ .../test/controller/host_words_test.dart           | 124 ++++++++++++++
+ .../test/controller/plan_controller_test.dart      |   2 +-
+ .../test/controller/symbol_definition_test.dart    | 183 +++++++++++++++++++++
+ .../test/controller/symbols_controller_test.dart   |  24 +--
+ .../test/editor/editor_words_test.dart             |   4 +-
+ .../test/editor/plan_editor_test.dart              |   4 +-
+ .../test/kits/guarded_instances_test.dart          | 102 ++++++++++++
+ .../test/panels/plan_symbol_gallery_test.dart      |   2 +-
+ .../test/panels/symbol_section_test.dart           |   4 +-
+ packages/jet_cad_2d_plan/test/support/box_kit.dart |  10 +-
+ .../test/symbols/plan_symbol_loader_test.dart      |  12 +-
+ 22 files changed, 594 insertions(+), 74 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart b/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart
+index d3bec16a..c7272a4e 100644
+--- a/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart
++++ b/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart
+@@ -1,17 +1,19 @@
+ /// The plan library of jet_cad_2d: a `PlanController` over one plan and the
+ /// composable widgets of design mode, over the kits a host loads.
+ library;
+ 
+ export 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
+     show SymbolThumbnails;
+ 
++export 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show SymbolsState;
++
+ export 'src/canvas/plan_canvas.dart' show PlanCanvas, kLockHintDuration;
+ export 'src/controller/camera_bounds.dart' show kPlanMaxScale, kPlanMinScale;
+ export 'src/controller/permissions.dart' show PlanPermissions;
+ export 'src/controller/plan_change.dart'
+     show
+         PlanChange,
+         PlanObjectAdded,
+         PlanObjectChanged,
+         PlanObjectRemoved,
+         PlanReplaced;
+@@ -59,12 +61,11 @@ export 'src/l10n/strings_en.dart' show PlanStringsEn;
+ export 'src/l10n/strings_tr.dart' show PlanStringsTr;
+ export 'src/panels/plan_layer_panel.dart' show PlanLayerPanel;
+ export 'src/panels/plan_page_panel.dart' show PlanPagePanel;
+ export 'src/panels/plan_property_panel.dart' show PlanPropertyPanel;
+ export 'src/panels/plan_symbol_gallery.dart' show PlanSymbolGallery;
+ export 'src/shortcuts/plan_shortcut_guard.dart' show PlanShortcutGuard;
+ export 'src/shortcuts/plan_shortcuts.dart' show PlanShortcuts;
+ export 'src/symbols/plan_symbol.dart' show PlanSymbol;
+ export 'src/symbols/plan_symbol_loader.dart'
+     show PlanSymbolLoad, PlanSymbolLoader;
+-export 'src/symbols/plan_symbols_state.dart' show PlanSymbolsState;
+ export 'src/theme/plan_theme.dart' show PlanTheme;
+diff --git a/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart b/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
+index c07de113..65aa7609 100644
+--- a/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
++++ b/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
+@@ -21,21 +21,20 @@ import '../kits/guard.dart';
+ import '../kits/kit_set.dart';
+ import '../kits/locks.dart';
+ import '../l10n/document_separator.dart';
+ import '../l10n/strings.dart';
+ import '../export/page_flows.dart';
+ import '../export/page_printer.dart';
+ import '../export/registries.dart';
+ import '../shortcuts/tool_letters.dart';
+ import '../symbols/plan_symbol.dart';
+ import '../symbols/plan_symbol_loader.dart';
+-import '../symbols/plan_symbols_state.dart';
+ import '../tools/generic_tools.dart';
+ import '../tools/move_resolver.dart';
+ import '../tools/plan_select_gates.dart';
+ import '../tools/plan_symbol_tool.dart';
+ import 'camera_bounds.dart';
+ import 'new_plan.dart';
+ import 'permissions.dart';
+ import 'plan_change.dart';
+ import 'services.dart';
+ import 'session.dart';
+@@ -71,52 +70,71 @@ final class _Host implements ServicesHost {
+   DocumentSession get session => _c._session;
+ 
+   @override
+   CameraController get camera => _c.camera;
+ 
+   @override
+   SnapSettings get snap => _c._snap;
+ 
+   @override
+   ToolSettingsStore get toolSettings => _c.toolSettings;
++
++  @override
++  PlanSymbol? symbolById(String id) => _c.symbolById(id);
++
++  @override
++  ValueListenable<SymbolsState> get symbolsState => _c._symbolsState;
++
++  @override
++  Map<String, SymbolDefinitionRef> get pendingDefinitions =>
++      _c._pendingDefinitions;
+ }
+ 
+ /// One plan and everything over it (spec P2). A controller is shown in one
+ /// `PlanCanvas` at a time (Task 15).
+ class PlanController extends ChangeNotifier {
+   /// A controller over [kits] and [json], or an empty plan. Throws, before
+   /// it builds anything it would have to dispose: a [KitSetError] for the
+   /// kits (spec P4), an [ArgumentError] unless `1e-6 <= minScale <
+   /// maxScale`, both finite (today's G-3), and a [PlanFormatException]
+   /// when [json] is not a plan.
+   ///
+   /// The empty plan prints the decimal separator of the first locale a
+   /// widget reports ([reportLocale]): until then the engine's point, and
+   /// then as if made so -- no undo step, not [dirty] -- unless [save] read
+   /// it or an edit touched it first (today's Q0 N1, N2).
+   ///
+   /// [symbols] and [thumbnails] may be shared by several controllers (a
+   /// host's own); a controller never disposes one it was given, and makes
+   /// and disposes its own otherwise. The symbol libraries start loading
+   /// here and never block an edit ([symbolsState]).
++  ///
++  /// [words] are the host's words (spec 2b S4): each kit reads them before
++  /// its own, per locale; an id in no known namespace or naming no kit is an
++  /// [ArgumentError] naming the first problem (`validateHostWords`).
+   factory PlanController({
+     required List<PlanKit> kits,
+     String? json,
+     PlanSymbolLoader? symbols,
+     SymbolThumbnails? thumbnails,
+     List<PlanExporter> exporters = const [],
+     List<PlanImporter> importers = const [],
+     double minScale = kPlanMinScale,
+     double maxScale = kPlanMaxScale,
+     PlanPermissions permissions = PlanPermissions.full,
++    KitNames words = KitNames.empty,
+   }) {
+     final set = validateKitSet(kits);
++    final wordProblems = validateHostWords(words);
++    if (wordProblems.isNotEmpty) {
++      throw ArgumentError.value(words, 'words', '${wordProblems.first}');
++    }
+     PlanPageFlows.checkRegistry(exporters: exporters, importers: importers);
+     if (!minScale.isFinite || minScale < _minScaleFloor) {
+       throw ArgumentError.value(
+           minScale, 'minScale', 'must be finite and at least 1e-6');
+     }
+     if (!maxScale.isFinite || maxScale <= minScale) {
+       throw ArgumentError.value(
+           maxScale, 'maxScale', 'must be finite and above minScale');
+     }
+     final catalog = ParametricCatalog();
+@@ -139,35 +157,38 @@ class PlanController extends ChangeNotifier {
+     }
+     return PlanController._(set, catalog, document, measurer,
+         unsettled: json == null,
+         loadDiagnostics: diagnostics,
+         symbols: symbols,
+         thumbnails: thumbnails,
+         exporters: exporters,
+         importers: importers,
+         minScale: minScale,
+         maxScale: maxScale,
+-        permissions: permissions);
++        permissions: permissions,
++        words: words);
+   }
+ 
+   PlanController._(this.kits, this.catalog, DraftDocument document,
+       FlutterTextMeasurer measurer,
+       {required bool unsettled,
+       required List<Diagnostic> loadDiagnostics,
+       required PlanSymbolLoader? symbols,
+       required SymbolThumbnails? thumbnails,
+       required List<PlanExporter> exporters,
+       required List<PlanImporter> importers,
+       required double minScale,
+       required double maxScale,
+-      required PlanPermissions permissions})
++      required PlanPermissions permissions,
++      required KitNames words})
+       : _permissions = permissions,
++        _hostWords = words,
+         _minScale = minScale,
+         _maxScale = maxScale,
+         _symbolLoader = symbols ?? PlanSymbolLoader(),
+         _ownsSymbolLoader = symbols == null,
+         _ownsThumbnails = thumbnails == null,
+         thumbnails =
+             thumbnails ?? SymbolThumbnails(maxEntries: kPlanThumbnailCapacity),
+         camera = CameraController(
+             ViewportTransform(
+                 worldToScreenMatrix: const Transform2(1, 0, 0, -1, 0, 0)),
+@@ -185,21 +206,21 @@ class PlanController extends ChangeNotifier {
+       // `this.`: the constructor's own `document` parameter is the first
+       // plan, never the current one.
+       document: () => this.document,
+       catalog: () => catalog,
+       settle: settlePendingInput,
+       load: load,
+     );
+     _services = {
+       for (final kit in kits.kits)
+         kit.id: KitServices(
+-            kit, _host, KitNamesWords(kit.names, () => _locale.value)),
++            kit, _host, KitNamesWords(_names[kit.id]!, () => _locale.value)),
+     };
+     _open(document, measurer, loadDiagnostics);
+     _savedState = document.commands.stateId;
+     if (unsettled) _unsettled = (document: document, at: _savedState);
+     _placeNominally();
+     _refreshFlags();
+     // The tool letters are the kit set's (Task 16): a letterTaken
+     // diagnostic is in the log before any widget is built.
+     planToolEntries(this);
+     // Last: a constructor that threw leaves no load running.
+@@ -288,20 +309,38 @@ class PlanController extends ChangeNotifier {
+   /// text, an empty manifest added when it has none (spec P5). An
+   /// importer's error, or a load that refuses ([PlanFormatException]),
+   /// completes the `Future` with it and changes nothing; an unknown
+   /// [importerId] is an [ArgumentError] at once.
+   Future<void> import(String importerId, Uint8List bytes) =>
+       pageFlows.import(importerId, bytes);
+ 
+   final double _minScale, _maxScale;
+ 
+   late final Map<String, KitServices> _services;
++
++  /// The host's words (spec 2b S4).
++  final KitNames _hostWords;
++
++  /// Each loaded kit's words with the host's first, per locale.
++  late final Map<String, KitNames> _names = {
++    for (final kit in kits.kits) kit.id: _hostWords.merge(kit.names),
++  };
++
++  /// The words of the loaded kit [kitId], the host's first (spec 2b S4);
++  /// null for a kit that is not loaded. Every reader of a kit's words reads
++  /// them here or through its services.
++  @internal
++  KitNames? namesOf(String kitId) => _names[kitId];
++
++  /// The refs `symbolDefinition` handed out whose `add` has not executed
++  /// (spec 2b S2): cleared by [execute] and by a document swap.
++  final Map<String, SymbolDefinitionRef> _pendingDefinitions = {};
+   late final _Host _host = _Host(this);
+   late DocumentSession _session;
+   List<Diagnostic> _loadDiagnostics = const [];
+ 
+   final List<DocumentSession> _dropped = [];
+   bool _disposed = false;
+ 
+   /// Whether [dispose] ran: a report owed after a frame (the locale push,
+   /// Task 15) checks it before it lands.
+   @internal
+@@ -339,22 +378,22 @@ class PlanController extends ChangeNotifier {
+       ..ensureVisualUpdate();
+   }
+ 
+   /// [snappingAllowed] as of the last frame: PlanShortcuts rebinds F3 when
+   /// it changes (S-14: F3 only while snapping is allowed).
+   @internal
+   ValueListenable<bool> get snapping => _snapping;
+ 
+   final ValueNotifier<Locale> _locale = ValueNotifier(const Locale('en'));
+   final DiagnosticsLog _diagnostics = DiagnosticsLog();
+-  final ValueNotifier<PlanSymbolsState> _symbolsState =
+-      ValueNotifier(PlanSymbolsState.ready);
++  final ValueNotifier<SymbolsState> _symbolsState =
++      ValueNotifier(SymbolsState.ready);
+   final ValueNotifier<bool> _dirty = ValueNotifier(false);
+   final ValueNotifier<bool> _canUndo = ValueNotifier(false);
+   final ValueNotifier<bool> _canRedo = ValueNotifier(false);
+   final ValueNotifier<String> _activeTool = ValueNotifier(planSelectToolId);
+   Set<String> _missingKits = const {};
+ 
+   late final PlanChangeTracker _tracker = PlanChangeTracker(_emit);
+   late final StreamController<PlanChange> _out =
+       StreamController<PlanChange>.broadcast(
+           onListen: _tracker.listen, onCancel: _tracker.cancel);
+@@ -562,21 +601,24 @@ class PlanController extends ChangeNotifier {
+   /// widget and panel (controller ruling R-b; no widget calls
+   /// `document.commands.execute`). True when it applied; false when it was
+   /// refused, the refusal caught here: [PlanLocked] (and [lockHint] set;
+   /// the engine's refusal of a write on a frozen, locked object is one),
+   /// `DanglingReferenceError` (E2's refusal of a frozen object's
+   /// referrer), `PermissionDeniedError` (the engine permissions the
+   /// editor's permissions set, e.g. [PlanPermissions.readOnly]),
+   /// `ArgumentError`, and a kit's hook failure the retry did not cure (one
+   /// diagnostic). `StateError` (`PartialMutationError` included, after the
+   /// damage is handled) goes on to the caller.
++  ///
++  /// Drops the pending symbol definitions (spec 2b S2).
+   bool execute(DraftCommand command) {
++    _pendingDefinitions.clear();
+     try {
+       document.commands.execute(command);
+       return true;
+     } on PlanLocked {
+       lockHint.value = true;
+       return false;
+     } on DanglingReferenceError {
+       return false;
+     } on PermissionDeniedError {
+       return false;
+@@ -622,20 +664,21 @@ class PlanController extends ChangeNotifier {
+   PlanType<Component>? typeOf(Handle object) {
+     final typeId = catalog.typeIdOf(document, object);
+     return typeId == null ? null : kits.typeOf(typeId);
+   }
+ 
+   // ---------------------------------------------------------------------
+   // Opening and replacing documents.
+ 
+   void _open(DraftDocument document, FlutterTextMeasurer measurer,
+       List<Diagnostic> loadDiagnostics) {
++    _pendingDefinitions.clear();
+     _damaged.value = false;
+     _disabledTools.clear();
+     // The engine's permissions follow the profile, before any system is
+     // installed over the document (spec P2).
+     document.commands.permissions = _permissions.draft;
+     for (final t in genericTools) {
+       _toolNeeds[t.id] = t.needs;
+     }
+     for (final kit in kits.kits) {
+       for (final planTool in kit.tools) {
+@@ -1028,86 +1071,99 @@ class PlanController extends ChangeNotifier {
+     _savedState = d.commands.stateId;
+   }
+ 
+   // ---------------------------------------------------------------------
+   // State.
+ 
+   ValueListenable<List<KitDiagnostic>> get diagnostics => _diagnostics;
+ 
+   /// The symbol libraries' state (spec P2): loading until every source has
+   /// settled; failed when every source failed; else ready.
+-  ValueListenable<PlanSymbolsState> get symbolsState => _symbolsState;
++  ValueListenable<SymbolsState> get symbolsState => _symbolsState;
+ 
+   /// The loaded symbols in load order, retired ones included (a placed
+   /// retired symbol still resolves; the gallery hides them).
+   List<PlanSymbol> get symbols => _symbols;
+ 
+   PlanSymbol? symbolById(String id) => _symbolsById[id];
+ 
+   /// The symbol plan.symbol places.
+   ValueListenable<PlanSymbol?> get armedSymbol => _armed;
+ 
+   /// Arms [symbol] and activates plan.symbol (a gallery cell, or the
+   /// host). Answers whether plan.symbol is now active; the symbol stays
+   /// armed either way (today's _armSymbol, planner_shell.dart:940-943).
+   bool armSymbol(PlanSymbol symbol) {
+     _armed.value = symbol;
+     return selectTool(PlanToolIds.symbol);
+   }
+ 
+   /// Loads the libraries again after a failure; nothing in another state.
+   Future<void> retrySymbols() async {
+-    if (_symbolsState.value != PlanSymbolsState.failed) return;
++    if (_symbolsState.value != SymbolsState.failed) return;
+     await _loadSymbols();
+   }
+ 
+   /// The codes a symbol load reports, one load's set at a time.
+   static const Set<KitDiagnosticCode> _libraryCodes = {
+     KitDiagnosticCode.libraryUnreadable,
+     KitDiagnosticCode.libraryKitMismatch,
+     KitDiagnosticCode.symbolDuplicate,
+   };
+ 
+   Future<void> _loadSymbols() async {
+     final run = ++_symbolRun;
+     // A kit set without a symbol library is ready at once, empty (Task
+     // 8's C1 reads `ready` right after construction).
+     if (kits.kits.every((kit) => kit.symbols.isEmpty)) {
+-      _symbolsState.value = PlanSymbolsState.ready;
++      _symbolsState.value = SymbolsState.ready;
+       return;
+     }
+-    _symbolsState.value = PlanSymbolsState.loading;
++    _symbolsState.value = SymbolsState.loading;
+     PlanSymbolLoad? load;
+     Object? error;
+     try {
+       load = await _symbolLoader.load(kits);
+     } catch (e) {
+       error = e; // a loader the host disposed
+     }
+     if (_disposed || run != _symbolRun) return;
+     if (load == null) {
+-      _symbolsState.value = PlanSymbolsState.failed;
++      _symbolsState.value = SymbolsState.failed;
+       debugPrint('The symbol libraries could not be loaded: $error');
+       return;
+     }
+-    _symbols = load.symbols;
+-    _symbolsById = {for (final s in load.symbols) s.id: s};
++    _symbols = _named(load.symbols);
++    _symbolsById = {for (final s in _symbols) s.id: s};
+     // This load's library problems replace the last one's: a source that
+     // read on a retry has none left (Task 13 ruling, final review I3).
+     _diagnostics.removeWhere((d) => _libraryCodes.contains(d.code));
+     for (final d in load.diagnostics) {
+       _diagnostics.add(d);
+     }
+     _reportUnofferedKinds();
+     _symbolsState.value = load.state;
+   }
+ 
++  /// [symbols] named with the host's words first (spec 2b S4): each wrapped
++  /// again with its kit's merged words; as loaded when the host gave none
++  /// (a loader may serve several controllers).
++  List<PlanSymbol> _named(List<PlanSymbol> symbols) => _hostWords.words.isEmpty
++      ? symbols
++      : List.unmodifiable([
++          for (final s in symbols)
++            PlanSymbol(
++                kitId: s.kitId,
++                names: _names[s.kitId] ?? s.names,
++                entry: s.entry),
++        ]);
++
+   /// One attachmentKindUnoffered per kit and kind (the log keeps one per
+   /// kit, subject and code) for each loaded symbol's attachTo kind that no
+   /// provider of the current document offers.
+   void _reportUnofferedKinds() {
+     final offered = _session.attachments.kinds;
+     for (final s in _symbols) {
+       for (final kind in s.component.attachTo) {
+         if (offered.contains(kind)) continue;
+         _diagnostics.add(KitDiagnostic(
+             kitId: s.kitId,
+diff --git a/packages/jet_cad_2d_plan/lib/src/controller/services.dart b/packages/jet_cad_2d_plan/lib/src/controller/services.dart
+index 917a054e..7363f394 100644
+--- a/packages/jet_cad_2d_plan/lib/src/controller/services.dart
++++ b/packages/jet_cad_2d_plan/lib/src/controller/services.dart
+@@ -1,28 +1,41 @@
+ // PlanServices (spec 2a P1): a live view, one per kit per controller, of
+ // the current document, its index, the camera, the effective object snap,
+ // the attachment registry, the kit's words at the controller's locale, the
+ // kit's own tools' settings and the per-document shared cache.
+ import 'package:flutter/foundation.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+ 
++import '../symbols/plan_symbol.dart';
++import '../symbols/symbol_box.dart' show servedTopOfEntry;
++import '../symbols/symbol_placer.dart' show definitionForEntry;
+ import 'session.dart';
+ import 'tool_settings_store.dart';
+ 
+ /// What the services read of their controller.
+ abstract interface class ServicesHost {
+   DocumentSession get session;
+   CameraController get camera;
+   SnapSettings get snap;
+   ToolSettingsStore get toolSettings;
++
++  /// The loaded symbol `key@version`, or null.
++  PlanSymbol? symbolById(String id);
++
++  /// The controller's symbol libraries' state.
++  ValueListenable<SymbolsState> get symbolsState;
++
++  /// The refs whose `add` has not executed yet, by key: one map per
++  /// controller, shared by every kit's services (spec 2b S2).
++  Map<String, SymbolDefinitionRef> get pendingDefinitions;
+ }
+ 
+ final class KitServices implements PlanServices {
+   KitServices(this.kit, this._host, this.words);
+ 
+   final PlanKit kit;
+   final ServicesHost _host;
+ 
+   @override
+   final KitWords words;
+@@ -56,28 +69,50 @@ final class KitServices implements PlanServices {
+       throw ArgumentError.value(
+           toolId, 'toolId', 'has settings of ${value.runtimeType}, not $S');
+     }
+     return value;
+   }
+ 
+   @override
+   T shared<T extends Object>(T Function(PlanServices) create) =>
+       _host.session.shared.get<T>(kit.id, this, create);
+ 
+-  // Spec 2b S2. Task 4 implements both; no kit calls them before it.
+-  @override
+-  SymbolDefinitionRef? symbolDefinition(String key) =>
+-      throw UnimplementedError('KitServices.symbolDefinition (2b Task 4)');
++  /// Spec 2b S2. A pending ref is handed out again until the document holds
++  /// its definition (its `add` executed, by whatever path), the controller
++  /// executes a command, or the document is replaced; a ref whose
++  /// definition the document holds is made afresh, with no `add`.
++  @override
++  SymbolDefinitionRef? symbolDefinition(String key) {
++    final pending = _host.pendingDefinitions;
++    final document = this.document;
++    final kept = pending[key];
++    if (kept != null) {
++      if (document.tree.definition(kept.handle) == null) return kept;
++      pending.remove(key);
++    }
++    final entry = _host.symbolById(key)?.entry;
++    if (entry == null) return null;
++    final made = definitionForEntry(document, entry);
++    final ref = SymbolDefinitionRef(
++      handle: made.definition,
++      add: made.commands.isEmpty
++          ? null
++          : CompoundCommand(made.commands, label: 'Add ${entry.symbol.name}'),
++      basePoint: entry.definition.basePoint.clone(),
++      top: servedTopOfEntry(entry),
++    );
++    if (ref.add != null) pending[key] = ref;
++    return ref;
++  }
+ 
+   @override
+-  ValueListenable<SymbolsState> get symbolsState =>
+-      throw UnimplementedError('KitServices.symbolsState (2b Task 4)');
++  ValueListenable<SymbolsState> get symbolsState => _host.symbolsState;
+ }
+ 
+ /// The attachment registry until Task 14: no kind, no attachment.
+ final class NoAttachments implements AttachmentRegistry {
+   const NoAttachments();
+ 
+   @override
+   Attachment? attach(List<String> kinds, AttachmentQuery query) => null;
+ 
+   @override
+diff --git a/packages/jet_cad_2d_plan/lib/src/editor/plan_tool_palette.dart b/packages/jet_cad_2d_plan/lib/src/editor/plan_tool_palette.dart
+index dc46062e..0b2fd619 100644
+--- a/packages/jet_cad_2d_plan/lib/src/editor/plan_tool_palette.dart
++++ b/packages/jet_cad_2d_plan/lib/src/editor/plan_tool_palette.dart
+@@ -28,24 +28,23 @@ String planToolLabel(
+   final s = PlanStrings.of(context);
+   return switch (toolId) {
+     PlanToolIds.select => s.toolSelect,
+     PlanToolIds.line => s.toolLine,
+     PlanToolIds.polyline => s.toolPolyline,
+     PlanToolIds.rectangle => s.toolRectangle,
+     PlanToolIds.circle => s.toolCircle,
+     PlanToolIds.arc => s.toolArc,
+     PlanToolIds.text => s.toolText,
+     PlanToolIds.symbol => s.toolSymbol,
+-    _ => controller.kits
+-            .kitOf(kitOfKey(toolId))
+-            ?.names
+-            .word(controller.locale.value.languageCode, 'tool:$toolId') ??
++    _ => controller
++            .namesOf(kitOfKey(toolId))
++            ?.word(controller.locale.value.languageCode, 'tool:$toolId') ??
+         toolId,
+   };
+ }
+ 
+ /// The tools of [controller] and the Fill toggle.
+ class PlanToolPalette extends StatefulWidget {
+   const PlanToolPalette({super.key, required this.controller});
+ 
+   final PlanController controller;
+ 
+diff --git a/packages/jet_cad_2d_plan/lib/src/panels/kit_lookup.dart b/packages/jet_cad_2d_plan/lib/src/panels/kit_lookup.dart
+index f8cc9519..f4a6fc8b 100644
+--- a/packages/jet_cad_2d_plan/lib/src/panels/kit_lookup.dart
++++ b/packages/jet_cad_2d_plan/lib/src/panels/kit_lookup.dart
+@@ -18,16 +18,15 @@ PlanType<Component>? planTypeOf(PlanController controller, String typeId) {
+ PlanTool? planToolOf(PlanController controller, String toolId) {
+   for (final kit in controller.kits.kits) {
+     for (final t in kit.tools) {
+       if (t.id == toolId) return t;
+     }
+   }
+   return null;
+ }
+ 
+ /// [wordId] of kit [kitId] in the controller's locale, else English, else
+-/// null (`KitNames.word`).
++/// null (`KitNames.word`), the host's words first (spec 2b S4).
+ String? planWordOf(PlanController controller, String kitId, String wordId) =>
+-    controller.kits
+-        .kitOf(kitId)
+-        ?.names
+-        .word(controller.locale.value.languageCode, wordId);
++    controller
++        .namesOf(kitId)
++        ?.word(controller.locale.value.languageCode, wordId);
+diff --git a/packages/jet_cad_2d_plan/lib/src/panels/plan_property_panel.dart b/packages/jet_cad_2d_plan/lib/src/panels/plan_property_panel.dart
+index 790ebe4f..48ea1a56 100644
+--- a/packages/jet_cad_2d_plan/lib/src/panels/plan_property_panel.dart
++++ b/packages/jet_cad_2d_plan/lib/src/panels/plan_property_panel.dart
+@@ -756,21 +756,21 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
+         KitSectionBoundary(
+           kitId: kit,
+           typeId: t.typeId,
+           log: c.diagnosticsLog,
+           builder: (context) => type.sectionFor(
+               context,
+               doc,
+               t.handle,
+               (command) => _guarded(
+                   t, 'the section\'s commit', () => c.execute(command)),
+-              KitNamesWords(c.kits.kitOf(kit)!.names, () => c.locale.value)),
++              c.servicesOf(kit).words),
+         ),
+     ];
+   }
+ 
+   /// The Symbol section (09c D7; `selection_panel.dart:1122-1191`).
+   List<Widget> _symbolSection(_SymbolTarget t, TextStyle? title) {
+     final c = _c;
+     final doc = c.document;
+     final h = t.handle;
+     final node = doc.tree[h]! as InstanceNode;
+@@ -779,24 +779,23 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
+     final members = sizeMenuMembers(symbolEntriesOf(c.symbols), doc, h);
+     String size(SymbolBox b) => '${formatPanelNumber(b.width, _strings)} × '
+         '${formatPanelNumber(b.depth, _strings)}';
+     final p = c.permissions;
+     final engine = doc.commands.permissions;
+     final turnable = engine.allows(Capability.transform);
+     final resizable = engine.allows(Capability.structure) &&
+         engine.allows(Capability.geometry) &&
+         engine.allows(Capability.components) &&
+         turnable;
+-    final name = c.kits
+-            .kitOf(kitOfKey(component.key))
+-            ?.names
+-            .symbolName(_strings.languageCode, component) ??
++    final name = c
++            .namesOf(kitOfKey(component.key))
++            ?.symbolName(_strings.languageCode, component) ??
+         component.name;
+     return [
+       Text(_strings.toolSymbol, key: const Key('symbol-section'), style: title),
+       InputDecorator(
+         decoration:
+             InputDecoration(labelText: _strings.name, border: InputBorder.none),
+         child: Text(name, key: const Key('symbol-name')),
+       ),
+       InputDecorator(
+         decoration:
+diff --git a/packages/jet_cad_2d_plan/lib/src/panels/plan_symbol_gallery.dart b/packages/jet_cad_2d_plan/lib/src/panels/plan_symbol_gallery.dart
+index 687cab6e..98bd6015 100644
+--- a/packages/jet_cad_2d_plan/lib/src/panels/plan_symbol_gallery.dart
++++ b/packages/jet_cad_2d_plan/lib/src/panels/plan_symbol_gallery.dart
+@@ -3,27 +3,27 @@
+ // optional filter (today's symbolFilter); choosing a symbol arms
+ // plan.symbol. Ported from jet_cad_floor_plan's symbol_panel.dart (spec
+ // 09b D7, F-4, F-13; 09c D13).
+ import 'dart:async';
+ 
+ import 'package:flutter/material.dart';
+ import 'package:flutter/services.dart'
+     show HardwareKeyboard, KeyEvent, KeyUpEvent, LogicalKeyboardKey;
+ import 'package:jet_cad_2d/jet_cad_2d.dart' show foregroundFor;
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show SymbolsState;
+ 
+ import '../controller/plan_controller.dart';
+ import '../l10n/locale_scope.dart';
+ import '../l10n/strings.dart';
+ import '../symbols/gallery_model.dart';
+ import '../symbols/plan_symbol.dart';
+-import '../symbols/plan_symbols_state.dart';
+ import '../symbols/thumbnail_document.dart';
+ import '../tools/generic_tools.dart' show PlanToolIds;
+ import 'panel_focus.dart';
+ 
+ /// The gallery of [controller]'s symbols.
+ ///
+ /// - **Loading:** a progress indicator and the "loading" words (key
+ ///   `symbol-loading`).
+ /// - **Failed:** the words and a Retry button (key `symbol-retry`) calling
+ ///   `PlanController.retrySymbols`.
+@@ -163,24 +163,24 @@ class _PlanSymbolGalleryState extends State<PlanSymbolGallery> {
+     widget.controller.armSymbol(s);
+   }
+ 
+   @override
+   Widget build(BuildContext context) {
+     final c = widget.controller;
+     return ListenableBuilder(
+       listenable:
+           Listenable.merge([c, c.symbolsState, c.activeTool, c.armedSymbol]),
+       builder: (context, _) => switch (c.symbolsState.value) {
+-        PlanSymbolsState.loading => const _Loading(),
+-        PlanSymbolsState.failed =>
++        SymbolsState.loading => const _Loading(),
++        SymbolsState.failed =>
+           _Failed(onRetry: () => unawaited(c.retrySymbols())),
+-        PlanSymbolsState.ready => _ready(context),
++        SymbolsState.ready => _ready(context),
+       },
+     );
+   }
+ 
+   Widget _ready(BuildContext context) {
+     final c = widget.controller;
+     _index(c.symbols);
+     final words = PlanSymbolWords(PlanStrings.of(context).languageCode);
+     if (words.language != _words.language) {
+       _words = words;
+diff --git a/packages/jet_cad_2d_plan/lib/src/symbols/plan_symbol_loader.dart b/packages/jet_cad_2d_plan/lib/src/symbols/plan_symbol_loader.dart
+index 099440e0..b03c6929 100644
+--- a/packages/jet_cad_2d_plan/lib/src/symbols/plan_symbol_loader.dart
++++ b/packages/jet_cad_2d_plan/lib/src/symbols/plan_symbol_loader.dart
+@@ -1,33 +1,32 @@
+ // Spec P2 "Symbol libraries" (Task 13): reads, decodes and caches the
+ // kits' symbol libraries. One loader may serve several controllers (today's
+ // §4: the app's loader, never disposed by a view); a controller never
+ // disposes a loader it was given.
+ import 'dart:async';
+ 
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+ 
+ import '../kits/kit_set.dart';
+ import 'plan_symbol.dart';
+-import 'plan_symbols_state.dart';
+ 
+ /// One assembly of a kit set's libraries: the symbols in load order, the
+ /// problems met, and the state they leave.
+ final class PlanSymbolLoad {
+   PlanSymbolLoad._(
+       List<PlanSymbol> symbols, List<KitDiagnostic> diagnostics, this.state)
+       : symbols = List.unmodifiable(symbols),
+         diagnostics = List.unmodifiable(diagnostics);
+ 
+   final List<PlanSymbol> symbols;
+   final List<KitDiagnostic> diagnostics;
+-  final PlanSymbolsState state;
++  final SymbolsState state;
+ }
+ 
+ /// The kits' symbol libraries, read once per source.
+ ///
+ /// [library] reads and decodes one source and keeps the result; a failed
+ /// read or decode is not kept, so a later call reads again. [load] asks
+ /// for every source of a kit set at once and assembles them in kit order,
+ /// then each kit's source order, then library order:
+ /// - a library that cannot be read or decoded is skipped
+ ///   (`libraryUnreadable`);
+@@ -102,22 +101,22 @@ class PlanSymbolLoader {
+               code: KitDiagnosticCode.symbolDuplicate,
+               message: '${entry.id} of "${source.label}" is already given '
+                   'by the kit "$earlier"; dropped'));
+           continue;
+         }
+         given[entry.id] = kit.id;
+         symbols.add(PlanSymbol(kitId: kit.id, names: kit.names, entry: entry));
+       }
+     }
+     final state = reads.isNotEmpty && failed == reads.length
+-        ? PlanSymbolsState.failed
+-        : PlanSymbolsState.ready;
++        ? SymbolsState.failed
++        : SymbolsState.ready;
+     return PlanSymbolLoad._(symbols, diagnostics, state);
+   }
+ 
+   /// Drops every kept read. A load still running completes; the loader
+   /// cannot be used afterwards.
+   void dispose() {
+     _disposed = true;
+     _reads.clear();
+   }
+ }
+diff --git a/packages/jet_cad_2d_plan/lib/src/symbols/plan_symbols_state.dart b/packages/jet_cad_2d_plan/lib/src/symbols/plan_symbols_state.dart
+deleted file mode 100644
+index ce954eae..00000000
+--- a/packages/jet_cad_2d_plan/lib/src/symbols/plan_symbols_state.dart
++++ /dev/null
+@@ -1,4 +0,0 @@
+-// The symbol libraries' state (spec 2a P2 "Symbol libraries"): Task 13's
+-// loader drives it; until then a controller is `ready`.
+-
+-enum PlanSymbolsState { loading, ready, failed }
+diff --git a/packages/jet_cad_2d_plan/lib/src/symbols/symbol_box.dart b/packages/jet_cad_2d_plan/lib/src/symbols/symbol_box.dart
+index e5b057fb..f72fea79 100644
+--- a/packages/jet_cad_2d_plan/lib/src/symbols/symbol_box.dart
++++ b/packages/jet_cad_2d_plan/lib/src/symbols/symbol_box.dart
+@@ -119,20 +119,39 @@ final class _Memo {
+   const _Memo(this.box);
+ }
+ 
+ /// The local box of [entry], computed on the first call and the same object
+ /// on every later call for the same entry (spec D2: once per entry).
+ SymbolBox? boxOfEntry(SymbolEntry entry) =>
+     (_entryBoxes[entry] ??= _Memo(boxOfLeaves(
+             [for (final l in entry.leaves) (l.record.kind, l.payload)])))
+         .box;
+ 
++/// The served top of [entry] in its definition's coordinates (spec 2b S2,
++/// `SymbolDefinitionRef.top`): its first leaf's box when that leaf is a
++/// circle or a closed polyline (today's `tableTopOf`,
++/// jet_cad_floor_plan/lib/src/service/table_picker.dart:92-110), else the
++/// symbol's box ([boxOfEntry]); empty when no leaf draws. The entry's
++/// leaves are ascending by handle, so the first is the lowest.
++Aabb2 servedTopOfEntry(SymbolEntry entry) {
++  final all = boxOfEntry(entry);
++  final whole = all == null ? Aabb2.empty() : footprintOf(all);
++  if (entry.leaves.isEmpty) return whole;
++  final first = entry.leaves.first;
++  final kind = first.record.kind;
++  final served = kind == EntityKind.circle ||
++      (kind == EntityKind.polyline && isClosedPolyline(first.payload));
++  if (!served) return whole;
++  final top = boxOfLeaves([(kind, first.payload)]);
++  return top == null ? whole : footprintOf(top);
++}
++
+ /// The local box of the definition [definition] in [doc], from its **live**
+ /// leaves (the entities it owns); null when [definition] names no definition
+ /// or none of its leaves draws.
+ ///
+ /// Not memoised: O(entities) per call. The per-document memo cleared on a
+ /// document change belongs to the caller (`WallFaces`, spec D3, D4).
+ SymbolBox? boxOfDefinition(DraftDocument doc, Handle definition) {
+   if (doc.tree.definition(definition) == null) return null;
+   final entities = doc.entities;
+   return boxOfLeaves([
+diff --git a/packages/jet_cad_2d_plan/test/barrel_test.dart b/packages/jet_cad_2d_plan/test/barrel_test.dart
+index 691af620..7b8afb4a 100644
+--- a/packages/jet_cad_2d_plan/test/barrel_test.dart
++++ b/packages/jet_cad_2d_plan/test/barrel_test.dart
+@@ -30,21 +30,21 @@ void main() {
+       // Task 6
+       'KitSet', 'validateKitSet', 'KitSetError', 'reservedKitIds',
+       // Task 7
+       'PlanFormatException', 'PlanFormatCode', 'PlanManifest',
+       'ManifestCheck', 'checkManifest', 'kPlanFormat', 'manifestOf',
+       'manifestToWrite', 'usedKits', 'decodePlan', 'encodePlan',
+       'ensureManifest',
+       // Task 8
+       'kPlanMinScale', 'kPlanMaxScale', 'kPlanThumbnailCapacity',
+       'PlanController', 'PlanChange', 'PlanObjectAdded', 'PlanObjectChanged',
+-      'PlanObjectRemoved', 'PlanReplaced', 'PlanSymbolsState',
++      'PlanObjectRemoved', 'PlanReplaced', 'SymbolsState',
+       // Task 9
+       'PlanStrings', 'PlanStringsEn', 'PlanStringsDe', 'PlanStringsTr',
+       'PlanLocalizations', 'planSupportedLocales',
+       'planLocalizationsDelegates', 'PlanTheme', 'kPlanFontFamily',
+       'ensurePlanFonts', 'registerFontLicences',
+       // Task 10, 11, 12
+       'PlanLocked', 'KitHookFailure', 'PlanPermissions',
+       // Task 13
+       'PlanSymbol', 'PlanSymbolLoader', 'PlanSymbolLoad',
+       'PlanSymbolGallery', 'SymbolThumbnails',
+diff --git a/packages/jet_cad_2d_plan/test/controller/host_words_test.dart b/packages/jet_cad_2d_plan/test/controller/host_words_test.dart
+new file mode 100644
+index 00000000..2adb5edb
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/controller/host_words_test.dart
+@@ -0,0 +1,124 @@
++// Spec 2b S4 "Words": PlanController(words:) checks a host's words
++// (validateHostWords) and merges them before each kit's own, per locale: a
++// host overrides a kit's word or adds a locale the kit lacks. Every reader
++// of a kit's words reads them: the services, the panel's lookup, the
++// gallery's names, the palette's labels.
++import 'package:flutter/material.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:jet_cad_2d_plan/src/editor/plan_tool_palette.dart'
++    show planToolLabel;
++import 'package:jet_cad_2d_plan/src/panels/kit_lookup.dart' show planWordOf;
++import 'package:jet_cad_2d_plan/src/symbols/gallery_model.dart'
++    show PlanSymbolWords;
++
++import '../support/symbol_fixtures.dart';
++import '../support/test_kit.dart';
++
++void main() {
++  TestWidgetsFlutterBinding.ensureInitialized();
++
++  test(
++      'PB-words-1 the host\'s word first, per locale: it overrides the '
++      'kit\'s, the kit\'s own locale still beats the host\'s English, and a '
++      'locale the kit lacks is the host\'s', () {
++    final c = PlanController(
++        kits: [testKit(), discKit()],
++        words: const KitNames({
++          'en': {'type:test.slab': 'Floor slab'},
++          'tr': {'tool:test.slab': 'Döşeme aracı'},
++          'de': {'type:disc.round': 'Runde Scheibe'},
++        }));
++    addTearDown(c.dispose);
++    final slab = c.servicesOf('test').words;
++    final disc = c.servicesOf('disc').words;
++    c.reportLocale(const Locale('tr'));
++    // M-PB-W1: `kit.names.merge(words)` (the kit's word first).
++    // M-PB-W2: the words ignored (KitNamesWords over kit.names).
++    expect(slab.word('tool:test.slab'), 'Döşeme aracı');
++    expect(slab.word('type:test.slab'), 'Döşeme',
++        reason: "the kit's Turkish before the host's English");
++    c.reportLocale(const Locale('en'));
++    expect(slab.word('type:test.slab'), 'Floor slab');
++    expect(slab.word('tool:test.slab'), 'Slab');
++    c.reportLocale(const Locale('de'));
++    expect(disc.word('type:disc.round'), 'Runde Scheibe');
++    expect(disc.word('property:disc.round.radius'), 'Radius');
++    expect(slab.word('type:test.slab'), 'Floor slab',
++        reason: "no German: the host's English");
++  });
++
++  test(
++      'PB-words-2 a host word in no known namespace, or naming no kit, is '
++      'an ArgumentError naming the first problem; any kit is a kit', () {
++    for (final (id, code) in [
++      ('label:test.x', 'unknownWordId'),
++      ('tool:slab', 'foreignWordId'),
++    ]) {
++      // M-PB-W3: the constructor not calling validateHostWords.
++      expect(
++          () => PlanController(
++              kits: [testKit()],
++              words: KitNames({
++                'en': {id: 'x', 'type:nokit': 'y'},
++              })),
++          throwsA(isA<ArgumentError>().having(
++              (e) => '${e.message}',
++              'message',
++              allOf(contains('"$id"'), contains(code),
++                  isNot(contains('type:nokit'))))),
++          reason: id);
++    }
++    final c = PlanController(
++        kits: [testKit()],
++        words: const KitNames({
++          'en': {'tool:acme.wall': 'Wall'},
++        }));
++    addTearDown(c.dispose);
++    expect(c.servicesOf('test').words.maybe('tool:acme.wall'), 'Wall',
++        reason: "a word for a kit not loaded is sound, and merged");
++  });
++
++  test(
++      'PB-words-3 the panel\'s word lookup and the gallery\'s symbol names '
++      'read the host\'s words first', () async {
++    final c = PlanController(
++        kits: [testKit(), demoKit()],
++        words: const KitNames({
++          'tr': {
++            'property:test.slab.width': 'En',
++            'symbol:demo.sofa.two': 'İkili koltuk',
++          },
++        }));
++    addTearDown(c.dispose);
++    c.reportLocale(const Locale('tr'));
++    // M-PB-W4: planWordOf reading kit.names.
++    expect(planWordOf(c, 'test', 'property:test.slab.width'), 'En');
++    expect(planWordOf(c, 'test', 'property:test.slab.height'), 'Yükseklik');
++    expect(c.namesOf('nokit'), isNull);
++    await settle();
++    // M-PB-W5: the loaded symbols kept with the kit's names only.
++    expect(const PlanSymbolWords('tr').name(c.symbolById('demo.sofa.two@1')!),
++        'İkili koltuk');
++    expect(const PlanSymbolWords('tr').name(c.symbolById('demo.sofa.three@1')!),
++        'Üçlü kanepe');
++  });
++
++  testWidgets('PB-words-4 the palette\'s label of a kit\'s tool',
++      (tester) async {
++    final c = PlanController(
++        kits: [testKit()],
++        words: const KitNames({
++          'en': {'tool:test.slab': 'Floor slab tool'},
++        }));
++    addTearDown(c.dispose);
++    late String label;
++    await tester.pumpWidget(MaterialApp(home: Builder(builder: (context) {
++      label = planToolLabel(context, c, 'test.slab');
++      return const SizedBox();
++    })));
++    // M-PB-W6: planToolLabel reading kit.names.
++    expect(label, 'Floor slab tool');
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/controller/plan_controller_test.dart b/packages/jet_cad_2d_plan/test/controller/plan_controller_test.dart
+index fdacfe20..7b937069 100644
+--- a/packages/jet_cad_2d_plan/test/controller/plan_controller_test.dart
++++ b/packages/jet_cad_2d_plan/test/controller/plan_controller_test.dart
+@@ -36,21 +36,21 @@ void main() {
+     expect(page.originY, -5250);
+     expect(page.scaleDenominator, 50);
+     // M-C1a: the units not set.
+     expect(d.header.units, DrawingUnits.millimeters);
+     // M-C1b: the history not cleared.
+     expect(d.commands.canUndo, isFalse);
+     expect(c.canUndo.value, isFalse);
+     expect(c.dirty.value, isFalse);
+     expect(c.activeTool.value, 'plan.select');
+     expect(c.missingKits, isEmpty);
+-    expect(c.symbolsState.value, PlanSymbolsState.ready);
++    expect(c.symbolsState.value, SymbolsState.ready);
+     expect(c.diagnostics.value, isEmpty);
+     expect(manifestOf(d), isNull, reason: 'a new plan has none until saved');
+     await tester.pump();
+   });
+ 
+   testWidgets(
+       'C2 a bad kit set or a bad plan throws before anything is built; a bad '
+       'json at construction is a FormatException (C12, review F-5)',
+       (tester) async {
+     expect(() => PlanController(kits: [testKit(), testKit()]),
+diff --git a/packages/jet_cad_2d_plan/test/controller/symbol_definition_test.dart b/packages/jet_cad_2d_plan/test/controller/symbol_definition_test.dart
+new file mode 100644
+index 00000000..da0b0b09
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/controller/symbol_definition_test.dart
+@@ -0,0 +1,183 @@
++// Spec 2b S2 "The contract gains": PlanServices.symbolDefinition answers a
++// library symbol as a definition of the current document, with the command
++// that adds it when the document lacks it; a second call before that add
++// executes returns the same ref; symbolsState is the controller's own.
++// Every value is off the origin.
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/authoring.dart'
++    show
++        Catalog,
++        CatalogCircle,
++        CatalogLine,
++        CatalogPolyline,
++        CatalogSymbol,
++        CatalogUnit,
++        encodeLibrary;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/symbol_fixtures.dart';
++
++/// A round table whose served top (its circle, the first leaf) is smaller
++/// than its box (a line across it), and a shelf whose first leaf is a line.
++final Catalog pbCatalog = Catalog(kit: 'pb', symbols: [
++  const CatalogSymbol(
++    key: 'pb.table.round',
++    name: 'Round table',
++    category: 'Tables',
++    tags: ['table'],
++    unit: CatalogUnit(kind: UnitKinds.table, capacity: 4),
++    base: (2100.5, 1300.25),
++    shapes: [
++      CatalogCircle((2100.5, 1300.25), 450),
++      CatalogLine((1400.5, 1300.25), (2800.5, 1300.25)),
++    ],
++  ),
++  const CatalogSymbol(
++    key: 'pb.shelf.plain',
++    name: 'Plain shelf',
++    category: 'Storage',
++    tags: ['shelf'],
++    base: (610.75, 205.5),
++    shapes: [
++      CatalogLine((110.75, 405.5), (1110.75, 405.5)),
++      CatalogPolyline(
++          [(160.75, 5.5), (1060.75, 5.5), (1060.75, 355.5), (160.75, 355.5)],
++          closed: true),
++    ],
++  ),
++]);
++
++PlanKit pbKit() => symbolKit('pb', [
++      SymbolLibrarySource(
++          label: 'pb', read: () async => encodeLibrary(pbCatalog)),
++    ]);
++
++const String table = 'pb.table.round@1';
++
++PlanController make(List<PlanKit> kits) {
++  final c = PlanController(kits: kits);
++  addTearDown(c.dispose);
++  return c;
++}
++
++List<double> boxOf(Aabb2 b) => [b.minX, b.minY, b.maxX, b.maxY];
++
++/// The definitions of [d] carrying [key]'s jetcad.symbol.
++List<Handle> definitionsOf(DraftDocument d, String key) => [
++      for (final h in d.components.withComponent<SymbolComponent>())
++        if (d.components.get<SymbolComponent>(h)!.key == key &&
++            d.tree.definition(h) != null)
++          h,
++    ];
++
++void main() {
++  TestWidgetsFlutterBinding.ensureInitialized();
++
++  test(
++      'PB-def-twice two calls for one key before its add executes: one ref, '
++      'from any kit\'s services; executed once, through the document, the '
++      'next call adds nothing', () async {
++    final c = make([pbKit(), demoKit()]);
++    await settle();
++    final s = c.servicesOf('pb');
++    final d = c.document;
++    final one = s.symbolDefinition(table)!;
++    expect(one.add, isA<CompoundCommand>());
++    expect(d.tree.definition(one.handle), isNull, reason: 'not added yet');
++    // M-PB1: no ref kept pending (each call copies anew).
++    expect(identical(s.symbolDefinition(table), one), isTrue);
++    // M-PB2: the pending refs kept per kit's services.
++    expect(
++        identical(c.servicesOf('demo').symbolDefinition(table), one), isTrue);
++
++    // A tool's commit executes straight through the document.
++    d.commands.execute(one.add!);
++    expect(d.tree.definition(one.handle), isNotNull);
++    expect(d.components.get<UnitComponent>(one.handle),
++        UnitComponent(kind: UnitKinds.table, capacity: 4));
++    final again = s.symbolDefinition(table)!;
++    // M-PB3: a pending ref kept after the document holds its definition
++    // (its add handed out again).
++    expect(again.add, isNull);
++    expect(again.handle, one.handle);
++    expect(definitionsOf(d, 'pb.table.round'), [one.handle]);
++  });
++
++  test(
++      'PB-def-execute a controller execute, and a new plan, drop the '
++      'pending refs: the next call is a new copy', () async {
++    final c = make([pbKit()]);
++    await settle();
++    final s = c.servicesOf('pb');
++    final d = c.document;
++    final one = s.symbolDefinition(table)!;
++    expect(
++        c.execute(addDrafted(d, EntityKind.line,
++            linePayload(Vector2(-3100.5, 4200.25), Vector2(-1700.75, 5100.5)),
++            layer: ReservedHandles.layerZero)),
++        isTrue);
++    final next = s.symbolDefinition(table)!;
++    // M-PB4: `execute` not clearing the pending refs.
++    expect(identical(next, one), isFalse);
++    expect(next.add, isNotNull);
++    expect(next.handle, isNot(one.handle), reason: 'new handles from the seed');
++
++    c.newPlan();
++    final fresh = s.symbolDefinition(table)!;
++    // M-PB5: `_open` not clearing them (the old document's handles).
++    expect(identical(fresh, next), isFalse);
++    expect(fresh.add, isNotNull);
++    expect(c.document.tree.definition(fresh.handle), isNull);
++  });
++
++  test(
++      'PB-def-top the base point, and the top: the first leaf\'s box for a '
++      'circle or a closed outline, else the definition\'s box', () async {
++    final c = make([pbKit()]);
++    await settle();
++    final s = c.servicesOf('pb');
++    final round = s.symbolDefinition(table)!;
++    expect(round.basePoint, Vector2(2100.5, 1300.25));
++    // M-PB6: the top always the definition's box.
++    expect(boxOf(round.top), [1650.5, 850.25, 2550.5, 1750.25]);
++    final shelf = s.symbolDefinition('pb.shelf.plain@1')!;
++    expect(shelf.basePoint, Vector2(610.75, 205.5));
++    // M-PB7: any first leaf taken as the top (the shelf's line).
++    expect(boxOf(shelf.top), [110.75, 5.5, 1110.75, 405.5]);
++    // The base point is the ref's own: writing it leaves the library as is.
++    shelf.basePoint.x = 0;
++    expect(c.symbolById('pb.shelf.plain@1')!.entry.definition.basePoint,
++        Vector2(610.75, 205.5));
++  });
++
++  test(
++      'PB-def-null null for a key no loaded library has, and while loading; '
++      'symbolsState is the controller\'s, failed included', () async {
++    final c = make([pbKit()]);
++    final s = c.servicesOf('pb');
++    // M-PB8: the services' own listenable (a ValueNotifier(ready)).
++    expect(identical(s.symbolsState, c.symbolsState), isTrue);
++    expect(s.symbolsState.value, SymbolsState.loading);
++    expect(s.symbolDefinition(table), isNull, reason: 'still loading');
++    await settle();
++    expect(s.symbolsState.value, SymbolsState.ready);
++    expect(s.symbolDefinition('pb.table.round@9'), isNull);
++    expect(s.symbolDefinition('pb.table.round'), isNull,
++        reason: 'a full versioned key only');
++    expect(s.symbolDefinition('pb.chair.none@1'), isNull);
++    expect(s.symbolDefinition(table), isNotNull);
++
++    final f = make([
++      symbolKit('pb', [
++        SymbolLibrarySource(
++            label: 'pb', read: () async => throw StateError('offline')),
++      ]),
++    ]);
++    await settle();
++    expect(f.servicesOf('pb').symbolsState.value, SymbolsState.failed);
++    expect(f.servicesOf('pb').symbolDefinition(table), isNull);
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/controller/symbols_controller_test.dart b/packages/jet_cad_2d_plan/test/controller/symbols_controller_test.dart
+index feb3c274..0c06dc9b 100644
+--- a/packages/jet_cad_2d_plan/test/controller/symbols_controller_test.dart
++++ b/packages/jet_cad_2d_plan/test/controller/symbols_controller_test.dart
+@@ -43,24 +43,24 @@ void main() {
+   test(
+       'S-9 the load starts with the controller: loading, then ready with the '
+       'symbols; its diagnostics reach the controller', () async {
+     final c = make([
+       demoKit(),
+       symbolKit('beta', [
+         SymbolLibrarySource(
+             label: 'broken', read: () async => throw StateError('no file')),
+       ]),
+     ]);
+-    expect(c.symbolsState.value, PlanSymbolsState.loading);
++    expect(c.symbolsState.value, SymbolsState.loading);
+     expect(c.symbols, isEmpty);
+     await settle();
+-    expect(c.symbolsState.value, PlanSymbolsState.ready);
++    expect(c.symbolsState.value, SymbolsState.ready);
+     expect(idsOf(c.symbols), [for (final s in demoCatalog.symbols) s.id],
+         reason: 'retired symbols load; the gallery hides them');
+     // M-S9: the load's diagnostics not added to the controller's log.
+     expect(problemsOf(c),
+         [('beta', 'broken', KitDiagnosticCode.libraryUnreadable)]);
+     expect(c.symbolById('demo.sofa.two@1')!.component.name, 'Two-seat sofa');
+     expect(c.symbolById('demo.sofa.two@9'), isNull);
+   });
+ 
+   test(
+@@ -69,35 +69,35 @@ void main() {
+       'symbol of the failed library (Review Focus 5)', () async {
+     final alphaRead = Completer<Uint8List>();
+     final betaRead = Completer<Uint8List>();
+     final c = make([
+       symbolKit('alpha',
+           [SymbolLibrarySource(label: 'alpha', read: () => alphaRead.future)]),
+       symbolKit('beta',
+           [SymbolLibrarySource(label: 'beta', read: () => betaRead.future)]),
+     ]);
+     useTestCamera(c);
+-    expect(c.symbolsState.value, PlanSymbolsState.loading);
++    expect(c.symbolsState.value, SymbolsState.loading);
+     final line =
+         drawLine(c, Vector2(4120.5, -1415.25), Vector2(4730.75, -1102.5));
+     final state = c.document.commands.stateId;
+     final depth = c.document.commands.undoDepth;
+     expect(depth, greaterThan(0), reason: 'premise: drawn while loading');
+ 
+     alphaRead.complete(itemsBytes('alpha', ['one', 'two']));
+     await settle();
+-    expect(c.symbolsState.value, PlanSymbolsState.loading,
++    expect(c.symbolsState.value, SymbolsState.loading,
+         reason: 'beta has not settled');
+     betaRead.completeError(StateError('beta asset missing'));
+     await settle();
+ 
+-    expect(c.symbolsState.value, PlanSymbolsState.ready);
++    expect(c.symbolsState.value, SymbolsState.ready);
+     expect(idsOf(c.symbols), ['alpha.item.one@1', 'alpha.item.two@1']);
+     expect(c.symbols.where((s) => s.kitId == 'beta'), isEmpty);
+     expect(
+         problemsOf(c), [('beta', 'beta', KitDiagnosticCode.libraryUnreadable)]);
+     expect(linesOf(c.document), contains(line));
+     expect(c.document.commands.stateId, state);
+     expect(c.document.commands.undoDepth, depth);
+     expect(c.activeTool.value, 'plan.select');
+     // The drawing goes on.
+     final next =
+@@ -119,21 +119,21 @@ void main() {
+         thumbnails: thumbs);
+     await settle();
+     one.dispose();
+     // M-S11: the controller disposes the loader it was given.
+     expect(shared.isDisposed, isFalse);
+     expect(thumbs.disposals, 0);
+     // A second controller over the same loader reads nothing again.
+     final two = make([demoKit(source: read.source)],
+         symbols: shared, thumbnails: thumbs);
+     await settle();
+-    expect(two.symbolsState.value, PlanSymbolsState.ready);
++    expect(two.symbolsState.value, SymbolsState.ready);
+     expect(read.reads, 1);
+ 
+     final own = PlanController(kits: [demoKit()]);
+     final ownThumbs = own.thumbnails;
+     await settle();
+     own.dispose();
+     expect(
+         () => ownThumbs.imageFor(
+             key: 'k',
+             document: DraftDocument.empty,
+@@ -147,60 +147,60 @@ void main() {
+   test(
+       'S-12 every library failed is failed; retrySymbols reads again and '
+       'reaches ready; from ready it does nothing', () async {
+     var fail = true;
+     final read = CountingSource('demo', () async {
+       if (fail) throw StateError('offline');
+       return demoBytes();
+     });
+     final c = make([demoKit(source: read.source)]);
+     await settle();
+-    expect(c.symbolsState.value, PlanSymbolsState.failed);
++    expect(c.symbolsState.value, SymbolsState.failed);
+     fail = false;
+     final retry = c.retrySymbols();
+-    expect(c.symbolsState.value, PlanSymbolsState.loading);
++    expect(c.symbolsState.value, SymbolsState.loading);
+     await retry;
+-    expect(c.symbolsState.value, PlanSymbolsState.ready);
++    expect(c.symbolsState.value, SymbolsState.ready);
+     expect(read.reads, 2);
+     final symbols = c.symbols;
+     final again = c.retrySymbols();
+     // M-S12: retrySymbols acts in every state (it goes back to loading;
+     // the loader's cache keeps the read count at 2 either way).
+-    expect(c.symbolsState.value, PlanSymbolsState.ready);
++    expect(c.symbolsState.value, SymbolsState.ready);
+     await again;
+     expect(read.reads, 2);
+     expect(c.symbols, same(symbols), reason: 'nothing was loaded again');
+   });
+ 
+   test(
+       'S-19 (final review I3) a retry clears the library diagnostics of each '
+       'source that now reads; a source still failing keeps its own', () async {
+     var alphaFails = true;
+     final alpha = CountingSource('alpha', () async {
+       if (alphaFails) throw StateError('alpha offline');
+       return itemsBytes('alpha', ['one', 'two']);
+     });
+     final beta =
+         CountingSource('beta', () async => throw StateError('beta offline'));
+     final c = make([
+       symbolKit('alpha', [alpha.source]),
+       symbolKit('beta', [beta.source]),
+     ]);
+     await settle();
+-    expect(c.symbolsState.value, PlanSymbolsState.failed);
++    expect(c.symbolsState.value, SymbolsState.failed);
+     expect(problemsOf(c), [
+       ('alpha', 'alpha', KitDiagnosticCode.libraryUnreadable),
+       ('beta', 'beta', KitDiagnosticCode.libraryUnreadable),
+     ]);
+     alphaFails = false;
+     await c.retrySymbols();
+-    expect(c.symbolsState.value, PlanSymbolsState.ready);
++    expect(c.symbolsState.value, SymbolsState.ready);
+     expect(idsOf(c.symbols), ['alpha.item.one@1', 'alpha.item.two@1']);
+     // M-S19: `_loadSymbols` without its `removeWhere`: alpha's fixed
+     // failure stays on the bar.
+     expect(
+         problemsOf(c), [('beta', 'beta', KitDiagnosticCode.libraryUnreadable)]);
+   });
+ 
+   test('S-13 a controller disposed mid-load ignores the late result', () async {
+     // The controller is made inside the zone, so the load's continuation
+     // runs there too and any error it throws lands in [errors].
+diff --git a/packages/jet_cad_2d_plan/test/editor/editor_words_test.dart b/packages/jet_cad_2d_plan/test/editor/editor_words_test.dart
+index ee28511f..a4a6c677 100644
+--- a/packages/jet_cad_2d_plan/test/editor/editor_words_test.dart
++++ b/packages/jet_cad_2d_plan/test/editor/editor_words_test.dart
+@@ -8,28 +8,28 @@
+ // (PW1's zoom read-out, which Task 18 left here). The floor planner's
+ // words for its own tools (Wall, Door, Dimension) are the generic tools'
+ // (Line, Circle, Text); its wall is the editor fixture's first mark; the
+ // service bar's lines are 2b's.
+ import 'package:flutter/foundation.dart' show SynchronousFuture;
+ import 'package:flutter/material.dart';
+ import 'package:flutter/services.dart' show LogicalKeyboardKey;
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show SymbolsState;
+ import 'package:jet_cad_2d_plan/src/controller/plan_controller.dart';
+ import 'package:jet_cad_2d_plan/src/editor/plan_editor.dart';
+ import 'package:jet_cad_2d_plan/src/l10n/localizations.dart';
+ import 'package:jet_cad_2d_plan/src/l10n/strings.dart';
+ import 'package:jet_cad_2d_plan/src/l10n/strings_tr.dart';
+ import 'package:jet_cad_2d_plan/src/symbols/gallery_model.dart'
+     show PlanSymbolWords;
+-import 'package:jet_cad_2d_plan/src/symbols/plan_symbols_state.dart';
+ 
+ import '../support/editor_host.dart';
+ import '../support/mark_kit.dart';
+ import '../support/recording_plan_strings.dart';
+ import '../support/symbol_fixtures.dart' show demoKit;
+ 
+ Widget app(PlanController c, Locale locale) => MaterialApp(
+     locale: locale,
+     supportedLocales: planSupportedLocales,
+     localizationsDelegates: planLocalizationsDelegates,
+@@ -287,21 +287,21 @@ void main() {
+     await tester.pumpAndSettle();
+     await tester.tap(find.byKey(const Key('export-format-plan.png')));
+     await tester.pump();
+     await look();
+     await tester.tap(find.byKey(const Key('export-cancel')));
+     await tester.pumpAndSettle();
+     // The Symbols tab, loaded, and a search with no match.
+     await tester.tap(find.byKey(const Key('tab-symbols')));
+     await tester.pump();
+     await tester.runAsync(() async {
+-      while (c.symbolsState.value != PlanSymbolsState.ready) {
++      while (c.symbolsState.value != SymbolsState.ready) {
+         await Future<void>.delayed(const Duration(milliseconds: 20));
+       }
+     });
+     await look();
+     await tester.enterText(find.byType(TextField).first, 'zzz');
+     await look();
+ 
+     final leaks = leaksOf(seen, recording, c);
+     expect(leaks, isEmpty, reason: 'shown but never asked of the strings');
+     expect(seen.length, greaterThan(60), reason: 'premise: a full screen');
+diff --git a/packages/jet_cad_2d_plan/test/editor/plan_editor_test.dart b/packages/jet_cad_2d_plan/test/editor/plan_editor_test.dart
+index e6ef97c7..28806d93 100644
+--- a/packages/jet_cad_2d_plan/test/editor/plan_editor_test.dart
++++ b/packages/jet_cad_2d_plan/test/editor/plan_editor_test.dart
+@@ -1,32 +1,32 @@
+ // 2a spec P2 (PlanEditor: today's layout, its options, the host's file
+ // callbacks, the bar's commands by the permissions, the theme), P4 (the
+ // damaged warning) and P7 (one view over a controller).
+ 
+ import 'package:flutter/material.dart';
+ import 'package:flutter/services.dart' show LogicalKeyboardKey;
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
+     show InteractionLayer, SelectionKey;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show SymbolsState;
+ import 'package:jet_cad_2d_plan/src/canvas/plan_canvas.dart';
+ import 'package:jet_cad_2d_plan/src/controller/permissions.dart';
+ import 'package:jet_cad_2d_plan/src/controller/plan_controller.dart';
+ import 'package:jet_cad_2d_plan/src/editor/plan_editor.dart';
+ import 'package:jet_cad_2d_plan/src/editor/plan_tool_palette.dart';
+ import 'package:jet_cad_2d_plan/src/export/registries.dart';
+ import 'package:jet_cad_2d_plan/src/l10n/strings_en.dart';
+ import 'package:jet_cad_2d_plan/src/panels/plan_layer_panel.dart';
+ import 'package:jet_cad_2d_plan/src/panels/plan_page_panel.dart';
+ import 'package:jet_cad_2d_plan/src/panels/plan_property_panel.dart';
+ import 'package:jet_cad_2d_plan/src/panels/plan_symbol_gallery.dart';
+-import 'package:jet_cad_2d_plan/src/symbols/plan_symbols_state.dart';
+ import 'package:jet_cad_2d_plan/src/theme/plan_theme.dart';
+ 
+ import '../support/editor_host.dart';
+ import '../support/export_plan.dart';
+ import '../support/fake_page_printer.dart';
+ import '../support/layer_plan.dart';
+ import '../support/mark_kit.dart';
+ import '../support/recording_exporters.dart';
+ import '../support/symbol_fixtures.dart' show demoKit;
+ 
+@@ -525,21 +525,21 @@ void main() {
+         'ED-F symbolFilter reaches the gallery: a symbol it refuses has no '
+         'cell, the others keep theirs', (tester) async {
+       final c =
+           PlanController(kits: [markKit(), demoKit()], json: editorPlanJson());
+       addTearDown(c.dispose);
+       await pumpEditor(
+           tester,
+           PlanEditor(
+               controller: c, symbolFilter: (s) => s.id != 'demo.bed.double@1'));
+       await tester.runAsync(() async {
+-        while (c.symbolsState.value != PlanSymbolsState.ready) {
++        while (c.symbolsState.value != SymbolsState.ready) {
+           await Future<void>.delayed(const Duration(milliseconds: 20));
+         }
+       });
+       await tester.tap(byKey('tab-symbols'));
+       await tester.pump();
+       await tester.pump();
+       expect(byKey('symbol-cell-demo.bed.single@1'), findsOneWidget,
+           reason: 'premise: the gallery shows the library');
+       // M-ED-F: the editor hands the gallery `filter: null`.
+       expect(byKey('symbol-cell-demo.bed.double@1'), findsNothing);
+diff --git a/packages/jet_cad_2d_plan/test/kits/guarded_instances_test.dart b/packages/jet_cad_2d_plan/test/kits/guarded_instances_test.dart
+new file mode 100644
+index 00000000..944527e1
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/kits/guarded_instances_test.dart
+@@ -0,0 +1,102 @@
++// Spec 2b S1 "The output": 2a's GuardedType wraps E5's `instances` as it
++// wraps `generate` (guard.dart): a throw is a KitHookFailure naming the hook
++// `instances`, the engine rolls the edit back and `probe` returns it; through
++// the controller, the boundary probes the type, freezes and locks the
++// failing object, and the other objects still regenerate (2a P4, E2). The
++// square sits off the origin, turned (box_kit.dart).
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:jet_cad_2d_plan/src/kits/guard.dart' show GuardedType;
++
++import '../support/box_kit.dart';
++
++/// A document with a page and a system over the guarded square
++/// (guarded_type_test.dart's harness, the disc left out).
++({DraftDocument doc, ParametricSystem system}) harness(Switches sw) {
++  final d = DraftDocument.empty();
++  PageComponent.register(d.components);
++  d.commands.execute(SetComponentCommand<PageComponent>(
++      d.rootHandle, PageComponent(scaleDenominator: 50)));
++  final catalog = ParametricCatalog()
++    ..register<SquareParams>(SquareParams.id, SquareParams.fromJson,
++        GuardedType<SquareParams>('box', SquareParams.id, SquareType(sw)));
++  final system = ParametricSystem(d, catalog)..install();
++  return (doc: d, system: system);
++}
++
++Matcher failedInstances() => isA<KitHookFailure>()
++    .having((f) => f.kitId, 'kitId', 'box')
++    .having((f) => f.typeId, 'typeId', SquareParams.id)
++    .having((f) => f.hook, 'hook', 'instances')
++    .having((f) => f.error, 'error',
++        isA<HookBoom>().having((b) => b.hook, 'hook', 'instances'));
++
++List<KitDiagnostic> diagnosticsOf(PlanController c, KitDiagnosticCode code) => [
++      for (final d in c.diagnostics.value)
++        if (d.code == code) d
++    ];
++
++void main() {
++  TestWidgetsFlutterBinding.ensureInitialized();
++
++  const poisoned = SquareParams(side: 1200, poisoned: true);
++
++  test(
++      'PB-guard-1 a throwing instances is a KitHookFailure naming '
++      '"instances": the edit rolled back, and probe returns it', () {
++    final sw = Switches();
++    final h = harness(sw);
++    final s = addObject(h.doc, atSquare, poisoned);
++    sw.failing.add('instances');
++    final before = canon(h.doc);
++    final depth = h.doc.commands.undoDepth;
++    // M-PB-guard-a: GuardedType.instances calling the delegate bare (the
++    // raw HookBoom escapes). M-PB-guard-b: `_fail('generate', e, s)` in it.
++    expect(
++        () => h.doc.commands.execute(SetComponentCommand<SquareParams>(
++            s, poisoned.copyWith(side: 900.5))),
++        throwsA(failedInstances()));
++    expect(canon(h.doc), before, reason: 'rolled back');
++    expect(h.doc.commands.undoDepth, depth);
++    expect(h.system.probe(s), failedInstances());
++  });
++
++  test(
++      'PB-guard-2 through the controller: the object frozen and locked, one '
++      'diagnostic naming the hook, its geometry kept, the other square '
++      'still regenerated', () {
++    final sw = Switches();
++    final c = PlanController(kits: [boxKit(sw)]);
++    addTearDown(c.dispose);
++    final d = c.document;
++    final broken = addObject(d, atSquare, poisoned);
++    final other = addObject(
++        d, nearSquare(4000, -500, 0.25), const SquareParams(side: 500));
++    final drawn = coordsOf(d, broken);
++    sw.failing.add('instances');
++
++    // The resize fails on the hook, the boundary probes the type, freezes
++    // the broken square and retries: the retry touches a locked object.
++    expect(
++        c.execute(SetComponentCommand<SquareParams>(
++            broken, poisoned.copyWith(side: 900.5))),
++        isFalse);
++    expect(c.locked.value, {broken});
++    expect(c.frozen, contains(broken));
++    final failures = diagnosticsOf(c, KitDiagnosticCode.hookFailed);
++    expect(failures, hasLength(1));
++    expect((failures.single.kitId, failures.single.subject),
++        ('box', SquareParams.id));
++    expect(failures.single.message, startsWith('instances: '));
++    expect(coordsOf(d, broken), drawn);
++
++    final otherBefore = coordsOf(d, other);
++    expect(
++        c.execute(SetComponentCommand<SquareParams>(
++            other, const SquareParams(side: 650.5))),
++        isTrue);
++    expect(coordsOf(d, other), isNot(otherBefore), reason: 'regenerated');
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/panels/plan_symbol_gallery_test.dart b/packages/jet_cad_2d_plan/test/panels/plan_symbol_gallery_test.dart
+index a511cec9..6bb35e94 100644
+--- a/packages/jet_cad_2d_plan/test/panels/plan_symbol_gallery_test.dart
++++ b/packages/jet_cad_2d_plan/test/panels/plan_symbol_gallery_test.dart
+@@ -89,21 +89,21 @@ final class Host {
+           ),
+         ),
+       );
+ 
+   /// Lets the load settle (when [load]), pumps the gallery and lets the
+   /// canvas take focus.
+   Future<void> pump({bool load = true, TextEditingController? query}) async {
+     await tester.pumpWidget(build(query: query));
+     if (load) {
+       for (var i = 0;
+-          i < 10 && controller.symbolsState.value == PlanSymbolsState.loading;
++          i < 10 && controller.symbolsState.value == SymbolsState.loading;
+           i++) {
+         await tester.pump();
+       }
+     }
+     await tester.pump();
+   }
+ 
+   void dispose() {
+     query.dispose();
+     canvas.dispose();
+diff --git a/packages/jet_cad_2d_plan/test/panels/symbol_section_test.dart b/packages/jet_cad_2d_plan/test/panels/symbol_section_test.dart
+index 563f88f2..8fbc5bd8 100644
+--- a/packages/jet_cad_2d_plan/test/panels/symbol_section_test.dart
++++ b/packages/jet_cad_2d_plan/test/panels/symbol_section_test.dart
+@@ -385,25 +385,25 @@ void main() {
+     });
+   });
+ 
+   group('the panel', () {
+     Finder byKey(String k) => find.byKey(Key(k));
+ 
+     /// Lets the controller's symbol load settle: a few pumps, as the
+     /// gallery's tests do.
+     Future<void> settle(WidgetTester tester, PlanController c) async {
+       for (var i = 0;
+-          i < 10 && c.symbolsState.value == PlanSymbolsState.loading;
++          i < 10 && c.symbolsState.value == SymbolsState.loading;
+           i++) {
+         await tester.pump();
+       }
+-      expect(c.symbolsState.value, PlanSymbolsState.ready,
++      expect(c.symbolsState.value, SymbolsState.ready,
+           reason: 'premise: the library loaded');
+       await tester.pump();
+     }
+ 
+     /// A controller over the kit "test" whose one source reads
+     /// [libraryBytes] (once [gate] completes, when given), and the panel
+     /// over it; without a gate, once the library has loaded.
+     Future<PlanController> pumpPanel(WidgetTester tester,
+         {Completer<Uint8List>? gate}) async {
+       final c = PlanController(kits: [
+diff --git a/packages/jet_cad_2d_plan/test/support/box_kit.dart b/packages/jet_cad_2d_plan/test/support/box_kit.dart
+index 7d42cc9d..a7135463 100644
+--- a/packages/jet_cad_2d_plan/test/support/box_kit.dart
++++ b/packages/jet_cad_2d_plan/test/support/box_kit.dart
+@@ -15,21 +15,21 @@ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ /// What a switched hook throws.
+ final class HookBoom implements Exception {
+   const HookBoom(this.hook);
+   final String hook;
+   @override
+   String toString() => 'HookBoom($hook)';
+ }
+ 
+ /// The hooks made to throw, by name: `reach`, `references`, `generate`,
+-/// `diagnose`, `dissolves`, `placeBox`, `placeInput`, `readBox` (per object,
++/// `instances`, `diagnose`, `dissolves`, `placeBox`, `placeInput`, `readBox` (per object,
+ /// for a poisoned one); `editCapability`, `referencePolicy`, `pageKey`,
+ /// `contributesPlace`, `readsPlaces`, `create` (type level); `fromJson` (a
+ /// poisoned component's factory). Not a throw: `openRegion` makes a
+ /// poisoned square's `generate` add an open region, which the engine's
+ /// planner refuses outside any hook (an `ArgumentError`, no
+ /// KitHookFailure).
+ final class Switches {
+   final Set<String> failing = {};
+ 
+   /// Switches that act once, then turn themselves off (`openRegion`).
+@@ -157,20 +157,28 @@ final class SquareType extends ParametricType<SquareParams> {
+     final h = p.side / 2;
+     final c = [Vector2(-h, -h), Vector2(h, -h), Vector2(h, h), Vector2(-h, h)];
+     return [
+       for (var i = 0; i < 4; i++)
+         Generated(EntityKind.line, linePayload(c[i], c[(i + 1) % 4])),
+       if (sw.takes('openRegion', p.poisoned))
+         Generated.region(polylinePayload(c)),
+     ];
+   }
+ 
++  /// No instance (E5's default), but switchable: a poisoned square's
++  /// `instances` throws when `instances` is failing (2b Task 4).
++  @override
++  List<GeneratedInstance> instances(ParametricView view, Handle self) {
++    sw.check('instances', view.paramsOf<SquareParams>(self)!.poisoned);
++    return const [];
++  }
++
+   @override
+   List<Diagnostic> diagnose(ParametricView view, Handle self) {
+     sw.check('diagnose', _poisoned(view, self));
+     return const [];
+   }
+ 
+   @override
+   Iterable<Handle> references(SquareParams params) {
+     sw.check('references', params.poisoned);
+     final p = params.partner;
+diff --git a/packages/jet_cad_2d_plan/test/symbols/plan_symbol_loader_test.dart b/packages/jet_cad_2d_plan/test/symbols/plan_symbol_loader_test.dart
+index e8e62995..4f4ea842 100644
+--- a/packages/jet_cad_2d_plan/test/symbols/plan_symbol_loader_test.dart
++++ b/packages/jet_cad_2d_plan/test/symbols/plan_symbol_loader_test.dart
+@@ -44,42 +44,42 @@ void main() {
+       'beta.item.four@1',
+       'alpha.item.one@1',
+       'alpha.item.two@1',
+       'alpha.item.three@1',
+     ]);
+     expect([for (final s in load.symbols) s.kitId],
+         ['beta', 'alpha', 'alpha', 'alpha']);
+     expect(load.symbols.first.names, same(beta.names));
+     expect(load.symbols.first.component.key, 'beta.item.four');
+     expect(load.diagnostics, isEmpty);
+-    expect(load.state, PlanSymbolsState.ready);
++    expect(load.state, SymbolsState.ready);
+     expect(() => load.symbols.add(load.symbols.first), throwsUnsupportedError);
+   });
+ 
+   test(
+       'S-2 a key@N given again by a later source is dropped from it, one '
+       'symbolDuplicate naming it; the rest of that library stays', () async {
+     final alpha = symbolKit('alpha', [
+       SymbolLibrarySource(
+           label: 'a1', read: () async => itemsBytes('alpha', ['one', 'two'])),
+       SymbolLibrarySource(
+           label: 'a2', read: () async => itemsBytes('alpha', ['two', 'three'])),
+     ]);
+     final load = await loader().load(validateKitSet([alpha]));
+     // M-S2: the `given` check dropped.
+     expect(idsOf(load.symbols),
+         ['alpha.item.one@1', 'alpha.item.two@1', 'alpha.item.three@1']);
+     expect(problemsOf(load),
+         [('alpha', 'alpha.item.two@1', KitDiagnosticCode.symbolDuplicate)]);
+     expect(load.symbols[1].entry.definition.basePoint.x, 400.5,
+         reason: 'the first source\'s two, not the second\'s (at 300.5)');
+-    expect(load.state, PlanSymbolsState.ready);
++    expect(load.state, SymbolsState.ready);
+   });
+ 
+   test('S-3 the same key at another version is a different symbol (LS4)',
+       () async {
+     final alpha = symbolKit('alpha', [
+       SymbolLibrarySource(
+           label: 'a1', read: () async => itemsBytes('alpha', ['one'])),
+       SymbolLibrarySource(
+           label: 'a2',
+           read: () async => itemsBytes('alpha', ['one'], version: 2)),
+@@ -96,21 +96,21 @@ void main() {
+       SymbolLibrarySource(
+           label: 'wrong', read: () async => itemsBytes('beta', ['four'])),
+       SymbolLibrarySource(
+           label: 'right', read: () async => itemsBytes('alpha', ['one'])),
+     ]);
+     final load = await loader().load(validateKitSet([alpha]));
+     // M-S4: the kit check dropped.
+     expect(idsOf(load.symbols), ['alpha.item.one@1']);
+     expect(problemsOf(load),
+         [('alpha', 'wrong', KitDiagnosticCode.libraryKitMismatch)]);
+-    expect(load.state, PlanSymbolsState.ready);
++    expect(load.state, SymbolsState.ready);
+   });
+ 
+   test(
+       'S-5 an unreadable library (a throwing read, bytes that do not '
+       'decode) is skipped, one libraryUnreadable each, its error kept',
+       () async {
+     final boom = StateError('no asset here');
+     final alpha = symbolKit('alpha', [
+       SymbolLibrarySource(label: 'throws', read: () async => throw boom),
+       SymbolLibrarySource(
+@@ -127,41 +127,41 @@ void main() {
+       ('alpha', 'garbage', KitDiagnosticCode.libraryUnreadable),
+     ]);
+     expect(load.diagnostics.first.error, same(boom));
+     expect(load.diagnostics.last.error, isA<SymbolLibraryError>());
+   });
+ 
+   test(
+       'S-6 the state: no source is ready and empty; every source failed is '
+       'failed; one loaded is ready', () async {
+     final none = await loader().load(validateKitSet([symbolKit('alpha', [])]));
+-    expect(none.state, PlanSymbolsState.ready);
++    expect(none.state, SymbolsState.ready);
+     expect(none.symbols, isEmpty);
+     final bad = SymbolLibrarySource(
+         label: 'bad', read: () async => throw StateError('gone'));
+     final all = await loader().load(validateKitSet([
+       symbolKit('alpha', [bad]),
+       symbolKit('beta', [
+         SymbolLibrarySource(
+             label: 'mismatch', read: () async => itemsBytes('alpha', ['x'])),
+       ]),
+     ]));
+-    expect(all.state, PlanSymbolsState.failed);
++    expect(all.state, SymbolsState.failed);
+     // M-S6: `failed == total` written `failed > 0`.
+     final one = await loader().load(validateKitSet([
+       symbolKit('alpha', [
+         bad,
+         SymbolLibrarySource(
+             label: 'ok', read: () async => itemsBytes('alpha', ['one'])),
+       ]),
+     ]));
+-    expect(one.state, PlanSymbolsState.ready);
++    expect(one.state, SymbolsState.ready);
+   });
+ 
+   test(
+       'S-7 a source is read once across loads and kit sets; a failed read '
+       'is not kept, so the next load reads it again', () async {
+     final good = CountingSource('good', () async => itemsBytes('alpha', ['a']));
+     var fail = true;
+     final flaky = CountingSource('flaky', () async {
+       if (fail) throw StateError('not yet');
+       return itemsBytes('beta', ['b']);
