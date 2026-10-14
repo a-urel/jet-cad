@@ -1,0 +1,320 @@
+# Review package: 395fd873..HEAD
+
+## Commits
+9a76ce37 fix(plan): F3 follows the canvas's snapping option
+
+## Files changed
+ .../lib/src/controller/plan_controller.dart        | 36 ++++++++++++++++++++--
+ .../lib/src/shortcuts/plan_shortcuts.dart          | 14 ++++++---
+ .../test/shortcuts/host_text_keys_test.dart        |  5 +--
+ .../test/shortcuts/plan_shortcuts_test.dart        | 22 +++++++++++++
+ .../test/support/design_harness.dart               | 23 +++++++++++---
+ 5 files changed, 87 insertions(+), 13 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart b/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
+index 47bfbba8..83a0fee6 100644
+--- a/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
++++ b/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
+@@ -176,25 +176,25 @@ class PlanController extends ChangeNotifier {
+     _services = {
+       for (final kit in kits.kits)
+         kit.id: KitServices(
+             kit, _host, KitNamesWords(kit.names, () => _locale.value)),
+     };
+     _open(document, measurer, loadDiagnostics);
+     _savedState = document.commands.stateId;
+     if (unsettled) _unsettled = (document: document, at: _savedState);
+     _placeNominally();
+     _refreshFlags();
+-    // Last: a constructor that threw leaves no load running.
+-    unawaited(_loadSymbols());
+     // The tool letters are the kit set's (Task 16): a letterTaken
+     // diagnostic is in the log before any widget is built.
+     planToolEntries(this);
++    // Last: a constructor that threw leaves no load running.
++    unawaited(_loadSymbols());
+   }
+ 
+   /// The page, the contract's four components and the kits' types: what a
+   /// plan's registry holds. Once per registry.
+   static void _register(ComponentRegistry r, ParametricCatalog catalog) {
+     PageComponent.register(r);
+     registerKitComponents(r);
+     catalog.registerComponents(r);
+   }
+ 
+@@ -249,23 +249,52 @@ class PlanController extends ChangeNotifier {
+ 
+   /// Whether [dispose] ran: a report owed after a frame (the locale push,
+   /// Task 15) checks it before it lands.
+   @internal
+   bool get isDisposed => _disposed;
+ 
+   final SnapSettings _userSnap = SnapSettings();
+   late final EffectiveSnap _snap =
+       EffectiveSnap(_userSnap, () => snappingAllowed);
+ 
++  bool _snappingAllowed = true;
++  bool _snappingNoticeOwed = false;
++  final ValueNotifier<bool> _snapping = ValueNotifier<bool>(true);
++
+   /// The canvas's `snapping` option (Task 15): object snap only while true.
++  /// The tools read it at once ([EffectiveSnap]); [snapping] tells the
++  /// keyboard (F3, Task 16) after the current frame.
++  @internal
++  bool get snappingAllowed => _snappingAllowed;
++
++  /// Written by the canvas in `initState` and `didUpdateWidget`, inside a
++  /// build, where an ancestor (PlanShortcuts) may not be marked dirty: the
++  /// value changes now, and [snapping] follows it after the frame (as
++  /// `PlanLocaleScope.push` reports the locale).
++  @internal
++  set snappingAllowed(bool value) {
++    if (value == _snappingAllowed) return;
++    _snappingAllowed = value;
++    if (_snappingNoticeOwed) return;
++    _snappingNoticeOwed = true;
++    SchedulerBinding.instance
++      ..addPostFrameCallback((_) {
++        _snappingNoticeOwed = false;
++        if (!_disposed) _snapping.value = _snappingAllowed;
++      })
++      ..ensureVisualUpdate();
++  }
++
++  /// [snappingAllowed] as of the last frame: PlanShortcuts rebinds F3 when
++  /// it changes (S-14: F3 only while snapping is allowed).
+   @internal
+-  bool snappingAllowed = true;
++  ValueListenable<bool> get snapping => _snapping;
+ 
+   final ValueNotifier<Locale> _locale = ValueNotifier(const Locale('en'));
+   final DiagnosticsLog _diagnostics = DiagnosticsLog();
+   final ValueNotifier<PlanSymbolsState> _symbolsState =
+       ValueNotifier(PlanSymbolsState.ready);
+   final ValueNotifier<bool> _dirty = ValueNotifier(false);
+   final ValueNotifier<bool> _canUndo = ValueNotifier(false);
+   final ValueNotifier<bool> _canRedo = ValueNotifier(false);
+   final ValueNotifier<String> _activeTool = ValueNotifier(planSelectToolId);
+   Set<String> _missingKits = const {};
+@@ -1214,17 +1243,18 @@ class PlanController extends ChangeNotifier {
+     _canUndo.dispose();
+     _canRedo.dispose();
+     _activeTool.dispose();
+     _fill.dispose();
+     _locked.dispose();
+     lockHint.dispose();
+     _damaged.dispose();
+     _canvasRect.dispose();
+     _fits.dispose();
+     _snap.dispose();
++    _snapping.dispose();
+     _userSnap.dispose();
+     camera.dispose();
+     _settles.clear();
+     unawaited(_out.close());
+     super.dispose();
+   }
+ }
+diff --git a/packages/jet_cad_2d_plan/lib/src/shortcuts/plan_shortcuts.dart b/packages/jet_cad_2d_plan/lib/src/shortcuts/plan_shortcuts.dart
+index c8d7ea12..baff892a 100644
+--- a/packages/jet_cad_2d_plan/lib/src/shortcuts/plan_shortcuts.dart
++++ b/packages/jet_cad_2d_plan/lib/src/shortcuts/plan_shortcuts.dart
+@@ -125,27 +125,32 @@ class _PlanShortcutsState extends State<PlanShortcuts> {
+     // undo() and redo() do nothing mid-shape.
+     if (p.undo) {
+       for (final chord in kUndoChords) {
+         m[chord] = c.undo;
+       }
+       for (final chord in kRedoChords) {
+         m[chord] = c.redo;
+       }
+     }
+     // Spec 03 D10: one toggle per press, never per key repeat; only while
+-    // snapping is allowed (S-14).
++    // snapping is allowed (S-14). The canvas writes the flag below this
++    // widget, inside a build: c.snapping tells this builder after the frame.
+     if (c.snappingAllowed) {
+       m[const SingleActivator(LogicalKeyboardKey.f3, includeRepeats: false)] =
+           c.snap.toggleObjectSnap;
+     }
+     // Spec 05 D5: the letters, then Fill, then Escape. Only the allowed
+-    // letters are bound; a refused one bubbles (C-5).
++    // letters are bound; a refused one bubbles (C-5). A letter the
++    // permissions allow stays bound when selectTool would still refuse its
++    // tool (a factory that threw, needs the engine denies): the key is
++    // consumed and nothing arms, as the shell's under `runtime` (A12),
++    // while the palette greys that row.
+     for (final e in planToolEntries(c)) {
+       final key = e.key;
+       if (key != null && p.allowsTool(e.id)) {
+         m[SingleActivator(key, includeRepeats: false)] =
+             () => c.selectTool(e.id);
+       }
+     }
+     if (fillOffered(c)) {
+       m[const SingleActivator(LogicalKeyboardKey.keyF, includeRepeats: false)] =
+           () {
+@@ -161,19 +166,20 @@ class _PlanShortcutsState extends State<PlanShortcuts> {
+       }
+     };
+     return m;
+   }
+ 
+   @override
+   Widget build(BuildContext context) {
+     final c = widget.controller;
+     return PlanTextKeys(
+       child: ListenableBuilder(
+-        // A permissions change or a document swap rebinds.
+-        listenable: c,
++        // A permissions change, a document swap or the canvas's snapping
++        // option rebinds.
++        listenable: Listenable.merge([c, c.snapping]),
+         builder: (context, child) =>
+             CallbackShortcuts(bindings: _bindings(c), child: child!),
+         child: widget.child,
+       ),
+     );
+   }
+ }
+diff --git a/packages/jet_cad_2d_plan/test/shortcuts/host_text_keys_test.dart b/packages/jet_cad_2d_plan/test/shortcuts/host_text_keys_test.dart
+index 151d2f78..7dda779d 100644
+--- a/packages/jet_cad_2d_plan/test/shortcuts/host_text_keys_test.dart
++++ b/packages/jet_cad_2d_plan/test/shortcuts/host_text_keys_test.dart
+@@ -15,22 +15,23 @@ import '../support/canvas_fixture.dart';
+ import '../support/design_harness.dart';
+ 
+ Finder byKey(String key) => find.byKey(Key(key));
+ 
+ /// An intent the host's own `Shortcuts` maps a key to, by name.
+ class PosIntent extends Intent {
+   const PosIntent(this.name);
+   final String name;
+ }
+ 
+-/// The host's keys: a point of sale's Delete and Backspace, a letter the
+-/// planner binds (W) and one it does not (K), a digit, Space and Ctrl+Z.
++/// The host's keys: a point of sale's Delete and Backspace, W (the
++/// planner's wall letter, no plan letter here: KB-2 and A8 cover a plan
++/// letter in a field) and K, a digit, Space and Enter.
+ final Map<String, (SingleActivator, LogicalKeyboardKey)> kPosKeys = {
+   'delete': (
+     const SingleActivator(LogicalKeyboardKey.delete),
+     LogicalKeyboardKey.delete
+   ),
+   'backspace': (
+     const SingleActivator(LogicalKeyboardKey.backspace),
+     LogicalKeyboardKey.backspace
+   ),
+   'w': (
+diff --git a/packages/jet_cad_2d_plan/test/shortcuts/plan_shortcuts_test.dart b/packages/jet_cad_2d_plan/test/shortcuts/plan_shortcuts_test.dart
+index a75f21a4..31bc319e 100644
+--- a/packages/jet_cad_2d_plan/test/shortcuts/plan_shortcuts_test.dart
++++ b/packages/jet_cad_2d_plan/test/shortcuts/plan_shortcuts_test.dart
+@@ -289,11 +289,33 @@ void main() {
+     expect(c.locale.value, const Locale('en'), reason: 'premise');
+     await tester.pumpWidget(MaterialApp(
+         locale: const Locale('tr'),
+         supportedLocales: const [Locale('en'), Locale('tr')],
+         localizationsDelegates: GlobalMaterialLocalizations.delegates,
+         home: PlanShortcuts(controller: c, child: const SizedBox())));
+     await tester.pump();
+     await tester.pump();
+     expect(c.locale.value, const Locale('tr'));
+   });
++
++  testWidgets(
++      'KB-13 under PlanCanvas(snapping: false) F3 reaches the host and the '
++      'user\'s snap setting is kept; snapping: true at runtime binds F3 '
++      'again (S-14) (M-KB-13a, M-KB-13b, M-KB-13c)', (tester) async {
++    final c = drawController().c;
++    final d = await pumpDesign(tester, c, snapping: false, hostKeys: kHostKeys);
++    await focusCanvas(tester);
++    final osnap = c.snap.objectSnap;
++    expect(c.snappingAllowed, isFalse, reason: 'premise: the canvas wrote it');
++    await sendActivator(tester, kHostKeys['f3']!);
++    expect(d.reached['f3'], 1);
++    expect(c.snap.objectSnap, osnap, reason: 'the hidden setting kept');
++
++    // The control: snapping allowed again, the plan takes F3.
++    d.snapping.value = true;
++    await tester.pump();
++    await tester.pump();
++    await sendActivator(tester, kHostKeys['f3']!);
++    expect(c.snap.objectSnap, isNot(osnap));
++    expect(d.reached['f3'], 1, reason: 'the host heard nothing more');
++  });
+ }
+diff --git a/packages/jet_cad_2d_plan/test/support/design_harness.dart b/packages/jet_cad_2d_plan/test/support/design_harness.dart
+index c95f07ee..e56f0e06 100644
+--- a/packages/jet_cad_2d_plan/test/support/design_harness.dart
++++ b/packages/jet_cad_2d_plan/test/support/design_harness.dart
+@@ -12,47 +12,62 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
+     show InteractionLayer;
+ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+ import 'package:jet_cad_2d_plan/src/editor/plan_tool_palette.dart'
+     show planToolLabel;
+ 
+ import 'canvas_fixture.dart';
+ 
+ /// What the host saw: the keys that reached its bindings, by name, and its
+ /// file callbacks' calls.
+ final class Design {
+-  Design(this.c, bool shortcuts) : shortcuts = ValueNotifier(shortcuts);
++  Design(this.c, bool shortcuts, bool snapping)
++      : shortcuts = ValueNotifier(shortcuts),
++        snapping = ValueNotifier(snapping);
+ 
+   final PlanController c;
+ 
+   /// `PlanShortcuts.shortcuts`, changeable at runtime.
+   final ValueNotifier<bool> shortcuts;
++
++  /// `PlanCanvas.snapping`, changeable at runtime.
++  final ValueNotifier<bool> snapping;
+   final Map<String, int> reached = {};
+   int news = 0, opens = 0, saves = 0, saveAses = 0, exports = 0, prints = 0;
+ }
+ 
+ /// Pumps the composition over [c]: [hostKeys] are the host's bindings
+ /// above the plan (by name); [hostField] puts a host text field, guarded
+ /// as a host guards its own fields, beside the status line; [right] is the
+ /// right column (Task 17's property panel); [host] wraps the plan in a
+-/// host's own `Shortcuts`/`Actions`/`Focus`.
++/// host's own `Shortcuts`/`Actions`/`Focus`; [snapping] is the canvas's
++/// option.
+ Future<Design> pumpDesign(WidgetTester tester, PlanController c,
+     {bool shortcuts = true,
++    bool snapping = true,
+     Map<String, SingleActivator> hostKeys = const {},
+     bool hostField = false,
+     Widget? right,
+     Widget Function(Widget plan)? host}) async {
+-  final d = Design(c, shortcuts);
++  final d = Design(c, shortcuts, snapping);
+   addTearDown(d.shortcuts.dispose);
++  addTearDown(d.snapping.dispose);
+   for (final name in hostKeys.keys) {
+     d.reached[name] = 0;
+   }
+-  Widget frame(Widget canvas) {
++  // pumpDraw's canvas has the default options: this one follows
++  // [Design.snapping].
++  Widget frame(Widget _) {
++    final canvas = ValueListenableBuilder<bool>(
++      valueListenable: d.snapping,
++      builder: (_, snapping, __) =>
++          PlanCanvas(controller: c, snapping: snapping),
++    );
+     final plan = ValueListenableBuilder<bool>(
+       valueListenable: d.shortcuts,
+       builder: (_, keys, __) => PlanShortcuts(
+         controller: c,
+         shortcuts: keys,
+         onNew: () async => d.news++,
+         onOpen: () async => d.opens++,
+         onSave: () async => d.saves++,
+         onSaveAs: () async => d.saveAses++,
+         onExport: () async => d.exports++,

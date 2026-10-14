@@ -1,0 +1,1820 @@
+# Review package: 1d68c7a5..HEAD
+
+## Commits
+395fd873 feat(plan): PlanToolPalette and PlanShortcuts (P2)
+
+## Files changed
+ packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart  |   3 +
+ .../lib/src/controller/plan_controller.dart        |   4 +
+ .../lib/src/editor/plan_tool_palette.dart          | 139 +++++++++
+ .../lib/src/shortcuts/plan_shortcut_guard.dart     |  11 +-
+ .../lib/src/shortcuts/plan_shortcuts.dart          | 179 ++++++++++++
+ .../lib/src/shortcuts/tool_letters.dart            | 106 +++++++
+ .../test/editor/palette_draw_test.dart             | 316 +++++++++++++++++++++
+ .../test/editor/plan_tool_palette_test.dart        | 168 +++++++++++
+ .../test/shortcuts/host_text_keys_test.dart        | 178 ++++++++++++
+ .../test/shortcuts/plan_shortcuts_test.dart        | 299 +++++++++++++++++++
+ .../test/support/design_harness.dart               | 155 ++++++++++
+ .../jet_cad_2d_plan/test/support/stamp_kit.dart    |  67 +++++
+ 12 files changed, 1620 insertions(+), 5 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart b/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart
+index bdf6c73b..cb35bb4a 100644
+--- a/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart
++++ b/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart
+@@ -6,20 +6,21 @@ export 'src/canvas/plan_canvas.dart' show PlanCanvas, kLockHintDuration;
+ export 'src/controller/camera_bounds.dart' show kPlanMaxScale, kPlanMinScale;
+ export 'src/controller/permissions.dart';
+ export 'src/controller/plan_change.dart'
+     show
+         PlanChange,
+         PlanObjectAdded,
+         PlanObjectChanged,
+         PlanObjectRemoved,
+         PlanReplaced;
+ export 'src/controller/plan_controller.dart';
++export 'src/editor/plan_tool_palette.dart' show PlanToolPalette;
+ export 'src/export/registries.dart';
+ export 'src/file/manifest.dart'
+     show
+         ManifestCheck,
+         PlanManifest,
+         checkManifest,
+         kPlanFormat,
+         manifestOf,
+         manifestToWrite,
+         usedKits;
+@@ -29,14 +30,16 @@ export 'src/fonts/plan_fonts.dart'
+     show ensurePlanFonts, kPlanFontFamily, registerFontLicences;
+ export 'src/kits/guard.dart' show KitHookFailure;
+ export 'src/kits/kit_set.dart';
+ export 'src/kits/locks.dart' show PlanLocked;
+ export 'src/l10n/localizations.dart';
+ export 'src/l10n/strings.dart';
+ export 'src/l10n/strings_de.dart';
+ export 'src/l10n/strings_en.dart';
+ export 'src/l10n/strings_tr.dart';
+ export 'src/panels/plan_symbol_gallery.dart';
++export 'src/shortcuts/plan_shortcut_guard.dart' show PlanShortcutGuard;
++export 'src/shortcuts/plan_shortcuts.dart';
+ export 'src/symbols/plan_symbol.dart';
+ export 'src/symbols/plan_symbol_loader.dart';
+ export 'src/symbols/plan_symbols_state.dart';
+ export 'src/theme/plan_theme.dart' show PlanTheme;
+diff --git a/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart b/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
+index cd34ea0c..47bfbba8 100644
+--- a/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
++++ b/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
+@@ -16,20 +16,21 @@ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+ 
+ import '../file/manifest.dart';
+ import '../file/plan_file.dart';
+ import '../file/plan_format_exception.dart';
+ import '../kits/guard.dart';
+ import '../kits/kit_set.dart';
+ import '../kits/locks.dart';
+ import '../l10n/document_separator.dart';
+ import '../l10n/strings.dart';
+ import '../export/registries.dart';
++import '../shortcuts/tool_letters.dart';
+ import '../symbols/plan_symbol.dart';
+ import '../symbols/plan_symbol_loader.dart';
+ import '../symbols/plan_symbols_state.dart';
+ import '../tools/generic_tools.dart';
+ import '../tools/move_resolver.dart';
+ import '../tools/plan_select_gates.dart';
+ import '../tools/plan_symbol_tool.dart';
+ import 'camera_bounds.dart';
+ import 'new_plan.dart';
+ import 'permissions.dart';
+@@ -177,20 +178,23 @@ class PlanController extends ChangeNotifier {
+         kit.id: KitServices(
+             kit, _host, KitNamesWords(kit.names, () => _locale.value)),
+     };
+     _open(document, measurer, loadDiagnostics);
+     _savedState = document.commands.stateId;
+     if (unsettled) _unsettled = (document: document, at: _savedState);
+     _placeNominally();
+     _refreshFlags();
+     // Last: a constructor that threw leaves no load running.
+     unawaited(_loadSymbols());
++    // The tool letters are the kit set's (Task 16): a letterTaken
++    // diagnostic is in the log before any widget is built.
++    planToolEntries(this);
+   }
+ 
+   /// The page, the contract's four components and the kits' types: what a
+   /// plan's registry holds. Once per registry.
+   static void _register(ComponentRegistry r, ParametricCatalog catalog) {
+     PageComponent.register(r);
+     registerKitComponents(r);
+     catalog.registerComponents(r);
+   }
+ 
+diff --git a/packages/jet_cad_2d_plan/lib/src/editor/plan_tool_palette.dart b/packages/jet_cad_2d_plan/lib/src/editor/plan_tool_palette.dart
+new file mode 100644
+index 00000000..dc46062e
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/editor/plan_tool_palette.dart
+@@ -0,0 +1,139 @@
++// Spec 2a P2, "The widgets": the generic tools, then each kit's, grouped in
++// load order, labelled by tool:<id>; the Fill toggle. Ported from
++// jet_cad_floor_plan/lib/src/tool_palette.dart (spec 05 D5, D13): the rows
++// come from the controller (planToolEntries) instead of the shell's list.
++//
++// It never takes focus (ExcludeFocus, Ruling 05-6), so the canvas keeps it
++// and the shortcuts keep working after a click here.
++import 'package:flutter/material.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart' show Capability;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show kitOfKey;
++
++import '../controller/plan_controller.dart';
++import '../l10n/locale_scope.dart';
++import '../l10n/strings.dart';
++import '../shortcuts/tool_letters.dart';
++import '../tools/generic_tools.dart';
++
++/// Whether a fill-capable tool is offered (host embedding spec S-9 f): the
++/// Fill row and F only then.
++bool fillOffered(PlanController controller) =>
++    genericTools.any((t) => t.fills && controller.permissions.allowsTool(t.id));
++
++/// [toolId]'s label: the plan library's word for a generic tool, else the
++/// kit's `tool:<id>` word in the controller's locale (English where the
++/// kit has none), else the id itself.
++String planToolLabel(
++    BuildContext context, PlanController controller, String toolId) {
++  final s = PlanStrings.of(context);
++  return switch (toolId) {
++    PlanToolIds.select => s.toolSelect,
++    PlanToolIds.line => s.toolLine,
++    PlanToolIds.polyline => s.toolPolyline,
++    PlanToolIds.rectangle => s.toolRectangle,
++    PlanToolIds.circle => s.toolCircle,
++    PlanToolIds.arc => s.toolArc,
++    PlanToolIds.text => s.toolText,
++    PlanToolIds.symbol => s.toolSymbol,
++    _ => controller.kits
++            .kitOf(kitOfKey(toolId))
++            ?.names
++            .word(controller.locale.value.languageCode, 'tool:$toolId') ??
++        toolId,
++  };
++}
++
++/// The tools of [controller] and the Fill toggle.
++class PlanToolPalette extends StatefulWidget {
++  const PlanToolPalette({super.key, required this.controller});
++
++  final PlanController controller;
++
++  @override
++  State<PlanToolPalette> createState() => _PlanToolPaletteState();
++}
++
++class _PlanToolPaletteState extends State<PlanToolPalette> {
++  @override
++  void didChangeDependencies() {
++    super.didChangeDependencies();
++    PlanLocaleScope.push(context, widget.controller);
++  }
++
++  @override
++  void didUpdateWidget(PlanToolPalette oldWidget) {
++    super.didUpdateWidget(oldWidget);
++    if (!identical(oldWidget.controller, widget.controller)) {
++      PlanLocaleScope.push(context, widget.controller);
++    }
++  }
++
++  /// Whether `selectTool(id)` would arm the tool now (Task 12's rule):
++  /// made for the current document (a factory that threw leaves its tool
++  /// out, spec P4), offered by the permissions, and every need allowed by
++  /// the document's engine permissions.
++  static bool _enabled(PlanController c, PlanToolEntry e) {
++    if (c.isToolDisabled(e.id)) return false;
++    if (!c.permissions.allowsTool(e.id)) return false;
++    final needs = c.needsOf(e.id);
++    if (needs == null) return false;
++    final engine = c.document.commands.permissions;
++    return needs.every(engine.allows);
++  }
++
++  @override
++  Widget build(BuildContext context) {
++    final c = widget.controller;
++    return ExcludeFocus(
++      // The left slot paints its own background, so the tiles need a
++      // Material of their own to paint their ink on.
++      child: Material(
++        color: Colors.transparent,
++        child: ListenableBuilder(
++          // The controller notifies on a permissions change and a document
++          // swap (Tasks 8, 12).
++          listenable: Listenable.merge([c, c.activeTool, c.fill, c.locale]),
++          builder: (context, _) {
++            final strings = PlanStrings.of(context);
++            final geometry =
++                c.document.commands.permissions.allows(Capability.geometry);
++            final active = c.activeTool.value;
++            final rows = <Widget>[];
++            String? group;
++            for (final e in planToolEntries(c)) {
++              if (group != null && e.kitId != group) {
++                rows.add(Divider(key: Key('tool-group-${e.kitId}')));
++              }
++              group = e.kitId;
++              rows.add(ListTile(
++                key: Key('tool-${e.id}'),
++                dense: true,
++                leading: Icon(e.icon, size: 18),
++                selected: active == e.id,
++                enabled: _enabled(c, e),
++                title: Text(planToolLabel(context, c, e.id)),
++                trailing: e.letter == null ? null : Text(e.letter!),
++                onTap: () => c.selectTool(e.id),
++              ));
++            }
++            if (fillOffered(c)) {
++              rows
++                ..add(const Divider())
++                ..add(CheckboxListTile(
++                  key: const Key('tool-fill'),
++                  dense: true,
++                  title: Text(strings.fill),
++                  secondary: const Text('F'),
++                  value: c.fill.value,
++                  onChanged: geometry ? (v) => c.fill.value = v ?? false : null,
++                ));
++            }
++            return ListView(
++                padding: const EdgeInsets.symmetric(vertical: 8),
++                children: rows);
++          },
++        ),
++      ),
++    );
++  }
++}
+diff --git a/packages/jet_cad_2d_plan/lib/src/shortcuts/plan_shortcut_guard.dart b/packages/jet_cad_2d_plan/lib/src/shortcuts/plan_shortcut_guard.dart
+index 860926e2..4840defe 100644
+--- a/packages/jet_cad_2d_plan/lib/src/shortcuts/plan_shortcut_guard.dart
++++ b/packages/jet_cad_2d_plan/lib/src/shortcuts/plan_shortcut_guard.dart
+@@ -2,34 +2,35 @@
+ // text fields keep their keys, and the guard is built from the letters
+ // actually in use, not from today's fixed list of 16). Ported from
+ // jet_cad_floor_plan/lib/src/shortcut_guard.dart: ShellShortcutGuard
+ // becomes PlanShortcutGuard, whose letters come from planLetterKeys;
+ // PlannerTextKeys becomes PlanTextKeys, unchanged.
+ import 'package:flutter/services.dart'
+     show HardwareKeyboard, KeyEvent, KeyUpEvent, LogicalKeyboardKey;
+ import 'package:flutter/widgets.dart';
+ 
+ import '../controller/plan_controller.dart';
+-import '../tools/generic_tools.dart';
+ import 'chords.dart';
++import 'tool_letters.dart';
+ 
+ export 'chords.dart';
+ 
+ /// The key of an upper-case Latin [letter] (`'A'`..`'Z'`).
+ LogicalKeyboardKey letterKey(String letter) => LogicalKeyboardKey(
+     LogicalKeyboardKey.keyA.keyId + letter.codeUnitAt(0) - 0x41);
+ 
+-/// The letters [controller]'s keyboard binds, F included (spec 2a P2: F is
+-/// reserved for Fill). Here the generic tools' (V L P R C A T); Task 16
+-/// adds the kits' letters in load order.
++/// The letters [controller]'s keyboard binds, F included (spec 2a P2: the
++/// guard is built from the letters actually in use; F is reserved for
++/// Fill): the generic tools' and the kits' given letters, in palette order.
+ List<LogicalKeyboardKey> planLetterKeys(PlanController controller) => [
+-      for (final t in genericTools) letterKey(t.letter),
++      for (final e in planToolEntries(controller))
++        if (e.key case final key?) key,
+       LogicalKeyboardKey.keyF,
+     ];
+ 
+ /// Spec 05 D9, Ruling 05-8, spec 2a P2. Ported from `ShellShortcutGuard`
+ /// (`shortcut_guard.dart:27-67`).
+ ///
+ /// **Why this exists.** A `Shortcuts` or `CallbackShortcuts` above a text
+ /// field takes the field's keystrokes. PlanShortcuts' tool letters, its
+ /// Undo and Redo chords and its Escape are such shortcuts.
+ ///
+diff --git a/packages/jet_cad_2d_plan/lib/src/shortcuts/plan_shortcuts.dart b/packages/jet_cad_2d_plan/lib/src/shortcuts/plan_shortcuts.dart
+new file mode 100644
+index 00000000..c8d7ea12
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/shortcuts/plan_shortcuts.dart
+@@ -0,0 +1,179 @@
++// Spec 2a P2, "The keyboard": the file commands call the host's callbacks;
++// Undo and Redo; F3 for snapping; F for Fill; Escape back to plan.select;
++// the tool letters in use. Ported from the shell's bindings
++// (jet_cad_floor_plan/lib/src/planner_shell.dart:1444-1469, spec 05 D5,
++// 12a D6, host embedding C-5, C-7, S-16, S-26), the capabilities read from
++// PlanPermissions. Text fields keep their keys: PlanTextKeys around
++// everything (Slice 4 Task 7 finding 1), and PlanShortcutGuard around each
++// of the plan's fields (built from planLetterKeys).
++import 'dart:async';
++
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:flutter/widgets.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart' show Capability;
++
++import '../controller/plan_controller.dart';
++import '../editor/plan_tool_palette.dart' show fillOffered;
++import '../l10n/locale_scope.dart';
++import '../tools/generic_tools.dart';
++import 'plan_shortcut_guard.dart';
++import 'tool_letters.dart';
++
++/// The plan's keys around [child] (a host's layout of the plan's widgets).
++///
++/// - [shortcuts] false binds none of them and closes the select tool's
++///   idle keys (Delete, Backspace, Escape), so every key reaches the host;
++///   a gesture's own keys stay (a drag's Escape, a drawing tool's Escape
++///   and Enter, plan.symbol's R and M). The controller's commands stay
++///   callable.
++/// - The file chords are bound for the callbacks given; a chord whose
++///   command cannot act now (a shape part-way, or no page for Export and
++///   Print) consumes the key and does nothing (S-26).
++class PlanShortcuts extends StatefulWidget {
++  const PlanShortcuts({
++    super.key,
++    required this.controller,
++    required this.child,
++    this.shortcuts = true,
++    this.onNew,
++    this.onOpen,
++    this.onSave,
++    this.onSaveAs,
++    this.onExport,
++    this.onPrint,
++  });
++
++  final PlanController controller;
++  final Widget child;
++  final bool shortcuts;
++  final Future<void> Function()? onNew;
++  final Future<void> Function()? onOpen;
++  final Future<void> Function()? onSave;
++  final Future<void> Function()? onSaveAs;
++  final Future<void> Function()? onExport;
++  final Future<void> Function()? onPrint;
++
++  @override
++  State<PlanShortcuts> createState() => _PlanShortcutsState();
++}
++
++class _PlanShortcutsState extends State<PlanShortcuts> {
++  @override
++  void initState() {
++    super.initState();
++    widget.controller.addListener(_applyIdleKeys);
++    _applyIdleKeys();
++  }
++
++  @override
++  void didChangeDependencies() {
++    super.didChangeDependencies();
++    PlanLocaleScope.push(context, widget.controller);
++  }
++
++  @override
++  void didUpdateWidget(PlanShortcuts oldWidget) {
++    super.didUpdateWidget(oldWidget);
++    if (!identical(oldWidget.controller, widget.controller)) {
++      oldWidget.controller.removeListener(_applyIdleKeys);
++      widget.controller.addListener(_applyIdleKeys);
++      PlanLocaleScope.push(context, widget.controller);
++    }
++    _applyIdleKeys();
++  }
++
++  @override
++  void dispose() {
++    widget.controller.removeListener(_applyIdleKeys);
++    super.dispose();
++  }
++
++  /// The select tool's idle keys are the shortcuts (S-16). The gates are
++  /// per document, so this runs again after a swap (the controller
++  /// notifies).
++  void _applyIdleKeys() =>
++      widget.controller.selectGates.idleKeys = widget.shortcuts;
++
++  /// Runs a file command when it can act: no shape part-way (spec 12a D6),
++  /// and a page for Export and Print (spec 13 D8, D9).
++  void _run(Future<void> Function() run, {required bool needsPage}) {
++    final c = widget.controller;
++    if (c.toolController.active.isMidShape) return;
++    if (needsPage && c.page.value == null) return;
++    unawaited(run());
++  }
++
++  Map<ShortcutActivator, VoidCallback> _bindings(PlanController c) {
++    if (!widget.shortcuts) return const {};
++    final p = c.permissions;
++    final m = <ShortcutActivator, VoidCallback>{};
++    void file(List<SingleActivator> chords, Future<void> Function()? run,
++        {bool needsPage = false}) {
++      if (run == null) return;
++      for (final chord in chords) {
++        m[chord] = () => _run(run, needsPage: needsPage);
++      }
++    }
++
++    file(kNewChords, widget.onNew);
++    file(kOpenChords, widget.onOpen);
++    file(kSaveChords, widget.onSave);
++    file(kSaveAsChords, widget.onSaveAs);
++    if (p.export) file(kExportChords, widget.onExport, needsPage: true);
++    if (p.print) file(kPrintChords, widget.onPrint, needsPage: true);
++    // Spec P2: widget-facing commands consult the flags; the controller's
++    // undo() and redo() do nothing mid-shape.
++    if (p.undo) {
++      for (final chord in kUndoChords) {
++        m[chord] = c.undo;
++      }
++      for (final chord in kRedoChords) {
++        m[chord] = c.redo;
++      }
++    }
++    // Spec 03 D10: one toggle per press, never per key repeat; only while
++    // snapping is allowed (S-14).
++    if (c.snappingAllowed) {
++      m[const SingleActivator(LogicalKeyboardKey.f3, includeRepeats: false)] =
++          c.snap.toggleObjectSnap;
++    }
++    // Spec 05 D5: the letters, then Fill, then Escape. Only the allowed
++    // letters are bound; a refused one bubbles (C-5).
++    for (final e in planToolEntries(c)) {
++      final key = e.key;
++      if (key != null && p.allowsTool(e.id)) {
++        m[SingleActivator(key, includeRepeats: false)] =
++            () => c.selectTool(e.id);
++      }
++    }
++    if (fillOffered(c)) {
++      m[const SingleActivator(LogicalKeyboardKey.keyF, includeRepeats: false)] =
++          () {
++        if (c.document.commands.permissions.allows(Capability.geometry)) {
++          c.fill.value = !c.fill.value;
++        }
++      };
++    }
++    // An idle drawing tool leaves Escape unhandled; it arrives here.
++    m[const SingleActivator(LogicalKeyboardKey.escape)] = () {
++      if (c.activeTool.value != PlanToolIds.select) {
++        c.selectTool(PlanToolIds.select);
++      }
++    };
++    return m;
++  }
++
++  @override
++  Widget build(BuildContext context) {
++    final c = widget.controller;
++    return PlanTextKeys(
++      child: ListenableBuilder(
++        // A permissions change or a document swap rebinds.
++        listenable: c,
++        builder: (context, child) =>
++            CallbackShortcuts(bindings: _bindings(c), child: child!),
++        child: widget.child,
++      ),
++    );
++  }
++}
+diff --git a/packages/jet_cad_2d_plan/lib/src/shortcuts/tool_letters.dart b/packages/jet_cad_2d_plan/lib/src/shortcuts/tool_letters.dart
+new file mode 100644
+index 00000000..040e5490
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/shortcuts/tool_letters.dart
+@@ -0,0 +1,106 @@
++// The palette's rows and the tool letters (spec 2a P2, "The keyboard" and
++// "The widgets"): the generic tools first, with today's letters (V L P R C
++// A T), then each kit's tools in load order. F is reserved for Fill. A
++// kit's letter goes to the first tool that asks for it; a later tool that
++// asks for a taken letter, for F, or for something that is no letter A-Z
++// gets none and a letterTaken diagnostic (A3). plan.symbol has no row and
++// no letter: the gallery arms it.
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:flutter/widgets.dart' show IconData;
++import 'package:jet_cad_2d/jet_cad_2d.dart' show Capability;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:meta/meta.dart' show immutable;
++
++import '../controller/plan_controller.dart';
++import '../tools/generic_tools.dart';
++import 'plan_shortcut_guard.dart' show letterKey;
++
++/// The kit id the plan library's own tools stand under (a reserved id).
++const String kPlanKitId = 'plan';
++
++/// One palette row and its letter.
++@immutable
++final class PlanToolEntry {
++  const PlanToolEntry({
++    required this.id,
++    required this.kitId,
++    required this.icon,
++    required this.needs,
++    this.letter,
++  });
++
++  final String id;
++
++  /// [kPlanKitId] for a generic tool, else its kit's id.
++  final String kitId;
++  final IconData icon;
++
++  /// What the tool's commits need (`PlanTool.needs`' meaning).
++  final Set<Capability> needs;
++
++  /// The letter given, upper case, or null.
++  final String? letter;
++
++  /// [letter]'s key, or null.
++  LogicalKeyboardKey? get key => switch (letter) {
++        final l? => letterKey(l),
++        null => null,
++      };
++}
++
++final Expando<List<PlanToolEntry>> _entriesOf =
++    Expando<List<PlanToolEntry>>('planToolEntries');
++
++/// [controller]'s rows in palette order, computed once per controller: its
++/// kit set is fixed at construction. The first call reports the refused
++/// letters.
++List<PlanToolEntry> planToolEntries(PlanController controller) =>
++    _entriesOf[controller] ??= _assign(controller);
++
++final RegExp _aLetter = RegExp(r'^[A-Z]$');
++
++List<PlanToolEntry> _assign(PlanController c) {
++  // The letter → the tool (or Fill) that has it.
++  final taken = <String, String>{'F': 'Fill'};
++  final out = <PlanToolEntry>[];
++  for (final g in genericTools) {
++    taken[g.letter] = g.id;
++    out.add(PlanToolEntry(
++        id: g.id,
++        kitId: kPlanKitId,
++        icon: g.icon,
++        needs: g.needs,
++        letter: g.letter));
++  }
++  for (final kit in c.kits.kits) {
++    for (final t in kit.tools) {
++      final asked = t.letter?.toUpperCase();
++      String? letter;
++      if (asked != null) {
++        final owner = taken[asked];
++        if (!_aLetter.hasMatch(asked)) {
++          _refuse(c, kit, t, '"${t.letter}" is not a letter A-Z');
++        } else if (owner != null) {
++          _refuse(c, kit, t, 'the letter $asked is taken by $owner');
++        } else {
++          taken[asked] = t.id;
++          letter = asked;
++        }
++      }
++      out.add(PlanToolEntry(
++          id: t.id,
++          kitId: kit.id,
++          icon: t.icon,
++          needs: t.needs,
++          letter: letter));
++    }
++  }
++  return List<PlanToolEntry>.unmodifiable(out);
++}
++
++void _refuse(PlanController c, PlanKit kit, PlanTool tool, String why) =>
++    c.diagnosticsLog.report(KitDiagnostic(
++        kitId: kit.id,
++        subject: tool.id,
++        code: KitDiagnosticCode.letterTaken,
++        message: '${tool.id} gets no letter: $why'));
+diff --git a/packages/jet_cad_2d_plan/test/editor/palette_draw_test.dart b/packages/jet_cad_2d_plan/test/editor/palette_draw_test.dart
+new file mode 100644
+index 00000000..20048d6e
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/editor/palette_draw_test.dart
+@@ -0,0 +1,316 @@
++// Ported from jet_cad_floor_plan/test/planner_draw_test.dart; assertions unchanged.
++//
++// The palette and the keyboard over the design composition (Task 16's
++// design_harness.dart): A1-A6, A8, A10-A13. The canvas-only cases (A7,
++// A17, A20-A22) are Task 15's (test/canvas/canvas_draw_test.dart); the
++// page panel's (A9, A14, A15, A18, A19, A23-A26) are Task 18's; the bar's
++// read-outs (A16, A27) are Task 20's.
++import 'package:flutter/material.dart';
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++
++import '../support/canvas_fixture.dart';
++import '../support/design_harness.dart';
++
++void main() {
++  testWidgets('A1 each palette entry activates its tool', (tester) async {
++    final f = drawController();
++    final c = f.c;
++    await pumpDesign(tester, c);
++    for (final (key, name) in const [
++      ('tool-plan.line', 'Line'),
++      ('tool-plan.polyline', 'Polyline'),
++      ('tool-plan.rectangle', 'Rectangle'),
++      ('tool-plan.circle', 'Circle'),
++      ('tool-plan.arc', 'Arc'),
++      ('tool-plan.text', 'Text'),
++      ('tool-plan.select', 'Select'),
++    ]) {
++      await tester.tap(find.byKey(Key(key)));
++      await tester.pump();
++      expect(status(tester), name, reason: key);
++    }
++  });
++
++  testWidgets('A2 each shortcut activates its tool, and F toggles Fill',
++      (tester) async {
++    final f = drawController();
++    final c = f.c;
++    await pumpDesign(tester, c);
++    for (final (key, name) in const [
++      (LogicalKeyboardKey.keyL, 'Line'),
++      (LogicalKeyboardKey.keyP, 'Polyline'),
++      (LogicalKeyboardKey.keyR, 'Rectangle'),
++      (LogicalKeyboardKey.keyC, 'Circle'),
++      (LogicalKeyboardKey.keyA, 'Arc'),
++      (LogicalKeyboardKey.keyT, 'Text'),
++      (LogicalKeyboardKey.keyV, 'Select'),
++    ]) {
++      await press(tester, key);
++      expect(status(tester), name);
++    }
++    bool fill() => tester
++        .widget<CheckboxListTile>(find.byKey(const Key('tool-fill')))
++        .value!;
++    expect(fill(), isFalse);
++    await press(tester, LogicalKeyboardKey.keyF);
++    expect(fill(), isTrue);
++    await tester.tap(find.byKey(const Key('tool-fill')));
++    await tester.pump();
++    expect(fill(), isFalse);
++  });
++
++  testWidgets('A3 activating a drawing tool clears the selection',
++      (tester) async {
++    final f = drawController();
++    final c = f.c;
++    await pumpDesign(tester, c);
++    c.selection.replace([SelectionKey.root(f.line)]);
++    await tester.pump();
++    expect(c.selection.isEmpty, isFalse);
++    await press(tester, LogicalKeyboardKey.keyL);
++    expect(c.selection.isEmpty, isTrue);
++  });
++
++  testWidgets('A4 an idle Escape returns to Select (M-05m)', (tester) async {
++    final f = drawController();
++    final c = f.c;
++    await pumpDesign(tester, c);
++    await press(tester, LogicalKeyboardKey.keyL);
++    await press(tester, LogicalKeyboardKey.escape);
++    expect(status(tester), 'Select');
++  });
++
++  testWidgets(
++      'A5 text end to end: T, click, type, Enter; then focus is back '
++      'on the canvas', (tester) async {
++    final f = drawController();
++    final c = f.c;
++    await pumpDesign(tester, c);
++    await press(tester, LogicalKeyboardKey.keyT);
++    await tester.tapAt(globalOf(tester, c, 7100.5, 3050.25));
++    await tester.pump();
++    expect(find.byKey(const Key('text-entry')), findsOneWidget);
++    await tester.enterText(find.byKey(const Key('text-entry')), 'Kitchen');
++    await tester.testTextInput.receiveAction(TextInputAction.done);
++    await tester.pump();
++    final text = ofKind(c.document, EntityKind.text).single;
++    final slot = c.document.entities.slotOf(text)!;
++    expect(c.document.entities.read(slot).text, 'Kitchen');
++    expect(
++        c.document.geometry
++            .read(c.document.entities.geomIndexAt(slot))
++            .scalars[0],
++        50.0);
++    expect(find.byKey(const Key('text-entry')), findsNothing);
++    await press(tester, LogicalKeyboardKey.keyL);
++    expect(status(tester), 'Line', reason: 'Ruling 05-7: focus came back');
++  });
++
++  testWidgets(
++      'A6 text: Escape and a palette click cancel byte-identically; a '
++      'canvas click commits', (tester) async {
++    final f = drawController();
++    final c = f.c;
++    await pumpDesign(tester, c);
++    final before = bytes(c);
++    await press(tester, LogicalKeyboardKey.keyT);
++    await tester.tapAt(globalOf(tester, c, 7100, 3050));
++    await tester.pump();
++    await tester.enterText(find.byKey(const Key('text-entry')), 'x');
++    await press(tester, LogicalKeyboardKey.escape);
++    expect(bytes(c), before);
++    expect(find.byKey(const Key('text-entry')), findsNothing);
++
++    await tester.tapAt(globalOf(tester, c, 7100, 3050));
++    await tester.pump();
++    await tester.enterText(find.byKey(const Key('text-entry')), 'y');
++    await tester.tap(find.byKey(const Key('tool-plan.select')));
++    await tester.pump();
++    expect(bytes(c), before);
++
++    await press(tester, LogicalKeyboardKey.keyT);
++    await tester.tapAt(globalOf(tester, c, 7100, 3050));
++    await tester.pump();
++    await tester.enterText(find.byKey(const Key('text-entry')), 'Hall');
++    // Spec 05 D9: a click on the field is not a canvas click.
++    await tester.tap(find.byKey(const Key('text-entry')));
++    await tester.pump();
++    expect(ofKind(c.document, EntityKind.text), isEmpty);
++    // Off the field: (7180, 3020) projects 171 px right of and 1.5 px above
++    // the anchor, inside the 240 x 32 field, so it would click the field.
++    await tester.tapAt(globalOf(tester, c, 7180, 3120));
++    await tester.pump();
++    expect(ofKind(c.document, EntityKind.text), hasLength(1));
++  });
++
++  testWidgets(
++      'A8 shell letters typed into the field are not consumed and do '
++      'not switch tools (M-05v)', (tester) async {
++    final f = drawController();
++    final c = f.c;
++    await pumpDesign(tester, c);
++    await press(tester, LogicalKeyboardKey.keyT);
++    await tester.tapAt(globalOf(tester, c, 7100, 3050));
++    await tester.pump();
++    for (final key in const [
++      LogicalKeyboardKey.keyL,
++      LogicalKeyboardKey.keyA,
++      LogicalKeyboardKey.keyT,
++      LogicalKeyboardKey.keyF,
++      LogicalKeyboardKey.keyV,
++    ]) {
++      expect(await press(tester, key), isFalse,
++          reason: '$key reaches the platform as text (Ruling 05-9)');
++      expect(status(tester), 'Text');
++    }
++  });
++
++  testWidgets(
++      'A10 a shortcut mid-polyline is swallowed; a palette switch cancels '
++      'byte-identically (Review Focus 2, Ruling T7-a)', (tester) async {
++    final f = drawController();
++    final c = f.c;
++    await pumpDesign(tester, c);
++    final before = bytes(c);
++    await press(tester, LogicalKeyboardKey.keyP);
++    await tester.tapAt(globalOf(tester, c, 7010, 3020));
++    await tester.tapAt(globalOf(tester, c, 7060, 3090));
++    await tester.pump();
++    // Spec 05 D3 (pinned by B5): mid-shape the tool handles every other
++    // key-down, so the shell's L never arrives. The palette is the switch.
++    await press(tester, LogicalKeyboardKey.keyL);
++    expect(status(tester), 'Polyline');
++    expect((activeTool(c) as PolylineTool).isPending, isTrue);
++    await tester.tap(find.byKey(const Key('tool-plan.line')));
++    await tester.pump();
++    expect(status(tester), 'Line');
++    expect(bytes(c), before);
++  });
++
++  testWidgets(
++      'A11 cmd+Z after a commit, with the tool armed and idle, removes '
++      'exactly that shape (Review Focus 5)', (tester) async {
++    final f = drawController();
++    final c = f.c;
++    await pumpDesign(tester, c);
++    final before = withoutSeed(c);
++    await press(tester, LogicalKeyboardKey.keyR);
++    await tester.tapAt(globalOf(tester, c, 7010, 3020));
++    await tester.tapAt(globalOf(tester, c, 7090, 3070));
++    await tester.pump();
++    expect(ofKind(c.document, EntityKind.polyline), hasLength(1));
++    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
++    await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
++    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
++    await tester.pump();
++    expect(withoutSeed(c), before);
++    expect(status(tester), 'Rectangle', reason: 'still armed');
++  });
++
++  testWidgets('A12 under runtime permissions the drawing tools are disabled',
++      (tester) async {
++    final f = drawController();
++    final c = f.c;
++    c.document.commands.permissions = DraftPermissions.runtime;
++    await pumpDesign(tester, c);
++    expect(
++        tester
++            .widget<ListTile>(find.byKey(const Key('tool-plan.line')))
++            .enabled,
++        isFalse);
++    expect(
++        tester
++            .widget<ListTile>(find.byKey(const Key('tool-plan.select')))
++            .enabled,
++        isTrue);
++    await press(tester, LogicalKeyboardKey.keyL);
++    expect(status(tester), 'Select');
++  });
++
++  testWidgets(
++      "A12b every palette entry's drawing flag, by key: under runtime "
++      'permissions each drawing tool is disabled and Select is not; with '
++      'every permission all are enabled (Plan 11 rvF-paletteNotDrawing)',
++      (tester) async {
++    // Whether each entry is a drawing tool. The palette must carry exactly
++    // these keys: an entry missing here, or missing from the palette, fails.
++    // The planner's box, wall, door, window, gap, room, separator and
++    // dimension rows are sub-project 3's tools and leave with them.
++    const drawing = {
++      'tool-plan.select': false,
++      'tool-plan.line': true,
++      'tool-plan.polyline': true,
++      'tool-plan.rectangle': true,
++      'tool-plan.circle': true,
++      'tool-plan.arc': true,
++      'tool-plan.text': true,
++    };
++    // The tool tiles: the Fill toggle's inner ListTile carries no key.
++    List<String> paletteKeys() => [
++          for (final t in tester.widgetList<ListTile>(find.descendant(
++              of: find.byType(PlanToolPalette),
++              matching: find.byType(ListTile))))
++            if (t.key case final ValueKey<String> k) k.value,
++        ];
++    bool enabled(String key) =>
++        tester.widget<ListTile>(find.byKey(Key(key))).enabled;
++
++    final f = drawController();
++    final c = f.c;
++    expect(c.document.commands.permissions.allows(Capability.geometry), isTrue);
++    await pumpDesign(tester, c);
++    expect(paletteKeys(), unorderedEquals(drawing.keys));
++    for (final key in drawing.keys) {
++      expect(enabled(key), isTrue, reason: '$key with every permission');
++    }
++
++    c.document.commands.permissions = DraftPermissions.runtime;
++    expect(
++        c.document.commands.permissions.allows(Capability.geometry), isFalse);
++    await pumpDesign(tester, c);
++    expect(paletteKeys(), unorderedEquals(drawing.keys));
++    for (final MapEntry(:key, value: isDrawing) in drawing.entries) {
++      expect(enabled(key), !isDrawing,
++          reason: isDrawing ? '$key draws: disabled' : '$key: enabled');
++    }
++  });
++
++  testWidgets(
++      'A13 a window switch with text pending keeps the field, its text '
++      'and its focus (Ruling T7-b)', (tester) async {
++    // The focus manager follows the app lifecycle on desktop and web only,
++    // hence the macOS variant.
++    FocusManager.instance.listenToApplicationLifecycleChangesIfSupported();
++    final f = drawController();
++    final c = f.c;
++    await pumpDesign(tester, c);
++    await press(tester, LogicalKeyboardKey.keyT);
++    await tester.tapAt(globalOf(tester, c, 7100, 3050));
++    await tester.pump();
++    await tester.enterText(find.byKey(const Key('text-entry')), 'x');
++    final placed = c.textTool;
++    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
++    await tester.pump();
++    expect(FocusManager.instance.primaryFocus,
++        same(FocusManager.instance.rootScope),
++        reason: 'the window switch moved focus off the field');
++    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
++    await tester.pump();
++    expect(find.byKey(const Key('text-entry')), findsOneWidget);
++    expect(placed.controller.text, 'x');
++    expect(
++        tester
++            .state<EditableTextState>(entryEditable)
++            .widget
++            .focusNode
++            .hasFocus,
++        isTrue);
++    await press(tester, LogicalKeyboardKey.escape);
++    await press(tester, LogicalKeyboardKey.keyL);
++    expect(status(tester), 'Line');
++  }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
++}
+diff --git a/packages/jet_cad_2d_plan/test/editor/plan_tool_palette_test.dart b/packages/jet_cad_2d_plan/test/editor/plan_tool_palette_test.dart
+new file mode 100644
+index 00000000..cf27354c
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/editor/plan_tool_palette_test.dart
+@@ -0,0 +1,168 @@
++// Spec 2a P2, "The widgets": PlanToolPalette alone, with only a
++// controller: the generic tools, then each kit's in load order, grouped;
++// labels from tool:<id> in the controller's locale, English where the kit
++// has no word; rows disabled by the permissions, letters unbound with
++// them; the Fill row while a fill tool is offered.
++import 'package:flutter/material.dart';
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:flutter_localizations/flutter_localizations.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++
++import '../support/canvas_fixture.dart';
++import '../support/design_harness.dart';
++import '../support/harness.dart' show controllerFor;
++import '../support/stamp_kit.dart';
++import '../support/throwing_kit.dart';
++
++/// The palette's tool rows' keys, in order (the Fill toggle's inner
++/// ListTile carries no key).
++List<String> rowKeys(WidgetTester tester) => [
++      for (final t in tester.widgetList<ListTile>(find.descendant(
++          of: find.byType(PlanToolPalette), matching: find.byType(ListTile))))
++        if (t.key case final ValueKey<String> k) k.value,
++    ];
++
++bool enabled(WidgetTester tester, String key) =>
++    tester.widget<ListTile>(find.byKey(Key(key))).enabled;
++
++void main() {
++  testWidgets(
++      'KB-7 the generic tools, then each kit\'s in load order, a divider '
++      'before each kit; a kit row reads tool:<id> in the locale, English '
++      'without a word; the letter is the trailing text (M-KB-7a, M-KB-7b)',
++      (tester) async {
++    final c = PlanController(kits: [stampKit, lateKit]);
++    addTearDown(c.dispose);
++    Future<void> pumpIn(Locale locale) async {
++      await tester.pumpWidget(MaterialApp(
++          locale: locale,
++          supportedLocales: const [Locale('en'), Locale('de'), Locale('tr')],
++          localizationsDelegates: GlobalMaterialLocalizations.delegates,
++          home: Scaffold(
++              body: SizedBox(
++                  width: 240,
++                  height: 900,
++                  child: PlanToolPalette(controller: c)))));
++      await tester.pump();
++      await tester.pump();
++    }
++
++    await pumpIn(const Locale('tr'));
++    expect(rowKeys(tester), [
++      'tool-plan.select',
++      'tool-plan.line',
++      'tool-plan.polyline',
++      'tool-plan.rectangle',
++      'tool-plan.circle',
++      'tool-plan.arc',
++      'tool-plan.text',
++      'tool-stamp.star',
++      'tool-stamp.clash',
++      'tool-stamp.fill',
++      'tool-stamp.none',
++      'tool-late.star',
++    ]);
++    expect(find.byKey(const Key('tool-group-stamp')), findsOneWidget);
++    expect(find.byKey(const Key('tool-group-late')), findsOneWidget);
++    expect(
++        tester.getTopLeft(find.byKey(const Key('tool-group-stamp'))).dy,
++        greaterThan(
++            tester.getTopLeft(find.byKey(const Key('tool-plan.text'))).dy));
++    Text title(String key) => tester.widget<Text>(find
++        .descendant(of: find.byKey(Key(key)), matching: find.byType(Text))
++        .first);
++    expect(title('tool-stamp.star').data, 'Yıldız');
++    expect(title('tool-stamp.clash').data, 'Clash', reason: 'no tr word');
++    expect(
++        find.descendant(
++            of: find.byKey(const Key('tool-stamp.star')),
++            matching: find.text('B')),
++        findsOneWidget);
++    expect(
++        find.descendant(
++            of: find.byKey(const Key('tool-stamp.clash')),
++            matching: find.text('L')),
++        findsNothing,
++        reason: 'L is plan.line\'s');
++    await pumpIn(const Locale('de'));
++    expect(title('tool-stamp.star').data, 'Star', reason: 'no de word');
++  });
++
++  testWidgets(
++      'KB-8 a tool the permissions leave out: its row disabled and its letter '
++      'unbound (the key reaches the host); a runtime change rebuilds the '
++      'palette and binds it again (M-KB-8a, M-KB-8b)', (tester) async {
++    final c = drawController().c;
++    final d = await pumpDesign(tester, c, hostKeys: const {
++      'l': SingleActivator(LogicalKeyboardKey.keyL),
++    });
++    c.permissions =
++        const PlanPermissions(tools: {'plan.select', 'plan.rectangle'});
++    await tester.pump();
++    expect(enabled(tester, 'tool-plan.line'), isFalse);
++    expect(enabled(tester, 'tool-plan.rectangle'), isTrue);
++    await focusCanvas(tester);
++    await press(tester, LogicalKeyboardKey.keyL);
++    expect(d.reached['l'], 1);
++    expect(c.activeTool.value, 'plan.select');
++    c.permissions = PlanPermissions.full;
++    await tester.pump();
++    expect(enabled(tester, 'tool-plan.line'), isTrue);
++    await press(tester, LogicalKeyboardKey.keyL);
++    expect(c.activeTool.value, 'plan.line');
++    expect(d.reached['l'], 1);
++  });
++
++  testWidgets(
++      'KB-9 F toggles Fill while a fill tool is offered; with none offered '
++      'there is no Fill row and F reaches the host (M-KB-9)', (tester) async {
++    final c = drawController().c;
++    final d = await pumpDesign(tester, c, hostKeys: const {
++      'f': SingleActivator(LogicalKeyboardKey.keyF),
++    });
++    await focusCanvas(tester);
++    await press(tester, LogicalKeyboardKey.keyF);
++    expect(c.fill.value, isTrue);
++    expect(
++        tester
++            .widget<CheckboxListTile>(find.byKey(const Key('tool-fill')))
++            .value,
++        isTrue);
++    c.permissions = const PlanPermissions(tools: {'plan.select', 'plan.line'});
++    await tester.pump();
++    expect(find.byKey(const Key('tool-fill')), findsNothing);
++    await press(tester, LogicalKeyboardKey.keyF);
++    expect(d.reached['f'], 1);
++    expect(c.fill.value, isTrue, reason: 'unchanged');
++  });
++
++  testWidgets(
++      'KB-11 a kit tool whose factory threw for this document is greyed, as '
++      'selectTool refuses it; made, it is enabled (spec P4) (M-KB-11)',
++      (tester) async {
++    Future<void> pumpPalette(PlanController c) async {
++      await tester.pumpWidget(MaterialApp(
++          home: Scaffold(
++              body: SizedBox(
++                  width: 240,
++                  height: 900,
++                  child: PlanToolPalette(controller: c)))));
++      await tester.pump();
++    }
++
++    // The control: the factory ran, the row is enabled.
++    final healthy = controllerFor(kits: [ThrowingKit().kit]);
++    await pumpPalette(healthy);
++    expect(enabled(tester, 'tool-boom.tool'), isTrue);
++
++    final c = controllerFor(kits: [
++      ThrowingKit(failing: ['toolCreate']).kit
++    ]);
++    expect(c.isToolDisabled('boom.tool'), isTrue, reason: 'premise');
++    expect(c.selectTool('boom.tool'), isFalse, reason: 'premise');
++    await pumpPalette(c);
++    expect(enabled(tester, 'tool-boom.tool'), isFalse);
++    expect(enabled(tester, 'tool-plan.line'), isTrue);
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/shortcuts/host_text_keys_test.dart b/packages/jet_cad_2d_plan/test/shortcuts/host_text_keys_test.dart
+new file mode 100644
+index 00000000..151d2f78
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/shortcuts/host_text_keys_test.dart
+@@ -0,0 +1,178 @@
++// Ported from jet_cad_floor_plan/test/host/host_text_keys_test.dart; assertions unchanged.
++//
++// Slice 4, Task 7 finding 1: a host's `Shortcuts` above the plan binding
++// Delete, Backspace, letters and digits never takes a key typed into a
++// host's own text field beside the plan, with `shortcuts` true or false.
++// Over the design composition (design_harness.dart). The panel fields'
++// cases go with their panels (Tasks 13, 17, 18); the canvas-focused case
++// asserted a table selection and is KB-3's (plan_shortcuts_test.dart).
++import 'package:flutter/material.dart';
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++
++import '../support/canvas_fixture.dart';
++import '../support/design_harness.dart';
++
++Finder byKey(String key) => find.byKey(Key(key));
++
++/// An intent the host's own `Shortcuts` maps a key to, by name.
++class PosIntent extends Intent {
++  const PosIntent(this.name);
++  final String name;
++}
++
++/// The host's keys: a point of sale's Delete and Backspace, a letter the
++/// planner binds (W) and one it does not (K), a digit, Space and Ctrl+Z.
++final Map<String, (SingleActivator, LogicalKeyboardKey)> kPosKeys = {
++  'delete': (
++    const SingleActivator(LogicalKeyboardKey.delete),
++    LogicalKeyboardKey.delete
++  ),
++  'backspace': (
++    const SingleActivator(LogicalKeyboardKey.backspace),
++    LogicalKeyboardKey.backspace
++  ),
++  'w': (
++    const SingleActivator(LogicalKeyboardKey.keyW),
++    LogicalKeyboardKey.keyW
++  ),
++  'k': (
++    const SingleActivator(LogicalKeyboardKey.keyK),
++    LogicalKeyboardKey.keyK
++  ),
++  '1': (
++    const SingleActivator(LogicalKeyboardKey.digit1),
++    LogicalKeyboardKey.digit1
++  ),
++  'space': (
++    const SingleActivator(LogicalKeyboardKey.space),
++    LogicalKeyboardKey.space
++  ),
++  'enter': (
++    const SingleActivator(LogicalKeyboardKey.enter),
++    LogicalKeyboardKey.enter
++  ),
++};
++
++/// A host chord no field takes: it reaches the host from a field too.
++const SingleActivator kPosChord =
++    SingleActivator(LogicalKeyboardKey.keyK, control: true);
++
++final class PosHost {
++  PosHost(this.c, bool shortcuts) : shortcuts = ValueNotifier(shortcuts);
++
++  final PlanController c;
++  final ValueNotifier<bool> shortcuts;
++
++  /// The host's intents that fired, by name.
++  final Map<String, int> fired = {for (final n in kPosKeys.keys) n: 0};
++
++  /// [kPosChord]'s.
++  int chords = 0;
++}
++
++/// The plan under a host's `Shortcuts` + `Actions` + `Focus`, with a host
++/// field beside the status line.
++Future<PosHost> mountPos(WidgetTester tester, {bool shortcuts = false}) async {
++  final c = drawController().c;
++  final h = PosHost(c, shortcuts);
++  addTearDown(h.shortcuts.dispose);
++  await pumpDesign(tester, c,
++      shortcuts: shortcuts,
++      hostField: true,
++      host: (plan) => Shortcuts(
++            shortcuts: {
++              for (final MapEntry(:key, :value) in kPosKeys.entries)
++                value.$1: PosIntent(key),
++              kPosChord: const PosIntent('chord'),
++            },
++            child: Actions(
++              actions: {
++                PosIntent: CallbackAction<PosIntent>(
++                    onInvoke: (i) => i.name == 'chord'
++                        ? h.chords++
++                        : h.fired[i.name] = h.fired[i.name]! + 1),
++              },
++              child: Focus(child: plan),
++            ),
++          ));
++  return h;
++}
++
++/// The focused field's text.
++String focusedText() {
++  final context = FocusManager.instance.primaryFocus!.context!;
++  return context
++      .findAncestorStateOfType<EditableTextState>()!
++      .textEditingValue
++      .text;
++}
++
++/// Whether a text field has the primary focus.
++bool inField() =>
++    FocusManager.instance.primaryFocus?.context
++        ?.findAncestorWidgetOfExactType<EditableText>() !=
++    null;
++
++/// [text] put into the field [key] (focused), the cursor at [cursor].
++Future<void> fill(
++    WidgetTester tester, String key, String text, int cursor) async {
++  await tester.enterText(byKey(key), text);
++  await tester.pump();
++  tester.testTextInput.updateEditingValue(TextEditingValue(
++      text: text, selection: TextSelection.collapsed(offset: cursor)));
++  await tester.pump();
++}
++
++/// In the focused field [key]: Backspace and Delete edit it; W, K, 1,
++/// Space and Enter go to the platform's text input (no handler takes
++/// them); none of the host's intents fires and the field keeps the focus.
++/// Ctrl+K, a chord, still reaches the host.
++Future<void> typeInto(WidgetTester tester, PosHost h, String key) async {
++  await fill(tester, key, '123', 2);
++  expect(inField(), isTrue, reason: '$key: premise, the field focused');
++  await press(tester, LogicalKeyboardKey.backspace);
++  expect(focusedText(), '13', reason: '$key: Backspace edits the field');
++  await press(tester, LogicalKeyboardKey.delete);
++  expect(focusedText(), '1', reason: '$key: Delete edits the field');
++  for (final name in ['w', 'k', '1', 'space', 'enter']) {
++    final handled = await press(tester, kPosKeys[name]!.$2);
++    expect(handled, isFalse, reason: '$key: $name goes to the text input');
++  }
++  expect(h.fired, {for (final n in kPosKeys.keys) n: 0}, reason: key);
++  expect(inField(), isTrue, reason: '$key: the field keeps the focus');
++  final chords = h.chords;
++  await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
++  await tester.sendKeyEvent(LogicalKeyboardKey.keyK);
++  await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
++  await tester.pump();
++  expect(h.chords, chords + 1, reason: '$key: a chord is no typing');
++}
++
++void main() {
++  for (final shortcuts in [false, true]) {
++    testWidgets(
++        'shortcuts: $shortcuts: a host field beside the plan keeps its keys '
++        "from the host's own bindings (a chord reaches it)", (tester) async {
++      final h = await mountPos(tester, shortcuts: shortcuts);
++      await typeInto(tester, h, 'host-field');
++    });
++  }
++
++  testWidgets(
++      '(final review F-6, mutant S25): a held key typed in a field, its '
++      "repeats included, never fires the host's intent", (tester) async {
++    final h = await mountPos(tester);
++    const key = 'host-field';
++    await fill(tester, key, '123', 2);
++    expect(inField(), isTrue, reason: 'premise: the field focused');
++    await tester.sendKeyDownEvent(LogicalKeyboardKey.keyK);
++    await tester.sendKeyRepeatEvent(LogicalKeyboardKey.keyK);
++    await tester.sendKeyRepeatEvent(LogicalKeyboardKey.keyK);
++    await tester.sendKeyUpEvent(LogicalKeyboardKey.keyK);
++    await tester.pump();
++    expect(h.fired['k'], 0);
++    expect(inField(), isTrue, reason: 'the field keeps the focus');
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/shortcuts/plan_shortcuts_test.dart b/packages/jet_cad_2d_plan/test/shortcuts/plan_shortcuts_test.dart
+new file mode 100644
+index 00000000..a75f21a4
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/shortcuts/plan_shortcuts_test.dart
+@@ -0,0 +1,299 @@
++// Spec 2a P2, "The keyboard": the generic letters, then the kits' in load
++// order, F reserved, a taken letter a diagnostic (A3); the guard built
++// from the letters in use; shortcuts: false; Escape; Undo and Redo under
++// the permissions; the host's file callbacks; autofocus. Over the drawing
++// fixture (a 1:20 page at (7000, 3000), one line, a rotated, zoomed camera)
++// with the stamp kits (stamp_kit.dart).
++import 'package:flutter/material.dart';
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:flutter_localizations/flutter_localizations.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:jet_cad_2d_plan/src/shortcuts/plan_shortcut_guard.dart';
++import 'package:jet_cad_2d_plan/src/shortcuts/tool_letters.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/canvas_fixture.dart';
++import '../support/design_harness.dart';
++import '../support/stamp_kit.dart';
++
++/// The host's keys, by name.
++const Map<String, SingleActivator> kHostKeys = {
++  'l': SingleActivator(LogicalKeyboardKey.keyL),
++  'b': SingleActivator(LogicalKeyboardKey.keyB),
++  'f': SingleActivator(LogicalKeyboardKey.keyF),
++  'f3': SingleActivator(LogicalKeyboardKey.f3),
++  'escape': SingleActivator(LogicalKeyboardKey.escape),
++  'delete': SingleActivator(LogicalKeyboardKey.delete),
++  'ctrl+z': SingleActivator(LogicalKeyboardKey.keyZ, control: true),
++  'ctrl+y': SingleActivator(LogicalKeyboardKey.keyY, control: true),
++  'ctrl+n': SingleActivator(LogicalKeyboardKey.keyN, control: true),
++  'ctrl+s': SingleActivator(LogicalKeyboardKey.keyS, control: true),
++  'ctrl+e': SingleActivator(LogicalKeyboardKey.keyE, control: true),
++  'ctrl+p': SingleActivator(LogicalKeyboardKey.keyP, control: true),
++};
++
++/// One more line on [c]'s plan, off the fixture's, one undo step.
++void drawALine(PlanController c) => c.document.commands.execute(addDrafted(
++    c.document,
++    EntityKind.line,
++    linePayload(Vector2(7020.5, 3030.25), Vector2(7080.5, 3061.75)),
++    layer: ReservedHandles.layerZero));
++
++void main() {
++  testWidgets(
++      'KB-1 the generic letters, then the kits\' in load order; a taken '
++      'letter, F and a later kit\'s B go to no tool, each a letterTaken '
++      'diagnostic at construction (M-KB-1a, M-KB-1b, M-KB-1c)', (tester) async {
++    final c = PlanController(kits: [stampKit, lateKit]);
++    addTearDown(c.dispose);
++    // Before any widget is built.
++    expect({
++      for (final d in c.diagnostics.value)
++        if (d.code == KitDiagnosticCode.letterTaken) d.subject
++    }, {
++      'stamp.clash',
++      'stamp.fill',
++      'late.star'
++    });
++    final entries = planToolEntries(c);
++    expect([
++      for (final e in entries) e.id
++    ], [
++      'plan.select',
++      'plan.line',
++      'plan.polyline',
++      'plan.rectangle',
++      'plan.circle',
++      'plan.arc',
++      'plan.text',
++      'stamp.star',
++      'stamp.clash',
++      'stamp.fill',
++      'stamp.none',
++      'late.star',
++    ]);
++    expect([for (final e in entries) e.letter],
++        ['V', 'L', 'P', 'R', 'C', 'A', 'T', 'B', null, null, null, null]);
++    expect(planLetterKeys(c), [
++      for (final l in 'VLPRCATB'.split('')) letterKey(l),
++      LogicalKeyboardKey.keyF,
++    ]);
++    expect(identical(planToolEntries(c), entries), isTrue,
++        reason: 'once per controller');
++  });
++
++  testWidgets(
++      'KB-2 a kit\'s letter typed into a guarded field reaches the text input '
++      'and arms nothing; on the canvas it arms the kit\'s tool (M-KB-2)',
++      (tester) async {
++    final c = PlanController(kits: [stampKit]);
++    addTearDown(c.dispose);
++    await pumpDesign(tester, c, hostField: true);
++    await tester.tap(find.byKey(const Key('host-field')));
++    await tester.pump();
++    expect(await press(tester, LogicalKeyboardKey.keyB), isFalse,
++        reason: 'B goes to the platform as text');
++    expect(c.activeTool.value, 'plan.select');
++    await focusCanvas(tester);
++    expect(await press(tester, LogicalKeyboardKey.keyB), isTrue);
++    expect(c.activeTool.value, 'stamp.star');
++    expect(status(tester), 'Star');
++  });
++
++  testWidgets(
++      'KB-3 shortcuts: false, the canvas focused: a letter, F3, F, Escape, '
++      'Delete, Undo and the file chords reach the host; the tool, OSNAP, '
++      'Fill, the selection and the history are kept. With shortcuts the '
++      'plan takes each (M-KB-3a, M-KB-3b)', (tester) async {
++    final f = drawController();
++    final c = f.c;
++    final d =
++        await pumpDesign(tester, c, shortcuts: false, hostKeys: kHostKeys);
++    await focusCanvas(tester);
++    drawALine(c);
++    c.selection.replace([SelectionKey.root(f.line)]);
++    await tester.pump();
++    final before = bytes(c);
++    final osnap = c.snap.objectSnap;
++    final fill = c.fill.value;
++    const sent = ['l', 'f3', 'f', 'escape', 'delete', 'ctrl+z', 'ctrl+s'];
++    for (final k in sent) {
++      await sendActivator(tester, kHostKeys[k]!);
++      expect(d.reached[k], 1, reason: k);
++    }
++    expect(bytes(c), before, reason: 'nothing deleted, nothing undone');
++    expect(c.activeTool.value, 'plan.select');
++    expect(c.snap.objectSnap, osnap);
++    expect(c.fill.value, fill);
++    expect(c.selection.keys, [SelectionKey.root(f.line)],
++        reason: 'the idle Escape bubbled');
++    expect(d.saves, 0);
++
++    // The control: the plan binds them all.
++    d.shortcuts.value = true;
++    await tester.pump();
++    await sendActivator(tester, kHostKeys['f3']!);
++    expect(c.snap.objectSnap, isNot(osnap));
++    await sendActivator(tester, kHostKeys['f']!);
++    expect(c.fill.value, isNot(fill));
++    await sendActivator(tester, kHostKeys['ctrl+z']!);
++    expect(bytes(c), isNot(before), reason: 'undone');
++    await sendActivator(tester, kHostKeys['ctrl+s']!);
++    expect(d.saves, 1);
++    await sendActivator(tester, kHostKeys['l']!);
++    expect(c.activeTool.value, 'plan.line');
++    await sendActivator(tester, kHostKeys['escape']!);
++    expect(c.activeTool.value, 'plan.select');
++    for (final k in sent) {
++      expect(d.reached[k], 1, reason: '$k: the host heard nothing more');
++    }
++  });
++
++  testWidgets(
++      'KB-4 an idle drawing tool\'s Escape arms plan.select; part-way, the '
++      'Escape is the tool\'s and a host\'s undo() waits (M-KB-4)',
++      (tester) async {
++    final c = drawController().c;
++    await pumpDesign(tester, c);
++    await focusCanvas(tester);
++    drawALine(c);
++    final depth = c.document.commands.undoDepth;
++    await press(tester, LogicalKeyboardKey.keyP);
++    await tester.tapAt(globalOf(tester, c, 7010, 3020));
++    await tester.tapAt(globalOf(tester, c, 7060, 3090));
++    await tester.pump();
++    expect(activeTool(c).isMidShape, isTrue, reason: 'premise: part-way');
++    c.undo();
++    expect(c.document.commands.undoDepth, depth, reason: 'mid-shape: no undo');
++    await press(tester, LogicalKeyboardKey.escape);
++    expect(activeTool(c).isMidShape, isFalse, reason: 'the shape dropped');
++    expect(c.activeTool.value, 'plan.polyline', reason: 'the tool stays');
++    await press(tester, LogicalKeyboardKey.escape);
++    expect(c.activeTool.value, 'plan.select');
++    c.undo();
++    expect(c.document.commands.undoDepth, depth - 1, reason: 'idle: undo acts');
++  });
++
++  testWidgets(
++      'KB-5 undo: false unbinds Undo and Redo: the chord reaches the host and '
++      'the step stays; a host\'s undo() still undoes; undo: true binds them '
++      'again (M-KB-5)', (tester) async {
++    final c = drawController().c;
++    final d = await pumpDesign(tester, c, hostKeys: kHostKeys);
++    await focusCanvas(tester);
++    drawALine(c);
++    final depth = c.document.commands.undoDepth;
++    c.permissions = PlanPermissions.full.copyWith(undo: false);
++    await tester.pump();
++    await sendActivator(tester, kHostKeys['ctrl+z']!);
++    expect(d.reached['ctrl+z'], 1);
++    expect(c.document.commands.undoDepth, depth);
++    c.undo();
++    expect(c.document.commands.undoDepth, depth - 1,
++        reason: 'host calls are not gated (spec P2)');
++    c.redo();
++    c.permissions = PlanPermissions.full;
++    await tester.pump();
++    await sendActivator(tester, kHostKeys['ctrl+z']!);
++    expect(c.document.commands.undoDepth, depth - 1);
++    await sendActivator(tester, kHostKeys['ctrl+y']!);
++    expect(c.document.commands.undoDepth, depth);
++    expect(d.reached['ctrl+z'], 1);
++    expect(d.reached['ctrl+y'], 0);
++  });
++
++  testWidgets(
++      'KB-6 the file chords call the host\'s callbacks; Export and Print are '
++      'refused with no page but keep their key; export: false lets Ctrl+E '
++      'reach the host (M-KB-6a, M-KB-6b)', (tester) async {
++    final c = drawController().c;
++    final d = await pumpDesign(tester, c, hostKeys: kHostKeys);
++    await focusCanvas(tester);
++    for (final k in ['ctrl+n', 'ctrl+s', 'ctrl+e', 'ctrl+p']) {
++      await sendActivator(tester, kHostKeys[k]!);
++    }
++    await sendActivator(
++        tester, const SingleActivator(LogicalKeyboardKey.keyO, control: true));
++    await sendActivator(
++        tester,
++        const SingleActivator(LogicalKeyboardKey.keyS,
++            control: true, shift: true));
++    expect([d.news, d.opens, d.saves, d.saveAses, d.exports, d.prints],
++        [1, 1, 1, 1, 1, 1]);
++    expect(d.reached['ctrl+e'], 0);
++
++    // No page: the commands cannot act, their keys stay the plan's (S-26).
++    c.document.commands.execute(
++        SetComponentCommand<PageComponent>(c.document.rootHandle, null));
++    await tester.pump();
++    expect(c.page.value, isNull, reason: 'premise: no page');
++    await sendActivator(tester, kHostKeys['ctrl+e']!);
++    await sendActivator(tester, kHostKeys['ctrl+p']!);
++    expect([d.exports, d.prints], [1, 1]);
++    expect([d.reached['ctrl+e'], d.reached['ctrl+p']], [0, 0]);
++
++    c.permissions = PlanPermissions.full.copyWith(export: false);
++    await tester.pump();
++    await sendActivator(tester, kHostKeys['ctrl+e']!);
++    expect(d.reached['ctrl+e'], 1);
++    expect(d.reached['ctrl+p'], 0);
++  });
++
++  testWidgets(
++      'KB-10 autofocus: with it the canvas takes the focus from a host field '
++      'mounted in the same frame; without it the field keeps it and a click '
++      'on the canvas takes it (T6-a) (M-KB-10)', (tester) async {
++    final c = drawController().c;
++    Future<FocusNode> sameFrame({required bool autofocus}) async {
++      final field = FocusNode(debugLabel: 'host-field');
++      addTearDown(field.dispose);
++      await tester.binding.setSurfaceSize(const Size(1440, 900));
++      addTearDown(() => tester.binding.setSurfaceSize(null));
++      await tester.pumpWidget(MaterialApp(
++          home: Scaffold(
++              body: Column(children: [
++        Expanded(child: PlanCanvas(controller: c, autofocus: autofocus)),
++        SizedBox(
++            height: 48,
++            child: TextField(
++                key: const Key('host-field'),
++                onTapOutside: (_) {},
++                focusNode: field,
++                autofocus: true)),
++      ]))));
++      await tester.pump();
++      await tester.pump();
++      return field;
++    }
++
++    final control = await sameFrame(autofocus: true);
++    expect(FocusManager.instance.primaryFocus, isNot(same(control)),
++        reason: 'the control: the canvas');
++    await tester.pumpWidget(const SizedBox());
++    await tester.pump();
++    final field = await sameFrame(autofocus: false);
++    expect(FocusManager.instance.primaryFocus, same(field));
++    await focusCanvas(tester);
++  });
++
++  testWidgets(
++      'KB-12 PlanShortcuts alone pushes the app\'s locale into its '
++      'controller, as every widget of the plan library does (M-KB-12)',
++      (tester) async {
++    final c = PlanController(kits: [stampKit]);
++    addTearDown(c.dispose);
++    expect(c.locale.value, const Locale('en'), reason: 'premise');
++    await tester.pumpWidget(MaterialApp(
++        locale: const Locale('tr'),
++        supportedLocales: const [Locale('en'), Locale('tr')],
++        localizationsDelegates: GlobalMaterialLocalizations.delegates,
++        home: PlanShortcuts(controller: c, child: const SizedBox())));
++    await tester.pump();
++    await tester.pump();
++    expect(c.locale.value, const Locale('tr'));
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/support/design_harness.dart b/packages/jet_cad_2d_plan/test/support/design_harness.dart
+new file mode 100644
+index 00000000..c95f07ee
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/support/design_harness.dart
+@@ -0,0 +1,155 @@
++// The design composition a host builds from the widgets (spec 2a P2): the
++// keyboard around a status line, the palette, the canvas and an optional
++// right column, over one controller, under the drawing fixture's rotated,
++// zoomed camera (canvas_fixture.dart's pumpDraw). A host's own bindings
++// sit above it and count every key that reaches them. The status line is
++// the active tool's palette label (today's status text, less the
++// selection count, which is Task 20's bar).
++import 'package:flutter/material.dart';
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
++    show InteractionLayer;
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:jet_cad_2d_plan/src/editor/plan_tool_palette.dart'
++    show planToolLabel;
++
++import 'canvas_fixture.dart';
++
++/// What the host saw: the keys that reached its bindings, by name, and its
++/// file callbacks' calls.
++final class Design {
++  Design(this.c, bool shortcuts) : shortcuts = ValueNotifier(shortcuts);
++
++  final PlanController c;
++
++  /// `PlanShortcuts.shortcuts`, changeable at runtime.
++  final ValueNotifier<bool> shortcuts;
++  final Map<String, int> reached = {};
++  int news = 0, opens = 0, saves = 0, saveAses = 0, exports = 0, prints = 0;
++}
++
++/// Pumps the composition over [c]: [hostKeys] are the host's bindings
++/// above the plan (by name); [hostField] puts a host text field, guarded
++/// as a host guards its own fields, beside the status line; [right] is the
++/// right column (Task 17's property panel); [host] wraps the plan in a
++/// host's own `Shortcuts`/`Actions`/`Focus`.
++Future<Design> pumpDesign(WidgetTester tester, PlanController c,
++    {bool shortcuts = true,
++    Map<String, SingleActivator> hostKeys = const {},
++    bool hostField = false,
++    Widget? right,
++    Widget Function(Widget plan)? host}) async {
++  final d = Design(c, shortcuts);
++  addTearDown(d.shortcuts.dispose);
++  for (final name in hostKeys.keys) {
++    d.reached[name] = 0;
++  }
++  Widget frame(Widget canvas) {
++    final plan = ValueListenableBuilder<bool>(
++      valueListenable: d.shortcuts,
++      builder: (_, keys, __) => PlanShortcuts(
++        controller: c,
++        shortcuts: keys,
++        onNew: () async => d.news++,
++        onOpen: () async => d.opens++,
++        onSave: () async => d.saves++,
++        onSaveAs: () async => d.saveAses++,
++        onExport: () async => d.exports++,
++        onPrint: () async => d.prints++,
++        child: Column(children: [
++          SizedBox(
++            height: 40,
++            child: Row(children: [
++              Expanded(child: StatusLine(controller: c)),
++              if (hostField)
++                SizedBox(
++                    width: 160,
++                    child: PlanShortcutGuard(
++                        controller: c,
++                        child: const TextField(key: Key('host-field')))),
++            ]),
++          ),
++          Expanded(
++            child: Row(children: [
++              SizedBox(width: 240, child: PlanToolPalette(controller: c)),
++              Expanded(child: canvas),
++              if (right != null)
++                SizedBox(
++                    width: 280, child: SingleChildScrollView(child: right)),
++            ]),
++          ),
++        ]),
++      ),
++    );
++    final hosted = host?.call(plan) ?? plan;
++    return CallbackShortcuts(
++      bindings: {
++        for (final MapEntry(key: name, value: chord) in hostKeys.entries)
++          chord: () => d.reached[name] = d.reached[name]! + 1,
++      },
++      child: hosted,
++    );
++  }
++
++  await pumpDraw(tester, c, frame: frame);
++  return d;
++}
++
++/// The active tool's palette label, keyed `status-text`.
++class StatusLine extends StatelessWidget {
++  const StatusLine({super.key, required this.controller});
++
++  final PlanController controller;
++
++  @override
++  Widget build(BuildContext context) => ValueListenableBuilder<String>(
++        valueListenable: controller.activeTool,
++        builder: (context, id, _) => Text(
++            planToolLabel(context, controller, id),
++            key: const Key('status-text')),
++      );
++}
++
++/// `planner_draw_test.dart`'s `status` (`:60-61`).
++String status(WidgetTester tester) =>
++    tester.widget<Text>(find.byKey(const Key('status-text'))).data!;
++
++/// `planner_draw_test.dart`'s `press` (`:63-67`): whether a handler took
++/// the key.
++Future<bool> press(WidgetTester tester, LogicalKeyboardKey key) async {
++  final handled = await tester.sendKeyEvent(key);
++  await tester.pump();
++  return handled;
++}
++
++/// `keyboard_focus_test.dart`'s `sendActivator` (`:242-252`): [a]'s
++/// modifiers down around its key.
++Future<void> sendActivator(WidgetTester tester, SingleActivator a) async {
++  if (a.control) await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
++  if (a.meta) await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
++  if (a.shift) await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
++  await tester.sendKeyEvent(a.trigger);
++  if (a.shift) await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
++  if (a.meta) await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
++  if (a.control) await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
++  await tester.pump();
++}
++
++/// The canvas's own focus node: the `Focus` the `InteractionLayer` builds.
++FocusNode canvasFocus(WidgetTester tester) => tester
++    .widget<Focus>(find
++        .descendant(
++            of: find.byType(InteractionLayer), matching: find.byType(Focus))
++        .first)
++    .focusNode!;
++
++/// A click a little inside the canvas's top left (empty paper under the
++/// fixture's camera): the canvas takes the focus.
++Future<void> focusCanvas(WidgetTester tester) async {
++  await tester.tapAt(
++      tester.getTopLeft(find.byType(InteractionLayer)) + const Offset(6, 6));
++  await tester.pump();
++  expect(FocusManager.instance.primaryFocus, same(canvasFocus(tester)),
++      reason: 'premise: the canvas focused');
++}
+diff --git a/packages/jet_cad_2d_plan/test/support/stamp_kit.dart b/packages/jet_cad_2d_plan/test/support/stamp_kit.dart
+new file mode 100644
+index 00000000..96e3a778
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/support/stamp_kit.dart
+@@ -0,0 +1,67 @@
++// Kits of tools only, for the keyboard and the palette (2a Task 16).
++// stamp.star asks for B (free); stamp.clash for L (plan.line's); stamp.fill
++// for "f" (F is Fill's: asked in lower case, so the check runs on the upper
++// case); stamp.none for no letter. late.star, in a later kit, asks for B,
++// which stamp.star already has. Turkish names one tool; German names none
++// (the English fallback).
++import 'package:flutter/material.dart' show Icons;
++import 'package:jet_cad_2d/jet_cad_2d.dart' show Capability;
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show LineTool;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++
++const Set<Capability> _draws = {Capability.geometry};
++
++final PlanKit stampKit = PlanKit(
++  id: 'stamp',
++  version: '1.0.0',
++  tools: [
++    PlanTool(
++        id: 'stamp.star',
++        icon: Icons.star,
++        letter: 'B',
++        needs: _draws,
++        create: (_) => LineTool()),
++    PlanTool(
++        id: 'stamp.clash',
++        icon: Icons.warning_amber,
++        letter: 'L',
++        needs: _draws,
++        create: (_) => LineTool()),
++    PlanTool(
++        id: 'stamp.fill',
++        icon: Icons.format_color_fill,
++        letter: 'f',
++        needs: _draws,
++        create: (_) => LineTool()),
++    PlanTool(
++        id: 'stamp.none',
++        icon: Icons.circle_outlined,
++        needs: _draws,
++        create: (_) => LineTool()),
++  ],
++  names: const KitNames({
++    'en': {
++      'tool:stamp.star': 'Star',
++      'tool:stamp.clash': 'Clash',
++      'tool:stamp.fill': 'Filler',
++      'tool:stamp.none': 'Plain',
++    },
++    'tr': {'tool:stamp.star': 'Yıldız'},
++  }),
++);
++
++final PlanKit lateKit = PlanKit(
++  id: 'late',
++  version: '1.0.0',
++  tools: [
++    PlanTool(
++        id: 'late.star',
++        icon: Icons.star_border,
++        letter: 'B',
++        needs: _draws,
++        create: (_) => LineTool()),
++  ],
++  names: const KitNames({
++    'en': {'tool:late.star': 'Late star'},
++  }),
++);

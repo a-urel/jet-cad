@@ -1,0 +1,885 @@
+# Review package: aeb5e610..HEAD
+
+## Commits
+6df8967a feat(plan): the plan file: manifest, load, save and versions
+
+## Files changed
+ packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart  |  11 ++
+ .../jet_cad_2d_plan/lib/src/file/manifest.dart     | 143 ++++++++++++++++
+ .../jet_cad_2d_plan/lib/src/file/plan_file.dart    | 131 +++++++++++++++
+ .../lib/src/file/plan_format_exception.dart        |  42 +++++
+ packages/jet_cad_2d_plan/lib/src/file/semver.dart  |  82 +++++++++
+ .../jet_cad_2d_plan/test/file/manifest_test.dart   | 111 +++++++++++++
+ .../jet_cad_2d_plan/test/file/plan_file_test.dart  | 183 +++++++++++++++++++++
+ .../jet_cad_2d_plan/test/file/semver_test.dart     |  60 +++++++
+ packages/jet_cad_2d_plan/test/support/harness.dart |  16 ++
+ 9 files changed, 779 insertions(+)
+
+## Diff
+diff --git a/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart b/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart
+index 916a9055..6d18ac0b 100644
+--- a/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart
++++ b/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart
+@@ -1,5 +1,16 @@
+ /// The plan library of jet_cad_2d: a `PlanController` over one plan and the
+ /// composable widgets of design mode, over the kits a host loads.
+ library;
+ 
++export 'src/file/manifest.dart'
++    show
++        ManifestCheck,
++        PlanManifest,
++        checkManifest,
++        kPlanFormat,
++        manifestOf,
++        manifestToWrite,
++        usedKits;
++export 'src/file/plan_file.dart';
++export 'src/file/plan_format_exception.dart';
+ export 'src/kits/kit_set.dart';
+diff --git a/packages/jet_cad_2d_plan/lib/src/file/manifest.dart b/packages/jet_cad_2d_plan/lib/src/file/manifest.dart
+new file mode 100644
+index 00000000..34b82bc0
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/file/manifest.dart
+@@ -0,0 +1,143 @@
++// The plan manifest (spec 2a P4, umbrella A8): on a plan's root, the
++// format and `{kit id: version}` for each kit the plan uses. Read as it
++// was saved, written at each save, checked against the loaded kits.
++import 'dart:collection';
++
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:meta/meta.dart';
++
++import '../kits/kit_set.dart';
++import 'semver.dart';
++
++/// The plan format this library writes and reads.
++const int kPlanFormat = 1;
++
++/// A plan's manifest: its format and its kits' versions.
++@immutable
++final class PlanManifest {
++  const PlanManifest({this.format = kPlanFormat, this.kits = const {}});
++
++  final int format;
++
++  /// Kit id → the version that last saved the plan.
++  final Map<String, String> kits;
++
++  @override
++  bool operator ==(Object other) {
++    if (other is! PlanManifest ||
++        other.format != format ||
++        other.kits.length != kits.length) {
++      return false;
++    }
++    for (final MapEntry(:key, :value) in kits.entries) {
++      if (other.kits[key] != value) return false;
++    }
++    return true;
++  }
++
++  @override
++  int get hashCode => Object.hash(
++      format,
++      Object.hashAllUnordered(
++          [for (final e in kits.entries) Object.hash(e.key, e.value)]));
++
++  @override
++  String toString() => 'PlanManifest($format, $kits)';
++}
++
++/// [d]'s root manifest as read, or null when it has none (a new plan).
++PlanManifest? manifestOf(DraftDocument d) {
++  if (!d.components.isRegistered<ManifestComponent>()) return null;
++  final m = d.components.get<ManifestComponent>(d.rootHandle);
++  return m == null ? null : PlanManifest(format: m.format, kits: m.kits);
++}
++
++/// The kits [d] uses, sorted (spec P4): see [usedKitsIn].
++Set<String> usedKits(DraftDocument d) => usedKitsIn(d.components.toJson());
++
++/// The kits an encoded `components` map uses: the `<kit>` of each type id
++/// `<kit>.<...>` whose `<kit>` is a kit id other than `jetcad`, and the
++/// kit of each `jetcad.symbol` payload's `key`. Raw components count by
++/// their type id.
++Set<String> usedKitsIn(Map<String, Object?> components) {
++  final used = SplayTreeSet<String>();
++  void add(String id) {
++    final dot = id.indexOf('.');
++    if (dot <= 0) return;
++    final kit = id.substring(0, dot);
++    if (kit != 'jetcad' && isKitId(kit)) used.add(kit);
++  }
++
++  for (final MapEntry(key: typeId, value: byHandle) in components.entries) {
++    add(typeId);
++    if (typeId == SymbolComponent.componentTypeId &&
++        byHandle is Map<String, Object?>) {
++      for (final payload in byHandle.values) {
++        if (payload is Map<String, Object?> && payload['key'] is String) {
++          add(payload['key']! as String);
++        }
++      }
++    }
++  }
++  return used;
++}
++
++/// The manifest a save writes (spec P4): for each kit used or read, a
++/// loaded kit's version when it is used, and a kit that is not loaded
++/// with its entry as read.
++PlanManifest manifestToWrite(
++    PlanManifest? read, Set<String> used, KitSet loaded) {
++  final kits = SplayTreeMap<String, String>();
++  for (final id in {...used, ...?read?.kits.keys}) {
++    final kit = loaded.kitOf(id);
++    if (kit != null) {
++      if (used.contains(id)) kits[id] = kit.version;
++    } else if (read?.kits[id] case final version?) {
++      kits[id] = version;
++    }
++  }
++  return PlanManifest(kits: Map.unmodifiable(kits));
++}
++
++/// What a load finds (spec P4): the kits the plan names or uses that are
++/// not loaded, and one diagnostic for each such kit (`kitMissing`) and for
++/// each loaded kit whose saved version is newer (`kitNewer`).
++@immutable
++final class ManifestCheck {
++  const ManifestCheck(this.missing, this.diagnostics);
++
++  final Set<String> missing;
++  final List<KitDiagnostic> diagnostics;
++}
++
++/// [manifest] and the [used] kits checked against the [loaded] ones (spec
++/// P4), kit by kit in id order: see [ManifestCheck]. A version that does
++/// not parse is not compared.
++ManifestCheck checkManifest(
++    PlanManifest manifest, Set<String> used, KitSet loaded) {
++  final missing = SplayTreeSet<String>();
++  final diagnostics = <KitDiagnostic>[];
++  for (final id in SplayTreeSet<String>.of({...manifest.kits.keys, ...used})) {
++    final saved = manifest.kits[id];
++    final kit = loaded.kitOf(id);
++    if (kit == null) {
++      missing.add(id);
++      diagnostics.add(KitDiagnostic(
++          kitId: id,
++          code: KitDiagnosticCode.kitMissing,
++          message: 'the plan uses the kit "$id"'
++              '${saved == null ? '' : ' $saved'}, which is not loaded'));
++      continue;
++    }
++    if (saved != null && isNewerVersion(saved, kit.version) == true) {
++      diagnostics.add(KitDiagnostic(
++          kitId: id,
++          code: KitDiagnosticCode.kitNewer,
++          message: 'the plan was saved by "$id" $saved, newer than the '
++              'loaded ${kit.version}'));
++    }
++  }
++  return ManifestCheck(
++      Set.unmodifiable(missing), List.unmodifiable(diagnostics));
++}
+diff --git a/packages/jet_cad_2d_plan/lib/src/file/plan_file.dart b/packages/jet_cad_2d_plan/lib/src/file/plan_file.dart
+new file mode 100644
+index 00000000..53770128
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/file/plan_file.dart
+@@ -0,0 +1,131 @@
++// A plan's text (spec 2a P4 "The plan file", P5): the engine's JSON with
++// the manifest on its root. Loading refuses by code and changes nothing;
++// saving writes the manifest without touching the document; an import
++// without a manifest gets an empty one.
++import 'dart:convert';
++
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++
++import '../kits/kit_set.dart';
++import 'manifest.dart';
++import 'plan_format_exception.dart';
++
++const String _manifestType = ManifestComponent.componentTypeId;
++
++/// [text] as a plan document, or a [PlanFormatException] (spec P4): not
++/// JSON (`notJson`); no manifest on the root (`noManifest`); a manifest
++/// that does not read (`schema`) or whose format is above [kPlanFormat]
++/// (`formatTooNew`); anything the engine's decode throws (`schema`).
++/// [register] registers the plan's component types (the page, the
++/// contract's, the kits'); [diagnostics] receives the engine's load
++/// diagnostics, `component.unreadable` included: a component whose factory
++/// throws is kept raw and the plan opens (E4, opt-in).
++DraftDocument decodePlan(String text,
++    {required void Function(ComponentRegistry registry) register,
++    required List<Diagnostic> diagnostics,
++    TextMeasurer measurer = const InsertionPointMeasurer(),
++    DraftPermissions permissions = DraftPermissions.all}) {
++  final json = _object(text);
++  _checkManifest(json);
++  try {
++    return DraftDocumentCodec.decode(json,
++        measurer: measurer,
++        permissions: permissions,
++        diagnostics: diagnostics,
++        registerComponents: register,
++        keepUnreadableComponents: true);
++  } catch (e) {
++    throw PlanFormatException(PlanFormatCode.schema, 'not a plan: $e');
++  }
++}
++
++Map<String, Object?> _object(String text) {
++  final Object? json;
++  try {
++    json = jsonDecode(text);
++  } on FormatException catch (e) {
++    throw PlanFormatException(PlanFormatCode.notJson, 'not JSON: ${e.message}');
++  }
++  if (json is! Map<String, Object?>) {
++    throw const PlanFormatException(
++        PlanFormatCode.notJson, 'not a JSON object');
++  }
++  return json;
++}
++
++/// The root's manifest, read from the raw JSON before anything else.
++void _checkManifest(Map<String, Object?> json) {
++  final root = json['root'];
++  final components = json['components'];
++  final byHandle =
++      components is Map<String, Object?> ? components[_manifestType] : null;
++  final raw = root is int && byHandle is Map<String, Object?>
++      ? byHandle['$root']
++      : null;
++  if (raw is! Map<String, Object?>) {
++    throw const PlanFormatException(PlanFormatCode.noManifest,
++        'the plan carries no $_manifestType on its root');
++  }
++  final ManifestComponent manifest;
++  try {
++    manifest = ManifestComponent.fromJson(raw);
++  } catch (e) {
++    throw PlanFormatException(
++        PlanFormatCode.schema, 'its $_manifestType does not read: $e');
++  }
++  if (manifest.format > kPlanFormat) {
++    throw PlanFormatException(PlanFormatCode.formatTooNew,
++        'the plan format ${manifest.format} is newer than $kPlanFormat');
++  }
++}
++
++/// [d]'s text with the manifest a save writes (spec P4, [manifestToWrite])
++/// on its root. [d] is not changed: the manifest in memory stays the one
++/// read. The components map is written in the order the engine writes it
++/// (type ids sorted, handles ascending), so a plan read and saved again
++/// is the same bytes.
++String encodePlan(DraftDocument d, KitSet loaded) {
++  final json = DraftDocumentCodec.encode(d);
++  final components =
++      Map<String, Object?>.of(json['components']! as Map<String, Object?>);
++  final manifest =
++      manifestToWrite(manifestOf(d), usedKitsIn(components), loaded);
++  final byHandle = <String, Object?>{
++    ...?(components[_manifestType] as Map<String, Object?>?),
++    '${d.rootHandle.value}':
++        ManifestComponent(format: manifest.format, kits: manifest.kits)
++            .toJson(),
++  };
++  components[_manifestType] = {
++    for (final h
++        in byHandle.keys.toList()
++          ..sort((a, b) => int.parse(a).compareTo(int.parse(b))))
++      h: byHandle[h],
++  };
++  json['components'] = {
++    for (final typeId in components.keys.toList()..sort())
++      typeId: components[typeId],
++  };
++  return jsonEncode(json);
++}
++
++/// An imported plan's text, with an empty manifest on its root when it has
++/// none (spec P5, A17.5), so it opens as plain geometry. [text] itself
++/// when it already has one, or when it is JSON but no plan ([decodePlan]
++/// then refuses it by its own code). Not JSON: `notJson`.
++String ensureManifest(String text) {
++  final json = _object(text);
++  final root = json['root'];
++  final components = json['components'];
++  if (root is! int || components is! Map<String, Object?>) return text;
++  final byHandle = components[_manifestType];
++  if (byHandle is Map<String, Object?> && byHandle.containsKey('$root')) {
++    return text;
++  }
++  components[_manifestType] = <String, Object?>{
++    if (byHandle is Map<String, Object?>) ...byHandle,
++    '$root': ManifestComponent(kits: const {}).toJson(),
++  };
++  return jsonEncode(json);
++}
+diff --git a/packages/jet_cad_2d_plan/lib/src/file/plan_format_exception.dart b/packages/jet_cad_2d_plan/lib/src/file/plan_format_exception.dart
+new file mode 100644
+index 00000000..a427cf1d
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/file/plan_format_exception.dart
+@@ -0,0 +1,42 @@
++// A plan the library refuses to open or save (spec 2a P4): a
++// FormatException, as today's load throws (floor_plan_controller.dart:
++// 1192-1203), with a code a host can test.
++
++/// Why a plan was refused.
++enum PlanFormatCode {
++  /// The plan carries no `jetcad.manifest` on its root.
++  noManifest,
++
++  /// The manifest's format is above the one this library writes.
++  formatTooNew,
++
++  /// The engine's schema check refused it, or its manifest does not read.
++  schema,
++
++  /// The text is not a JSON object.
++  notJson,
++
++  /// A damaged plan whose encoding does not decode again (Task 11).
++  damagedUnsavable,
++}
++
++/// A refused plan. A [FormatException], so a host that catches today's
++/// keeps working.
++final class PlanFormatException implements FormatException {
++  const PlanFormatException(this.code, this.message);
++
++  final PlanFormatCode code;
++
++  @override
++  final String message;
++
++  /// Not kept: a plan's text can be megabytes.
++  @override
++  Object? get source => null;
++
++  @override
++  int? get offset => null;
++
++  @override
++  String toString() => 'PlanFormatException(${code.name}): $message';
++}
+diff --git a/packages/jet_cad_2d_plan/lib/src/file/semver.dart b/packages/jet_cad_2d_plan/lib/src/file/semver.dart
+new file mode 100644
+index 00000000..7ddad809
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/file/semver.dart
+@@ -0,0 +1,82 @@
++// Kit versions in a plan's manifest (spec 2a P4 "Versions", contract R6):
++// semantic versions 2.0.0, compared by precedence. A version that does not
++// parse is not compared, and never refuses a load.
++import 'dart:math' as math;
++
++import 'package:meta/meta.dart';
++
++final RegExp _semver = RegExp(r'^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)'
++    r'(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)'
++    r'(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?'
++    r'(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$');
++
++final RegExp _numeric = RegExp(r'^\d+$');
++
++@immutable
++final class SemVer implements Comparable<SemVer> {
++  const SemVer._(this.major, this.minor, this.patch, this.pre);
++
++  final int major, minor, patch;
++
++  /// The pre-release identifiers; empty for a release. Build metadata is
++  /// not kept: it takes no part in precedence.
++  final List<String> pre;
++
++  /// [text] as a semantic version, or null when it is not one (or a part
++  /// overflows an int).
++  static SemVer? tryParse(String text) {
++    final m = _semver.firstMatch(text);
++    if (m == null) return null;
++    final major = int.tryParse(m[1]!);
++    final minor = int.tryParse(m[2]!);
++    final patch = int.tryParse(m[3]!);
++    if (major == null || minor == null || patch == null) return null;
++    final pre = m[4];
++    return SemVer._(major, minor, patch,
++        pre == null ? const [] : List.unmodifiable(pre.split('.')));
++  }
++
++  @override
++  int compareTo(SemVer other) {
++    if (major != other.major) return major.compareTo(other.major);
++    if (minor != other.minor) return minor.compareTo(other.minor);
++    if (patch != other.patch) return patch.compareTo(other.patch);
++    if (pre.isEmpty || other.pre.isEmpty) {
++      // A release ranks above its pre-releases.
++      return (other.pre.isEmpty ? 0 : 1) - (pre.isEmpty ? 0 : 1);
++    }
++    for (var i = 0; i < math.min(pre.length, other.pre.length); i++) {
++      final c = _compareIdentifier(pre[i], other.pre[i]);
++      if (c != 0) return c;
++    }
++    return pre.length.compareTo(other.pre.length);
++  }
++
++  /// Numeric identifiers numerically (no leading zero: the longer is the
++  /// larger, so no int can overflow), below alphanumeric ones, which
++  /// compare in ASCII order.
++  static int _compareIdentifier(String a, String b) {
++    final an = _numeric.hasMatch(a), bn = _numeric.hasMatch(b);
++    if (an && bn) {
++      return a.length != b.length
++          ? a.length.compareTo(b.length)
++          : a.compareTo(b);
++    }
++    if (an != bn) return an ? -1 : 1;
++    return a.compareTo(b);
++  }
++
++  @override
++  bool operator ==(Object other) => other is SemVer && compareTo(other) == 0;
++
++  @override
++  int get hashCode => Object.hash(major, minor, patch, Object.hashAll(pre));
++}
++
++/// Whether [plan] is newer than [loaded] by precedence; null when either
++/// does not parse.
++bool? isNewerVersion(String plan, String loaded) {
++  final a = SemVer.tryParse(plan), b = SemVer.tryParse(loaded);
++  if (a == null || b == null) return null;
++  return a.compareTo(b) > 0;
++}
+diff --git a/packages/jet_cad_2d_plan/test/file/manifest_test.dart b/packages/jet_cad_2d_plan/test/file/manifest_test.dart
+new file mode 100644
+index 00000000..5146d140
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/file/manifest_test.dart
+@@ -0,0 +1,111 @@
++// Spec 2a P4 "The plan file": which kits a plan uses, the manifest a save
++// writes, and what a load reports against the loaded kits.
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/harness.dart';
++import '../support/test_kit.dart';
++
++void main() {
++  test('PF-3 used kits: component type ids and symbol keys under a kit id', () {
++    final kits = [testKit(), discKit()];
++    final d = planDocument(kits);
++    installSystem(d, kits);
++    addObject<SlabComponent>(
++        d, SlabComponent(width: 1800, height: 900, angle: 0.4),
++        at: Vector2(2350, -1180));
++    addObject<DiscComponent>(d, DiscComponent(radius: 650),
++        at: Vector2(-3100, 2240));
++    final symbolHolder = d.handleSeed.next();
++    d.commands.execute(CompoundCommand([
++      AddNodeCommand(GroupNode(
++          handle: symbolHolder,
++          parent: d.rootHandle,
++          transform: Transform2.translation(4100, -900),
++          children: const [])),
++      SetComponentCommand<SymbolComponent>(
++          symbolHolder,
++          SymbolComponent(
++              key: 'cafe.table.round',
++              version: 2,
++              name: 'Round table',
++              category: 'Tables',
++              tags: const ['table'])),
++    ], label: 'Add a symbol'));
++    // Premise: the page and the objects' layers are there, and are no kit.
++    expect(d.components.get<PageComponent>(d.rootHandle), isNotNull);
++    // M-PF-3a: symbol keys not read. M-PF-3b: 'jetcad' not excluded.
++    expect(usedKits(d), {'cafe', 'disc', 'test'});
++    expect(usedKits(d).toList(), ['cafe', 'disc', 'test'], reason: 'sorted');
++  });
++
++  test('PF-4 a missing kit keeps the entry read; a loaded used kit is written',
++      () {
++    final loaded = validateKitSet([testKit(), discKit()]);
++    final written = manifestToWrite(
++        const PlanManifest(
++            kits: {'gone': '2.0.0', 'test': '0.9.0', 'old': '1.0.0'}),
++        {'test', 'gone'},
++        loaded);
++    // M-PF-4: a kit that is not loaded drops its entry.
++    expect(
++        written,
++        const PlanManifest(
++            kits: {'gone': '2.0.0', 'old': '1.0.0', 'test': '1.2.0'}));
++  });
++
++  test('PF-5 a loaded kit the plan no longer uses is dropped', () {
++    final loaded = validateKitSet([testKit(), discKit()]);
++    // M-PF-5: every loaded kit read is written, used or not.
++    expect(
++        manifestToWrite(
++            const PlanManifest(kits: {'disc': '0.4.0', 'test': '1.0.0'}),
++            {'test'},
++            loaded),
++        const PlanManifest(kits: {'test': '1.2.0'}));
++    expect(manifestToWrite(null, {'disc', 'lost'}, loaded),
++        const PlanManifest(kits: {'disc': '0.4.0'}),
++        reason: 'a used kit neither loaded nor read has no version to write');
++  });
++
++  test('PF-8 missing kits, a newer kit warns, an unparsed version never does',
++      () {
++    final loaded =
++        validateKitSet([testKit(version: '1.2.0'), discKit(version: '0.4.0')]);
++    final check = checkManifest(
++        const PlanManifest(
++            kits: {'gone': '1.0.0', 'test': '2.0.0', 'disc': '0.4.0'}),
++        {'test', 'disc', 'lost'},
++        loaded);
++    // M-PF-8b: only the manifest's kits visited ('lost' is used, not listed).
++    expect(check.missing, {'gone', 'lost'});
++    expect([
++      for (final d in check.diagnostics) (d.kitId, d.code)
++    ], [
++      ('gone', KitDiagnosticCode.kitMissing),
++      ('lost', KitDiagnosticCode.kitMissing),
++      ('test', KitDiagnosticCode.kitNewer),
++    ]);
++    expect(check.diagnostics.last.message,
++        allOf(contains('2.0.0'), contains('1.2.0')));
++
++    // M-PF-8a: a version that does not parse taken as newer.
++    for (final (saved, have) in [
++      ('1.x', '1.2.0'),
++      ('9.0.0', 'dev'),
++      ('0.9.0', '1.2.0')
++    ]) {
++      final quiet = checkManifest(PlanManifest(kits: {'test': saved}), const {},
++          validateKitSet([testKit(version: have)]));
++      expect(quiet.diagnostics, isEmpty, reason: '$saved over $have');
++      expect(quiet.missing, isEmpty);
++    }
++    final pre = checkManifest(const PlanManifest(kits: {'test': '1.2.0'}),
++        const {}, validateKitSet([testKit(version: '1.2.0-rc.1')]));
++    expect([for (final d in pre.diagnostics) d.code],
++        [KitDiagnosticCode.kitNewer]);
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/file/plan_file_test.dart b/packages/jet_cad_2d_plan/test/file/plan_file_test.dart
+new file mode 100644
+index 00000000..f756f811
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/file/plan_file_test.dart
+@@ -0,0 +1,183 @@
++// Spec 2a P4 "The plan file", P5 "Imported text without a manifest": a
++// load refuses by code and changes nothing; a save writes the manifest and
++// is byte-stable; a component this build cannot read is kept raw; an
++// import gets an empty manifest.
++import 'dart:convert';
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/harness.dart';
++import '../support/test_kit.dart';
++
++/// The fixture: a turned slab off the origin, a disc, a line.
++String fixture() => planText([testKit(), discKit()], (d) {
++      addObject<SlabComponent>(
++          d,
++          SlabComponent(
++              width: 1800,
++              height: 900,
++              angle: 0.4,
++              finish: 'tiled',
++              swatch: 'red'),
++          at: Vector2(2350, -1180));
++      addObject<DiscComponent>(d, DiscComponent(radius: 650),
++          at: Vector2(-3100, 2240));
++      addLine(d, Vector2(-500, 700), Vector2(1800, 2400));
++    });
++
++DraftDocument decode(String text,
++    {List<PlanKit>? kits, List<Diagnostic>? diagnostics}) {
++  final catalog = catalogOf(kits ?? [testKit(), discKit()]);
++  return decodePlan(text,
++      register: (r) => registerPlanComponents(r, catalog),
++      diagnostics: diagnostics ?? <Diagnostic>[]);
++}
++
++Map<String, Object?> jsonOf(String text) =>
++    (jsonDecode(text) as Map<String, Object?>);
++
++Map<String, Object?> componentsOf(Map<String, Object?> json) =>
++    json['components']! as Map<String, Object?>;
++
++String rootKey(Map<String, Object?> json) => '${json['root']}';
++
++Matcher refusedWith(PlanFormatCode code) => throwsA(allOf(
++    isA<FormatException>(),
++    isA<PlanFormatException>().having((e) => e.code, 'code', code)));
++
++void main() {
++  test('PF-1 each refusal has its code, and is a FormatException', () {
++    final good = jsonOf(fixture());
++    String withManifest(Object? manifest) {
++      final json = jsonOf(fixture());
++      final byHandle =
++          componentsOf(json)['jetcad.manifest']! as Map<String, Object?>;
++      byHandle[rootKey(json)] = manifest;
++      return jsonEncode(json);
++    }
++
++    final noManifest = jsonOf(fixture());
++    componentsOf(noManifest).remove('jetcad.manifest');
++    final cases = <String, PlanFormatCode>{
++      'not json': PlanFormatCode.notJson,
++      '[1, 2]': PlanFormatCode.notJson,
++      '{}': PlanFormatCode.noManifest,
++      jsonEncode(noManifest): PlanFormatCode.noManifest,
++      withManifest({'format': 2, 'kits': <String, Object?>{}}):
++          PlanFormatCode.formatTooNew,
++      withManifest({'format': '1', 'kits': <String, Object?>{}}):
++          PlanFormatCode.schema,
++      withManifest({
++        'format': 1,
++        'kits': {'Bad': '1.0.0'},
++      }): PlanFormatCode.schema,
++      jsonEncode({...good, 'schemaVersion': 9999}): PlanFormatCode.schema,
++      jsonEncode({...good, 'entities': 7}): PlanFormatCode.schema,
++    };
++    // M-PF-1a: no manifest check. M-PF-1b: `format > kPlanFormat + 1`.
++    // M-PF-1c: the engine's errors rethrown as they are, not as schema.
++    for (final MapEntry(key: text, value: code) in cases.entries) {
++      expect(() => decode(text), refusedWith(code), reason: text);
++    }
++    expect('${const PlanFormatException(PlanFormatCode.noManifest, 'none')}',
++        'PlanFormatException(noManifest): none');
++  });
++
++  test(
++      'PF-unreadable a component whose factory throws is kept raw: the plan '
++      'opens, the diagnostic names it, and a save writes it byte for byte', () {
++    final json = jsonOf(fixture());
++    final slabs = componentsOf(json)[slabTypeId]! as Map<String, Object?>;
++    final key = slabs.keys.single;
++    (slabs[key]! as Map<String, Object?>)['width'] = 'wide';
++    final broken = jsonEncode(json);
++    final diagnostics = <Diagnostic>[];
++    // M-PF-unreadable: `keepUnreadableComponents: true` removed from
++    // decodePlan's codec call: the load is refused as schema.
++    final d = decode(broken, diagnostics: diagnostics);
++    final h = Handle.checked(int.parse(key));
++    expect(d.components.get<SlabComponent>(h), isNull);
++    expect(d.components.unknownOf(h), hasLength(1));
++    expect(
++        diagnostics
++            .where((x) => x.code == 'component.unreadable')
++            .single
++            .handles,
++        [h]);
++    final saved = componentsOf(
++        jsonOf(encodePlan(d, validateKitSet([testKit(), discKit()]))));
++    expect(jsonEncode(saved[slabTypeId]), jsonEncode(slabs));
++  });
++
++  test('PF-6 a save is byte-stable: encode(decode(x)) == x, twice', () {
++    final x = planText([testKit(), discKit()], (d) {
++      addObject<SlabComponent>(
++          d, SlabComponent(width: 1800, height: 900, angle: 0.4),
++          at: Vector2(2350, -1180));
++      addObject<DiscComponent>(d, DiscComponent(radius: 650),
++          at: Vector2(-3100, 2240));
++      d.components
++          .attachUnknown(d.rootHandle, {'typeId': 'gone.widget', 'size': 3});
++    });
++    final loaded = validateKitSet([testKit(), discKit()]);
++    final types = componentsOf(jsonOf(x)).keys.toList();
++    // M-PF-6: the components map not re-sorted after the manifest is put in.
++    expect(types, [...types]..sort(), reason: 'premise: the canonical order');
++    final y = encodePlan(decode(x), loaded);
++    expect(y, x);
++    expect(encodePlan(decode(y), loaded), x);
++  });
++
++  test("PF-9 a missing kit's entry and objects round-trip through a save", () {
++    final json = jsonOf(fixture());
++    componentsOf(json)['gone.widget'] = {
++      rootKey(json): {'b': 2, 'a': 1},
++    };
++    final manifest =
++        componentsOf(json)['jetcad.manifest']! as Map<String, Object?>;
++    manifest[rootKey(json)] = {
++      'format': 1,
++      'kits': {'disc': '0.4.0', 'gone': '3.1.0', 'test': '9.0.0'},
++    };
++    final saved = jsonOf(encodePlan(decode(jsonEncode(json)),
++        validateKitSet([testKit(version: '1.2.0'), discKit()])));
++    expect(
++        (componentsOf(saved)['jetcad.manifest']!
++            as Map<String, Object?>)[rootKey(saved)],
++        {
++          'format': 1,
++          'kits': {'disc': '0.4.0', 'gone': '3.1.0', 'test': '1.2.0'},
++        });
++    expect(
++        jsonEncode(componentsOf(saved)['gone.widget']),
++        jsonEncode({
++          rootKey(json): {'b': 2, 'a': 1}
++        }));
++  });
++
++  test(
++      'PF-10 an import without a manifest gets an empty one and opens as '
++      'plain geometry; one with a manifest is returned as it is', () {
++    final kits = [testKit()];
++    final drawing = planDocument(kits);
++    final line = addLine(drawing, Vector2(-500, 700), Vector2(1800, 2400));
++    final imported = DraftDocumentCodec.encodeToString(drawing);
++    expect(() => decode(imported), refusedWith(PlanFormatCode.noManifest),
++        reason: 'premise: without the manifest the load refuses');
++    // M-PF-10a: ensureManifest returns its text unchanged.
++    final d = decode(ensureManifest(imported), kits: kits);
++    expect(manifestOf(d), const PlanManifest());
++    expect(usedKits(d), isEmpty);
++    expect(d.entities.containsHandle(line), isTrue);
++
++    final plan = fixture();
++    // M-PF-10b: ensureManifest always re-encodes.
++    expect(ensureManifest(plan), same(plan));
++    expect(
++        () => ensureManifest('not json'), refusedWith(PlanFormatCode.notJson));
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/file/semver_test.dart b/packages/jet_cad_2d_plan/test/file/semver_test.dart
+new file mode 100644
+index 00000000..8dd4ee10
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/file/semver_test.dart
+@@ -0,0 +1,60 @@
++// Spec 2a P4 "Versions (R6)": kit versions are semantic versions compared
++// by precedence; one that does not parse is not compared.
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_plan/src/file/semver.dart';
++
++void main() {
++  test('PF-7 precedence, semver 2.0.0 section 11; build metadata ignored', () {
++    const ordered = [
++      '0.9.9',
++      '1.0.0-alpha',
++      '1.0.0-alpha.1',
++      '1.0.0-alpha.beta',
++      '1.0.0-beta',
++      '1.0.0-beta.2',
++      '1.0.0-beta.11',
++      '1.0.0-rc.1',
++      '1.0.0',
++      '1.0.1',
++      '1.2.0',
++      '1.10.0',
++      '2.0.0',
++    ];
++    for (var i = 0; i < ordered.length; i++) {
++      for (var j = 0; j < ordered.length; j++) {
++        final a = SemVer.tryParse(ordered[i])!,
++            b = SemVer.tryParse(ordered[j])!;
++        // M-PF-7a: pre-release identifiers compared as text ('11' < '2').
++        // M-PF-7b: a pre-release ranked above its release.
++        // M-PF-7c: minor compared as text ('10' < '2').
++        expect(a.compareTo(b).sign, i.compareTo(j).sign,
++            reason: '${ordered[i]} vs ${ordered[j]}');
++      }
++    }
++    expect(
++        SemVer.tryParse('1.2.3+build.7')!.compareTo(SemVer.tryParse('1.2.3')!),
++        0);
++  });
++
++  test('PF-7u what does not parse is null, and is never compared', () {
++    for (final text in [
++      '',
++      '1',
++      '1.2',
++      '1.2.x',
++      '01.2.3',
++      '1.2.3-',
++      'v1.2.3',
++      '1.2.3-01',
++      '99999999999999999999.0.0'
++    ]) {
++      // M-PF-7u: tryParse on the major.minor.patch prefix only.
++      expect(SemVer.tryParse(text), isNull, reason: text);
++    }
++    expect(isNewerVersion('1.x', '1.0.0'), isNull);
++    expect(isNewerVersion('2.0.0', 'dev'), isNull);
++    expect(isNewerVersion('1.2.1', '1.2.0'), isTrue);
++    expect(isNewerVersion('1.2.0', '1.2.0'), isFalse);
++    expect(isNewerVersion('1.2.0', '1.2.0-rc.1'), isTrue);
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/support/harness.dart b/packages/jet_cad_2d_plan/test/support/harness.dart
+index 939eb557..4e4c3f10 100644
+--- a/packages/jet_cad_2d_plan/test/support/harness.dart
++++ b/packages/jet_cad_2d_plan/test/support/harness.dart
+@@ -3,20 +3,21 @@
+ // tool without a canvas, and a pump that puts a widget in an app. Later
+ // tasks add to it: Task 7 `planText`, Task 8 `controllerFor`.
+ import 'dart:typed_data';
+ 
+ import 'package:flutter/gestures.dart' show kPrimaryButton;
+ import 'package:flutter/material.dart';
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ /// Every kit's types registered, in load order, without a guard.
+ ParametricCatalog catalogOf(List<PlanKit> kits) {
+   final catalog = ParametricCatalog();
+   for (final kit in kits) {
+     for (final type in kit.types) {
+       type.registerInto(catalog);
+     }
+   }
+@@ -95,10 +96,25 @@ ToolPointerEvent pointerAt(Vector2 world,
+         pickRadiusWorld: pickRadiusWorld);
+ 
+ /// [child] in a Material app of [size] logical pixels.
+ Future<void> pumpApp(WidgetTester tester, Widget child,
+     {Size size = const Size(1440, 900)}) async {
+   await tester.binding.setSurfaceSize(size);
+   addTearDown(() => tester.binding.setSurfaceSize(null));
+   await tester.pumpWidget(MaterialApp(home: Scaffold(body: child)));
+   await tester.pump();
+ }
++
++/// A saved plan over [kits]: [planDocument] with the kits' system
++/// installed, [build] run on it, then [encodePlan] (a manifest of the
++/// loaded kits the plan uses).
++String planText(List<PlanKit> kits, void Function(DraftDocument d) build,
++    {DecimalSeparator separator = DecimalSeparator.point}) {
++  final d = planDocument(kits, separator: separator);
++  final system = ParametricSystem(d, catalogOf(kits))..install();
++  try {
++    build(d);
++  } finally {
++    system.dispose();
++  }
++  return encodePlan(d, validateKitSet(kits));
++}

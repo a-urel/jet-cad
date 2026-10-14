@@ -1,0 +1,3688 @@
+# Review package: 551985c8..HEAD
+
+## Commits
+5229bd1b feat(plan): words, fonts and theme of the plan library (2a P5)
+
+## Files changed
+ packages/jet_cad_2d_kit/CHANGELOG.md               |   2 +
+ packages/jet_cad_2d_kit/lib/jet_cad_2d_kit.dart    |   1 +
+ packages/jet_cad_2d_kit/lib/src/kit/swatch.dart    |  40 ++
+ packages/jet_cad_2d_kit/test/kit/swatch_test.dart  |  34 ++
+ packages/jet_cad_2d_plan/assets/fonts/README.md    |  18 +
+ .../assets/fonts/Roboto_LICENSE.txt                | 202 +++++++++
+ .../jet_cad_2d_plan/lib/fonts/Roboto-Regular.ttf   | Bin 0 -> 171676 bytes
+ packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart  |   8 +
+ .../lib/src/controller/new_plan.dart               |  16 +-
+ .../lib/src/controller/plan_controller.dart        |  30 +-
+ .../jet_cad_2d_plan/lib/src/fonts/plan_fonts.dart  |  64 +++
+ .../lib/src/l10n/document_separator.dart           |  18 +
+ .../jet_cad_2d_plan/lib/src/l10n/locale_scope.dart |  34 ++
+ .../lib/src/l10n/localizations.dart                |  48 ++
+ .../jet_cad_2d_plan/lib/src/l10n/number_text.dart  |  36 ++
+ .../lib/src/l10n/numbered_names.dart               |  34 ++
+ .../jet_cad_2d_plan/lib/src/l10n/panel_number.dart |  20 +
+ .../jet_cad_2d_plan/lib/src/l10n/search_fold.dart  |  32 ++
+ packages/jet_cad_2d_plan/lib/src/l10n/strings.dart | 290 ++++++++++++
+ .../jet_cad_2d_plan/lib/src/l10n/strings_de.dart   | 295 ++++++++++++
+ .../jet_cad_2d_plan/lib/src/l10n/strings_en.dart   | 289 ++++++++++++
+ .../jet_cad_2d_plan/lib/src/l10n/strings_tr.dart   | 288 ++++++++++++
+ .../jet_cad_2d_plan/lib/src/theme/plan_theme.dart  | 238 ++++++++++
+ packages/jet_cad_2d_plan/pubspec.yaml              |   7 +
+ .../test/fonts/fonts_register_test.dart            |  62 +++
+ .../test/fonts/plan_assets_test.dart               | 121 +++++
+ .../test/l10n/document_separator_test.dart         |  93 ++++
+ packages/jet_cad_2d_plan/test/l10n/l10n_test.dart  | 178 ++++++++
+ .../test/l10n/locale_scope_test.dart               | 173 +++++++
+ .../test/l10n/numbered_names_test.dart             |  38 ++
+ .../test/l10n/value_words_test.dart                |  75 +++
+ .../test/theme/plan_theme_test.dart                | 503 +++++++++++++++++++++
+ 32 files changed, 3270 insertions(+), 17 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_kit/CHANGELOG.md b/packages/jet_cad_2d_kit/CHANGELOG.md
+index 7eaa708b..385aa065 100644
+--- a/packages/jet_cad_2d_kit/CHANGELOG.md
++++ b/packages/jet_cad_2d_kit/CHANGELOG.md
+@@ -15,10 +15,12 @@
+   `ValueUnit` and `ColourTarget`.
+ - The code side: `PlanType`, `PropertySectionBuilder`, `TypeGuard`,
+   `PlanTool`, `PlanToolSettings`, `PlanServices`, `KitWords`,
+   `KitNamesWords`, `Disposable`, the attachment types and `KitDiagnostic`.
+   `PlanKit` gains `types`, `tools`, `attachments` and `propertyIds`, and
+   `validate` checks them; seven `KitProblemCode`s for the code side and the
+   kit set; `isCodeId`. The contract depends on `jet_cad_2d_flutter`.
+ - `retired` on `jetcad.symbol` and `CatalogSymbol`, written only when true;
+   `conformance` takes `typeIds`, `toolIds` and `propertyIds`; rule 11
+   refuses a unit outline by its width, 2·area/perimeter, not by its area.
++- `PlanSwatch`, the plan's eight-colour palette, and `planSwatchNamed`:
++  kits name a swatch without depending on the plan library.
+diff --git a/packages/jet_cad_2d_kit/lib/jet_cad_2d_kit.dart b/packages/jet_cad_2d_kit/lib/jet_cad_2d_kit.dart
+index 221cce33..b31e7b15 100644
+--- a/packages/jet_cad_2d_kit/lib/jet_cad_2d_kit.dart
++++ b/packages/jet_cad_2d_kit/lib/jet_cad_2d_kit.dart
+@@ -11,12 +11,13 @@ library;
+ 
+ export 'src/kit/attachment.dart';
+ export 'src/kit/bundled_library.dart';
+ export 'src/kit/colour.dart';
+ export 'src/kit/kit_diagnostic.dart';
+ export 'src/kit/plan_kit.dart';
+ export 'src/kit/plan_services.dart';
+ export 'src/kit/plan_tool.dart';
+ export 'src/kit/plan_type.dart';
+ export 'src/kit/properties.dart';
++export 'src/kit/swatch.dart';
+ export 'src/kit/symbol_library_source.dart';
+ export 'src/model/model.dart';
+diff --git a/packages/jet_cad_2d_kit/lib/src/kit/swatch.dart b/packages/jet_cad_2d_kit/lib/src/kit/swatch.dart
+new file mode 100644
+index 00000000..4255b9b2
+--- /dev/null
++++ b/packages/jet_cad_2d_kit/lib/src/kit/swatch.dart
+@@ -0,0 +1,40 @@
++// The plan's palette (spec P3 "Colour", P5): eight fixed hues a kit's
++// ColourTarget stores by name, never by index, so reordering or extending
++// the palette breaks no file; a name this release does not know is kept as
++// read and drawn as no colour. Ported from jet_cad_floor_plan's
++// plan_color.dart (plan colours spec PC-1).
++//
++// Pure Dart: no Flutter import. A kit's parametric type (pure Dart over
++// `package:jet_cad_2d`) reads it to colour what it generates.
++
++/// A plan colour: one of eight fixed hues.
++///
++/// [rgb] is the document's colour, `0xRRGGBB`: what white paper, the export
++/// and the print show. A dark canvas shows it re-toned, as it shows every
++/// colour. A later release may add hues: an exhaustive `switch` over this
++/// enum then needs a new case.
++enum PlanSwatch {
++  red(0xE53935),
++  orange(0xFB8C00),
++  yellow(0xFDD835),
++  green(0x43A047),
++  teal(0x00897B),
++  blue(0x1E88E5),
++  purple(0x8E24AA),
++  grey(0x757575);
++
++  const PlanSwatch(this.rgb);
++
++  /// The hue, `0xRRGGBB`.
++  final int rgb;
++}
++
++/// The palette entry named [name] (its `name`), or null for null and for a
++/// name this release does not know.
++PlanSwatch? planSwatchNamed(String? name) {
++  if (name == null) return null;
++  for (final s in PlanSwatch.values) {
++    if (s.name == name) return s;
++  }
++  return null;
++}
+diff --git a/packages/jet_cad_2d_kit/test/kit/swatch_test.dart b/packages/jet_cad_2d_kit/test/kit/swatch_test.dart
+new file mode 100644
+index 00000000..7997428e
+--- /dev/null
++++ b/packages/jet_cad_2d_kit/test/kit/swatch_test.dart
+@@ -0,0 +1,34 @@
++// Spec P3 (colour targets) and P5: the plan's palette is contract data a
++// kit's ColourTarget stores by name. Ported from jet_cad_floor_plan's
++// plan_color.dart (plan colours spec PC-1): the names and hues are what a
++// file and a print show, so both are pinned.
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++
++void main() {
++  test('W-SW1 the eight swatches, their names and hues, in palette order', () {
++    // M-W-SW1: a hue changed, or two swatches swapped, goes red.
++    expect([
++      for (final s in PlanSwatch.values) (s.name, s.rgb)
++    ], const [
++      ('red', 0xE53935),
++      ('orange', 0xFB8C00),
++      ('yellow', 0xFDD835),
++      ('green', 0x43A047),
++      ('teal', 0x00897B),
++      ('blue', 0x1E88E5),
++      ('purple', 0x8E24AA),
++      ('grey', 0x757575),
++    ]);
++  });
++
++  test('W-SW2 a swatch is found by its name, never by its index', () {
++    for (final s in PlanSwatch.values) {
++      expect(planSwatchNamed(s.name), s, reason: s.name);
++    }
++    // M-W-SW2: `planSwatchNamed` comparing case-insensitively finds 'Teal'.
++    for (final name in [null, '', 'Teal', 'magenta', '4', 'teal ']) {
++      expect(planSwatchNamed(name), isNull, reason: '$name');
++    }
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/assets/fonts/README.md b/packages/jet_cad_2d_plan/assets/fonts/README.md
+new file mode 100644
+index 00000000..9b39dd12
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/assets/fonts/README.md
+@@ -0,0 +1,18 @@
++# The plan library's font
++
++`Roboto-Regular.ttf` (in `lib/fonts/`, so a host can also declare the bare
++family from it: `packages/jet_cad_2d_plan/fonts/Roboto-Regular.ttf`) is the
++family `Roboto` that `DraftDocument`'s Standard text style asks for;
++`ensurePlanFonts` registers it (spec P5, ported from `jet_cad_floor_plan`).
++The screen draws text in it, and the PDF export embeds the same bytes.
++
++- Source: `packages/jet_cad_floor_plan/lib/fonts/Roboto-Regular.ttf`, itself
++  a copy of `packages/jet_cad_2d_flutter/test/golden/fonts/Roboto-Regular.ttf`
++  (Flutter 3.27.3's `bin/cache/artifacts/material_fonts/Roboto-Regular.ttf`)
++- SHA-256: `79e851404657dac2106b3d22ad256d47824a9a5765458edb72c9102a45816d95`
++- Licence: Apache 2.0, `Roboto_LICENSE.txt` beside this file (registered with
++  `LicenseRegistry` under `Roboto` by `registerFontLicences`)
++- Copied unmodified, 2026-10-14, sub-project 2a Task 9
++
++`test/fonts/plan_assets_test.dart` asserts that the font equals the Flutter
++layer's golden copy byte for byte.
+diff --git a/packages/jet_cad_2d_plan/assets/fonts/Roboto_LICENSE.txt b/packages/jet_cad_2d_plan/assets/fonts/Roboto_LICENSE.txt
+new file mode 100644
+index 00000000..d6456956
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/assets/fonts/Roboto_LICENSE.txt
+@@ -0,0 +1,202 @@
++
++                                 Apache License
++                           Version 2.0, January 2004
++                        http://www.apache.org/licenses/
++
++   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
++
++   1. Definitions.
++
++      "License" shall mean the terms and conditions for use, reproduction,
++      and distribution as defined by Sections 1 through 9 of this document.
++
++      "Licensor" shall mean the copyright owner or entity authorized by
++      the copyright owner that is granting the License.
++
++      "Legal Entity" shall mean the union of the acting entity and all
++      other entities that control, are controlled by, or are under common
++      control with that entity. For the purposes of this definition,
++      "control" means (i) the power, direct or indirect, to cause the
++      direction or management of such entity, whether by contract or
++      otherwise, or (ii) ownership of fifty percent (50%) or more of the
++      outstanding shares, or (iii) beneficial ownership of such entity.
++
++      "You" (or "Your") shall mean an individual or Legal Entity
++      exercising permissions granted by this License.
++
++      "Source" form shall mean the preferred form for making modifications,
++      including but not limited to software source code, documentation
++      source, and configuration files.
++
++      "Object" form shall mean any form resulting from mechanical
++      transformation or translation of a Source form, including but
++      not limited to compiled object code, generated documentation,
++      and conversions to other media types.
++
++      "Work" shall mean the work of authorship, whether in Source or
++      Object form, made available under the License, as indicated by a
++      copyright notice that is included in or attached to the work
++      (an example is provided in the Appendix below).
++
++      "Derivative Works" shall mean any work, whether in Source or Object
++      form, that is based on (or derived from) the Work and for which the
++      editorial revisions, annotations, elaborations, or other modifications
++      represent, as a whole, an original work of authorship. For the purposes
++      of this License, Derivative Works shall not include works that remain
++      separable from, or merely link (or bind by name) to the interfaces of,
++      the Work and Derivative Works thereof.
++
++      "Contribution" shall mean any work of authorship, including
++      the original version of the Work and any modifications or additions
++      to that Work or Derivative Works thereof, that is intentionally
++      submitted to Licensor for inclusion in the Work by the copyright owner
++      or by an individual or Legal Entity authorized to submit on behalf of
++      the copyright owner. For the purposes of this definition, "submitted"
++      means any form of electronic, verbal, or written communication sent
++      to the Licensor or its representatives, including but not limited to
++      communication on electronic mailing lists, source code control systems,
++      and issue tracking systems that are managed by, or on behalf of, the
++      Licensor for the purpose of discussing and improving the Work, but
++      excluding communication that is conspicuously marked or otherwise
++      designated in writing by the copyright owner as "Not a Contribution."
++
++      "Contributor" shall mean Licensor and any individual or Legal Entity
++      on behalf of whom a Contribution has been received by Licensor and
++      subsequently incorporated within the Work.
++
++   2. Grant of Copyright License. Subject to the terms and conditions of
++      this License, each Contributor hereby grants to You a perpetual,
++      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
++      copyright license to reproduce, prepare Derivative Works of,
++      publicly display, publicly perform, sublicense, and distribute the
++      Work and such Derivative Works in Source or Object form.
++
++   3. Grant of Patent License. Subject to the terms and conditions of
++      this License, each Contributor hereby grants to You a perpetual,
++      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
++      (except as stated in this section) patent license to make, have made,
++      use, offer to sell, sell, import, and otherwise transfer the Work,
++      where such license applies only to those patent claims licensable
++      by such Contributor that are necessarily infringed by their
++      Contribution(s) alone or by combination of their Contribution(s)
++      with the Work to which such Contribution(s) was submitted. If You
++      institute patent litigation against any entity (including a
++      cross-claim or counterclaim in a lawsuit) alleging that the Work
++      or a Contribution incorporated within the Work constitutes direct
++      or contributory patent infringement, then any patent licenses
++      granted to You under this License for that Work shall terminate
++      as of the date such litigation is filed.
++
++   4. Redistribution. You may reproduce and distribute copies of the
++      Work or Derivative Works thereof in any medium, with or without
++      modifications, and in Source or Object form, provided that You
++      meet the following conditions:
++
++      (a) You must give any other recipients of the Work or
++          Derivative Works a copy of this License; and
++
++      (b) You must cause any modified files to carry prominent notices
++          stating that You changed the files; and
++
++      (c) You must retain, in the Source form of any Derivative Works
++          that You distribute, all copyright, patent, trademark, and
++          attribution notices from the Source form of the Work,
++          excluding those notices that do not pertain to any part of
++          the Derivative Works; and
++
++      (d) If the Work includes a "NOTICE" text file as part of its
++          distribution, then any Derivative Works that You distribute must
++          include a readable copy of the attribution notices contained
++          within such NOTICE file, excluding those notices that do not
++          pertain to any part of the Derivative Works, in at least one
++          of the following places: within a NOTICE text file distributed
++          as part of the Derivative Works; within the Source form or
++          documentation, if provided along with the Derivative Works; or,
++          within a display generated by the Derivative Works, if and
++          wherever such third-party notices normally appear. The contents
++          of the NOTICE file are for informational purposes only and
++          do not modify the License. You may add Your own attribution
++          notices within Derivative Works that You distribute, alongside
++          or as an addendum to the NOTICE text from the Work, provided
++          that such additional attribution notices cannot be construed
++          as modifying the License.
++
++      You may add Your own copyright statement to Your modifications and
++      may provide additional or different license terms and conditions
++      for use, reproduction, or distribution of Your modifications, or
++      for any such Derivative Works as a whole, provided Your use,
++      reproduction, and distribution of the Work otherwise complies with
++      the conditions stated in this License.
++
++   5. Submission of Contributions. Unless You explicitly state otherwise,
++      any Contribution intentionally submitted for inclusion in the Work
++      by You to the Licensor shall be under the terms and conditions of
++      this License, without any additional terms or conditions.
++      Notwithstanding the above, nothing herein shall supersede or modify
++      the terms of any separate license agreement you may have executed
++      with Licensor regarding such Contributions.
++
++   6. Trademarks. This License does not grant permission to use the trade
++      names, trademarks, service marks, or product names of the Licensor,
++      except as required for reasonable and customary use in describing the
++      origin of the Work and reproducing the content of the NOTICE file.
++
++   7. Disclaimer of Warranty. Unless required by applicable law or
++      agreed to in writing, Licensor provides the Work (and each
++      Contributor provides its Contributions) on an "AS IS" BASIS,
++      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
++      implied, including, without limitation, any warranties or conditions
++      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
++      PARTICULAR PURPOSE. You are solely responsible for determining the
++      appropriateness of using or redistributing the Work and assume any
++      risks associated with Your exercise of permissions under this License.
++
++   8. Limitation of Liability. In no event and under no legal theory,
++      whether in tort (including negligence), contract, or otherwise,
++      unless required by applicable law (such as deliberate and grossly
++      negligent acts) or agreed to in writing, shall any Contributor be
++      liable to You for damages, including any direct, indirect, special,
++      incidental, or consequential damages of any character arising as a
++      result of this License or out of the use or inability to use the
++      Work (including but not limited to damages for loss of goodwill,
++      work stoppage, computer failure or malfunction, or any and all
++      other commercial damages or losses), even if such Contributor
++      has been advised of the possibility of such damages.
++
++   9. Accepting Warranty or Additional Liability. While redistributing
++      the Work or Derivative Works thereof, You may choose to offer,
++      and charge a fee for, acceptance of support, warranty, indemnity,
++      or other liability obligations and/or rights consistent with this
++      License. However, in accepting such obligations, You may act only
++      on Your own behalf and on Your sole responsibility, not on behalf
++      of any other Contributor, and only if You agree to indemnify,
++      defend, and hold each Contributor harmless for any liability
++      incurred by, or claims asserted against, such Contributor by reason
++      of your accepting any such warranty or additional liability.
++
++   END OF TERMS AND CONDITIONS
++
++   APPENDIX: How to apply the Apache License to your work.
++
++      To apply the Apache License to your work, attach the following
++      boilerplate notice, with the fields enclosed by brackets "[]"
++      replaced with your own identifying information. (Don't include
++      the brackets!)  The text should be enclosed in the appropriate
++      comment syntax for the file format. We also recommend that a
++      file or class name and description of purpose be included on the
++      same "printed page" as the copyright notice for easier
++      identification within third-party archives.
++
++   Copyright [yyyy] [name of copyright owner]
++
++   Licensed under the Apache License, Version 2.0 (the "License");
++   you may not use this file except in compliance with the License.
++   You may obtain a copy of the License at
++
++       http://www.apache.org/licenses/LICENSE-2.0
++
++   Unless required by applicable law or agreed to in writing, software
++   distributed under the License is distributed on an "AS IS" BASIS,
++   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++   See the License for the specific language governing permissions and
++   limitations under the License.
+diff --git a/packages/jet_cad_2d_plan/lib/fonts/Roboto-Regular.ttf b/packages/jet_cad_2d_plan/lib/fonts/Roboto-Regular.ttf
+new file mode 100644
+index 00000000..2c97eead
+Binary files /dev/null and b/packages/jet_cad_2d_plan/lib/fonts/Roboto-Regular.ttf differ
+diff --git a/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart b/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart
+index d55f7066..a95c9774 100644
+--- a/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart
++++ b/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart
+@@ -16,12 +16,20 @@ export 'src/file/manifest.dart'
+     show
+         ManifestCheck,
+         PlanManifest,
+         checkManifest,
+         kPlanFormat,
+         manifestOf,
+         manifestToWrite,
+         usedKits;
+ export 'src/file/plan_file.dart';
+ export 'src/file/plan_format_exception.dart';
++export 'src/fonts/plan_fonts.dart'
++    show ensurePlanFonts, kPlanFontFamily, registerFontLicences;
+ export 'src/kits/kit_set.dart';
++export 'src/l10n/localizations.dart';
++export 'src/l10n/strings.dart';
++export 'src/l10n/strings_de.dart';
++export 'src/l10n/strings_en.dart';
++export 'src/l10n/strings_tr.dart';
+ export 'src/symbols/plan_symbols_state.dart';
++export 'src/theme/plan_theme.dart' show PlanTheme;
+diff --git a/packages/jet_cad_2d_plan/lib/src/controller/new_plan.dart b/packages/jet_cad_2d_plan/lib/src/controller/new_plan.dart
+index f1cdc6b9..a178bae9 100644
+--- a/packages/jet_cad_2d_plan/lib/src/controller/new_plan.dart
++++ b/packages/jet_cad_2d_plan/lib/src/controller/new_plan.dart
+@@ -1,19 +1,22 @@
+ // The document a new plan opens with (today's spec 12a D4, Q0 N1): the
+ // plan's components registered, millimetres, the default page, no history.
+ // Ported from jet_cad_floor_plan's new_document.dart, without its DASHED
+ // linetype (the separator's, sub-project 3) and with the registration
+ // passed in (the kits').
+ import 'dart:ui' show Locale;
+ 
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ 
++import '../l10n/document_separator.dart';
++import '../l10n/strings.dart';
++
+ /// A4 landscape at 1:50 in metres, every field at its default, with a
+ /// fixed origin that centres the sheet on the world origin.
+ PageComponent defaultPlanPage(
+         {DecimalSeparator decimalSeparator = DecimalSeparator.point}) =>
+     PageComponent(
+         originX: -7425, originY: -5250, decimalSeparator: decimalSeparator);
+ 
+ /// A new plan's document over [measurer]: [register] run once on its
+ /// registry, millimetres, [defaultPlanPage] attached through the log, then
+ /// the history cleared, so Undo is off and the save point finds it clean.
+@@ -22,19 +25,16 @@ DraftDocument newPlanDocument(TextMeasurer measurer,
+     DecimalSeparator decimalSeparator = DecimalSeparator.point}) {
+   final doc = DraftDocument.empty(measurer: measurer);
+   register(doc.components);
+   doc.header.units = DrawingUnits.millimeters;
+   doc.commands.execute(SetComponentCommand<PageComponent>(
+       doc.rootHandle, defaultPlanPage(decimalSeparator: decimalSeparator)));
+   doc.commands.clearHistory();
+   return doc;
+ }
+ 
+-/// The separator a new plan takes in [locale]'s language: comma for the
+-/// built-in German and Turkish, point otherwise (today's
+-/// `documentSeparatorFor` over `FloorPlanStrings.forLocale`). Task 9 reads
+-/// it from `PlanStrings`, which gives the same answers.
++/// The separator a new plan takes in [locale]'s language: the built-in
++/// language's ([PlanStrings.forLocale]), so comma for German and Turkish,
++/// point otherwise (today's `documentSeparatorFor` over
++/// `FloorPlanStrings.forLocale`): the plan library's one mapping.
+ DecimalSeparator decimalSeparatorFor(Locale locale) =>
+-    switch (locale.languageCode) {
+-      'de' || 'tr' => DecimalSeparator.comma,
+-      _ => DecimalSeparator.point,
+-    };
++    documentSeparatorFor(PlanStrings.forLocale(locale));
+diff --git a/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart b/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
+index 4c41439b..92a1c336 100644
+--- a/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
++++ b/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
+@@ -10,20 +10,22 @@ import 'dart:ui' show Locale, Offset, Rect, Size;
+ import 'package:flutter/foundation.dart';
+ import 'package:flutter/scheduler.dart';
+ import 'package:flutter/widgets.dart' show FocusManager;
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+ 
+ import '../file/manifest.dart';
+ import '../file/plan_file.dart';
+ import '../kits/kit_set.dart';
++import '../l10n/document_separator.dart';
++import '../l10n/strings.dart';
+ import '../export/registries.dart';
+ import '../symbols/plan_symbols_state.dart';
+ import 'camera_bounds.dart';
+ import 'diagnostics_log.dart';
+ import 'new_plan.dart';
+ import 'plan_change.dart';
+ import 'services.dart';
+ import 'session.dart';
+ import 'tool_settings_store.dart';
+ 
+@@ -248,20 +250,29 @@ class PlanController extends ChangeNotifier {
+   /// The state the last [save] encoded.
+   int? _encodedState;
+ 
+   /// The plan made with no locale known and its state then, while it is
+   /// unsettled; null for a settled or a loaded plan.
+   ({DraftDocument document, int at})? _unsettled;
+ 
+   /// The last locale a widget reported, for [newPlan].
+   Locale? _reported;
+ 
++  /// The language class the last report carried (a host's own, NS7), or
++  /// null when it carried none.
++  PlanStrings? _reportedStrings;
++
++  /// A new plan's separator under [locale]: the reported class's, else the
++  /// built-in language's.
++  DecimalSeparator _separatorOf(Locale locale) =>
++      documentSeparatorFor(_reportedStrings ?? PlanStrings.forLocale(locale));
++
+   /// The plan's text: the engine's JSON with the manifest of the kits it
+   /// uses (Task 7). [markSaved] marks the state encoded here. An empty plan
+   /// read here is settled as it is.
+   String save() {
+     settlePendingInput();
+     _unsettled = null;
+     _encodedState = document.commands.stateId;
+     return encodePlan(document, kits);
+   }
+ 
+@@ -301,23 +312,21 @@ class PlanController extends ChangeNotifier {
+     final DecimalSeparator? given = switch (decimalSeparator) {
+       null => null,
+       '.' => DecimalSeparator.point,
+       ',' => DecimalSeparator.comma,
+       _ => throw ArgumentError.value(
+           decimalSeparator, 'decimalSeparator', 'must be "." or ","'),
+     };
+     settlePendingInput();
+     final reported = _reported;
+     final separator = given ??
+-        (reported == null
+-            ? DecimalSeparator.point
+-            : decimalSeparatorFor(reported));
++        (reported == null ? DecimalSeparator.point : _separatorOf(reported));
+     final measurer = FlutterTextMeasurer();
+     _replace(
+         newPlanDocument(measurer,
+             register: _registerComponents, decimalSeparator: separator),
+         measurer,
+         unsettled: given == null && reported == null);
+   }
+ 
+   /// The kits the plan names or uses that are not loaded (spec P4).
+   Set<String> get missingKits => _missingKits;
+@@ -549,34 +558,37 @@ class PlanController extends ChangeNotifier {
+   /// read it live.
+   ValueListenable<Locale> get locale => _locale;
+ 
+   bool get _untouched {
+     final u = _unsettled;
+     if (u == null || !identical(u.document, document)) return false;
+     final commands = u.document.commands;
+     return commands.stateId == u.at && !commands.canRedo;
+   }
+ 
+-  /// A widget's locale (floor_plan_controller.dart:1028-1045): kept for
+-  /// [newPlan] and the kits' words. An unsettled, untouched plan takes its
+-  /// separator now, as if made so: the page's command, then the history
+-  /// cleared and the save point moved, so it stays clean with no step.
++  /// A widget's locale (floor_plan_controller.dart:1028-1045) and, when it
++  /// has one, its language class [strings] (a host's own gives its own
++  /// separator, NS7): kept for [newPlan] and the kits' words. An
++  /// unsettled, untouched plan takes its separator now, as if made so: the
++  /// page's command, then the history cleared and the save point moved, so
++  /// it stays clean with no step.
+   @internal
+-  void reportLocale(Locale locale) {
++  void reportLocale(Locale locale, {PlanStrings? strings}) {
+     _locale.value = locale;
+     _reported = locale;
++    _reportedStrings = strings;
+     final untouched = _untouched;
+     _unsettled = null;
+     if (!untouched) return;
+     final d = document;
+     final page = d.components.get<PageComponent>(d.rootHandle)!;
+-    final separator = decimalSeparatorFor(locale);
++    final separator = _separatorOf(locale);
+     if (page.decimalSeparator == separator) return;
+     d.commands.execute(SetComponentCommand<PageComponent>(
+         d.rootHandle, page.copyWith(decimalSeparator: separator)));
+     d.commands.clearHistory();
+     _savedState = d.commands.stateId;
+   }
+ 
+   // ---------------------------------------------------------------------
+   // State.
+ 
+diff --git a/packages/jet_cad_2d_plan/lib/src/fonts/plan_fonts.dart b/packages/jet_cad_2d_plan/lib/src/fonts/plan_fonts.dart
+new file mode 100644
+index 00000000..2c07949f
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/fonts/plan_fonts.dart
+@@ -0,0 +1,64 @@
++// The plan's font (spec P5 "Fonts", today's host guide §2, moved
++// unchanged): documents name the family `Roboto`, and the measurer uses
++// that name verbatim, but a font a package declares registers as
++// `packages/jet_cad_2d_plan/Roboto`. So the package registers the bare
++// family itself, from its own bytes, before the first document is
++// measured: the screen then lays text out in the same face the PDF embeds,
++// on every platform, whatever the host's default font. Its Apache 2.0
++// licence is registered at start-up by [registerFontLicences]. Ported from
++// jet_cad_floor_plan's fonts.dart and export_font.dart.
++import 'package:flutter/foundation.dart';
++import 'package:flutter/services.dart' show AssetBundle, FontLoader, rootBundle;
++
++/// The family documents name and the plan library registers.
++const String kPlanFontFamily = 'Roboto';
++
++/// The bundled font's asset key: the package's `lib/fonts/` file, declared
++/// under `assets:` in its `pubspec.yaml`, so every host has it. It lives
++/// under `lib/` so a host can also declare the bare family `Roboto` from it
++/// (`packages/jet_cad_2d_plan/fonts/Roboto-Regular.ttf`); either way
++/// [ensurePlanFonts] registers `Roboto` from these bytes.
++const String kPlanFontAsset =
++    'packages/jet_cad_2d_plan/lib/fonts/Roboto-Regular.ttf';
++
++/// The font's licence text (declared under `assets:` in the package's
++/// `pubspec.yaml`).
++const String kPlanFontLicenceAsset =
++    'packages/jet_cad_2d_plan/assets/fonts/Roboto_LICENSE.txt';
++
++Future<void>? _registered;
++
++/// Forgets the registration, so the next [ensurePlanFonts] registers again:
++/// a test seam (the registration is process-wide, and a test must not
++/// inherit another's pending future). The engine keeps any face already
++/// loaded.
++@visibleForTesting
++void resetPlanFontsForTest() => _registered = null;
++
++/// Registers family [kPlanFontFamily] from the package's bundled Roboto
++/// (read from [bundle], [rootBundle] when null). Once per process: every
++/// call after the first returns the first call's future, unless that one
++/// failed, in which case the next call tries again. A host awaits it before
++/// `runApp` (after `WidgetsFlutterBinding.ensureInitialized()`).
++Future<void> ensurePlanFonts([AssetBundle? bundle]) {
++  final pending = _registered;
++  if (pending != null) return pending;
++  final loader = FontLoader(kPlanFontFamily)
++    ..addFont((bundle ?? rootBundle).load(kPlanFontAsset));
++  final next = loader.load();
++  _registered = next;
++  next.then<void>((_) {}, onError: (Object _) {
++    if (identical(_registered, next)) _registered = null;
++  });
++  return next;
++}
++
++/// Registers the font's licence with [LicenseRegistry] under the package
++/// name `Roboto`, its text read from [bundle] ([rootBundle] when null) when
++/// the licences are collected.
++void registerFontLicences([AssetBundle? bundle]) {
++  LicenseRegistry.addLicense(() async* {
++    final text = await (bundle ?? rootBundle).loadString(kPlanFontLicenceAsset);
++    yield LicenseEntryWithLineBreaks(const <String>['Roboto'], text);
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/lib/src/l10n/document_separator.dart b/packages/jet_cad_2d_plan/lib/src/l10n/document_separator.dart
+new file mode 100644
+index 00000000..54bea5ee
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/l10n/document_separator.dart
+@@ -0,0 +1,18 @@
++// Spec Q0 N1 (the assumed Q2): a new plan takes the UI language's decimal
++// separator. Applied, wherever a context exists, to
++// `PlanStrings.of(context)`, so a host's own language class gives the
++// separator its panels use.
++// Ported from jet_cad_floor_plan (2a Task 9).
++import 'package:jet_cad_2d/jet_cad_2d.dart' show DecimalSeparator;
++
++import 'strings.dart';
++
++/// The decimal separator a new plan takes in [strings]' language (N1):
++/// [DecimalSeparator.comma] when the language's panels print `,`
++/// ([PlanStrings.decimalSeparator]), [DecimalSeparator.point]
++/// otherwise. Only a new plan reads it: nothing converts a plan that exists
++/// (N2).
++DecimalSeparator documentSeparatorFor(PlanStrings strings) =>
++    strings.decimalSeparator == ','
++        ? DecimalSeparator.comma
++        : DecimalSeparator.point;
+diff --git a/packages/jet_cad_2d_plan/lib/src/l10n/locale_scope.dart b/packages/jet_cad_2d_plan/lib/src/l10n/locale_scope.dart
+new file mode 100644
+index 00000000..f9e50107
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/l10n/locale_scope.dart
+@@ -0,0 +1,34 @@
++// Spec P5 "Words": the widgets push the app's Localizations locale into
++// controller.locale; a kit's KitWords read it live. Every widget of the
++// plan library calls [PlanLocaleScope.push] from didChangeDependencies
++// (which a change of the app's locale triggers, through the dependency
++// `maybeLocaleOf` registers) and when it is handed another controller.
++import 'package:flutter/scheduler.dart';
++import 'package:flutter/widgets.dart';
++
++import '../controller/plan_controller.dart';
++import 'strings.dart';
++
++/// Pushes the locale of a widget's [Localizations] into its controller.
++abstract final class PlanLocaleScope {
++  static const Locale _english = Locale('en');
++
++  /// Reports [context]'s locale and its [PlanStrings] to [controller]
++  /// (`reportLocale`, Task 8, with this task's `strings:`),
++  /// English when no [Localizations] is above (as `PlanStrings.of` answers
++  /// English there), and registers [context] as a dependent of the locale.
++  ///
++  /// Never notifies during a build: the report lands after the current
++  /// frame (one is scheduled when none is pending), and only while
++  /// [context] is still mounted; an unchanged locale notifies nothing.
++  static void push(BuildContext context, PlanController controller) {
++    final next = Localizations.maybeLocaleOf(context) ?? _english;
++    // The language class too (a host's own gives its own separator: NS7).
++    final strings = PlanStrings.of(context);
++    SchedulerBinding.instance
++      ..addPostFrameCallback((_) {
++        if (context.mounted) controller.reportLocale(next, strings: strings);
++      })
++      ..ensureVisualUpdate();
++  }
++}
+diff --git a/packages/jet_cad_2d_plan/lib/src/l10n/localizations.dart b/packages/jet_cad_2d_plan/lib/src/l10n/localizations.dart
+new file mode 100644
+index 00000000..1264a833
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/l10n/localizations.dart
+@@ -0,0 +1,48 @@
++// The plan library's localizations (spec P5 "Words"; ported from
++// jet_cad_floor_plan's localizations.dart, spec 14d L2): its delegate, the
++// locales it speaks, and the delegates a host's MaterialApp lists for them.
++import 'package:flutter/foundation.dart' show SynchronousFuture;
++import 'package:flutter/widgets.dart';
++import 'package:flutter_localizations/flutter_localizations.dart';
++
++import 'strings.dart';
++
++/// The locales the plan library speaks: English, German, Turkish.
++const List<Locale> planSupportedLocales = [
++  Locale('en'),
++  Locale('de'),
++  Locale('tr'),
++];
++
++/// The plan library's delegate and Flutter's three, for a host's
++/// `MaterialApp.localizationsDelegates` (a host that lists `de` or `tr` in
++/// `supportedLocales` needs Flutter's, or Material widgets throw).
++const List<LocalizationsDelegate<Object>> planLocalizationsDelegates = [
++  PlanLocalizations.delegate,
++  GlobalMaterialLocalizations.delegate,
++  GlobalWidgetsLocalizations.delegate,
++  GlobalCupertinoLocalizations.delegate,
++];
++
++/// The plan library's [LocalizationsDelegate]: the built-in language of the
++/// resolved locale, English for any other. Optional: without it,
++/// [PlanStrings.of] picks the same language from the locale.
++abstract final class PlanLocalizations {
++  static const LocalizationsDelegate<PlanStrings> delegate =
++      _PlanStringsDelegate();
++}
++
++final class _PlanStringsDelegate extends LocalizationsDelegate<PlanStrings> {
++  const _PlanStringsDelegate();
++
++  /// Every locale: an unknown one is answered in English.
++  @override
++  bool isSupported(Locale locale) => true;
++
++  @override
++  Future<PlanStrings> load(Locale locale) =>
++      SynchronousFuture(PlanStrings.forLocale(locale));
++
++  @override
++  bool shouldReload(_PlanStringsDelegate old) => false;
++}
+diff --git a/packages/jet_cad_2d_plan/lib/src/l10n/number_text.dart b/packages/jet_cad_2d_plan/lib/src/l10n/number_text.dart
+new file mode 100644
+index 00000000..a229edad
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/l10n/number_text.dart
+@@ -0,0 +1,36 @@
++// The panels' numbers in a language (spec 14d L12, L15, revision 2): the
++// language's decimal separator, never a grouping; the parser strict about
++// the separator, but tolerant of the other one where a device's keyboard
++// offers only that one and nothing can be misread (V-12).
++// Ported from jet_cad_floor_plan (2a Task 9).
++import 'panel_number.dart';
++import 'strings.dart';
++
++/// [v] as [panelNumberText] shows it, with [strings]' decimal separator.
++String formatPanelNumber(double v, PlanStrings strings) {
++  final text = panelNumberText(v);
++  final sep = strings.decimalSeparator;
++  return sep == '.' ? text : text.replaceAll('.', sep);
++}
++
++final RegExp _threeDigits = RegExp(r'^[0-9]{3}$');
++
++/// [text] read as a number in [strings]' language, or null (V-12): the
++/// language's separator; or the other one, when it occurs once, the
++/// language's does not occur, and it is not followed by exactly three
++/// digits -- `1.5` is 1.5 in German, `1.600` is refused, as `1,600` is in
++/// English. Otherwise as `double.tryParse` reads it.
++double? parsePanelNumber(String text, PlanStrings strings) {
++  final own = strings.decimalSeparator;
++  final other = own == '.' ? ',' : '.';
++  var t = text.trim();
++  if (t.contains(other)) {
++    final parts = t.split(other);
++    if (parts.length != 2 || t.contains(own)) return null;
++    if (_threeDigits.hasMatch(parts[1])) return null;
++    t = '${parts[0]}.${parts[1]}';
++  } else if (own != '.') {
++    t = t.replaceAll(own, '.');
++  }
++  return double.tryParse(t);
++}
+diff --git a/packages/jet_cad_2d_plan/lib/src/l10n/numbered_names.dart b/packages/jet_cad_2d_plan/lib/src/l10n/numbered_names.dart
+new file mode 100644
+index 00000000..55f61334
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/l10n/numbered_names.dart
+@@ -0,0 +1,34 @@
++// Names the planner writes once and counts (spec 14d L7): a new layer's
++// `Layer n`, in the language of the moment, the lowest free `n` counted
++// over the names of every built-in language, so a plan edited in two
++// languages never gets `Layer 3` and `Katman 3`.
++// Ported from jet_cad_floor_plan (2a Task 9).
++import 'strings.dart';
++import 'strings_de.dart';
++import 'strings_en.dart';
++import 'strings_tr.dart';
++
++final RegExp _numbered = RegExp(r'^(.*) ([1-9][0-9]*)$');
++
++/// The `n` of [name] when [name] is [pattern]`(n)` in [current] or in a
++/// built-in language, compared by [fold]; otherwise null.
++int? numberedNameIndex(String name,
++    String Function(PlanStrings s, int n) pattern, PlanStrings current,
++    {String Function(String s) fold = _same}) {
++  final m = _numbered.firstMatch(name);
++  if (m == null) return null;
++  final n = int.tryParse(m[2]!);
++  if (n == null) return null;
++  final folded = fold(name);
++  for (final s in <PlanStrings>[
++    current,
++    const PlanStringsEn(),
++    const PlanStringsDe(),
++    const PlanStringsTr(),
++  ]) {
++    if (fold(pattern(s, n)) == folded) return n;
++  }
++  return null;
++}
++
++String _same(String s) => s;
+diff --git a/packages/jet_cad_2d_plan/lib/src/l10n/panel_number.dart b/packages/jet_cad_2d_plan/lib/src/l10n/panel_number.dart
+new file mode 100644
+index 00000000..cc69f1df
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/l10n/panel_number.dart
+@@ -0,0 +1,20 @@
++// The panels' number text. Ported from jet_cad_floor_plan (2a Task 9).
++
++/// [v] as the shell shows a stored number: in a Selection panel field, in
++/// the Page panel's scale field and in the status line's scale. The text is
++/// one the fields' parser (`double.tryParse`) reads back as exactly [v],
++/// sign of zero included, so a commit of a shown value writes nothing. A
++/// whole number below 2^53 in magnitude shows without ".0" ("200");
++/// anything else is Dart's shortest round-trip form ("0.1",
++/// "100000000000000000000.0", "1e+300", "-0.0").
++///
++/// Not `v.round()` (fix/post-11): on the VM it saturates at 2^63 - 1, so
++/// 1e20 showed "9223372036854775807". In the Selection panel the focus loss
++/// after Enter wrote a second, silent undo step storing 9.22e18; in the
++/// Page panel a later Enter on the unchanged text did; the status line
++/// read "1:9223372036854775807".
++String panelNumberText(double v) => v.abs() < 9007199254740992 && // 2^53
++        v == v.truncateToDouble() &&
++        !(v == 0 && v.isNegative)
++    ? v.toInt().toString()
++    : v.toString();
+diff --git a/packages/jet_cad_2d_plan/lib/src/l10n/search_fold.dart b/packages/jet_cad_2d_plan/lib/src/l10n/search_fold.dart
+new file mode 100644
+index 00000000..ec8c217e
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/l10n/search_fold.dart
+@@ -0,0 +1,32 @@
++// The symbol search's fold (spec 14d L11, revision 2): both the query and
++// the names are folded, so `kose` finds `Köşe`, `ISIK` finds `ışık`, and
++// either language's letters meet. Search only: never applied to a stored
++// value.
++// Ported from jet_cad_floor_plan (2a Task 9).
++
++const Map<String, String> _fold = {
++  'ı': 'i',
++  '\u0307': '', // the combining dot `İ` lower-cases into
++  'ä': 'a',
++  'ö': 'o',
++  'ü': 'u',
++  'ß': 'ss',
++  'ğ': 'g',
++  'ş': 's',
++  'ç': 'c',
++  'â': 'a',
++  'î': 'i',
++  'û': 'u',
++};
++
++/// [s] lower-cased and folded: `İ`, `I` and `ı` meet at `i`; the German
++/// and Turkish letters meet their plain ones.
++String searchFold(String s) {
++  final lower = s.toLowerCase();
++  final out = StringBuffer();
++  for (final rune in lower.runes) {
++    final c = String.fromCharCode(rune);
++    out.write(_fold[c] ?? c);
++  }
++  return out.toString();
++}
+diff --git a/packages/jet_cad_2d_plan/lib/src/l10n/strings.dart b/packages/jet_cad_2d_plan/lib/src/l10n/strings.dart
+new file mode 100644
+index 00000000..929164ba
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/l10n/strings.dart
+@@ -0,0 +1,290 @@
++// The plan library's own words (spec P5 "Words"): one abstract class, a
++// member per string -- a getter for a fixed one, a method for one with
++// values or a count -- and one implementation per built-in language, so the
++// compiler refuses a language that misses a word. A host may subclass a
++// language and provide it through its own delegate. Ported from
++// jet_cad_floor_plan's FloorPlanStrings (spec 14d L1, L2): its generic
++// words; a kit's words come from KitNames (KitWords).
++import 'package:flutter/widgets.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart' show LayerNameProblem;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show PlanSwatch;
++
++import 'strings_de.dart';
++import 'strings_en.dart';
++import 'strings_tr.dart';
++
++/// The plan library's words in one language.
++abstract class PlanStrings {
++  const PlanStrings();
++
++  /// The words of [context]'s scope: those a [Localizations] scope provides
++  /// through a `LocalizationsDelegate<PlanStrings>`, else the built-in
++  /// language of the resolved locale, else English. Never throws.
++  static PlanStrings of(BuildContext context) =>
++      Localizations.of<PlanStrings>(context, PlanStrings) ??
++      forLocale(Localizations.maybeLocaleOf(context));
++
++  /// The built-in language for [locale]'s language code, English for any
++  /// other (or none).
++  static PlanStrings forLocale(Locale? locale) =>
++      switch (locale?.languageCode) {
++        'de' => const PlanStringsDe(),
++        'tr' => const PlanStringsTr(),
++        _ => const PlanStringsEn(),
++      };
++
++  /// The language's code: `en`, `de` or `tr` for the built-in ones.
++  String get languageCode;
++
++  /// The decimal separator of the panels' numbers (L12): `.` or `,`.
++  String get decimalSeparator;
++
++  // Values the engine and the planner hand out (L6, L5).
++
++  /// Why a name cannot be a layer's.
++  String layerNameProblem(LayerNameProblem problem);
++
++  // The shell (Task 3): tools, the status line, commands, dialogs.
++
++  /// The Select tool.
++  String get toolSelect;
++
++  /// "Line".
++  String get toolLine;
++
++  /// "Polyline".
++  String get toolPolyline;
++
++  /// "Rectangle".
++  String get toolRectangle;
++
++  /// "Circle".
++  String get toolCircle;
++
++  /// "Arc".
++  String get toolArc;
++
++  /// "Text".
++  String get toolText;
++
++  /// "Symbol".
++  String get toolSymbol;
++
++  /// The Fill toggle.
++  String get fill;
++
++  /// "Tools".
++  String get tabTools;
++
++  /// "Symbols".
++  String get tabSymbols;
++
++  /// "OSNAP".
++  String get objectSnapOn;
++
++  /// "osnap off".
++  String get objectSnapOff;
++
++  /// "Edited".
++  String get edited;
++
++  /// "Undo".
++  String get undo;
++
++  /// "Redo".
++  String get redo;
++
++  /// "Export…".
++  String get exportEllipsis;
++
++  /// "Print…".
++  String get printEllipsis;
++
++  /// The Control key in a shortcut.
++  String get controlKey;
++
++  /// The Shift key in a shortcut.
++  String get shiftKey;
++
++  /// "Export".
++  String get exportTitle;
++
++  /// "Export".
++  String get exportAction;
++
++  /// "Cancel".
++  String get cancel;
++
++  /// "Search symbols".
++  String get searchSymbols;
++
++  /// "Clear".
++  String get clear;
++
++  /// "Loading symbols…".
++  String get loadingSymbols;
++
++  /// "The symbols could not be loaded.".
++  String get symbolsFailed;
++
++  /// "Retry".
++  String get retry;
++
++  /// The status line's selection count.
++  String selectedCount(int count);
++
++  /// A resolution in the Export dialog.
++  String dpi(int dpi);
++
++  /// A search that matches no symbol.
++  String noSymbolsMatch(String query);
++
++  // The panels (Task 4).
++
++  /// "Name".
++  String get name;
++
++  /// "Size".
++  String get size;
++
++  /// "Rotation".
++  String get rotation;
++
++  /// "Mirror".
++  String get mirror;
++
++  /// "Page".
++  String get pageTitle;
++
++  /// "Custom".
++  String get customSize;
++
++  /// "Portrait".
++  String get portrait;
++
++  /// "Landscape".
++  String get landscape;
++
++  /// "Scale".
++  String get scale;
++
++  /// "Grid".
++  String get grid;
++
++  /// "Snap to grid".
++  String get snapToGrid;
++
++  /// "Page breaks".
++  String get pageBreaks;
++
++  /// "Decimal separator": the caption of the page's own separator, the
++  /// one the plan's text prints with (not [decimalSeparator]).
++  String get pageDecimalSeparator;
++
++  /// "Paper".
++  String get paper;
++
++  // The layer panel, row and picker (Task 4).
++
++  /// "Layers cannot be changed in this document".
++  String get layersLocked;
++
++  /// "Select a layer to delete it".
++  String get selectLayerToDelete;
++
++  /// "Layer 0 cannot be deleted".
++  String get layerZeroUndeletable;
++
++  /// "The current layer cannot be deleted".
++  String get currentLayerUndeletable;
++
++  /// "This layer is in use".
++  String get layerInUse;
++
++  /// "Layers".
++  String get layers;
++
++  /// "New layer".
++  String get newLayer;
++
++  /// "Delete layer".
++  String get deleteLayer;
++
++  /// "Mixed".
++  String get mixed;
++
++  /// "Read-only document".
++  String get readOnlyDocument;
++
++  /// "A plain group has no layer: it cannot be moved".
++  String get plainGroupNoLayer;
++
++  /// "Layer".
++  String get layer;
++
++  /// The Colour picker's title (plan colours spec PC-9).
++  String get color;
++
++  /// The picker's swatch for no colour.
++  String get colorNone;
++
++  /// The picker's tooltip when the host refuses `recolor`.
++  String get colorRefused;
++
++  /// [swatch]'s name, for its swatch's tooltip and semantics label.
++  String colorName(PlanSwatch swatch);
++
++  /// "Move the selection to a layer".
++  String get moveSelectionToLayer;
++
++  /// "A hidden layer cannot be current".
++  String get hiddenLayerNotCurrent;
++
++  /// "Current layer".
++  String get currentLayer;
++
++  /// "Make current".
++  String get makeCurrent;
++
++  /// "The current layer cannot be hidden".
++  String get currentLayerNotHidden;
++
++  /// "Hide layer".
++  String get hideLayer;
++
++  /// "Show layer".
++  String get showLayer;
++
++  /// "Unlock layer".
++  String get unlockLayer;
++
++  /// "Lock layer".
++  String get lockLayer;
++
++  /// "Layer colour".
++  String get layerColour;
++
++  /// A layer the document does not have, by its handle.
++  String missingLayer(String hex);
++
++  /// The name of ACI colour [aci], 1 to 9, in the colour menu.
++  String colourName(int aci);
++
++  // Names written into the document once (Task 5, L7).
++
++  /// A new layer's name.
++  String layerName(int n);
++
++  // The plan library's own notices (sub-project 2a).
++
++  /// The canvas's short hint when an edit would change a locked object
++  /// (spec P4 "Locks").
++  String get lockedHint;
++
++  /// What stands in a property section whose kit code failed (spec P4
++  /// "The failure boundary").
++  String get sectionFailed;
++
++  /// The warning a damaged plan shows (spec P4: a rollback that threw).
++  String get planDamaged;
++}
+diff --git a/packages/jet_cad_2d_plan/lib/src/l10n/strings_de.dart b/packages/jet_cad_2d_plan/lib/src/l10n/strings_de.dart
+new file mode 100644
+index 00000000..250d2420
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/l10n/strings_de.dart
+@@ -0,0 +1,295 @@
++// The plan library's words in German (spec P5; ported from
++// jet_cad_floor_plan's strings_de.dart, spec 14d L1).
++import 'package:jet_cad_2d/jet_cad_2d.dart'
++    show
++        LayerNameBadCharacter,
++        LayerNameDuplicate,
++        LayerNameEdgeSpace,
++        LayerNameEmpty,
++        LayerNameProblem,
++        LayerNameTooLong;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show PlanSwatch;
++
++import 'strings.dart';
++
++/// The plan library's words in German.
++class PlanStringsDe extends PlanStrings {
++  const PlanStringsDe();
++
++  @override
++  String get languageCode => 'de';
++
++  @override
++  String get decimalSeparator => ',';
++
++  @override
++  String layerNameProblem(LayerNameProblem problem) => switch (problem) {
++        LayerNameEmpty() => 'Ein Ebenenname darf nicht leer sein.',
++        LayerNameEdgeSpace() =>
++          'Ein Ebenenname darf nicht mit einem Leerzeichen beginnen oder enden.',
++        LayerNameTooLong(:final max) =>
++          'Ein Ebenenname darf höchstens $max Zeichen lang sein.',
++        LayerNameBadCharacter(:final character) =>
++          'Ein Ebenenname darf $character nicht enthalten.',
++        LayerNameDuplicate(:final existing) =>
++          'Eine Ebene namens $existing gibt es bereits.',
++      };
++
++  @override
++  String get toolSelect => 'Auswählen';
++
++  @override
++  String get toolLine => 'Linie';
++
++  @override
++  String get toolPolyline => 'Polylinie';
++
++  @override
++  String get toolRectangle => 'Rechteck';
++
++  @override
++  String get toolCircle => 'Kreis';
++
++  @override
++  String get toolArc => 'Bogen';
++
++  @override
++  String get toolText => 'Text';
++
++  @override
++  String get toolSymbol => 'Symbol';
++
++  @override
++  String get fill => 'Füllung';
++
++  @override
++  String get tabTools => 'Werkzeuge';
++
++  @override
++  String get tabSymbols => 'Symbole';
++
++  @override
++  String get objectSnapOn => 'OSNAP';
++
++  @override
++  String get objectSnapOff => 'OSNAP aus';
++
++  @override
++  String get edited => 'Geändert';
++
++  @override
++  String get undo => 'Rückgängig';
++
++  @override
++  String get redo => 'Wiederholen';
++
++  @override
++  String get exportEllipsis => 'Exportieren…';
++
++  @override
++  String get printEllipsis => 'Drucken…';
++
++  @override
++  String get controlKey => 'Strg';
++
++  @override
++  String get shiftKey => 'Umschalt';
++
++  @override
++  String get exportTitle => 'Exportieren';
++
++  @override
++  String get exportAction => 'Exportieren';
++
++  @override
++  String get cancel => 'Abbrechen';
++
++  @override
++  String get searchSymbols => 'Symbole suchen';
++
++  @override
++  String get clear => 'Leeren';
++
++  @override
++  String get loadingSymbols => 'Symbole werden geladen…';
++
++  @override
++  String get symbolsFailed => 'Die Symbole konnten nicht geladen werden.';
++
++  @override
++  String get retry => 'Erneut versuchen';
++
++  @override
++  String selectedCount(int count) => '$count ausgewählt';
++
++  @override
++  String dpi(int dpi) => '$dpi dpi';
++
++  @override
++  String noSymbolsMatch(String query) => 'Keine Symbole zu „$query“';
++
++  @override
++  String get name => 'Name';
++
++  @override
++  String get size => 'Größe';
++
++  @override
++  String get rotation => 'Drehung';
++
++  @override
++  String get mirror => 'Spiegeln';
++
++  @override
++  String get pageTitle => 'Seite';
++
++  @override
++  String get customSize => 'Benutzerdefiniert';
++
++  @override
++  String get portrait => 'Hochformat';
++
++  @override
++  String get landscape => 'Querformat';
++
++  @override
++  String get scale => 'Maßstab';
++
++  @override
++  String get grid => 'Raster';
++
++  @override
++  String get snapToGrid => 'Am Raster fangen';
++
++  @override
++  String get pageBreaks => 'Seitenumbrüche';
++
++  @override
++  String get pageDecimalSeparator => 'Dezimaltrennzeichen';
++
++  @override
++  String get paper => 'Papier';
++
++  @override
++  String get layersLocked =>
++      'Ebenen können in diesem Dokument nicht geändert werden';
++
++  @override
++  String get selectLayerToDelete => 'Wählen Sie eine Ebene zum Löschen';
++
++  @override
++  String get layerZeroUndeletable => 'Ebene 0 kann nicht gelöscht werden';
++
++  @override
++  String get currentLayerUndeletable =>
++      'Die aktuelle Ebene kann nicht gelöscht werden';
++
++  @override
++  String get layerInUse => 'Diese Ebene wird verwendet';
++
++  @override
++  String get layers => 'Ebenen';
++
++  @override
++  String get newLayer => 'Neue Ebene';
++
++  @override
++  String get deleteLayer => 'Ebene löschen';
++
++  @override
++  String get mixed => 'Gemischt';
++
++  @override
++  String get readOnlyDocument => 'Schreibgeschütztes Dokument';
++
++  @override
++  String get plainGroupNoLayer =>
++      'Eine einfache Gruppe hat keine Ebene: Sie kann nicht verschoben werden';
++
++  @override
++  String get layer => 'Ebene';
++
++  @override
++  String get color => 'Farbe';
++
++  @override
++  String get colorNone => 'Keine';
++
++  @override
++  String get colorRefused => 'Farben sind hier nicht änderbar';
++
++  @override
++  String colorName(PlanSwatch swatch) => switch (swatch) {
++        PlanSwatch.red => 'Rot',
++        PlanSwatch.orange => 'Orange',
++        PlanSwatch.yellow => 'Gelb',
++        PlanSwatch.green => 'Grün',
++        PlanSwatch.teal => 'Petrol',
++        PlanSwatch.blue => 'Blau',
++        PlanSwatch.purple => 'Lila',
++        PlanSwatch.grey => 'Grau',
++      };
++
++  @override
++  String get moveSelectionToLayer => 'Auswahl auf eine Ebene verschieben';
++
++  @override
++  String get hiddenLayerNotCurrent =>
++      'Eine ausgeblendete Ebene kann nicht aktuell sein';
++
++  @override
++  String get currentLayer => 'Aktuelle Ebene';
++
++  @override
++  String get makeCurrent => 'Als aktuell festlegen';
++
++  @override
++  String get currentLayerNotHidden =>
++      'Die aktuelle Ebene kann nicht ausgeblendet werden';
++
++  @override
++  String get hideLayer => 'Ebene ausblenden';
++
++  @override
++  String get showLayer => 'Ebene einblenden';
++
++  @override
++  String get unlockLayer => 'Ebene entsperren';
++
++  @override
++  String get lockLayer => 'Ebene sperren';
++
++  @override
++  String get layerColour => 'Ebenenfarbe';
++
++  @override
++  String missingLayer(String hex) => 'Fehlende Ebene $hex';
++
++  @override
++  String colourName(int aci) => switch (aci) {
++        1 => 'Rot',
++        2 => 'Gelb',
++        3 => 'Grün',
++        4 => 'Cyan',
++        5 => 'Blau',
++        6 => 'Magenta',
++        7 => 'Vordergrund',
++        8 => 'Dunkelgrau',
++        9 => 'Hellgrau',
++        _ => '$aci',
++      };
++
++  @override
++  String layerName(int n) => 'Ebene $n';
++
++  @override
++  String get lockedHint => 'Dieses Objekt ist gesperrt';
++
++  @override
++  String get sectionFailed => 'Dieser Abschnitt kann nicht angezeigt werden';
++
++  @override
++  String get planDamaged =>
++      'Eine Bearbeitung ist fehlgeschlagen; der Plan ist möglicherweise '
++      'beschädigt';
++}
+diff --git a/packages/jet_cad_2d_plan/lib/src/l10n/strings_en.dart b/packages/jet_cad_2d_plan/lib/src/l10n/strings_en.dart
+new file mode 100644
+index 00000000..bb4c2b05
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/l10n/strings_en.dart
+@@ -0,0 +1,289 @@
++// The plan library's words in English (spec P5; ported from
++// jet_cad_floor_plan's strings_en.dart, spec 14d L1).
++import 'package:jet_cad_2d/jet_cad_2d.dart'
++    show
++        LayerNameBadCharacter,
++        LayerNameDuplicate,
++        LayerNameEdgeSpace,
++        LayerNameEmpty,
++        LayerNameProblem,
++        LayerNameTooLong;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show PlanSwatch;
++
++import 'strings.dart';
++
++/// The plan library's words in English.
++class PlanStringsEn extends PlanStrings {
++  const PlanStringsEn();
++
++  @override
++  String get languageCode => 'en';
++
++  @override
++  String get decimalSeparator => '.';
++
++  @override
++  String layerNameProblem(LayerNameProblem problem) => switch (problem) {
++        LayerNameEmpty() => 'A layer name cannot be empty.',
++        LayerNameEdgeSpace() =>
++          'A layer name cannot start or end with a space.',
++        LayerNameTooLong(:final max) =>
++          'A layer name can be at most $max characters.',
++        LayerNameBadCharacter(:final character) =>
++          'A layer name cannot contain $character.',
++        LayerNameDuplicate(:final existing) =>
++          'A layer named $existing already exists.',
++      };
++
++  @override
++  String get toolSelect => 'Select';
++
++  @override
++  String get toolLine => 'Line';
++
++  @override
++  String get toolPolyline => 'Polyline';
++
++  @override
++  String get toolRectangle => 'Rectangle';
++
++  @override
++  String get toolCircle => 'Circle';
++
++  @override
++  String get toolArc => 'Arc';
++
++  @override
++  String get toolText => 'Text';
++
++  @override
++  String get toolSymbol => 'Symbol';
++
++  @override
++  String get fill => 'Fill';
++
++  @override
++  String get tabTools => 'Tools';
++
++  @override
++  String get tabSymbols => 'Symbols';
++
++  @override
++  String get objectSnapOn => 'OSNAP';
++
++  @override
++  String get objectSnapOff => 'osnap off';
++
++  @override
++  String get edited => 'Edited';
++
++  @override
++  String get undo => 'Undo';
++
++  @override
++  String get redo => 'Redo';
++
++  @override
++  String get exportEllipsis => 'Export…';
++
++  @override
++  String get printEllipsis => 'Print…';
++
++  @override
++  String get controlKey => 'Ctrl';
++
++  @override
++  String get shiftKey => 'Shift';
++
++  @override
++  String get exportTitle => 'Export';
++
++  @override
++  String get exportAction => 'Export';
++
++  @override
++  String get cancel => 'Cancel';
++
++  @override
++  String get searchSymbols => 'Search symbols';
++
++  @override
++  String get clear => 'Clear';
++
++  @override
++  String get loadingSymbols => 'Loading symbols…';
++
++  @override
++  String get symbolsFailed => 'The symbols could not be loaded.';
++
++  @override
++  String get retry => 'Retry';
++
++  @override
++  String selectedCount(int count) => '$count selected';
++
++  @override
++  String dpi(int dpi) => '$dpi dpi';
++
++  @override
++  String noSymbolsMatch(String query) => 'No symbols match "$query"';
++
++  @override
++  String get name => 'Name';
++
++  @override
++  String get size => 'Size';
++
++  @override
++  String get rotation => 'Rotation';
++
++  @override
++  String get mirror => 'Mirror';
++
++  @override
++  String get pageTitle => 'Page';
++
++  @override
++  String get customSize => 'Custom';
++
++  @override
++  String get portrait => 'Portrait';
++
++  @override
++  String get landscape => 'Landscape';
++
++  @override
++  String get scale => 'Scale';
++
++  @override
++  String get grid => 'Grid';
++
++  @override
++  String get snapToGrid => 'Snap to grid';
++
++  @override
++  String get pageBreaks => 'Page breaks';
++
++  @override
++  String get pageDecimalSeparator => 'Decimal separator';
++
++  @override
++  String get paper => 'Paper';
++
++  @override
++  String get layersLocked => 'Layers cannot be changed in this document';
++
++  @override
++  String get selectLayerToDelete => 'Select a layer to delete it';
++
++  @override
++  String get layerZeroUndeletable => 'Layer 0 cannot be deleted';
++
++  @override
++  String get currentLayerUndeletable => 'The current layer cannot be deleted';
++
++  @override
++  String get layerInUse => 'This layer is in use';
++
++  @override
++  String get layers => 'Layers';
++
++  @override
++  String get newLayer => 'New layer';
++
++  @override
++  String get deleteLayer => 'Delete layer';
++
++  @override
++  String get mixed => 'Mixed';
++
++  @override
++  String get readOnlyDocument => 'Read-only document';
++
++  @override
++  String get plainGroupNoLayer =>
++      'A plain group has no layer: it cannot be moved';
++
++  @override
++  String get layer => 'Layer';
++
++  @override
++  String get color => 'Colour';
++
++  @override
++  String get colorNone => 'None';
++
++  @override
++  String get colorRefused => 'Colours are not editable here';
++
++  @override
++  String colorName(PlanSwatch swatch) => switch (swatch) {
++        PlanSwatch.red => 'Red',
++        PlanSwatch.orange => 'Orange',
++        PlanSwatch.yellow => 'Yellow',
++        PlanSwatch.green => 'Green',
++        PlanSwatch.teal => 'Teal',
++        PlanSwatch.blue => 'Blue',
++        PlanSwatch.purple => 'Purple',
++        PlanSwatch.grey => 'Grey',
++      };
++
++  @override
++  String get moveSelectionToLayer => 'Move the selection to a layer';
++
++  @override
++  String get hiddenLayerNotCurrent => 'A hidden layer cannot be current';
++
++  @override
++  String get currentLayer => 'Current layer';
++
++  @override
++  String get makeCurrent => 'Make current';
++
++  @override
++  String get currentLayerNotHidden => 'The current layer cannot be hidden';
++
++  @override
++  String get hideLayer => 'Hide layer';
++
++  @override
++  String get showLayer => 'Show layer';
++
++  @override
++  String get unlockLayer => 'Unlock layer';
++
++  @override
++  String get lockLayer => 'Lock layer';
++
++  @override
++  String get layerColour => 'Layer colour';
++
++  @override
++  String missingLayer(String hex) => 'Missing layer $hex';
++
++  @override
++  String colourName(int aci) => switch (aci) {
++        1 => 'Red',
++        2 => 'Yellow',
++        3 => 'Green',
++        4 => 'Cyan',
++        5 => 'Blue',
++        6 => 'Magenta',
++        7 => 'Foreground',
++        8 => 'Dark grey',
++        9 => 'Light grey',
++        _ => '$aci',
++      };
++
++  @override
++  String layerName(int n) => 'Layer $n';
++
++  @override
++  String get lockedHint => 'This object is locked';
++
++  @override
++  String get sectionFailed => 'This section could not be shown';
++
++  @override
++  String get planDamaged => 'An edit failed and the plan may be damaged';
++}
+diff --git a/packages/jet_cad_2d_plan/lib/src/l10n/strings_tr.dart b/packages/jet_cad_2d_plan/lib/src/l10n/strings_tr.dart
+new file mode 100644
+index 00000000..57e411b3
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/l10n/strings_tr.dart
+@@ -0,0 +1,288 @@
++// The plan library's words in Turkish (spec P5; ported from
++// jet_cad_floor_plan's strings_tr.dart, spec 14d L1).
++import 'package:jet_cad_2d/jet_cad_2d.dart'
++    show
++        LayerNameBadCharacter,
++        LayerNameDuplicate,
++        LayerNameEdgeSpace,
++        LayerNameEmpty,
++        LayerNameProblem,
++        LayerNameTooLong;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show PlanSwatch;
++
++import 'strings.dart';
++
++/// The plan library's words in Turkish.
++class PlanStringsTr extends PlanStrings {
++  const PlanStringsTr();
++
++  @override
++  String get languageCode => 'tr';
++
++  @override
++  String get decimalSeparator => ',';
++
++  @override
++  String layerNameProblem(LayerNameProblem problem) => switch (problem) {
++        LayerNameEmpty() => 'Katman adı boş olamaz.',
++        LayerNameEdgeSpace() => 'Katman adı boşlukla başlayamaz veya bitemez.',
++        LayerNameTooLong(:final max) =>
++          'Katman adı en fazla $max karakter olabilir.',
++        LayerNameBadCharacter(:final character) =>
++          'Katman adı $character içeremez.',
++        LayerNameDuplicate(:final existing) =>
++          '$existing adlı bir katman zaten var.',
++      };
++
++  @override
++  String get toolSelect => 'Seç';
++
++  @override
++  String get toolLine => 'Çizgi';
++
++  @override
++  String get toolPolyline => 'Çoklu çizgi';
++
++  @override
++  String get toolRectangle => 'Dikdörtgen';
++
++  @override
++  String get toolCircle => 'Daire';
++
++  @override
++  String get toolArc => 'Yay';
++
++  @override
++  String get toolText => 'Metin';
++
++  @override
++  String get toolSymbol => 'Sembol';
++
++  @override
++  String get fill => 'Dolgu';
++
++  @override
++  String get tabTools => 'Araçlar';
++
++  @override
++  String get tabSymbols => 'Semboller';
++
++  @override
++  String get objectSnapOn => 'OSNAP';
++
++  @override
++  String get objectSnapOff => 'OSNAP kapalı';
++
++  @override
++  String get edited => 'Değiştirildi';
++
++  @override
++  String get undo => 'Geri al';
++
++  @override
++  String get redo => 'Yinele';
++
++  @override
++  String get exportEllipsis => 'Dışa aktar…';
++
++  @override
++  String get printEllipsis => 'Yazdır…';
++
++  @override
++  String get controlKey => 'Ctrl';
++
++  @override
++  String get shiftKey => 'Shift';
++
++  @override
++  String get exportTitle => 'Dışa aktar';
++
++  @override
++  String get exportAction => 'Dışa aktar';
++
++  @override
++  String get cancel => 'İptal';
++
++  @override
++  String get searchSymbols => 'Sembol ara';
++
++  @override
++  String get clear => 'Temizle';
++
++  @override
++  String get loadingSymbols => 'Semboller yükleniyor…';
++
++  @override
++  String get symbolsFailed => 'Semboller yüklenemedi.';
++
++  @override
++  String get retry => 'Tekrar dene';
++
++  @override
++  String selectedCount(int count) => '$count seçili';
++
++  @override
++  String dpi(int dpi) => '$dpi dpi';
++
++  @override
++  String noSymbolsMatch(String query) => '"$query" ile eşleşen sembol yok';
++
++  @override
++  String get name => 'Ad';
++
++  @override
++  String get size => 'Boyut';
++
++  @override
++  String get rotation => 'Döndürme';
++
++  @override
++  String get mirror => 'Aynala';
++
++  @override
++  String get pageTitle => 'Sayfa';
++
++  @override
++  String get customSize => 'Özel';
++
++  @override
++  String get portrait => 'Dikey';
++
++  @override
++  String get landscape => 'Yatay';
++
++  @override
++  String get scale => 'Ölçek';
++
++  @override
++  String get grid => 'Izgara';
++
++  @override
++  String get snapToGrid => 'Izgaraya yapış';
++
++  @override
++  String get pageBreaks => 'Sayfa sonları';
++
++  @override
++  String get pageDecimalSeparator => 'Ondalık ayırıcı';
++
++  @override
++  String get paper => 'Kâğıt';
++
++  @override
++  String get layersLocked => 'Bu belgede katmanlar değiştirilemez';
++
++  @override
++  String get selectLayerToDelete => 'Silmek için bir katman seçin';
++
++  @override
++  String get layerZeroUndeletable => '0 katmanı silinemez';
++
++  @override
++  String get currentLayerUndeletable => 'Geçerli katman silinemez';
++
++  @override
++  String get layerInUse => 'Bu katman kullanımda';
++
++  @override
++  String get layers => 'Katmanlar';
++
++  @override
++  String get newLayer => 'Yeni katman';
++
++  @override
++  String get deleteLayer => 'Katmanı sil';
++
++  @override
++  String get mixed => 'Karışık';
++
++  @override
++  String get readOnlyDocument => 'Salt okunur belge';
++
++  @override
++  String get plainGroupNoLayer => 'Düz bir grubun katmanı yok: taşınamaz';
++
++  @override
++  String get layer => 'Katman';
++
++  @override
++  String get color => 'Renk';
++
++  @override
++  String get colorNone => 'Yok';
++
++  @override
++  String get colorRefused => 'Renkler burada değiştirilemez';
++
++  @override
++  String colorName(PlanSwatch swatch) => switch (swatch) {
++        PlanSwatch.red => 'Kırmızı',
++        PlanSwatch.orange => 'Turuncu',
++        PlanSwatch.yellow => 'Sarı',
++        PlanSwatch.green => 'Yeşil',
++        PlanSwatch.teal => 'Turkuaz',
++        PlanSwatch.blue => 'Mavi',
++        PlanSwatch.purple => 'Mor',
++        PlanSwatch.grey => 'Gri',
++      };
++
++  @override
++  String get moveSelectionToLayer => 'Seçimi bir katmana taşı';
++
++  @override
++  String get hiddenLayerNotCurrent => 'Gizli bir katman geçerli olamaz';
++
++  @override
++  String get currentLayer => 'Geçerli katman';
++
++  @override
++  String get makeCurrent => 'Geçerli yap';
++
++  @override
++  String get currentLayerNotHidden => 'Geçerli katman gizlenemez';
++
++  @override
++  String get hideLayer => 'Katmanı gizle';
++
++  @override
++  String get showLayer => 'Katmanı göster';
++
++  @override
++  String get unlockLayer => 'Katman kilidini aç';
++
++  @override
++  String get lockLayer => 'Katmanı kilitle';
++
++  @override
++  String get layerColour => 'Katman rengi';
++
++  @override
++  String missingLayer(String hex) => 'Eksik katman $hex';
++
++  @override
++  String colourName(int aci) => switch (aci) {
++        1 => 'Kırmızı',
++        2 => 'Sarı',
++        3 => 'Yeşil',
++        4 => 'Camgöbeği',
++        5 => 'Mavi',
++        6 => 'Eflatun',
++        7 => 'Ön plan',
++        8 => 'Koyu gri',
++        9 => 'Açık gri',
++        _ => '$aci',
++      };
++
++  @override
++  String layerName(int n) => 'Katman $n';
++
++  @override
++  String get lockedHint => 'Bu nesne kilitli';
++
++  @override
++  String get sectionFailed => 'Bu bölüm gösterilemiyor';
++
++  @override
++  String get planDamaged =>
++      'Bir düzenleme başarısız oldu; plan bozulmuş olabilir';
++}
+diff --git a/packages/jet_cad_2d_plan/lib/src/theme/plan_theme.dart b/packages/jet_cad_2d_plan/lib/src/theme/plan_theme.dart
+new file mode 100644
+index 00000000..962dc5e0
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/theme/plan_theme.dart
+@@ -0,0 +1,238 @@
++// The plan library's look (spec P5 "Theme"): a ThemeExtension a host puts
++// in its ThemeData, overridden field by field by a view's own theme,
++// resolved once below the view and read where painters rebuild, never per
++// frame. Ported from jet_cad_floor_plan's FloorPlanTheme (host embedding
++// API spec T-1, T-2): its generic part, the selection and the canvas. 2b
++// adds the statuses, groups, focus veil, table colours and service bar.
++import 'dart:math' as math;
++import 'dart:ui' show lerpDouble;
++
++import 'package:flutter/foundation.dart';
++import 'package:flutter/material.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show PaperPalette;
++
++/// The plan library's look: the colours and widths a host may set. Every
++/// field is optional, and null is today's value, so `const PlanTheme()`
++/// draws exactly what no theme draws.
++///
++/// A host puts one in each of its `ThemeData`s, a light and a dark
++/// (`ThemeData(extensions: [PlanTheme(...)])`), and may override it for one
++/// editor with `PlanEditor(theme: ...)`, field by field ([merge]). The
++/// constructor never throws; the scope refuses a resolved theme out of
++/// range when it builds (an [ArgumentError] naming the field). The theme is
++/// never saved, exported or printed.
++@immutable
++final class PlanTheme extends ThemeExtension<PlanTheme> {
++  const PlanTheme({
++    this.selectionOnLight,
++    this.selectionOnDark,
++    this.selectionWidth,
++    this.canvasBackground,
++  });
++
++  /// The resolved theme for [context]: the nearest [PlanThemeScope]'s, else
++  /// the ambient extension (validated); null when no theme is set anywhere,
++  /// which draws today's look (as does every null field). Registers
++  /// [context] as a dependent. Read in `didChangeDependencies`, never per
++  /// frame.
++  static PlanTheme? of(BuildContext context) => PlanThemeScope.of(context);
++
++  /// The selection colour on a light paper, as the paper's palette chooses
++  /// today; the hover is derived from it. Null: the light palette's.
++  final Color? selectionOnLight;
++
++  /// The selection colour on a dark paper (and on the dark canvas). Null:
++  /// the dark palette's.
++  final Color? selectionOnDark;
++
++  /// The selection outline's stroke, in screen logical pixels, finite and
++  /// above 0. Null: 2. The hover stays 1.5.
++  final double? selectionWidth;
++
++  /// The canvas around the page and a page-less plan's paper: the
++  /// drafting's ink follows it as it follows a page. A translucent colour is
++  /// used as given (the ink keys on its RGB). Null: the ambient
++  /// `ColorScheme.surface`.
++  final Color? canvasBackground;
++
++  /// A copy with the given fields replaced; a null argument keeps the
++  /// field (Flutter's convention: [merge] a theme to set fields, there is
++  /// no way back to null here).
++  @override
++  PlanTheme copyWith({
++    Color? selectionOnLight,
++    Color? selectionOnDark,
++    double? selectionWidth,
++    Color? canvasBackground,
++  }) =>
++      PlanTheme(
++        selectionOnLight: selectionOnLight ?? this.selectionOnLight,
++        selectionOnDark: selectionOnDark ?? this.selectionOnDark,
++        selectionWidth: selectionWidth ?? this.selectionWidth,
++        canvasBackground: canvasBackground ?? this.canvasBackground,
++      );
++
++  /// This theme with [other]'s set fields over it, field by field: a field
++  /// [other] leaves null keeps this theme's. A null [other] returns this
++  /// theme itself.
++  PlanTheme merge(PlanTheme? other) {
++    if (other == null) return this;
++    return PlanTheme(
++      selectionOnLight: other.selectionOnLight ?? selectionOnLight,
++      selectionOnDark: other.selectionOnDark ?? selectionOnDark,
++      selectionWidth: other.selectionWidth ?? selectionWidth,
++      canvasBackground: other.canvasBackground ?? canvasBackground,
++    );
++  }
++
++  /// The theme [t] of the way to [other], for an animated theme switch.
++  ///
++  /// A field set on both sides is interpolated ([Color.lerp], [lerpDouble]),
++  /// the width clamped between its two ends: a host's overshooting curve
++  /// drives `t` out of `[0, 1]`, and two valid themes must never animate
++  /// into one the scope refuses. A field null on one side means a value that
++  /// depends on the paper, which cannot be interpolated, so it takes the
++  /// side `t` is nearer (this one below 0.5), whole, never fading from
++  /// transparent.
++  ///
++  /// A field equal on both sides is that side's value, and an [other] equal
++  /// to this theme returns this theme itself, so a theme that is the same in
++  /// a host's light and dark `ThemeData` stays `==` on every frame of the
++  /// switch and notifies nobody. A null [other] returns this theme itself.
++  @override
++  PlanTheme lerp(covariant ThemeExtension<PlanTheme>? other, double t) {
++    if (other is! PlanTheme || this == other) return this;
++    return PlanTheme(
++      selectionOnLight:
++          _lerp(selectionOnLight, other.selectionOnLight, t, Color.lerp),
++      selectionOnDark:
++          _lerp(selectionOnDark, other.selectionOnDark, t, Color.lerp),
++      selectionWidth:
++          _lerp(selectionWidth, other.selectionWidth, t, _lerpBetween),
++      canvasBackground:
++          _lerp(canvasBackground, other.canvasBackground, t, Color.lerp),
++    );
++  }
++
++  /// [a] to [b] at [t] by [lerp] when both are set and differ, [a] when
++  /// they are equal, else the nearer side.
++  static T? _lerp<T extends Object>(
++          T? a, T? b, double t, T? Function(T a, T b, double t) lerp) =>
++      a == null || b == null ? (t < 0.5 ? a : b) : (a == b ? a : lerp(a, b, t));
++
++  /// [lerpDouble] clamped between [a] and [b], whatever [t].
++  static double _lerpBetween(double a, double b, double t) =>
++      clampDouble(lerpDouble(a, b, t)!, math.min(a, b), math.max(a, b));
++
++  @override
++  bool operator ==(Object other) =>
++      other is PlanTheme &&
++      other.selectionOnLight == selectionOnLight &&
++      other.selectionOnDark == selectionOnDark &&
++      other.selectionWidth == selectionWidth &&
++      other.canvasBackground == canvasBackground;
++
++  @override
++  int get hashCode => Object.hash(
++      selectionOnLight, selectionOnDark, selectionWidth, canvasBackground);
++
++  /// Every field by name, in declaration order (for [toString]).
++  Map<String, Object?> get _fields => {
++        'selectionOnLight': selectionOnLight,
++        'selectionOnDark': selectionOnDark,
++        'selectionWidth': selectionWidth,
++        'canvasBackground': canvasBackground,
++      };
++
++  /// The set fields only, by name: `PlanTheme(selectionWidth: 4.0)`, and
++  /// `PlanTheme()` for none.
++  @override
++  String toString() => 'PlanTheme(${[
++        for (final MapEntry(:key, :value) in _fields.entries)
++          if (value != null) '$key: $value',
++      ].join(', ')})';
++}
++
++/// Throws an [ArgumentError] naming the field for a resolved [theme] the
++/// canvas cannot draw: a selection width not finite or not above 0.
++@internal
++void validatePlanTheme(PlanTheme theme) {
++  final width = theme.selectionWidth;
++  if (width != null && !(width.isFinite && width > 0)) {
++    throw ArgumentError.value(
++        width, 'selectionWidth', 'must be finite and above 0');
++  }
++}
++
++/// The overlays' colours on the display paper [paperArgb] under [theme]: the
++/// set [PaperPalette.forPaper] picks, with the theme's colour for that set
++/// (`selectionOnDark` for the dark set, `selectionOnLight` for the light) as
++/// its selection and hover ([PaperPalette.withSelection]). With no theme,
++/// or no colour for that set, it is the `const` set itself, so a canvas
++/// with no theme hands its painters today's instance. Grips and the
++/// attachment marker take this palette's grip and snap colours.
++///
++/// Called where a canvas builds, never per frame.
++@internal
++PaperPalette planPaperPaletteFor(int paperArgb, PlanTheme? theme) {
++  final set = PaperPalette.forPaper(paperArgb);
++  final colour = identical(set, PaperPalette.dark)
++      ? theme?.selectionOnDark
++      : theme?.selectionOnLight;
++  return colour == null ? set : set.withSelection(colour);
++}
++
++/// Resolves the plan library's look just below an editor or a canvas: the
++/// ambient extension of `Theme.of(context)` with [view]'s set fields over
++/// it, validated, provided by an [InheritedPlanTheme] compared by `==`.
++///
++/// Only this widget depends on the ambient `Theme`: a theme switch rebuilds
++/// it and hands the inherited widget the same [child], so nothing between
++/// it and the dependents is rebuilt by it.
++@internal
++class PlanThemeScope extends StatelessWidget {
++  const PlanThemeScope({super.key, required this.view, required this.child});
++
++  /// A view's own theme: overrides the ambient extension field by field.
++  final PlanTheme? view;
++
++  final Widget child;
++
++  /// The resolved theme of the nearest scope above [context] (null: no
++  /// theme anywhere), registering [context] as its dependent; with no scope
++  /// above, the ambient extension, validated as the scope validates it (an
++  /// [ArgumentError] naming the field).
++  static PlanTheme? of(BuildContext context) {
++    final scope =
++        context.dependOnInheritedWidgetOfExactType<InheritedPlanTheme>();
++    if (scope != null) return scope.theme;
++    final ambient = Theme.of(context).extension<PlanTheme>();
++    if (ambient != null) validatePlanTheme(ambient);
++    return ambient;
++  }
++
++  @override
++  Widget build(BuildContext context) {
++    final ambient = Theme.of(context).extension<PlanTheme>();
++    final resolved = ambient == null ? view : ambient.merge(view);
++    if (resolved != null) validatePlanTheme(resolved);
++    return InheritedPlanTheme(theme: resolved, child: child);
++  }
++}
++
++/// The resolved theme under a [PlanThemeScope]. A plain [InheritedWidget],
++/// not an `InheritedTheme`: a route pushed from below it (the export
++/// dialog) does not carry the view's override.
++@internal
++class InheritedPlanTheme extends InheritedWidget {
++  const InheritedPlanTheme(
++      {super.key, required this.theme, required super.child});
++
++  /// The resolved theme; null for today's look.
++  final PlanTheme? theme;
++
++  /// By value: an equal theme rebuilt by the host notifies nobody.
++  @override
++  bool updateShouldNotify(InheritedPlanTheme oldWidget) =>
++      theme != oldWidget.theme;
++}
+diff --git a/packages/jet_cad_2d_plan/pubspec.yaml b/packages/jet_cad_2d_plan/pubspec.yaml
+index a78d13f1..69a2075e 100644
+--- a/packages/jet_cad_2d_plan/pubspec.yaml
++++ b/packages/jet_cad_2d_plan/pubspec.yaml
+@@ -14,20 +14,27 @@ topics:
+   - editor
+ resolution: workspace
+ 
+ environment:
+   sdk: ^3.6.0
+   flutter: ">=3.44.0"
+ 
+ dependencies:
+   flutter:
+     sdk: flutter
++  flutter_localizations:
++    sdk: flutter
+   jet_cad_2d: ^0.7.2
+   jet_cad_2d_flutter: ^0.7.2
+   jet_cad_2d_kit: ^0.1.0
+   meta: ^1.18.0
+   vector_math: ^2.2.0
+ 
+ dev_dependencies:
+   flutter_test:
+     sdk: flutter
+   lints: ^6.1.0
++
++flutter:
++  assets:
++    - lib/fonts/Roboto-Regular.ttf
++    - assets/fonts/Roboto_LICENSE.txt
+diff --git a/packages/jet_cad_2d_plan/test/fonts/fonts_register_test.dart b/packages/jet_cad_2d_plan/test/fonts/fonts_register_test.dart
+new file mode 100644
+index 00000000..aeed38f0
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/fonts/fonts_register_test.dart
+@@ -0,0 +1,62 @@
++// Spec 14 V-11, review F-3: family `Roboto` measures in the test font until
++// `ensurePlanFonts` registers the bundled face, then measures as those
++// bytes do. Alone in its file, so its process has registered nothing
++// before it measures (a registered face cannot be taken back). Ported from
++// jet_cad_floor_plan (2a Task 9).
++import 'dart:io';
++
++import 'package:flutter/foundation.dart' show FlutterError;
++import 'package:flutter/painting.dart';
++import 'package:flutter/services.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_plan/src/fonts/plan_fonts.dart';
++
++class _MapBundle extends CachingAssetBundle {
++  _MapBundle(this.assets);
++
++  final Map<String, Uint8List> assets;
++
++  @override
++  Future<ByteData> load(String key) async {
++    final bytes = assets[key];
++    if (bytes == null) throw FlutterError('no asset $key');
++    return ByteData.sublistView(bytes);
++  }
++}
++
++/// The laid-out width of [text] in [family] at 20 px.
++double _width(String text, String family) {
++  final painter = TextPainter(
++    text: TextSpan(
++        text: text, style: TextStyle(fontFamily: family, fontSize: 20)),
++    textDirection: TextDirection.ltr,
++  )..layout();
++  final width = painter.width;
++  painter.dispose();
++  return width;
++}
++
++void main() {
++  testWidgets(
++      'FR1 Roboto measures in the test font before the registration and in '
++      'the bundled face after it (M-14b1-2)', (tester) async {
++    const sample = 'Masa 12 · Teras İçi';
++    expect(kPlanFontFamily, 'Roboto');
++    final before = _width(sample, kPlanFontFamily);
++    expect(before, _width(sample, 'NoSuchFamily'),
++        reason: 'premise: nothing named Roboto is registered yet');
++
++    final bytes = File('lib/fonts/Roboto-Regular.ttf').readAsBytesSync();
++    await tester.runAsync(() async {
++      // A probe family over the same bytes: what Roboto must measure as.
++      final probe = FontLoader('JetCadRobotoProbe')
++        ..addFont(Future.value(ByteData.sublistView(bytes)));
++      await probe.load();
++      await ensurePlanFonts(_MapBundle(
++          {'packages/jet_cad_2d_plan/lib/fonts/Roboto-Regular.ttf': bytes}));
++    });
++    final after = _width(sample, kPlanFontFamily);
++    expect(after, isNot(before));
++    expect(after, _width(sample, 'JetCadRobotoProbe'));
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/fonts/plan_assets_test.dart b/packages/jet_cad_2d_plan/test/fonts/plan_assets_test.dart
+new file mode 100644
+index 00000000..d7e41692
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/fonts/plan_assets_test.dart
+@@ -0,0 +1,121 @@
++// Spec P5 "Fonts": the plan's font and its licence are the package's
++// assets, read under its `packages/` keys (ported from jet_cad_floor_plan's
++// package_assets_test PA1, PA5), the font is the vendored face byte for
++// byte, and registerFontLicences registers the licence under `Roboto`.
++// PA6 and PA8 (ensurePlanFonts' retry and its one registration) are
++// ported from the same file's V-11 group.
++import 'dart:convert';
++import 'dart:io';
++
++import 'package:flutter/foundation.dart';
++import 'package:flutter/services.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_plan/src/fonts/plan_fonts.dart';
++
++class _MapBundle extends CachingAssetBundle {
++  _MapBundle(this.assets);
++
++  final Map<String, Uint8List> assets;
++
++  @override
++  Future<ByteData> load(String key) async {
++    final bytes = assets[key];
++    if (bytes == null) throw FlutterError('no asset $key');
++    return ByteData.sublistView(bytes);
++  }
++}
++
++void main() {
++  // Written out, not read from the constants: a key that drifted back to
++  // another package's must turn these red.
++  const fontKey = 'packages/jet_cad_2d_plan/lib/fonts/Roboto-Regular.ttf';
++  const licenceKey = 'packages/jet_cad_2d_plan/assets/fonts/Roboto_LICENSE.txt';
++
++  test('PA1 the constants name the package keys', () {
++    expect(kPlanFontAsset, fontKey);
++    expect(kPlanFontLicenceAsset, licenceKey);
++    expect(kPlanFontFamily, 'Roboto');
++  });
++
++  test('PA5 the pubspec declares the two font assets', () {
++    final pubspec = File('pubspec.yaml').readAsStringSync();
++    for (final asset in const [
++      'lib/fonts/Roboto-Regular.ttf',
++      'assets/fonts/Roboto_LICENSE.txt',
++    ]) {
++      expect(
++          RegExp('^\\s*-\\s+${RegExp.escape(asset)}\\s*\$', multiLine: true)
++              .hasMatch(pubspec),
++          isTrue,
++          reason: asset);
++      expect(File(asset).existsSync(), isTrue, reason: asset);
++    }
++  });
++
++  test('W-F1 the font is the vendored face, byte for byte', () {
++    // M-W-F1: any other file at lib/fonts/Roboto-Regular.ttf.
++    final ours = File('lib/fonts/Roboto-Regular.ttf').readAsBytesSync();
++    final vendored =
++        File('../jet_cad_2d_flutter/test/golden/fonts/Roboto-Regular.ttf')
++            .readAsBytesSync();
++    expect(ours, orderedEquals(vendored));
++    expect(
++        File('assets/fonts/Roboto_LICENSE.txt').readAsStringSync(),
++        File('../jet_cad_2d_flutter/test/golden/fonts/Roboto_LICENSE.txt')
++            .readAsStringSync());
++  });
++
++  test(
++      'W-F2 registerFontLicences adds one entry for Roboto, its text read '
++      'from the given bundle under the package key', () async {
++    LicenseRegistry.reset();
++    addTearDown(LicenseRegistry.reset);
++    registerFontLicences(
++        _MapBundle({licenceKey: utf8.encode('Licence text 7')}));
++    final entries = await LicenseRegistry.licenses.toList();
++    // M-W-F2a: the package named 'roboto' finds nothing here.
++    final roboto = [
++      for (final e in entries)
++        if (e.packages.contains('Roboto')) e
++    ];
++    expect(roboto, hasLength(1));
++    // M-W-F2b: `rootBundle` in place of the given bundle reads the real
++    // licence (or nothing) instead.
++    expect([for (final p in roboto.single.paragraphs) p.text].join('\n'),
++        'Licence text 7');
++  });
++
++  group('V-11 ensurePlanFonts (ported PA6, PA8)', () {
++    // The registration is process-wide: each test starts from none (review
++    // F-3), and every call that reads a bundle runs in real async time.
++    setUp(resetPlanFontsForTest);
++    tearDown(resetPlanFontsForTest);
++
++    Uint8List font() => File('lib/fonts/Roboto-Regular.ttf').readAsBytesSync();
++
++    testWidgets(
++        'PA6 a bundle without the font fails the registration, and the next '
++        'call tries again', (tester) async {
++      await tester.runAsync(() async {
++        await expectLater(
++            ensurePlanFonts(_MapBundle(const {})), throwsA(anything));
++      });
++      // Not held: this call registers from a bundle that has the bytes.
++      final bytes = font();
++      await tester
++          .runAsync(() => ensurePlanFonts(_MapBundle({fontKey: bytes})));
++    });
++
++    testWidgets('PA8 a second call returns the first call\'s future',
++        (tester) async {
++      final bundle = _MapBundle({fontKey: font()});
++      await tester.runAsync(() async {
++        final first = ensurePlanFonts(bundle);
++        expect(ensurePlanFonts(bundle), same(first));
++        expect(ensurePlanFonts(), same(first),
++            reason: 'a later call, whatever its bundle, gets the first');
++        await first;
++      });
++    });
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/l10n/document_separator_test.dart b/packages/jet_cad_2d_plan/test/l10n/document_separator_test.dart
+new file mode 100644
+index 00000000..7f369790
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/l10n/document_separator_test.dart
+@@ -0,0 +1,93 @@
++// Spec Q0 N1 (M-Q0-e): a new plan takes the separator of the language
++// class, not of its language code, and a host's own class settles the
++// controller's empty plan by its separator (controller ruling on NS7:
++// PlanLocaleScope.push reports PlanStrings.of(context) with the locale).
++// Ported from jet_cad_floor_plan's new_plan_separator_test.dart NS7a and
++// NS7 (2a Task 9); the view is a widget that pushes the locale as every
++// widget of the plan library does.
++import 'package:flutter/foundation.dart' show SynchronousFuture;
++import 'package:flutter/material.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:jet_cad_2d_plan/src/l10n/document_separator.dart';
++import 'package:jet_cad_2d_plan/src/l10n/locale_scope.dart';
++
++/// A host's own language (the final review's F-1): English words, French
++/// numbers, so only the class -- not a built-in language of its locale --
++/// can give `,`.
++class _Fr extends PlanStringsEn {
++  const _Fr();
++  @override
++  String get languageCode => 'fr';
++  @override
++  String get decimalSeparator => ',';
++}
++
++class _FrDelegate extends LocalizationsDelegate<PlanStrings> {
++  const _FrDelegate();
++  @override
++  bool isSupported(Locale locale) => true;
++  @override
++  Future<PlanStrings> load(Locale locale) => SynchronousFuture(const _Fr());
++  @override
++  bool shouldReload(_FrDelegate old) => false;
++}
++
++/// A widget of the plan library's shape: it pushes the locale from
++/// didChangeDependencies.
++class _Shows extends StatefulWidget {
++  const _Shows({required this.controller});
++  final PlanController controller;
++  @override
++  State<_Shows> createState() => _ShowsState();
++}
++
++class _ShowsState extends State<_Shows> {
++  @override
++  void didChangeDependencies() {
++    super.didChangeDependencies();
++    PlanLocaleScope.push(context, widget.controller);
++  }
++
++  @override
++  Widget build(BuildContext context) => const SizedBox();
++}
++
++void main() {
++  test(
++      'NS7a documentSeparatorFor reads the class\'s separator, not its '
++      'language code', () {
++    expect(documentSeparatorFor(const _Fr()), DecimalSeparator.comma);
++    expect(documentSeparatorFor(const PlanStringsEn()), DecimalSeparator.point);
++  });
++
++  testWidgets(
++      'NS7 a host\'s own language class settles the empty plan by its '
++      'separator (V-5): French, which no built-in language covers, gives '
++      'comma', (tester) async {
++    await tester.binding.setSurfaceSize(const Size(1440, 900));
++    addTearDown(() => tester.binding.setSurfaceSize(null));
++    final c = PlanController(kits: const []);
++    addTearDown(c.dispose);
++    await tester.pumpWidget(MaterialApp(
++        locale: const Locale('fr'),
++        supportedLocales: const [Locale('fr')],
++        localizationsDelegates: [
++          const _FrDelegate(),
++          ...planLocalizationsDelegates
++              .where((d) => d != PlanLocalizations.delegate),
++        ],
++        home: Scaffold(body: _Shows(controller: c))));
++    await tester.pump();
++    expect(PlanStrings.forLocale(const Locale('fr')).decimalSeparator, '.',
++        reason: 'premise: the built-in language for fr would give point');
++    expect(
++        c.document.components
++            .get<PageComponent>(c.document.rootHandle)!
++            .decimalSeparator,
++        DecimalSeparator.comma);
++    expect(c.document.commands.undoDepth, 0);
++    expect(c.dirty.value, isFalse);
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/l10n/l10n_test.dart b/packages/jet_cad_2d_plan/test/l10n/l10n_test.dart
+new file mode 100644
+index 00000000..b9265d2b
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/l10n/l10n_test.dart
+@@ -0,0 +1,178 @@
++// Spec 14d L2, L11, L12, L15 (revision 2): the language lookup in each of
++// V-4's host set-ups, the panels' numbers, and the search's fold.
++// Ported from jet_cad_floor_plan (2a Task 9).
++import 'package:flutter/foundation.dart' show SynchronousFuture;
++import 'package:flutter/material.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:jet_cad_2d_plan/src/l10n/number_text.dart';
++import 'package:jet_cad_2d_plan/src/l10n/search_fold.dart';
++
++/// The words a widget under [app] sees.
++Future<PlanStrings> wordsUnder(
++    WidgetTester tester, Widget Function(Widget probe) app) async {
++  late PlanStrings seen;
++  await tester.pumpWidget(app(Builder(builder: (context) {
++    seen = PlanStrings.of(context);
++    return const SizedBox();
++  })));
++  return seen;
++}
++
++class _Custom extends PlanStringsTr {
++  const _Custom();
++}
++
++class _CustomDelegate extends LocalizationsDelegate<PlanStrings> {
++  const _CustomDelegate();
++  @override
++  bool isSupported(Locale locale) => true;
++  @override
++  Future<PlanStrings> load(Locale locale) => SynchronousFuture(const _Custom());
++  @override
++  bool shouldReload(_CustomDelegate old) => false;
++}
++
++void main() {
++  testWidgets(
++      'LB1 a host listing the locales and the delegates gets German and '
++      'Turkish; an unlisted language resolves to English (M-14d-b)',
++      (tester) async {
++    for (final (locale, type) in [
++      (const Locale('de'), PlanStringsDe),
++      (const Locale('tr', 'TR'), PlanStringsTr),
++      (const Locale('en', 'GB'), PlanStringsEn),
++      (const Locale('fr'), PlanStringsEn),
++    ]) {
++      final words = await wordsUnder(
++          tester,
++          (probe) => MaterialApp(
++              locale: locale,
++              supportedLocales: planSupportedLocales,
++              localizationsDelegates: planLocalizationsDelegates,
++              home: probe));
++      expect(words.runtimeType, type, reason: '$locale');
++    }
++  });
++
++  testWidgets(
++      'LB2 without the planner\'s delegate the resolved locale still '
++      'chooses (M-14d-b)', (tester) async {
++    for (final (locale, type) in [
++      (const Locale('de'), PlanStringsDe),
++      (const Locale('tr'), PlanStringsTr),
++    ]) {
++      final words = await wordsUnder(
++          tester,
++          (probe) => MaterialApp(
++              locale: locale,
++              supportedLocales: planSupportedLocales,
++              localizationsDelegates: planLocalizationsDelegates
++                  .where((d) => d != PlanLocalizations.delegate),
++              home: probe));
++      expect(words.runtimeType, type, reason: '$locale');
++    }
++  });
++
++  testWidgets(
++      'LB3 a default MaterialApp on a Turkish device resolves to en_US, so '
++      'English (documented, V-4); no Localizations at all is English too',
++      (tester) async {
++    tester.platformDispatcher.localesTestValue = const [Locale('tr', 'TR')];
++    addTearDown(tester.platformDispatcher.clearLocalesTestValue);
++    final words = await wordsUnder(tester, (probe) => MaterialApp(home: probe));
++    expect(words, isA<PlanStringsEn>());
++    final bare = await wordsUnder(
++        tester,
++        (probe) =>
++            Directionality(textDirection: TextDirection.ltr, child: probe));
++    expect(bare, isA<PlanStringsEn>());
++  });
++
++  testWidgets('LB4 a host\'s own delegate wins', (tester) async {
++    final words = await wordsUnder(
++        tester,
++        (probe) => MaterialApp(
++            locale: const Locale('tr'),
++            supportedLocales: planSupportedLocales,
++            localizationsDelegates: [
++              const _CustomDelegate(),
++              ...planLocalizationsDelegates
++                  .where((d) => d != PlanLocalizations.delegate),
++            ],
++            home: probe));
++    expect(words, isA<_Custom>());
++  });
++
++  test('LB5 the built-in languages by code', () {
++    expect(PlanStrings.forLocale(const Locale('de')).languageCode, 'de');
++    expect(PlanStrings.forLocale(const Locale('tr')).languageCode, 'tr');
++    expect(PlanStrings.forLocale(null).languageCode, 'en');
++    expect(const PlanStringsEn().decimalSeparator, '.');
++    expect(const PlanStringsDe().decimalSeparator, ',');
++    expect(const PlanStringsTr().decimalSeparator, ',');
++    // The Page panel's caption (spec Q0 P1; the final review's F-8).
++    expect(const PlanStringsEn().pageDecimalSeparator, 'Decimal separator');
++    expect(const PlanStringsDe().pageDecimalSeparator, 'Dezimaltrennzeichen');
++    expect(const PlanStringsTr().pageDecimalSeparator, 'Ondalık ayırıcı');
++  });
++
++  group('NT the panels\' numbers (L12, L15 as amended, M-14d-f)', () {
++    const en = PlanStringsEn(), de = PlanStringsDe();
++    const tr = PlanStringsTr();
++
++    test('shown with the language\'s separator, never grouped', () {
++      expect(formatPanelNumber(1.5, en), '1.5');
++      expect(formatPanelNumber(1.5, de), '1,5');
++      expect(formatPanelNumber(-2400.125, tr), '-2400,125');
++      expect(formatPanelNumber(1600, de), '1600');
++      expect(formatPanelNumber(-0.0, tr), '-0,0');
++    });
++
++    test('a shown value reads back exactly', () {
++      for (final v in [1.5, -2400.125, 1600.0, 0.1, -0.0, 1e20, 1e300]) {
++        for (final s in [en, de, tr]) {
++          final back = parsePanelNumber(formatPanelNumber(v, s), s)!;
++          expect(back, v, reason: '$v in ${s.languageCode}');
++          expect(back.isNegative, v.isNegative);
++        }
++      }
++    });
++
++    test('the language\'s separator; the other once, unless a grouping', () {
++      final cases = <(String, PlanStrings, double?)>[
++        ('1,5', de, 1.5),
++        (' 1,5 ', tr, 1.5),
++        ('1.5', de, 1.5), // an English keypad on a German UI (V-12)
++        ('1.600', de, null),
++        ('1.234,5', de, null),
++        ('1,2,3', tr, null),
++        ('1.5', en, 1.5),
++        ('1,5', en, 1.5),
++        ('1,600', en, null),
++        ('1,234.5', en, null),
++        ('-0,25', tr, -0.25),
++        ('1e3', de, 1000),
++        ('abc', tr, null),
++      ];
++      for (final (text, s, want) in cases) {
++        expect(parsePanelNumber(text, s), want,
++            reason: '"$text" in ${s.languageCode}');
++      }
++    });
++  });
++
++  test('SF the fold meets either language\'s letters (L11, M-14d-j)', () {
++    expect(searchFold('Köşe kabin'), 'kose kabin');
++    expect(searchFold('ISIK'), searchFold('ışık'));
++    expect(searchFold('İSTANBUL'), 'istanbul');
++    // The web lower-cases `İ` to `i` and a combining dot (the full Unicode
++    // mapping); the VM to `i` alone. Both fold alike.
++    expect(searchFold('i\u0307stanbul'), 'istanbul');
++    expect(searchFold('Kâğıt'), 'kagit');
++    expect(searchFold('Straße'), 'strasse');
++    expect(searchFold('Çay ocağı'), 'cay ocagi');
++    expect(searchFold('Höhe ÜBER'), 'hohe uber');
++    expect(searchFold('booth'), 'booth');
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/l10n/locale_scope_test.dart b/packages/jet_cad_2d_plan/test/l10n/locale_scope_test.dart
+new file mode 100644
+index 00000000..65932c81
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/l10n/locale_scope_test.dart
+@@ -0,0 +1,173 @@
++// Spec P5 "Words": the widgets push the app's locale into
++// controller.locale, and a kit's KitWords read it live, so a kit's words
++// follow a change of language while mounted; English stands in for a
++// language the kit lacks. A new plan takes the pushed language's decimal
++// separator (today's rule, spec Q0 N1).
++import 'package:flutter/material.dart';
++import 'package:flutter/scheduler.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:jet_cad_2d_plan/src/l10n/locale_scope.dart';
++
++/// The services the probe tool's factory was given, per test.
++PlanServices? captured;
++
++/// A tool that does nothing: only its factory matters here.
++class _IdleTool extends Tool {
++  @override
++  String get name => 'probe';
++  @override
++  ToolPhase get phase => ToolPhase.idle;
++  @override
++  void onPointerDown(ToolPointerEvent e, ToolContext ctx) {}
++  @override
++  void onPointerMove(ToolPointerEvent e, ToolContext ctx) {}
++  @override
++  void onPointerUp(ToolPointerEvent e, ToolContext ctx) {}
++  @override
++  void onPointerExit(ToolContext ctx) {}
++  @override
++  KeyEventResult onKey(KeyEvent event, ToolContext ctx) =>
++      KeyEventResult.ignored;
++  @override
++  void cancel(ToolContext ctx) {}
++  @override
++  void paintOverlay(Canvas canvas, ViewportTransform camera, Size viewport,
++      PaperPalette paper) {}
++}
++
++/// A kit with one tool, English and Turkish words, no German.
++PlanKit probeKit() => PlanKit(
++      id: 'wkit',
++      version: '1.0.0',
++      tools: [
++        PlanTool(
++            id: 'wkit.probe',
++            icon: Icons.circle_outlined,
++            create: (services) {
++              captured = services;
++              return _IdleTool();
++            }),
++      ],
++      names: const KitNames({
++        'en': {'tool:wkit.probe': 'Probe'},
++        'tr': {'tool:wkit.probe': 'Sonda'},
++      }),
++    );
++
++/// A widget of the plan library's shape: it pushes the locale from
++/// didChangeDependencies, as every widget of Tasks 13 and 15-20 does.
++class _Pusher extends StatefulWidget {
++  const _Pusher({required this.controller});
++  final PlanController controller;
++  @override
++  State<_Pusher> createState() => _PusherState();
++}
++
++class _PusherState extends State<_Pusher> {
++  @override
++  void didChangeDependencies() {
++    super.didChangeDependencies();
++    PlanLocaleScope.push(context, widget.controller);
++  }
++
++  @override
++  Widget build(BuildContext context) => const SizedBox();
++}
++
++Widget appIn(Locale locale, PlanController c) => MaterialApp(
++    locale: locale,
++    supportedLocales: planSupportedLocales,
++    localizationsDelegates: planLocalizationsDelegates,
++    home: _Pusher(controller: c));
++
++void main() {
++  setUp(() => captured = null);
++
++  testWidgets(
++      'W-L1 the app\'s locale reaches controller.locale and a kit\'s words '
++      'follow it while mounted; a language the kit lacks reads English',
++      (tester) async {
++    final c = PlanController(kits: [probeKit()]);
++    addTearDown(c.dispose);
++    c.selectTool('wkit.probe');
++    expect(captured, isNotNull, reason: 'premise: the tool\'s factory ran');
++    final words = captured!.words;
++
++    await tester.pumpWidget(appIn(const Locale('tr'), c));
++    // M-W-L1a: `push` writing nothing (its body removed) leaves 'en'.
++    expect(c.locale.value, const Locale('tr'));
++    // M-W-L1b: Task 8's services built with the locale read once
++    // (`final l = locale.value; KitNamesWords(names, () => l)`) keep the
++    // construction's English here.
++    expect(words.word('tool:wkit.probe'), 'Sonda');
++    expect(words.locale, const Locale('tr'));
++
++    await tester.pumpWidget(appIn(const Locale('de'), c));
++    expect(c.locale.value, const Locale('de'));
++    expect(words.word('tool:wkit.probe'), 'Probe',
++        reason: 'no German word: the English one');
++
++    await tester.pumpWidget(appIn(const Locale('tr'), c));
++    expect(words.word('tool:wkit.probe'), 'Sonda', reason: 'back again, live');
++  });
++
++  testWidgets(
++      'W-L4 a change of language while mounted reaches the listeners after '
++      'the build, never inside it', (tester) async {
++    final c = PlanController(kits: [probeKit()]);
++    addTearDown(c.dispose);
++    await tester.pumpWidget(appIn(const Locale('en'), c));
++    final phases = <SchedulerPhase>[];
++    c.locale.addListener(
++        () => phases.add(SchedulerBinding.instance.schedulerPhase));
++    await tester.pumpWidget(appIn(const Locale('tr'), c));
++    // M-W-L4: `push` calling `controller.reportLocale(…)` at once
++    // notifies inside the frame's build (persistentCallbacks).
++    expect(phases, [SchedulerPhase.postFrameCallbacks]);
++    expect(c.locale.value, const Locale('tr'));
++    await tester.pumpWidget(appIn(const Locale('tr'), c));
++    expect(phases, hasLength(1), reason: 'an unchanged locale writes nothing');
++  });
++
++  testWidgets('W-L2 with no Localizations above, the pushed locale is English',
++      (tester) async {
++    final c = PlanController(kits: [probeKit()]);
++    addTearDown(c.dispose);
++    c.reportLocale(const Locale('tr'));
++    await tester.pumpWidget(Directionality(
++        textDirection: TextDirection.ltr, child: _Pusher(controller: c)));
++    // M-W-L2: `push` returning early when `maybeLocaleOf` is null keeps
++    // 'tr'.
++    expect(c.locale.value, const Locale('en'));
++  });
++
++  test(
++      'W-L3 a new plan takes the separator of the locale\'s built-in '
++      'language: a comma for German and Turkish, a point otherwise', () {
++    final c = PlanController(kits: const []);
++    addTearDown(c.dispose);
++    DecimalSeparator separatorAfterNewPlanIn(Locale locale) {
++      c.reportLocale(locale);
++      c.newPlan();
++      final d = c.document;
++      return d.components.get<PageComponent>(d.rootHandle)!.decimalSeparator;
++    }
++
++    // M-W-L3: `documentSeparatorFor` answering `point` always turns the
++    // first two red.
++    expect(separatorAfterNewPlanIn(const Locale('de')), DecimalSeparator.comma);
++    expect(separatorAfterNewPlanIn(const Locale('tr')), DecimalSeparator.comma);
++    expect(separatorAfterNewPlanIn(const Locale('fr')), DecimalSeparator.point);
++    expect(separatorAfterNewPlanIn(const Locale('en')), DecimalSeparator.point);
++    // An explicit separator wins over the locale.
++    c.reportLocale(const Locale('de'));
++    c.newPlan(decimalSeparator: '.');
++    final d = c.document;
++    expect(d.components.get<PageComponent>(d.rootHandle)!.decimalSeparator,
++        DecimalSeparator.point);
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/l10n/numbered_names_test.dart b/packages/jet_cad_2d_plan/test/l10n/numbered_names_test.dart
+new file mode 100644
+index 00000000..cbb9de94
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/l10n/numbered_names_test.dart
+@@ -0,0 +1,38 @@
++// Spec 14d L7: a new layer is named in the language of the moment, its N
++// counted over every built-in language's pattern (M-14d-k). Ported from
++// jet_cad_floor_plan (2a Task 9): NN2's layer-name loop; NN1 (nextLayerName)
++// is Task 18's, NN3 (the sample plan's rooms) sub-project 3's.
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:jet_cad_2d_plan/src/l10n/numbered_names.dart';
++
++void main() {
++  test('NN2 a layer name of another shape takes no N', () {
++    for (final name in ['Layer 0', 'Layer 2 ', 'Layer', 'Raum 2a', 'Oda']) {
++      expect(
++          numberedNameIndex(
++              name, (s, n) => s.layerName(n), const PlanStringsEn()),
++          isNull,
++          reason: name);
++    }
++  });
++
++  test('W-NN4 a layer name in another built-in language counts', () {
++    // M-W-NN4: `numberedNameIndex` comparing with `current` only (the
++    // built-in languages left out of its list) answers null here.
++    expect(
++        numberedNameIndex(
++            'Katman 7', (s, n) => s.layerName(n), const PlanStringsDe()),
++        7);
++    expect(
++        numberedNameIndex(
++            'Ebene 12', (s, n) => s.layerName(n), const PlanStringsEn()),
++        12);
++    // Folded: the fold given meets a case difference.
++    expect(
++        numberedNameIndex(
++            'KATMAN 3', (s, n) => s.layerName(n), const PlanStringsEn(),
++            fold: (s) => s.toLowerCase()),
++        3);
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/l10n/value_words_test.dart b/packages/jet_cad_2d_plan/test/l10n/value_words_test.dart
+new file mode 100644
+index 00000000..d0b31f10
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/l10n/value_words_test.dart
+@@ -0,0 +1,75 @@
++// Spec 14d L5, L6 (revision 2): the values the engine and the planner hand
++// out instead of sentences, worded in each language (M-14d-t). Ported from
++// jet_cad_floor_plan (2a Task 9): VW1 (the layer-name problems); VW2-VW4
++// (tables, numbering, rooms) are 2b's. W-VW5, W-VW6: the plan library's
++// own words.
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show PlanSwatch;
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++
++const languages = <PlanStrings>[
++  PlanStringsEn(),
++  PlanStringsDe(),
++  PlanStringsTr(),
++];
++
++/// [word] in each language: never empty, holding every [parts], and
++/// different in each language.
++void expectWorded(String Function(PlanStrings s) word,
++    {List<String> parts = const [], String? english}) {
++  final words = [for (final s in languages) word(s)];
++  for (final (i, w) in words.indexed) {
++    expect(w, isNotEmpty);
++    for (final p in parts) {
++      expect(w, contains(p), reason: '${languages[i].languageCode}: $w');
++    }
++  }
++  expect(words.toSet(), hasLength(3), reason: '$words');
++  if (english != null) expect(words.first, english);
++}
++
++void main() {
++  test('VW1 every layer-name problem in each language', () {
++    expectWorded((s) => s.layerNameProblem(const LayerNameEmpty()),
++        english: 'A layer name cannot be empty.');
++    expectWorded((s) => s.layerNameProblem(const LayerNameEdgeSpace()));
++    expectWorded((s) => s.layerNameProblem(const LayerNameTooLong(255)),
++        parts: ['255']);
++    expectWorded((s) => s.layerNameProblem(const LayerNameBadCharacter(';')),
++        parts: [';'], english: 'A layer name cannot contain ;.');
++    expectWorded((s) => s.layerNameProblem(const LayerNameDuplicate('Wände')),
++        parts: ['Wände']);
++    // The engine's English and the planner's are one text.
++    for (final p in const <LayerNameProblem>[
++      LayerNameEmpty(),
++      LayerNameEdgeSpace(),
++      LayerNameTooLong(255),
++      LayerNameBadCharacter('|'),
++      LayerNameDuplicate('A'),
++    ]) {
++      expect(const PlanStringsEn().layerNameProblem(p), p.toString());
++    }
++  });
++
++  test('W-VW5 the plan library\'s three new words in each language', () {
++    // M-W-VW5: a language that returns the English text for a new word
++    // (copy-paste) makes the three not distinct.
++    expectWorded((s) => s.lockedHint, english: 'This object is locked');
++    expectWorded((s) => s.sectionFailed,
++        english: 'This section could not be shown');
++    expectWorded((s) => s.planDamaged,
++        english: 'An edit failed and the plan may be damaged');
++  });
++
++  test('W-VW6 every swatch is worded, differently, in each language', () {
++    // M-W-VW6: `colorName` returning one word for teal and blue in a
++    // language goes red on the per-language set size.
++    for (final s in languages) {
++      final names = {for (final c in PlanSwatch.values) s.colorName(c)};
++      expect(names, hasLength(PlanSwatch.values.length),
++          reason: s.languageCode);
++    }
++    expectWorded((s) => s.colorName(PlanSwatch.teal), english: 'Teal');
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/theme/plan_theme_test.dart b/packages/jet_cad_2d_plan/test/theme/plan_theme_test.dart
+new file mode 100644
+index 00000000..bc14eee9
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/theme/plan_theme_test.dart
+@@ -0,0 +1,503 @@
++// Spec P5 "Theme": PlanTheme, the generic part of jet_cad_floor_plan's
++// FloorPlanTheme, its value semantics, copyWith, merge and lerp, and its
++// resolution below a PlanThemeScope: the ambient extension with the view's
++// set fields over it, validated, provided by an inherited widget compared
++// by ==. Ported from floor_plan_theme_test.dart (host embedding API spec
++// Slice 3, T-1, T-2, S-3 to S-5, S-11, T-3) over the four fields that move;
++// the statuses, groups, focus veil, table colour and service bar are 2b's.
++//
++// The themes are not the default shape: colours that are no palette's and
++// no other theme's, widths that are not today's.
++import 'dart:ui' show lerpDouble;
++
++import 'package:flutter/material.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show PaperPalette;
++import 'package:jet_cad_2d_plan/src/theme/plan_theme.dart';
++
++const Color seed = Color(0xFF2266CC);
++final ThemeData lightTheme = ThemeData(colorSchemeSeed: seed);
++final ThemeData darkTheme =
++    ThemeData(colorSchemeSeed: seed, brightness: Brightness.dark);
++const int white = 0xFFFFFFFF;
++const int blueprint = 0xFF1F3A5F;
++
++/// A full theme, every field off today's value.
++const PlanTheme fullA = PlanTheme(
++  selectionOnLight: Color(0xFFD81B60),
++  selectionOnDark: Color(0xFFFFD54F),
++  selectionWidth: 4,
++  canvasBackground: Color(0xFF263238),
++);
++
++/// A second full theme, every field different from [fullA]'s and today's.
++const PlanTheme fullB = PlanTheme(
++  selectionOnLight: Color(0xFF5E35B1),
++  selectionOnDark: Color(0xFFC0CA33),
++  selectionWidth: 2.5,
++  canvasBackground: Color(0xFFEFEBE9),
++);
++
++typedef Field = ({
++  String name,
++  Object? Function(PlanTheme t) get,
++  PlanTheme Function(PlanTheme t, Object v) set,
++  Object? Function(Object a, Object b, double t) lerp,
++});
++
++Object? _color(Object a, Object b, double t) =>
++    Color.lerp(a as Color, b as Color, t);
++Object? _double(Object a, Object b, double t) =>
++    lerpDouble(a as double, b as double, t);
++
++/// The four fields, in declaration order.
++final List<Field> fields = [
++  (
++    name: 'selectionOnLight',
++    get: (t) => t.selectionOnLight,
++    set: (t, v) => t.copyWith(selectionOnLight: v as Color),
++    lerp: _color,
++  ),
++  (
++    name: 'selectionOnDark',
++    get: (t) => t.selectionOnDark,
++    set: (t, v) => t.copyWith(selectionOnDark: v as Color),
++    lerp: _color,
++  ),
++  (
++    name: 'selectionWidth',
++    get: (t) => t.selectionWidth,
++    set: (t, v) => t.copyWith(selectionWidth: v as double),
++    lerp: _double,
++  ),
++  (
++    name: 'canvasBackground',
++    get: (t) => t.canvasBackground,
++    set: (t, v) => t.copyWith(canvasBackground: v as Color),
++    lerp: _color,
++  ),
++];
++
++PlanTheme only(Field field, PlanTheme source) =>
++    field.set(const PlanTheme(), field.get(source)!);
++
++void expectField(Object? a, Object? b, String reason) {
++  if (a is double && b is double) {
++    expect(a, closeTo(b, 1e-12), reason: reason);
++  } else {
++    expect(a, b, reason: reason);
++  }
++}
++
++ThemeData lightWith(PlanTheme t) => lightTheme.copyWith(extensions: [t]);
++ThemeData darkWith(PlanTheme t) => darkTheme.copyWith(extensions: [t]);
++
++/// A valid theme whose width sits near the edge of its range.
++const PlanTheme edgeA = PlanTheme(selectionWidth: 3);
++
++/// [edgeA]'s partner: the width different.
++const PlanTheme edgeB = PlanTheme(selectionWidth: 0.5);
++
++/// The resolved theme a widget under a PlanThemeScope over [view] reads,
++/// under [theme] (or the light theme), [dark] and [mode], zero animation.
++PlanTheme? seen;
++
++Widget scopeApp(
++        {PlanTheme? view,
++        ThemeData? theme,
++        ThemeData? dark,
++        ThemeMode mode = ThemeMode.light,
++        bool scope = true,
++        Key? key}) =>
++    MaterialApp(
++        key: key,
++        theme: theme ?? lightTheme,
++        darkTheme: dark ?? darkTheme,
++        themeMode: mode,
++        themeAnimationDuration: Duration.zero,
++        home: scope
++            ? PlanThemeScope(view: view, child: const _Probe())
++            : const _Probe());
++
++class _Probe extends StatelessWidget {
++  const _Probe();
++  @override
++  Widget build(BuildContext context) {
++    seen = PlanTheme.of(context);
++    return const SizedBox();
++  }
++}
++
++/// A dependent of the resolved theme: logs each dependency change.
++class ThemeReader extends StatefulWidget {
++  const ThemeReader({super.key, required this.log});
++  final List<PlanTheme?> log;
++  @override
++  State<ThemeReader> createState() => _ThemeReaderState();
++}
++
++class _ThemeReaderState extends State<ThemeReader> {
++  @override
++  void didChangeDependencies() {
++    super.didChangeDependencies();
++    widget.log.add(PlanThemeScope.of(context));
++  }
++
++  @override
++  Widget build(BuildContext context) => const SizedBox(width: 10, height: 10);
++}
++
++void main() {
++  setUp(() => seen = null);
++
++  test('TH0 the field table names the four fields of a full theme', () {
++    expect(fields, hasLength(4));
++    for (final f in fields) {
++      expect(f.get(fullA), isNotNull, reason: f.name);
++      expect(f.get(fullB), isNotNull, reason: f.name);
++      expect(f.get(fullA) == f.get(fullB), isFalse, reason: f.name);
++      expect(f.get(const PlanTheme()), isNull, reason: f.name);
++      expect(fullA.toString(), contains('${f.name}: '), reason: f.name);
++    }
++  });
++
++  group('merge (T-2)', () {
++    test(
++        'TH1 a view setting one field over an ambient setting all four: '
++        'that field the view\'s, the three others the ambient\'s', () {
++      // M-TH1: `merge` taking `this.canvasBackground ?? other...` (the
++      // ambient over the view) goes red for canvasBackground.
++      for (final f in fields) {
++        final merged = fullB.merge(only(f, fullA));
++        for (final g in fields) {
++          final want = identical(g, f) ? g.get(fullA) : g.get(fullB);
++          expect(g.get(merged), want, reason: '${f.name} set: ${g.name}');
++        }
++      }
++    });
++
++    test('TH2 a null view is the ambient itself; an empty view keeps it', () {
++      expect(identical(fullA.merge(null), fullA), isTrue);
++      expect(fullA.merge(const PlanTheme()), fullA);
++      expect(const PlanTheme().merge(fullA), fullA);
++    });
++  });
++
++  group('lerp (S-4)', () {
++    test(
++        'TH3 two full themes at 0, 0.25, 0.5 and 1: each field its type\'s '
++        'lerp', () {
++      // M-TH3: `selectionWidth` lerped with `t` and `1 - t` swapped.
++      for (final t in [0.0, 0.25, 0.5, 1.0]) {
++        final l = fullA.lerp(fullB, t);
++        for (final f in fields) {
++          expectField(f.get(l), f.lerp(f.get(fullA)!, f.get(fullB)!, t),
++              '${f.name} at $t');
++        }
++      }
++      for (final f in fields) {
++        expect(f.get(fullA.lerp(fullB, 0)), f.get(fullA), reason: f.name);
++        expect(f.get(fullA.lerp(fullB, 1)), f.get(fullB), reason: f.name);
++      }
++      expect(fullA.lerp(fullB, 0.25) == fullA, isFalse);
++    });
++
++    test(
++        'TH4 R-1: two valid themes at t -0.2 and 1.2, both ways: the width '
++        'within its ends, the theme valid', () {
++      // M-TH4: `_lerpBetween` returning `lerpDouble(a, b, t)!` unclamped.
++      for (final t in [-0.2, 1.2]) {
++        for (final (a, b) in [(edgeA, edgeB), (edgeB, edgeA)]) {
++          final l = a.lerp(b, t);
++          final reason = '${a == edgeA ? 'A to B' : 'B to A'} at $t';
++          expect(l.selectionWidth, inInclusiveRange(0.5, 3.0), reason: reason);
++          expect(() => validatePlanTheme(l), returnsNormally, reason: reason);
++        }
++      }
++      expect(edgeA.lerp(edgeB, 1.2).selectionWidth, 0.5);
++      expect(edgeB.lerp(edgeA, 1.2).selectionWidth, 3.0);
++    });
++
++    test(
++        'TH5 R-2: a theme lerped with an equal one is that theme at every t '
++        '(itself when equal); a field equal on both sides stays exactly '
++        'equal', () {
++      for (var i = 1; i < 100; i++) {
++        final t = i / 100;
++        expect(fullA.lerp(fullA, t), fullA, reason: 'at $t');
++        expect(identical(fullA.lerp(fullA.copyWith(), t), fullA), isTrue,
++            reason: 'at $t');
++        final l = fullA.lerp(fullA.copyWith(selectionWidth: 5), t);
++        expect(l.selectionWidth, closeTo(4 + t, 1e-12), reason: 'at $t');
++        for (final f in fields.where((f) => f.name != 'selectionWidth')) {
++          expect(f.get(l) == f.get(fullA), isTrue, reason: '${f.name} at $t');
++        }
++      }
++    });
++
++    test(
++        'TH6 T1-b: a field null on one side switches at 0.5 and never fades '
++        '(no selectionOnLight to 0xFF00897B: null at 0.25, opaque at 0.75)',
++        () {
++      // M-TH6: `_lerp` lerping toward a null side as transparent
++      // (`Color.lerp(a, null, t)`) makes 0.75 translucent.
++      const to = PlanTheme(selectionOnLight: Color(0xFF00897B));
++      expect(const PlanTheme().lerp(to, 0.25).selectionOnLight, isNull);
++      final at75 = const PlanTheme().lerp(to, 0.75).selectionOnLight!;
++      expect(at75, const Color(0xFF00897B));
++      expect(at75.a, 1.0);
++      for (final t in [0.0, 0.25, 0.49]) {
++        expect(const PlanTheme().lerp(fullB, t), const PlanTheme(),
++            reason: 'at $t');
++        expect(fullA.lerp(const PlanTheme(), t), fullA, reason: 'at $t');
++      }
++      for (final t in [0.5, 0.75, 1.0]) {
++        expect(const PlanTheme().lerp(fullB, t), fullB, reason: 'at $t');
++        expect(fullA.lerp(const PlanTheme(), t), const PlanTheme(),
++            reason: 'at $t');
++      }
++    });
++
++    test('TH7 lerp(null, t) is the theme itself', () {
++      for (final t in [0.0, 0.3, 1.0]) {
++        expect(identical(fullA.lerp(null, t), fullA), isTrue);
++      }
++    });
++
++    test(
++        'TH8 through ThemeData.lerp: a light ThemeData with the extension and '
++        'a dark one without carry the first\'s unchanged; both with it, '
++        'lerped', () {
++      for (final t in [0.25, 0.75]) {
++        expect(
++            identical(
++                ThemeData.lerp(lightWith(fullA), darkTheme, t)
++                    .extension<PlanTheme>(),
++                fullA),
++            isTrue,
++            reason: 'at $t');
++        expect(
++            ThemeData.lerp(lightWith(fullA), darkWith(fullB), t)
++                .extension<PlanTheme>(),
++            fullA.lerp(fullB, t),
++            reason: 'at $t');
++      }
++    });
++  });
++
++  group('copyWith, ==, hashCode, toString', () {
++    test('TH9 each field changed alone makes != and a different hash', () {
++      // M-TH9: `==` without `other.canvasBackground == canvasBackground`.
++      expect(fullA, fullA.copyWith());
++      expect(identical(fullA, fullA.copyWith()), isFalse);
++      expect(fullA.copyWith().hashCode, fullA.hashCode);
++      for (final f in fields) {
++        final changed = f.set(fullA, f.get(fullB)!);
++        expect(f.get(changed), f.get(fullB), reason: f.name);
++        for (final g in fields) {
++          if (!identical(g, f)) {
++            expect(g.get(changed), g.get(fullA),
++                reason: '${f.name}: ${g.name}');
++          }
++        }
++        expect(changed == fullA, isFalse, reason: f.name);
++        expect(changed.hashCode == fullA.hashCode, isFalse, reason: f.name);
++        expect(only(f, fullA) == const PlanTheme(), isFalse, reason: f.name);
++        expect(only(f, fullA).hashCode == const PlanTheme().hashCode, isFalse,
++            reason: f.name);
++      }
++    });
++
++    test('TH10 toString names the set fields only, in declaration order', () {
++      expect(const PlanTheme().toString(), 'PlanTheme()');
++      expect(const PlanTheme(selectionWidth: 4).toString(),
++          'PlanTheme(selectionWidth: 4.0)');
++      const canvas = Color(0xFF263238);
++      expect(
++          const PlanTheme(canvasBackground: canvas, selectionWidth: 4)
++              .toString(),
++          'PlanTheme(selectionWidth: 4.0, canvasBackground: $canvas)');
++      expect(fullA.type, PlanTheme);
++    });
++  });
++
++  group('validation (S-5), through the scope', () {
++    testWidgets(
++        'TH11 the width: accepted and refused, naming the field; an ambient '
++        'theme out of range is refused the same way', (tester) async {
++      // M-TH11: `validatePlanTheme` without its `positive(selectionWidth)`
++      // call accepts every refused theme.
++      Future<Object?> pumpWith({PlanTheme? view, PlanTheme? ambient}) async {
++        await tester.pumpWidget(scopeApp(
++            key: UniqueKey(),
++            view: view,
++            theme: ambient == null ? lightTheme : lightWith(ambient)));
++        return tester.takeException();
++      }
++
++      final accepted = <(String, PlanTheme)>[
++        ('selectionWidth', const PlanTheme(selectionWidth: 0.5)),
++        ('all', fullA),
++      ];
++      final refused = <(String, PlanTheme)>[
++        for (final v in [0.0, -1.0, double.infinity, double.nan])
++          ('selectionWidth', PlanTheme(selectionWidth: v)),
++      ];
++      for (final (name, theme) in accepted) {
++        expect(await pumpWith(view: theme), isNull, reason: '$name: $theme');
++        expect(seen, theme, reason: '$name: $theme');
++        expect(await pumpWith(ambient: theme), isNull,
++            reason: 'ambient $name: $theme');
++      }
++      for (final (name, theme) in refused) {
++        for (final ambient in [false, true]) {
++          final e = ambient
++              ? await pumpWith(ambient: theme)
++              : await pumpWith(view: theme);
++          expect(e, isA<ArgumentError>().having((e) => e.name, 'name', name),
++              reason: '${ambient ? 'ambient ' : ''}$name: $theme');
++        }
++      }
++      expect(refused, hasLength(4));
++    });
++  });
++
++  group('resolution (T-2, S-11)', () {
++    testWidgets(
++        'TH12 P-6: no theme anywhere resolves to null; ambient '
++        'only is the ambient itself; view only the view itself',
++        (tester) async {
++      // M-TH12: `PlanThemeScope.build` merging `view.merge(ambient)` (the
++      // ambient over the view) breaks the identity of the view-only case
++      // only when an ambient exists, so TH13 catches it; here, a scope that
++      // drops the view (`InheritedPlanTheme(theme: ambient, ...)`) goes red.
++      await tester.pumpWidget(scopeApp());
++      expect(seen, isNull);
++
++      await tester.pumpWidget(scopeApp(theme: lightWith(fullA)));
++      expect(identical(seen, fullA), isTrue);
++
++      await tester.pumpWidget(scopeApp(view: fullB));
++      expect(identical(seen, fullB), isTrue);
++    });
++
++    testWidgets(
++        'TH13 M-H30: one field in the ambient theme and another in the '
++        'view\'s resolve to both; one field in both takes the view\'s',
++        (tester) async {
++      await tester.pumpWidget(scopeApp(
++          view: const PlanTheme(selectionOnLight: Color(0xFFD81B60)),
++          theme:
++              lightWith(const PlanTheme(canvasBackground: Color(0xFF00897B)))));
++      expect(
++          seen,
++          const PlanTheme(
++              canvasBackground: Color(0xFF00897B),
++              selectionOnLight: Color(0xFFD81B60)));
++
++      await tester.pumpWidget(scopeApp(
++          view: const PlanTheme(selectionWidth: 5),
++          theme: lightWith(const PlanTheme(
++              selectionWidth: 3, canvasBackground: Color(0xFF00897B)))));
++      expect(
++          seen,
++          const PlanTheme(
++              selectionWidth: 5, canvasBackground: Color(0xFF00897B)));
++    });
++
++    testWidgets(
++        'TH14 an ambient switch (light with A to dark with B, zero '
++        'animation) reaches the scope after one pump', (tester) async {
++      await tester
++          .pumpWidget(scopeApp(theme: lightWith(fullA), dark: darkWith(fullB)));
++      expect(seen, fullA);
++      await tester.pumpWidget(scopeApp(
++          theme: lightWith(fullA),
++          dark: darkWith(fullB),
++          mode: ThemeMode.dark));
++      await tester.pump();
++      expect(seen, fullB);
++    });
++
++    testWidgets(
++        'TH15 with no scope above, the ambient extension, validated: in '
++        'range read, out of range refused naming the field (R-4)',
++        (tester) async {
++      // M-TH15: `PlanThemeScope.of` returning the ambient without
++      // `validatePlanTheme` lets the bad width through.
++      await tester.pumpWidget(scopeApp(scope: false, theme: lightWith(fullA)));
++      expect(identical(seen, fullA), isTrue);
++      await tester.pumpWidget(scopeApp(scope: false, key: UniqueKey()));
++      expect(seen, isNull);
++
++      await tester.pumpWidget(scopeApp(
++          scope: false,
++          key: UniqueKey(),
++          theme: lightWith(fullA.merge(const PlanTheme(selectionWidth: -3)))));
++      expect(tester.takeException(),
++          isA<ArgumentError>().having((e) => e.name, 'name', 'selectionWidth'));
++    });
++  });
++
++  group('T1-c: the scope notifies by value', () {
++    test('TH16 updateShouldNotify: false for equal themes, true for different',
++        () {
++      // M-TH16: `updateShouldNotify` returning `!identical(theme, old.theme)`.
++      final a1 = fullA.copyWith();
++      final a2 = fullA.copyWith();
++      expect(identical(a1, a2), isFalse);
++      InheritedPlanTheme scope(PlanTheme? t) =>
++          InheritedPlanTheme(theme: t, child: const SizedBox());
++      expect(scope(a1).updateShouldNotify(scope(a2)), isFalse);
++      expect(scope(null).updateShouldNotify(scope(null)), isFalse);
++      expect(scope(fullA).updateShouldNotify(scope(fullB)), isTrue);
++      expect(scope(fullA).updateShouldNotify(scope(null)), isTrue);
++      expect(scope(null).updateShouldNotify(scope(fullA)), isTrue);
++    });
++
++    testWidgets(
++        'TH17 a host rebuild with an equal, non-identical view theme notifies '
++        'no dependent; a different one does', (tester) async {
++      final log = <PlanTheme?>[];
++      final reader = ThemeReader(log: log);
++      Widget app(PlanTheme view) => MaterialApp(
++          theme: lightTheme,
++          themeAnimationDuration: Duration.zero,
++          home: PlanThemeScope(view: view, child: reader));
++      await tester.pumpWidget(app(fullA.copyWith()));
++      expect(log, [fullA]);
++      await tester.pumpWidget(app(fullA.copyWith()));
++      expect(log, [fullA], reason: 'an equal theme notifies nobody');
++      await tester.pumpWidget(app(fullB.copyWith()));
++      expect(log, [fullA, fullB]);
++    });
++  });
++
++  test(
++      'TH18 planPaperPaletteFor: today\'s const sets with no colour for the '
++      'set', () {
++    const onLight = Color(0xFFD81B60);
++    const onDark = Color(0xFFFFD54F);
++    expect(identical(planPaperPaletteFor(white, null), PaperPalette.light),
++        isTrue);
++    expect(identical(planPaperPaletteFor(blueprint, null), PaperPalette.dark),
++        isTrue);
++    const lightOnly = PlanTheme(selectionOnLight: onLight);
++    const darkOnly = PlanTheme(selectionOnDark: onDark);
++    expect(
++        identical(planPaperPaletteFor(blueprint, lightOnly), PaperPalette.dark),
++        isTrue);
++    expect(identical(planPaperPaletteFor(white, darkOnly), PaperPalette.light),
++        isTrue);
++    // M-TH18: the two colours swapped (`selectionOnLight` for the dark set).
++    expect(planPaperPaletteFor(white, lightOnly),
++        PaperPalette.light.withSelection(onLight));
++    expect(planPaperPaletteFor(blueprint, darkOnly),
++        PaperPalette.dark.withSelection(onDark));
++    expect(
++        identical(
++            planPaperPaletteFor(white, const PlanTheme(selectionWidth: 4)),
++            PaperPalette.light),
++        isTrue);
++  });
++}

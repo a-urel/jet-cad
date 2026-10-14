@@ -1,0 +1,3636 @@
+# Review package: 29aaea73..HEAD
+
+## Commits
+a6958db4 test(plan): CV-10 pins the shortcut guard through the text entry
+8106dab0 test(plan): CV-alloc reads what a rebuild kept before its premise
+539b0676 feat(plan): PlanCanvas and its paint-allocation invariant (P2)
+
+## Files changed
+ packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart  |   1 +
+ .../lib/src/canvas/plan_canvas.dart                | 329 ++++++++++++++
+ .../lib/src/canvas/plan_canvas_view.dart           | 488 +++++++++++++++++++++
+ .../lib/src/canvas/text_entry_overlay.dart         | 190 ++++++++
+ .../lib/src/controller/plan_controller.dart        |  10 +
+ .../jet_cad_2d_plan/lib/src/l10n/locale_scope.dart |   8 +-
+ .../jet_cad_2d_plan/lib/src/shortcuts/chords.dart  |  59 +++
+ .../lib/src/shortcuts/plan_shortcut_guard.dart     | 141 ++++++
+ .../test/canvas/canvas_camera_test.dart            |  61 +++
+ .../test/canvas/canvas_draw_test.dart              | 206 +++++++++
+ .../test/canvas/canvas_layout_test.dart            |  90 ++++
+ .../test/canvas/canvas_palette_test.dart           | 235 ++++++++++
+ .../test/canvas/canvas_ui_test.dart                |  83 ++++
+ .../test/canvas/dark_canvas_test.dart              | 211 +++++++++
+ .../test/canvas/plan_canvas_test.dart              | 311 +++++++++++++
+ .../test/canvas/theme_canvas_test.dart             | 356 +++++++++++++++
+ .../test/canvas/touch_tools_test.dart              |  55 +++
+ .../invariants/canvas_paint_allocation_test.dart   | 114 +++++
+ .../test/support/canvas_fixture.dart               | 472 ++++++++++++++++++++
+ 19 files changed, 3418 insertions(+), 2 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart b/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart
+index 88b4cd87..bdf6c73b 100644
+--- a/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart
++++ b/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart
+@@ -1,14 +1,15 @@
+ /// The plan library of jet_cad_2d: a `PlanController` over one plan and the
+ /// composable widgets of design mode, over the kits a host loads.
+ library;
+ 
++export 'src/canvas/plan_canvas.dart' show PlanCanvas, kLockHintDuration;
+ export 'src/controller/camera_bounds.dart' show kPlanMaxScale, kPlanMinScale;
+ export 'src/controller/permissions.dart';
+ export 'src/controller/plan_change.dart'
+     show
+         PlanChange,
+         PlanObjectAdded,
+         PlanObjectChanged,
+         PlanObjectRemoved,
+         PlanReplaced;
+ export 'src/controller/plan_controller.dart';
+diff --git a/packages/jet_cad_2d_plan/lib/src/canvas/plan_canvas.dart b/packages/jet_cad_2d_plan/lib/src/canvas/plan_canvas.dart
+new file mode 100644
+index 00000000..a390b902
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/canvas/plan_canvas.dart
+@@ -0,0 +1,329 @@
++// The plan's canvas (spec 2a P2, "The widgets"): the rulers, the camera
++// gestures, the interaction layer, the page chrome, the drawing, the
++// selection and grip overlay and the text entry, over one PlanController,
++// which is all it takes.
++//
++// Ported from jet_cad_floor_plan: the paper, the ink and the resolver from
++// planner_shell.dart (:281-382), the canvas colour (:367-368), the
++// fit-on-start latch from host/floor_plan_view.dart (:507, :595-602), and
++// the view itself (PlanCanvasView, planner_view.dart). New: the one-canvas
++// rule, the controller's document swap, the locale push, the snapping
++// option and the lock hint (spec P4, "Where PlanLocked is caught").
++import 'dart:async';
++
++import 'package:flutter/material.dart';
++import 'package:flutter/scheduler.dart' show SchedulerBinding;
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++
++import '../controller/plan_controller.dart';
++import '../l10n/locale_scope.dart';
++import '../l10n/strings.dart';
++import '../theme/plan_theme.dart' show PlanTheme, planPaperPaletteFor;
++import 'plan_canvas_view.dart';
++
++/// How long the canvas shows the lock hint before it clears it.
++const Duration kLockHintDuration = Duration(seconds: 2);
++
++/// Draws [controller]'s plan and routes the pointer and the keys to its
++/// active tool.
++///
++/// - The plan is fitted to the drawing area on its first frame, and again
++///   on the first frame of each plan `load`, `newPlan` or `import` swaps in.
++/// - A controller is shown in one PlanCanvas at a time: a second one
++///   asserts in debug, after the frame.
++/// - [rulers] and [grid] are the drafting aids; [snapping] lets object snap
++///   act (the user's F3 setting is kept either way); [autofocus] lets the
++///   canvas take the focus when it is mounted.
++class PlanCanvas extends StatefulWidget {
++  const PlanCanvas({
++    super.key,
++    required this.controller,
++    this.rulers = true,
++    this.grid = true,
++    this.snapping = true,
++    this.autofocus = true,
++  });
++
++  final PlanController controller;
++  final bool rulers;
++  final bool grid;
++  final bool snapping;
++  final bool autofocus;
++
++  @override
++  State<PlanCanvas> createState() => _PlanCanvasState();
++}
++
++/// The canvases one controller is shown in, and whether the check after
++/// the frame is already scheduled: one check per controller and frame, so
++/// two canvases of one controller report once.
++final class _Shown {
++  final Set<Object> canvases = <Object>{};
++  bool checkScheduled = false;
++}
++
++/// Each controller's [_Shown], for the one-canvas rule (debug only).
++final Expando<_Shown> _canvasesOf = Expando<_Shown>('PlanCanvas');
++
++class _PlanCanvasState extends State<PlanCanvas> {
++  PlanController get _c => widget.controller;
++
++  /// The document the resolver, the page listener and the fit latch belong
++  /// to; [_bind] moves them to the controller's current one.
++  DraftDocument? _document;
++  PageNotifier? _page;
++
++  /// ACI 7's foreground follows the paper (planner_shell.dart:281-299):
++  /// replaced only when its key ([_foreground], [_darkCanvas]) changes, as
++  /// DraftCanvas rebuilds its painter whenever it is handed a different
++  /// resolver.
++  late StyleResolver _resolver;
++  int _foreground = -1;
++  bool _darkCanvas = false;
++
++  /// The theme's surface (or the theme's `canvasBackground`) and
++  /// brightness; set in [didChangeDependencies].
++  late int _surfaceArgb;
++  late Brightness _brightness;
++  PlanTheme? _theme;
++
++  final GesturePolicy _policy = GesturePolicy.forPlatform();
++
++  /// floor_plan_view.dart:507, :595-602: the fit-on-start latch, taken once
++  /// per document.
++  DraftDocument? _fitFor;
++  bool _fit = false;
++  bool _fitIsRequest = false;
++
++  Timer? _hintTimer;
++
++  @override
++  void initState() {
++    super.initState();
++    _enter(_c);
++    _c.addListener(_onController);
++    _c.lockHint.addListener(_onHint);
++    _c.snappingAllowed = widget.snapping;
++    _bind();
++  }
++
++  @override
++  void didChangeDependencies() {
++    super.didChangeDependencies();
++    final theme = Theme.of(context);
++    _theme = PlanTheme.of(context);
++    _surfaceArgb = _canvasColour(theme.colorScheme).toARGB32();
++    _brightness = theme.brightness;
++    // A build follows, so no setState: only a key change builds a new
++    // resolver (planner_shell.dart:371-382).
++    if (_nextResolver() case final next?) _resolver = next;
++    PlanLocaleScope.push(context, _c);
++  }
++
++  @override
++  void didUpdateWidget(PlanCanvas oldWidget) {
++    super.didUpdateWidget(oldWidget);
++    final old = oldWidget.controller;
++    if (!identical(old, _c)) {
++      _leave(old);
++      old.removeListener(_onController);
++      old.lockHint.removeListener(_onHint);
++      _hintTimer?.cancel();
++      _enter(_c);
++      _c.addListener(_onController);
++      _c.lockHint.addListener(_onHint);
++      _rebind();
++      PlanLocaleScope.push(context, _c);
++    }
++    _c.snappingAllowed = widget.snapping;
++  }
++
++  @override
++  void dispose() {
++    _leave(_c);
++    _c.removeListener(_onController);
++    _c.lockHint.removeListener(_onHint);
++    _page?.removeListener(_onPage);
++    _hintTimer?.cancel();
++    super.dispose();
++  }
++
++  /// Spec 2a P2: a controller is shown in one PlanCanvas at a time. Checked
++  /// after the frame, when a replaced canvas has been disposed (a keyed
++  /// swap inflates the new canvas before it deactivates the old one).
++  void _enter(PlanController c) {
++    assert(() {
++      final shown = _canvasesOf[c] ??= _Shown();
++      shown.canvases.add(this);
++      if (shown.checkScheduled) return true;
++      shown.checkScheduled = true;
++      SchedulerBinding.instance.addPostFrameCallback((_) {
++        shown.checkScheduled = false;
++        final count = shown.canvases.length;
++        if (count > 1) {
++          throw FlutterError(
++              'A PlanController is shown in one PlanCanvas at a time '
++              '(spec 2a P2): this controller is in $count. Dispose '
++              'the first canvas before showing the controller in another.');
++        }
++      });
++      return true;
++    }());
++  }
++
++  void _leave(PlanController c) {
++    assert(() {
++      _canvasesOf[c]?.canvases.remove(this);
++      return true;
++    }());
++  }
++
++  /// Binds the page listener to the controller's current document.
++  void _bind() {
++    _document = _c.document;
++    _page = _c.page..addListener(_onPage);
++  }
++
++  /// A new document (load, newPlan, import) or a new controller: the page
++  /// listener moves, and the resolver is made again for the new document.
++  void _rebind() {
++    _page?.removeListener(_onPage);
++    _bind();
++    _foreground = -1;
++    _resolver = _nextResolver()!;
++  }
++
++  /// The controller notified: a document swap rebuilds the canvas; any
++  /// other notification (permissions, the locale) is not the canvas's.
++  void _onController() {
++    if (identical(_c.document, _document)) return;
++    setState(_rebind);
++  }
++
++  /// planner_shell.dart:344-363, less the table fills (2b): a page change
++  /// that moves the resolver's key rebuilds with a new resolver.
++  void _onPage() {
++    final next = _nextResolver();
++    if (next == null) return;
++    setState(() => _resolver = next);
++  }
++
++  /// planner_shell.dart:328-331: the paper the drafting and the overlays
++  /// lie on.
++  int _paperArgb() => displayPaperFor(
++      page: _c.page.value?.background,
++      surface: _surfaceArgb,
++      brightness: _brightness);
++
++  /// planner_shell.dart:334-343: a new resolver when the key moved, else
++  /// null; records the new key.
++  StyleResolver? _nextResolver() {
++    final paper = _paperArgb();
++    final foreground = foregroundFor(paper);
++    final dark =
++        darkCanvasFor(page: _c.page.value?.background, brightness: _brightness);
++    if (foreground == _foreground && dark == _darkCanvas) return null;
++    _foreground = foreground;
++    _darkCanvas = dark;
++    return canvasResolverFor(_c.document, paper: paper, dark: dark);
++  }
++
++  /// planner_shell.dart:367-368: the theme's `canvasBackground`, else its
++  /// surface.
++  Color _canvasColour(ColorScheme scheme) =>
++      _theme?.canvasBackground ?? scheme.surface;
++
++  /// floor_plan_view.dart:595-602.
++  bool _fitOnStartFor(DraftDocument document) {
++    if (!identical(_fitFor, document)) {
++      _fitFor = document;
++      _fitIsRequest = !_c.owesFirstFit;
++      _fit = _c.takeFitOnStart();
++    }
++    return _fit;
++  }
++
++  /// Spec P4: the hint clears [kLockHintDuration] after it was set.
++  void _onHint() {
++    _hintTimer?.cancel();
++    if (!_c.lockHint.value) return;
++    final c = _c;
++    _hintTimer = Timer(kLockHintDuration, () {
++      if (mounted && identical(c, _c)) c.lockHint.value = false;
++    });
++  }
++
++  @override
++  Widget build(BuildContext context) {
++    final theme = Theme.of(context);
++    final scheme = theme.colorScheme;
++    final c = _c;
++    final document = c.document;
++    // A parent rebuild may arrive before the controller's notification.
++    if (!identical(document, _document)) _rebind();
++    final paper = _paperArgb();
++    return ColoredBox(
++      color: _canvasColour(scheme),
++      child: Stack(
++        fit: StackFit.expand,
++        children: [
++          PlanCanvasView(
++            // A new document is a new view: its own first fit, its own
++            // listeners (today's PlannerShell keyed by ObjectKey(document)).
++            key: ObjectKey(document),
++            controller: c,
++            document: document,
++            index: c.index,
++            resolver: _resolver,
++            camera: c.camera,
++            page: c.page,
++            policy: _policy,
++            selection: c.selection,
++            tools: c.toolController,
++            outlines: c.outlines,
++            chrome: ChromePalette.of(theme.brightness),
++            paper: planPaperPaletteFor(paper, _theme),
++            selectionStrokePixels:
++                _theme?.selectionWidth ?? kSelectionStrokePixels,
++            sheetArgb: _darkCanvas ? paper : null,
++            grips: c.grips,
++            textTool: c.textTool,
++            fitRequests: c.fitRequests,
++            fitOnStart: _fitOnStartFor(document),
++            startFitIsRequest: _fitIsRequest,
++            onFitted: c.fitted,
++            framing: c.framingFor,
++            cameraEpoch: () => c.cameraEpoch,
++            onCanvasPlaced: c.canvasPlaced,
++            rulers: widget.rulers,
++            grid: widget.grid,
++            autofocus: widget.autofocus,
++          ),
++          ValueListenableBuilder<bool>(
++            valueListenable: c.lockHint,
++            builder: (context, shown, _) => shown
++                ? Align(
++                    alignment: const Alignment(0, 0.9),
++                    child: IgnorePointer(
++                      child: DecoratedBox(
++                        key: const Key('plan-lock-hint'),
++                        decoration: BoxDecoration(
++                            color: scheme.inverseSurface,
++                            borderRadius: BorderRadius.circular(4)),
++                        child: Padding(
++                          padding: const EdgeInsets.symmetric(
++                              horizontal: 12, vertical: 6),
++                          child: Text(PlanStrings.of(context).lockedHint,
++                              style: TextStyle(color: scheme.onInverseSurface)),
++                        ),
++                      ),
++                    ),
++                  )
++                : const SizedBox.shrink(),
++          ),
++        ],
++      ),
++    );
++  }
++}
+diff --git a/packages/jet_cad_2d_plan/lib/src/canvas/plan_canvas_view.dart b/packages/jet_cad_2d_plan/lib/src/canvas/plan_canvas_view.dart
+new file mode 100644
+index 00000000..24d453a9
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/canvas/plan_canvas_view.dart
+@@ -0,0 +1,488 @@
++import 'package:flutter/widgets.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:meta/meta.dart' show internal;
++
++import '../controller/camera_bounds.dart';
++import '../controller/plan_controller.dart';
++import 'text_entry_overlay.dart';
++
++/// The rulers around the drawing area: a [RulerFrame] whose child is a
++/// [CameraGestureDetector] over the page chrome, the [DraftCanvas] and the
++/// selection overlay, with -- since 05 -- the text tool's inline field
++/// painted above it. Without [rulers] (the selection mode) the drawing area
++/// stands alone.
++///
++/// Tiles off, `backend` unset (spec D6): a floor plan is 500-5,000
++/// entities, and the resident backend cannot run on web, which this product
++/// targets. Neither is a default a later sub-project may flip without a
++/// measurement.
++@internal
++class PlanCanvasView extends StatefulWidget {
++  const PlanCanvasView({
++    super.key,
++    required this.controller,
++    required this.document,
++    required this.index,
++    required this.resolver,
++    required this.camera,
++    required this.page,
++    required this.policy,
++    required this.selection,
++    required this.tools,
++    required this.outlines,
++    required this.chrome,
++    required this.paper,
++    this.selectionStrokePixels = kSelectionStrokePixels,
++    this.sheetArgb,
++    this.grips,
++    this.textTool,
++    this.fitRequests,
++    this.fitOnStart = true,
++    this.startFitIsRequest = false,
++    this.onFitted,
++    this.framing,
++    this.underlay,
++    this.overlay,
++    this.tableOverlays,
++    this.rulers = true,
++    this.grid = true,
++    this.cameraEpoch,
++    this.userCamera = true,
++    this.onCanvasPlaced,
++    this.autofocus = true,
++  });
++
++  /// The controller, for the text entry's guard.
++  final PlanController controller;
++  final DraftDocument document;
++  final SpatialIndex index;
++
++  /// Owned by PlanCanvas, and replaced only when the paper's foreground
++  /// changes: [DraftCanvas] rebuilds its painter when handed a different
++  /// resolver (fix/post-07).
++  final StyleResolver resolver;
++  final CameraController camera;
++  final PageNotifier page;
++  final GesturePolicy policy;
++  final SelectionController selection;
++  final ToolController tools;
++
++  /// Owned by PlanCanvas since 03 (spec D6).
++  final OutlineCache outlines;
++
++  /// The rulers' and the sheet edge's colours, from the host's theme (dark
++  /// theme spec D2, D5): PlanCanvas computes it in
++  /// `build`, so a theme switch hands a new one down.
++  final ChromePalette chrome;
++
++  /// The colours of everything drawn on the paper -- the grid, the page
++  /// breaks, the selection and the tools' overlays -- picked by the paper
++  /// (dark theme spec D3, D4): the page's background, or the theme's
++  /// surface with no page.
++  final PaperPalette paper;
++
++  /// The selected outline's stroke in screen pixels (host embedding API
++  /// spec T-1's `selectionWidth`), handed to the selection overlay;
++  /// [kSelectionStrokePixels] by default.
++  final double selectionStrokePixels;
++
++  /// The sheet's fill when the canvas shows a paper other than the page's
++  /// ([kDarkCanvasPaper] on a dark canvas, decision note K2); null fills it
++  /// with the page's background.
++  final int? sheetArgb;
++
++  /// The selection's grips. A member of the overlay's repaint merge; null
++  /// where no grips show (the selection mode, spec 14b-2 H7).
++  final GripCache? grips;
++
++  /// PlanCanvas's text tool, whose inline field sits over the canvas
++  /// (spec 05 D9); null where there is none (the selection mode).
++  final TextTool? textTool;
++
++  /// Each notification refits the camera as the first frame did, at the
++  /// drawing area's last size (spec 14b-2 H8, `fitToView`).
++  final Listenable? fitRequests;
++
++  /// Whether the camera is fitted after the first frame (Ruling 01-2).
++  /// False when the host hands over a camera it already placed: a mode
++  /// switch keeps the pan and zoom (spec 14b-2 R-13).
++  final bool fitOnStart;
++
++  /// Whether the fit on start ([fitOnStart]) performs only a host's
++  /// request, which a camera command made before it drops (spec G-3);
++  /// false for a plan's own first fit, which no command cancels (Task 2
++  /// review R-1), nor a request merged into it, whose target the command
++  /// clears.
++  final bool startFitIsRequest;
++
++  /// Called after each fit this view performs (review F-2).
++  final VoidCallback? onFitted;
++
++  /// The camera a fit sets at the drawing area's size, asked when the fit
++  /// is performed (zone spec Z7); null from it, or no [framing], fits the
++  /// page as before.
++  final ViewportTransform? Function(Size size)? framing;
++
++  /// Painted between the page chrome and the drafting (spec 14c S7): the
++  /// selection mode's status fills, under the lines.
++  final Widget? underlay;
++
++  /// Painted above the drafting and below the selection overlay
++  /// (table-groups spec G3, F-11): the selection mode's group label chips,
++  /// which a chair's lines must not paint over. Null draws nothing there.
++  final Widget? overlay;
++
++  /// Painted above everything else on the canvas, the selection overlay
++  /// included, and inside the canvas's input listeners, clipped to the
++  /// canvas (host embedding API spec G-5): the host's widgets on the
++  /// tables. Null draws nothing there.
++  final Widget? tableOverlays;
++
++  /// The rulers around the drawing area; false in the selection mode,
++  /// which shows the plan, not the drafting aids.
++  final bool rulers;
++
++  /// The page's grid; false in the selection mode. The sheet stays.
++  final bool grid;
++
++  /// The host's camera epoch (host embedding API spec G-3): a fit captures
++  /// it when it becomes due -- when it is scheduled, or, for the fit a view
++  /// with no size yet owes, when the view is created or the request is
++  /// heard (Task 2 review R-2) -- and is dropped when it has moved by the
++  /// end of the frame, so a camera command made after a fit request wins.
++  /// Null performs every fit, as before.
++  final int Function()? cameraEpoch;
++
++  /// Whether the user's pan, pinch and wheel zoom move the camera (spec
++  /// G-3): false builds no [CameraGestureDetector]. Fits and the host's
++  /// commands still act.
++  final bool userCamera;
++
++  /// Told, after every frame in which it moved or was resized, where the
++  /// drawing area is in global coordinates (spec G-2), with this view's
++  /// state as the reporter; told null once when the view is disposed, or
++  /// when it is replaced by another reporter (Task 2 review R-8). The
++  /// first report follows the view's first fit when it owes one (review
++  /// R-3), so a reporter that moves the camera on it acts on the fitted
++  /// camera. Null reports nothing.
++  final void Function(Object view, Rect? global)? onCanvasPlaced;
++
++  /// Whether the canvas takes the focus when it is mounted (host embedding
++  /// API spec C-7, S-21), handed to its [InteractionLayer]. A press on the
++  /// canvas asks for the focus either way; a focused Material text field
++  /// keeps it from the canvas on that press unless its `onTapOutside` lets
++  /// go (`PlanCanvas.autofocus`).
++  final bool autofocus;
++
++  @override
++  State<PlanCanvasView> createState() => _PlanCanvasViewState();
++}
++
++class _PlanCanvasViewState extends State<PlanCanvasView> {
++  /// Ruling 01-2: the camera is fitted once, to the size the drawing area
++  /// really got; since Plan 04 the fit lands at the end of the first frame
++  /// (Ruling 04-16).
++  late bool _fitted = !widget.fitOnStart;
++
++  // The two caches are in the merge because they are the members that hear
++  // a `DocChange`: an edit under a selected instance rebuilds the outline
++  // and the grips, and nothing else in here would ask for the frame that
++  // draws them.
++  late final Listenable _repaint = Listenable.merge([
++    widget.selection,
++    widget.tools,
++    widget.camera,
++    widget.outlines,
++    if (widget.grips != null) widget.grips,
++  ]);
++
++  /// The drawing area's size at the last layout, for a fit request.
++  Size? _size;
++
++  /// The plan's own first fit is still to be scheduled (Task 2 review
++  /// R-1): no command cancels it, so it captures no epoch.
++  late bool _ownFit = !_fitted && !widget.startFitIsRequest;
++
++  /// The camera epoch when the fit the next sized layout performs became
++  /// due (Task 2 review R-2): when this view was created owing a requested
++  /// fit, or when a request came while it had no size. Read when the fit
++  /// is scheduled, so a command made in between, while the view had no
++  /// size, still wins. Unused for the plan's own first fit.
++  int? _dueEpoch;
++
++  /// A fit a layout scheduled and the end of the frame has not run yet:
++  /// the first report waits for it (Task 2 review R-3).
++  bool _fitAhead = false;
++
++  @override
++  void initState() {
++    super.initState();
++    if (!_ownFit && !_fitted) _dueEpoch = widget.cameraEpoch?.call();
++    widget.fitRequests?.addListener(_onFitRequest);
++    _watch();
++  }
++
++  @override
++  void didUpdateWidget(PlanCanvasView oldWidget) {
++    super.didUpdateWidget(oldWidget);
++    if (oldWidget.fitRequests != widget.fitRequests) {
++      oldWidget.fitRequests?.removeListener(_onFitRequest);
++      widget.fitRequests?.addListener(_onFitRequest);
++    }
++    // Task 2 review R-8: the reporter replaced while a rect is registered
++    // with it is told the view is gone from it; the new one hears the rect
++    // at the end of the frame.
++    if (oldWidget.onCanvasPlaced != widget.onCanvasPlaced && _placed != null) {
++      oldWidget.onCanvasPlaced?.call(this, null);
++      _placed = null;
++    }
++    _watch();
++  }
++
++  @override
++  void dispose() {
++    widget.fitRequests?.removeListener(_onFitRequest);
++    if (_placed != null) widget.onCanvasPlaced?.call(this, null);
++    super.dispose();
++  }
++
++  void _onFitRequest() {
++    if (_size == null) {
++      // Not laid out yet: the first layout fits (review F-2), dropped if a
++      // command comes before it (Task 2 review R-2).
++      _fitted = false;
++      if (!_ownFit) _dueEpoch = widget.cameraEpoch?.call();
++      return;
++    }
++    // The size is read when the fit runs, after this frame's layout (zone
++    // spec Z7): a request made with a layout change fits the new size. The
++    // epoch is read now, when the fit is asked (spec G-3).
++    final epoch = widget.cameraEpoch?.call();
++    WidgetsBinding.instance.addPostFrameCallback((_) => _fit(_size!, epoch));
++    WidgetsBinding.instance.ensureVisualUpdate();
++  }
++
++  /// Spec D4/D11: the [PlanCanvasView.framing], else the page when there is
++  /// one, at the drawing area's size -- inside the frame, so the bars are
++  /// excluded -- clamped to the camera's zoom bounds about the drawing
++  /// area's centre (host embedding API spec G-3). Dropped when the camera
++  /// epoch moved since [epoch] was read: a later command has placed the
++  /// camera.
++  void _fit(Size size, int? epoch) {
++    if (!mounted) return;
++    if (epoch != null && widget.cameraEpoch?.call() != epoch) return;
++    final page = widget.page.value;
++    final camera = widget.camera;
++    camera.value = clampCameraScale(
++        widget.framing?.call(size) ??
++            (page != null
++                ? fitToPage(page, size)
++                : ViewportTransform.fit(widget.document.extents, size)),
++        size,
++        minScale: camera.minScale,
++        maxScale: camera.maxScale);
++    widget.onFitted?.call();
++  }
++
++  // Spec G-2: the drawing area's global place, checked after every frame
++  // while a reporter is given. A view moved by an ancestor without being
++  // laid out again (a parent's padding) is seen too: no layout callback
++  // would hear it. One `localToGlobal` per frame, nothing per entity.
++
++  /// The drawing area's subtree: its render box is the canvas whose
++  /// coordinates the camera's are. Global, so a [PlanCanvasView.userCamera]
++  /// switch moves it under or out of the gesture detector without
++  /// remounting the interaction layer and the drafting.
++  final GlobalKey _area = GlobalKey();
++
++  /// The rect last reported; null before the first report.
++  Rect? _placed;
++  bool _watching = false;
++
++  void _watch() {
++    if (_watching || widget.onCanvasPlaced == null) return;
++    _watching = true;
++    WidgetsBinding.instance.addPostFrameCallback(_check);
++  }
++
++  void _check(Duration _) {
++    if (!mounted || widget.onCanvasPlaced == null) {
++      _watching = false;
++      return;
++    }
++    // Task 2 review R-3: the first report waits for the first fit -- one
++    // owed and not yet scheduled (no size yet), or scheduled and not yet
++    // run, which reports itself after it runs.
++    if (_placed != null || (_fitted && !_fitAhead)) _report();
++    // Once per frame that happens: a post-frame callback asks for none.
++    WidgetsBinding.instance.addPostFrameCallback(_check);
++  }
++
++  /// Reports the drawing area's global rect when it differs from the last
++  /// one reported.
++  void _report() {
++    final reporter = widget.onCanvasPlaced;
++    if (!mounted || reporter == null) return;
++    final box = _area.currentContext?.findRenderObject();
++    if (box is RenderBox && box.attached && box.hasSize) {
++      final rect = box.localToGlobal(Offset.zero) & box.size;
++      if (rect != _placed) {
++        _placed = rect;
++        reporter(this, rect);
++      }
++    }
++  }
++
++  late final Listenable _chromeRepaint =
++      Listenable.merge([widget.camera, widget.page]);
++
++  @override
++  Widget build(BuildContext context) {
++    final area = _drawingArea();
++    return widget.rulers
++        ? RulerFrame(
++            camera: widget.camera,
++            page: widget.page,
++            chrome: widget.chrome,
++            child: area,
++          )
++        : area;
++  }
++
++  Widget _drawingArea() => LayoutBuilder(
++        builder: (context, constraints) {
++          if (constraints.biggest.width > 0 && constraints.biggest.height > 0) {
++            _size = constraints.biggest;
++          }
++          if (!_fitted &&
++              constraints.biggest.width > 0 &&
++              constraints.biggest.height > 0) {
++            _fitted = true;
++            final size = constraints.biggest;
++            final epoch = _ownFit ? null : _dueEpoch;
++            _ownFit = false;
++            // Assigning `camera.value` during layout would notify the
++            // zoom text's builder mid-build, which Flutter forbids
++            // (Ruling 04-16). Posting it defers the notification to the
++            // end of this frame: the first frame paints at the shell's
++            // nominal fit, the second at the real size. The latch is set
++            // synchronously, so the fit still happens exactly once
++            // (Ruling 01-2).
++            // The epoch is the one read when the fit became due (spec G-3,
++            // Task 2 review R-2), none for the plan's own first fit (R-1);
++            // the first report follows the fit (R-3).
++            _fitAhead = true;
++            WidgetsBinding.instance.addPostFrameCallback((_) {
++              _fitAhead = false;
++              _fit(size, epoch);
++              _report();
++            });
++          }
++          // Spec 05 D9: the field sits outside the InteractionLayer, so a
++          // click on it is not a canvas click.
++          //
++          // A `Flow`, not a `Stack`: the field paints and hit-tests above
++          // the canvas (`_FieldAboveCanvas`), yet it is the first child,
++          // so it leaves the tree first. The layer's `deactivate` cancels
++          // the active tool; with a text pending, that notifies the
++          // field's builders and its `EditableText`, which must already be
++          // inactive, or Flutter asserts "markNeedsBuild() called during
++          // build".
++          return Flow(
++            delegate: const _FieldAboveCanvas(),
++            children: [
++              if (widget.textTool case final text?)
++                TextEntryOverlay(
++                  controller: widget.controller,
++                  tool: text,
++                  tools: widget.tools,
++                  camera: widget.camera,
++                )
++              else
++                const SizedBox.shrink(),
++              _userCamera(KeyedSubtree(
++                key: _area,
++                child: InteractionLayer(
++                  tools: widget.tools,
++                  autofocus: widget.autofocus,
++                  child: Stack(
++                    children: [
++                      Positioned.fill(
++                        child: RepaintBoundary(
++                          child: CustomPaint(
++                            painter: PageChromePainter(
++                              camera: widget.camera,
++                              page: widget.page,
++                              grid: widget.grid,
++                              chrome: widget.chrome,
++                              paper: widget.paper,
++                              sheetArgb: widget.sheetArgb,
++                              repaint: _chromeRepaint,
++                            ),
++                          ),
++                        ),
++                      ),
++                      if (widget.underlay case final under?)
++                        Positioned.fill(child: under),
++                      DraftCanvas(
++                        document: widget.document,
++                        index: widget.index,
++                        camera: widget.camera,
++                        resolver: widget.resolver,
++                        tiles: false,
++                      ), // already inside its own RepaintBoundary
++                      if (widget.overlay case final over?)
++                        Positioned.fill(child: over),
++                      Positioned.fill(
++                        child: RepaintBoundary(
++                          child: CustomPaint(
++                            painter: SelectionOverlayPainter(
++                              selection: widget.selection,
++                              tools: widget.tools,
++                              camera: widget.camera,
++                              outlines: widget.outlines,
++                              paper: widget.paper,
++                              selectionStrokePixels:
++                                  widget.selectionStrokePixels,
++                              repaint: _repaint,
++                            ),
++                            size: Size.infinite,
++                          ),
++                        ),
++                      ),
++                      if (widget.tableOverlays case final layer?)
++                        Positioned.fill(child: ClipRect(child: layer)),
++                    ],
++                  ),
++                ),
++              )),
++            ],
++          );
++        },
++      );
++
++  /// [area] under the user's pan and zoom, or alone when the host locked
++  /// them (spec G-3).
++  Widget _userCamera(Widget area) => widget.userCamera
++      ? CameraGestureDetector(
++          camera: widget.camera, policy: widget.policy, child: area)
++      : area;
++}
++
++/// Paints child 1, the canvas, and then child 0, the text field, above it.
++/// `RenderFlow` hit-tests in reverse paint order, so the field wins a hit on
++/// itself, and an empty region falls through to the canvas.
++class _FieldAboveCanvas extends FlowDelegate {
++  const _FieldAboveCanvas();
++
++  @override
++  void paintChildren(FlowPaintingContext context) {
++    context
++      ..paintChild(1)
++      ..paintChild(0);
++  }
++
++  @override
++  bool shouldRepaint(_FieldAboveCanvas oldDelegate) => false;
++}
+diff --git a/packages/jet_cad_2d_plan/lib/src/canvas/text_entry_overlay.dart b/packages/jet_cad_2d_plan/lib/src/canvas/text_entry_overlay.dart
+new file mode 100644
+index 00000000..427aa21c
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/canvas/text_entry_overlay.dart
+@@ -0,0 +1,190 @@
++import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb;
++import 'package:flutter/gestures.dart' show PointerDeviceKind;
++import 'package:flutter/material.dart';
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++
++import '../controller/plan_controller.dart';
++import '../shortcuts/plan_shortcut_guard.dart';
++
++/// Ruling 05-11: the field's size. Its bottom-left sits at the insertion
++/// point's screen position.
++const Size kTextEntrySize = Size(240, 32);
++
++/// Spec 05 D9: the inline field for [TextTool].
++///
++/// **Where it sits.** Outside the `InteractionLayer`, so a click on it is
++/// not a canvas click.
++///
++/// **Keys.** The guard lets the plan's letters through as text, and
++/// Escape cancels.
++///
++/// **Rebuilds.** The field is a stable child of the camera builder, so a pan
++/// or zoom moves it and never rebuilds it (Ruling 05-10).
++///
++/// **Commit and cancel.** Enter commits. Any other loss of focus cancels
++/// if the placement is still pending. A canvas click has already committed
++/// synchronously in the tool, so its blur finds nothing to cancel. A flow
++/// of the document host (spec 12a D2, R-5) commits the entry through the
++/// tool's `finish` before it moves the focus, so the focus loss that
++/// follows finds nothing to cancel either.
++///
++/// **Where the focus goes.** Back to the canvas, however the entry ends
++/// (`_onPending`, `_onTapOutside`).
++class TextEntryOverlay extends StatefulWidget {
++  const TextEntryOverlay({
++    super.key,
++    required this.controller,
++    required this.tool,
++    required this.tools,
++    required this.camera,
++  });
++
++  /// The plan whose letters the field's guard lets through as text.
++  final PlanController controller;
++  final TextTool tool;
++  final ToolController tools;
++  final CameraController camera;
++
++  @override
++  State<TextEntryOverlay> createState() => _TextEntryOverlayState();
++}
++
++class _TextEntryOverlayState extends State<TextEntryOverlay> {
++  final FocusNode _focus = FocusNode(debugLabel: 'text-entry');
++
++  @override
++  void initState() {
++    super.initState();
++    widget.tool.pending.addListener(_onPending);
++    _focus.addListener(_onFocus);
++  }
++
++  /// A placement takes focus for the field; Ruling 05-7 hands it back to
++  /// the canvas, the scope's previous child, as soon as the placement ends.
++  ///
++  /// `autofocus` alone never fires here: the canvas already holds focus (the
++  /// layer requests it on the very click that placed the point), and
++  /// autofocus only acts on a scope with nothing focused. The field is not
++  /// built yet, so the request is deferred until its `Focus` attaches.
++  void _onPending() {
++    if (widget.tool.pending.value != null) {
++      _focus.requestFocus();
++    } else if (_focus.hasFocus) {
++      _focus.unfocus(disposition: UnfocusDisposition.previouslyFocusedChild);
++    }
++  }
++
++  /// Spec 05 D9's "any other loss of focus" means one inside the app
++  /// (Ruling T7-b). A window switch moves primary focus to the root scope on
++  /// `inactive`, and the focus manager restores it on `resumed`; cancelling
++  /// here would detach the field and leave the plan's shortcuts dead. The
++  /// state is null until the first lifecycle message (and in tests), which
++  /// is not a window switch.
++  void _onFocus() {
++    final lifecycle = WidgetsBinding.instance.lifecycleState;
++    if (lifecycle != null && lifecycle != AppLifecycleState.resumed) return;
++    if (!_focus.hasFocus && widget.tool.pending.value != null) {
++      widget.tool.cancelText(widget.tools.context);
++    }
++  }
++
++  /// A tap outside the field drops its focus exactly when `EditableText`'s
++  /// default would (`_EditableTextTapOutsideAction`: every pointer on
++  /// macOS, Windows, Linux and the web; all but touch on Android, iOS and
++  /// Fuchsia), and the focus loss cancels the entry ([_onFocus]). But the
++  /// default is a plain `unfocus()`, which clears the scope's focus history
++  /// and leaves the focus on the route's scope, where no key reaches the
++  /// plan's shortcuts: after a click on the tool palette or a panel, the tool letters
++  /// and the file chords (spec 12a D6) did nothing until a canvas click
++  /// (plan 12a Task 7). This hands the focus back to the canvas instead,
++  /// the scope's previous child (Ruling 05-7), as a panel field does
++  /// (`PanelFieldFocusNode.handBack`).
++  void _onTapOutside(PointerDownEvent event) {
++    if (!kIsWeb && event.kind == PointerDeviceKind.touch) {
++      switch (defaultTargetPlatform) {
++        case TargetPlatform.android:
++        case TargetPlatform.iOS:
++        case TargetPlatform.fuchsia:
++          return;
++        case TargetPlatform.linux:
++        case TargetPlatform.macOS:
++        case TargetPlatform.windows:
++          break;
++      }
++    }
++    _focus.unfocus(disposition: UnfocusDisposition.previouslyFocusedChild);
++  }
++
++  void _submit(String s) => widget.tool.commitText(s, widget.tools.context);
++
++  void _cancel() => widget.tool.cancelText(widget.tools.context);
++
++  @override
++  void dispose() {
++    widget.tool.pending.removeListener(_onPending);
++    _focus.removeListener(_onFocus);
++    _focus.dispose();
++    super.dispose();
++  }
++
++  @override
++  Widget build(BuildContext context) => ValueListenableBuilder<TextPlacement?>(
++        valueListenable: widget.tool.pending,
++        builder: (context, placed, _) {
++          if (placed == null) return const SizedBox.shrink();
++          final field = SizedBox.fromSize(
++            key: const Key('text-entry-box'),
++            size: kTextEntrySize,
++            child: PlanShortcutGuard(
++              controller: widget.controller,
++              child: CallbackShortcuts(
++                bindings: <ShortcutActivator, VoidCallback>{
++                  const SingleActivator(LogicalKeyboardKey.escape): _cancel,
++                },
++                child: TextField(
++                  key: const Key('text-entry'),
++                  controller: widget.tool.controller,
++                  focusNode: _focus,
++                  autofocus: true,
++                  maxLines: 1,
++                  // Without this, `EditableText` unfocuses on submit with
++                  // `UnfocusDisposition.scope`, which clears the scope's
++                  // focus history before `_onPending` can hand focus back
++                  // to the canvas (Ruling 05-7).
++                  onEditingComplete: () {},
++                  onSubmitted: _submit,
++                  onTapOutside: _onTapOutside,
++                  // Dark theme spec D6b: filled from the theme, so the
++                  // field (its text the theme's onSurface) reads on any
++                  // paper, in either theme.
++                  decoration: InputDecoration(
++                      isDense: true,
++                      border: const OutlineInputBorder(),
++                      filled: true,
++                      fillColor: Theme.of(context)
++                          .colorScheme
++                          .surfaceContainerHighest),
++                ),
++              ),
++            ),
++          );
++          return Stack(
++            children: [
++              ListenableBuilder(
++                listenable: widget.camera,
++                builder: (context, child) {
++                  final s = widget.camera.value.worldToScreen(placed.point);
++                  return Positioned(
++                    left: s.x,
++                    top: s.y - kTextEntrySize.height,
++                    child: child!,
++                  );
++                },
++                child: field,
++              ),
++            ],
++          );
++        },
++      );
++}
+diff --git a/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart b/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
+index aa4586df..cd34ea0c 100644
+--- a/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
++++ b/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
+@@ -236,20 +236,25 @@ class PlanController extends ChangeNotifier {
+   final double _minScale, _maxScale;
+ 
+   late final Map<String, KitServices> _services;
+   late final _Host _host = _Host(this);
+   late DocumentSession _session;
+   List<Diagnostic> _loadDiagnostics = const [];
+ 
+   final List<DocumentSession> _dropped = [];
+   bool _disposed = false;
+ 
++  /// Whether [dispose] ran: a report owed after a frame (the locale push,
++  /// Task 15) checks it before it lands.
++  @internal
++  bool get isDisposed => _disposed;
++
+   final SnapSettings _userSnap = SnapSettings();
+   late final EffectiveSnap _snap =
+       EffectiveSnap(_userSnap, () => snappingAllowed);
+ 
+   /// The canvas's `snapping` option (Task 15): object snap only while true.
+   @internal
+   bool snappingAllowed = true;
+ 
+   final ValueNotifier<Locale> _locale = ValueNotifier(const Locale('en'));
+   final DiagnosticsLog _diagnostics = DiagnosticsLog();
+@@ -809,20 +814,25 @@ class PlanController extends ChangeNotifier {
+     } on DanglingReferenceError {
+       return false;
+     } on KitHookFailure catch (failure) {
+       _reportFailure(failure);
+       return false;
+     }
+   }
+ 
+   @internal
+   ToolController get toolController => _session.tools;
++
++  /// The current document's TEXT tool, unwrapped: the canvas's inline
++  /// field (TextEntryOverlay) drives its pending placement.
++  @internal
++  TextTool get textTool => _session.generic.byId[PlanToolIds.text]! as TextTool;
+   @internal
+   ToolContext get toolContext => _session.toolContext;
+   @internal
+   SelectionController get selection => _session.selection;
+   @internal
+   SpatialIndex get index => _session.index;
+   @internal
+   PageNotifier get page => _session.page;
+   @internal
+   GripCache get grips => _session.grips;
+diff --git a/packages/jet_cad_2d_plan/lib/src/l10n/locale_scope.dart b/packages/jet_cad_2d_plan/lib/src/l10n/locale_scope.dart
+index f9e50107..6de53813 100644
+--- a/packages/jet_cad_2d_plan/lib/src/l10n/locale_scope.dart
++++ b/packages/jet_cad_2d_plan/lib/src/l10n/locale_scope.dart
+@@ -13,22 +13,26 @@ import 'strings.dart';
+ abstract final class PlanLocaleScope {
+   static const Locale _english = Locale('en');
+ 
+   /// Reports [context]'s locale and its [PlanStrings] to [controller]
+   /// (`reportLocale`, Task 8, with this task's `strings:`),
+   /// English when no [Localizations] is above (as `PlanStrings.of` answers
+   /// English there), and registers [context] as a dependent of the locale.
+   ///
+   /// Never notifies during a build: the report lands after the current
+   /// frame (one is scheduled when none is pending), and only while
+-  /// [context] is still mounted; an unchanged locale notifies nothing.
++  /// [context] is still mounted and [controller] not disposed (a host may
++  /// dispose it in the frame the report was owed in, Task 15); an
++  /// unchanged locale notifies nothing.
+   static void push(BuildContext context, PlanController controller) {
+     final next = Localizations.maybeLocaleOf(context) ?? _english;
+     // The language class too (a host's own gives its own separator: NS7).
+     final strings = PlanStrings.of(context);
+     SchedulerBinding.instance
+       ..addPostFrameCallback((_) {
+-        if (context.mounted) controller.reportLocale(next, strings: strings);
++        if (context.mounted && !controller.isDisposed) {
++          controller.reportLocale(next, strings: strings);
++        }
+       })
+       ..ensureVisualUpdate();
+   }
+ }
+diff --git a/packages/jet_cad_2d_plan/lib/src/shortcuts/chords.dart b/packages/jet_cad_2d_plan/lib/src/shortcuts/chords.dart
+new file mode 100644
+index 00000000..d9d14af6
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/shortcuts/chords.dart
+@@ -0,0 +1,59 @@
++// The chords the plan's keyboard binds (spec 2a P2, "The keyboard"),
++// ported from jet_cad_floor_plan/lib/src/shell_commands.dart:10-61: Cmd
++// and Ctrl with each key, on every platform. PlanShortcuts binds them
++// (Task 16); the guard keeps Undo and Redo out of a focused field.
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:flutter/widgets.dart' show SingleActivator;
++
++/// Cmd and Ctrl with [key] (and Shift when [shift]): both modifiers are
++/// bound on every platform (spec 12a D6, S-26).
++List<SingleActivator> _chord(LogicalKeyboardKey key, {bool shift = false}) => [
++      SingleActivator(key, meta: true, shift: shift),
++      SingleActivator(key, control: true, shift: shift),
++    ];
++
++/// New: Meta+N, Ctrl+N.
++final List<SingleActivator> kNewChords = _chord(LogicalKeyboardKey.keyN);
++
++/// Open: Meta+O, Ctrl+O.
++final List<SingleActivator> kOpenChords = _chord(LogicalKeyboardKey.keyO);
++
++/// Save: Meta+S, Ctrl+S.
++final List<SingleActivator> kSaveChords = _chord(LogicalKeyboardKey.keyS);
++
++/// Save As: Meta+Shift+S, Ctrl+Shift+S.
++final List<SingleActivator> kSaveAsChords =
++    _chord(LogicalKeyboardKey.keyS, shift: true);
++
++/// Export: Meta+E, Ctrl+E (spec 13 D8).
++final List<SingleActivator> kExportChords = _chord(LogicalKeyboardKey.keyE);
++
++/// Print: Meta+P, Ctrl+P (spec 13 D9). Bare P is the Polyline tool's
++/// letter; the chord is not.
++final List<SingleActivator> kPrintChords = _chord(LogicalKeyboardKey.keyP);
++
++/// Undo: Meta+Z, Ctrl+Z.
++final List<SingleActivator> kUndoChords = _chord(LogicalKeyboardKey.keyZ);
++
++/// Redo: Meta+Shift+Z, Ctrl+Shift+Z, and Ctrl+Y.
++final List<SingleActivator> kRedoChords = [
++  ..._chord(LogicalKeyboardKey.keyZ, shift: true),
++  const SingleActivator(LogicalKeyboardKey.keyY, control: true),
++];
++
++/// Every file command's chord: what the app binds a second time above the
++/// Navigator, consume-only (spec 12a D6, U-3, R-10). Export's and Print's
++/// join them (spec 13 D8, R-8): with a dialog up, Ctrl+P must not reach the
++/// browser's own print.
++final List<SingleActivator> kFileChords = [
++  ...kNewChords,
++  ...kOpenChords,
++  ...kSaveChords,
++  ...kSaveAsChords,
++  ...kExportChords,
++  ...kPrintChords,
++];
++
++/// The file commands that need the document's page (spec 13 D8, D9): the
++/// shell enables them only while it has one, besides idle.
++const Set<String> kPageCommandIds = {'export', 'print'};
+diff --git a/packages/jet_cad_2d_plan/lib/src/shortcuts/plan_shortcut_guard.dart b/packages/jet_cad_2d_plan/lib/src/shortcuts/plan_shortcut_guard.dart
+new file mode 100644
+index 00000000..860926e2
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/shortcuts/plan_shortcut_guard.dart
+@@ -0,0 +1,141 @@
++// The keys a text field inside the plan keeps (spec 2a P2, "The keyboard":
++// text fields keep their keys, and the guard is built from the letters
++// actually in use, not from today's fixed list of 16). Ported from
++// jet_cad_floor_plan/lib/src/shortcut_guard.dart: ShellShortcutGuard
++// becomes PlanShortcutGuard, whose letters come from planLetterKeys;
++// PlannerTextKeys becomes PlanTextKeys, unchanged.
++import 'package:flutter/services.dart'
++    show HardwareKeyboard, KeyEvent, KeyUpEvent, LogicalKeyboardKey;
++import 'package:flutter/widgets.dart';
++
++import '../controller/plan_controller.dart';
++import '../tools/generic_tools.dart';
++import 'chords.dart';
++
++export 'chords.dart';
++
++/// The key of an upper-case Latin [letter] (`'A'`..`'Z'`).
++LogicalKeyboardKey letterKey(String letter) => LogicalKeyboardKey(
++    LogicalKeyboardKey.keyA.keyId + letter.codeUnitAt(0) - 0x41);
++
++/// The letters [controller]'s keyboard binds, F included (spec 2a P2: F is
++/// reserved for Fill). Here the generic tools' (V L P R C A T); Task 16
++/// adds the kits' letters in load order.
++List<LogicalKeyboardKey> planLetterKeys(PlanController controller) => [
++      for (final t in genericTools) letterKey(t.letter),
++      LogicalKeyboardKey.keyF,
++    ];
++
++/// Spec 05 D9, Ruling 05-8, spec 2a P2. Ported from `ShellShortcutGuard`
++/// (`shortcut_guard.dart:27-67`).
++///
++/// **Why this exists.** A `Shortcuts` or `CallbackShortcuts` above a text
++/// field takes the field's keystrokes. PlanShortcuts' tool letters, its
++/// Undo and Redo chords and its Escape are such shortcuts.
++///
++/// **What it does.** It maps each of them, **nearer** the field, to
++/// `DoNothingAndStopPropagationTextIntent`. `EditableText` answers that
++/// intent with `DoNothingAction(consumesKey: false)`, so the key stops here
++/// and reaches the field as text.
++///
++/// **Elsewhere it is inert.** With focus anywhere other than a text field,
++/// no action is found, and the key bubbles up to the shortcuts as before.
++class PlanShortcutGuard extends StatelessWidget {
++  const PlanShortcutGuard(
++      {super.key, required this.controller, required this.child});
++
++  /// Whose letters in use are guarded.
++  final PlanController controller;
++  final Widget child;
++
++  @override
++  Widget build(BuildContext context) => Shortcuts(
++        shortcuts: <ShortcutActivator, Intent>{
++          for (final key in planLetterKeys(controller))
++            SingleActivator(key): const DoNothingAndStopPropagationTextIntent(),
++          // Undo and Redo: in a focused field they never reach the
++          // document. A SingleActivator matches its modifiers exactly, so
++          // each chord is listed. The file chords are not guarded: Cmd+S in
++          // a panel field saves.
++          for (final chord in [...kUndoChords, ...kRedoChords])
++            chord: const DoNothingAndStopPropagationTextIntent(),
++          // PlanShortcuts binds Escape too: in a panel's field it must not
++          // drop a pending shape. The text entry's own Escape binding sits
++          // nearer, so it still cancels there.
++          const SingleActivator(LogicalKeyboardKey.escape):
++              const DoNothingAndStopPropagationTextIntent(),
++        },
++        child: child,
++      );
++}
++
++/// Slice 4, Task 7 finding 1: the text fields inside the view keep their
++/// keys from a host's bindings above it, in both modes.
++///
++/// **Why this exists.** Flutter binds the text-editing keys (Backspace,
++/// Delete, the arrows, select all, copy, paste) once, in `WidgetsApp`, at
++/// the top of the tree, and a key typed into a field bubbles through every
++/// ancestor first. A host's `Shortcuts` above the view binding Delete,
++/// Backspace or a letter (a point of sale's own keys) would take a key
++/// typed into a panel's field, the Symbols search, a layer's rename, the
++/// TEXT entry, or a host field in a bar or in the inspector.
++///
++/// **What it does.** It wraps the view in:
++/// - Flutter's `DefaultTextEditingShortcuts` again, nearer than any host
++///   binding, so an editing key in a field is the field's (Enter and
++///   Space among them: they stop there for the platform's text input);
++/// - above it, a key that types a character (no Control or Meta held),
++///   Delete and Backspace, mapped to
++///   `DoNothingAndStopPropagationTextIntent`: in a field (a read-only one
++///   too, whose own editing actions refuse Delete and Backspace) the key
++///   stops here and goes to the platform's text input, as
++///   [PlanShortcutGuard] does for the shell's keys. A chord (Control or
++///   Meta held) that no field takes still reaches the host.
++///
++/// **Elsewhere it is inert.** Only a focused `EditableText` answers those
++/// intents: with the focus on the canvas or on a button no action is found
++/// and the key bubbles up to the host as before. The planner's own
++/// bindings (the shell's and the selection mode's chords, letters and
++/// Escape, [PlanShortcutGuard]) sit nearer the fields and act as before.
++class PlanTextKeys extends StatelessWidget {
++  const PlanTextKeys({super.key, required this.child});
++
++  final Widget child;
++
++  static final Map<ShortcutActivator, Intent> _stop = {
++    const _TypingActivator(): const DoNothingAndStopPropagationTextIntent(),
++    const SingleActivator(LogicalKeyboardKey.delete):
++        const DoNothingAndStopPropagationTextIntent(),
++    const SingleActivator(LogicalKeyboardKey.backspace):
++        const DoNothingAndStopPropagationTextIntent(),
++  };
++
++  @override
++  Widget build(BuildContext context) => Shortcuts(
++        debugLabel: 'PlanTextKeys',
++        shortcuts: _stop,
++        child: DefaultTextEditingShortcuts(child: child),
++      );
++}
++
++/// A key-down or repeat that types a printable character, with neither
++/// Control nor Meta held (those are chords, not typing).
++class _TypingActivator extends ShortcutActivator {
++  const _TypingActivator();
++
++  @override
++  Iterable<LogicalKeyboardKey>? get triggers => null;
++
++  @override
++  bool accepts(KeyEvent event, HardwareKeyboard state) {
++    if (event is KeyUpEvent) return false;
++    final character = event.character;
++    if (character == null || character.isEmpty) return false;
++    final unit = character.codeUnitAt(0);
++    if (unit < 0x20 || unit == 0x7f) return false;
++    return !state.isControlPressed && !state.isMetaPressed;
++  }
++
++  @override
++  String debugDescribeKeys() => 'a key that types a character';
++}
+diff --git a/packages/jet_cad_2d_plan/test/canvas/canvas_camera_test.dart b/packages/jet_cad_2d_plan/test/canvas/canvas_camera_test.dart
+new file mode 100644
+index 00000000..17ae5138
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/canvas/canvas_camera_test.dart
+@@ -0,0 +1,61 @@
++// Ported from jet_cad_floor_plan/test/host/camera_test.dart; assertions unchanged.
++//
++// CM5's second half, which Task 8 sent here because it needs a mounted
++// canvas (controller ruling R-m): a camera command made before any canvas
++// drops a centring not yet performed, and the plan's own first fit still
++// frames the page. Task 8's first half (test/controller/camera_test.dart)
++// is repeated as the premise. The fitToTables half is 2b's.
++import 'package:flutter/material.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++
++import '../support/harness.dart';
++import '../support/test_kit.dart';
++
++List<double> parts(ViewportTransform t) {
++  final m = t.worldToScreenMatrix;
++  return [m.a, m.b, m.c, m.d, m.e, m.f];
++}
++
++/// [t] panned by [d], by hand.
++List<double> panned(ViewportTransform t, Offset d) {
++  final m = t.worldToScreenMatrix;
++  return [m.a, m.b, m.c, m.d, m.e + d.dx, m.f + d.dy];
++}
++
++/// [c]'s canvas in an app at 1440 x 900, pumped as today's `mount` did.
++Future<void> mount(WidgetTester tester, PlanController c) async {
++  await tester.binding.setSurfaceSize(const Size(1440, 900));
++  addTearDown(() => tester.binding.setSurfaceSize(null));
++  await tester
++      .pumpWidget(MaterialApp(home: Scaffold(body: PlanCanvas(controller: c))));
++  await tester.pump();
++  await tester.pump();
++}
++
++/// The page fitted to [c]'s canvas as the engine fits it, unclamped (the
++/// default bounds hold it).
++ViewportTransform pageFitOf(PlanController c) => fitToPage(
++    c.document.components.get<PageComponent>(c.document.rootHandle)!,
++    c.canvasRect.value!.size);
++
++void main() {
++  testWidgets(
++      'CM5 panBy with no view acts at once and drops a request not yet '
++      'performed with its target; the plan\'s own first fit still frames '
++      'the page (Task 2 review R-1)', (tester) async {
++    final c = controllerFor(kits: [testKit()], json: slabPlanText());
++    final before = c.camera.value;
++    c.centerOn(const Offset(-2600, 1400), scale: 0.2);
++    const d = Offset(37.25, -11.5);
++    c.panBy(d);
++    expect(parts(c.camera.value), panned(before, d));
++    expect(() => c.panBy(const Offset(double.nan, 0)), throwsArgumentError);
++    expect(parts(c.camera.value), panned(before, d));
++    await mount(tester, c);
++    expect(parts(c.camera.value), parts(pageFitOf(c)),
++        reason: 'the plan\'s own fit, not centerOn\'s');
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/canvas/canvas_draw_test.dart b/packages/jet_cad_2d_plan/test/canvas/canvas_draw_test.dart
+new file mode 100644
+index 00000000..1f392dd4
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/canvas/canvas_draw_test.dart
+@@ -0,0 +1,206 @@
++// Ported from jet_cad_floor_plan/test/planner_draw_test.dart; assertions unchanged.
++//
++// The drawing on the canvas alone: the TEXT entry's place (A7), the ink of
++// a drafted line through the canvas's own resolver and its survival across
++// rebuilds (A17), and the ink following the paper (A20-A22). A key that
++// armed a tool is the controller's selectTool here (the keyboard is Task
++// 16's); a swatch is the page edit it made (the page panel is Task 18's).
++import 'package:flutter/material.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:jet_cad_2d_plan/src/canvas/plan_canvas_view.dart';
++
++import '../support/canvas_fixture.dart';
++
++void main() {
++  testWidgets(
++      'A7 the field sits at the camera\'s point and survives a pan '
++      'with its state (M-05n, M-05u)', (tester) async {
++    final c = drawController().c;
++    await pumpDraw(tester, c);
++    c.selectTool('plan.text');
++    await tester.pump();
++    await tester.tapAt(globalOf(tester, c, 7100.5, 3050.25));
++    await tester.pump();
++    final field = find.byKey(const Key('text-entry'));
++    final placed = c.textTool;
++    final at = placed.pending.value!.point;
++    Offset corner() =>
++        tester.getBottomLeft(find.byKey(const Key('text-entry-box')));
++    final want = globalOf(tester, c, at.x, at.y);
++    expect((corner() - want).distance, lessThan(0.5));
++    await tester.enterText(field, 'abc');
++    final state = tester.state<EditableTextState>(entryEditable);
++    c.camera.value = ViewportTransform(
++        worldToScreenMatrix: Transform2.translation(40, -25)
++            .multiply(c.camera.value.worldToScreenMatrix));
++    await tester.pump();
++    expect(
++        (corner() - globalOf(tester, c, at.x, at.y)).distance, lessThan(0.5));
++    expect(identical(tester.state<EditableTextState>(entryEditable), state),
++        isTrue,
++        reason: 'Ruling 05-10: never rebuilt by the camera');
++    expect(state.widget.focusNode.hasFocus, isTrue);
++    expect(placed.controller.text, 'abc');
++  });
++
++  testWidgets(
++      'A17 a line drafted with L is ByLayer on layer 0 and resolves black '
++      "through the canvas's own resolver, which survives a rebuild "
++      '(fix/post-07)', (tester) async {
++    final seeded = drawController();
++    final c = seeded.c;
++    await pumpDraw(tester, c);
++    c.selectTool('plan.line');
++    await tester.pump();
++    await tester.tapAt(globalOf(tester, c, 7010, 3020));
++    await tester.pump();
++    await tester.tapAt(globalOf(tester, c, 7060, 3090));
++    await tester.pump();
++    c.selectTool('plan.select');
++    await tester.pump();
++    final doc = c.document;
++    final drafted =
++        ofKind(doc, EntityKind.line).where((h) => h != seeded.line).single;
++    final slot = doc.entities.slotOf(drafted)!;
++    // The fixture is the defect's own: nothing concrete to fall back on.
++    expect(doc.entities.colorAt(slot), kByLayer);
++    expect(doc.entities.layerAt(slot), ReservedHandles.layerZero);
++    expect(doc.tables.layers[ReservedHandles.layerZero]!.color,
++        const IndexedColor(7));
++
++    DraftCanvasState canvas() =>
++        tester.state<DraftCanvasState>(find.byType(DraftCanvas));
++    final painter = canvas().painter;
++    expect(painter.resolver.styleFor(slot, StyleContext.documentRoot).argb,
++        0xFF000000,
++        reason: 'ACI 7 is the foreground, black on the paper');
++
++    // A rebuild of the shell and the view must hand the canvas the same
++    // resolver: a different one makes `didUpdateWidget` rebuild the painter.
++    tester.element(find.byType(PlanCanvas)).markNeedsBuild();
++    tester.element(find.byType(PlanCanvasView)).markNeedsBuild();
++    await tester.pump();
++    expect(identical(canvas().painter, painter), isTrue,
++        reason: 'one resolver per paper foreground, not one per build');
++  });
++
++  /// Drafts one line with plan.line on [c] and returns its slot: ByLayer on
++  /// layer 0, which is ACI 7.
++  Future<int> draftLine(WidgetTester tester, PlanController c) async {
++    final doc = c.document;
++    final before = ofKind(doc, EntityKind.line).toSet();
++    c.selectTool('plan.line');
++    await tester.pump();
++    await tester.tapAt(globalOf(tester, c, 7010, 3020));
++    await tester.pump();
++    await tester.tapAt(globalOf(tester, c, 7060, 3090));
++    await tester.pump();
++    c.selectTool('plan.select');
++    await tester.pump();
++    final drafted =
++        ofKind(doc, EntityKind.line).where((h) => !before.contains(h)).single;
++    final slot = doc.entities.slotOf(drafted)!;
++    expect(doc.entities.colorAt(slot), kByLayer);
++    expect(doc.entities.layerAt(slot), ReservedHandles.layerZero);
++    return slot;
++  }
++
++  /// The slot's colour through the canvas's own painter's resolver.
++  int argbOnCanvas(WidgetTester tester, int slot) => tester
++      .state<DraftCanvasState>(find.byType(DraftCanvas))
++      .painter
++      .resolver
++      .styleFor(slot, StyleContext.documentRoot)
++      .argb;
++
++  testWidgets(
++      'A20 the foreground follows the paper: black on White, white on '
++      'Blueprint picked in the Page panel, back by undo and redo; White to '
++      'Ivory keeps the resolver (fix/post-07 F1b)', (tester) async {
++    final c = drawController().c;
++    await pumpDraw(tester, c);
++    final doc = c.document;
++    PageComponent page() => doc.components.get<PageComponent>(doc.rootHandle)!;
++    DraftCanvasState canvas() =>
++        tester.state<DraftCanvasState>(find.byType(DraftCanvas));
++    expect(page().background, 0xFFFFFFFF, reason: 'starts on White');
++    final slot = await draftLine(tester, c);
++    expect(argbOnCanvas(tester, slot), 0xFF000000, reason: 'White');
++
++    // Each page edit below is heard after the frame it is pumped in (the
++    // document's change stream is asynchronous, and the canvas alone has
++    // nothing that schedules that frame, as the shell's swatch tap and bar
++    // did): a second pump draws it.
++    doc.commands.execute(SetComponentCommand<PageComponent>(
++        doc.rootHandle, page().copyWith(background: 0xFF1F3A5F)));
++    await tester.pump();
++    await tester.pump();
++    expect(page().background, 0xFF1F3A5F);
++    expect(argbOnCanvas(tester, slot), 0xFFFFFFFF, reason: 'Blueprint');
++
++    doc.commands.undo();
++    await tester.pump();
++    await tester.pump();
++    expect(page().background, 0xFFFFFFFF);
++    expect(argbOnCanvas(tester, slot), 0xFF000000, reason: 'undo to White');
++
++    doc.commands.redo();
++    await tester.pump();
++    await tester.pump();
++    expect(page().background, 0xFF1F3A5F);
++    expect(argbOnCanvas(tester, slot), 0xFFFFFFFF, reason: 'redo Blueprint');
++
++    doc.commands.undo();
++    await tester.pump();
++    await tester.pump();
++    expect(argbOnCanvas(tester, slot), 0xFF000000, reason: 'undo again');
++
++    // White to Ivory: the page changes, the foreground does not, so the
++    // canvas keeps its painter (a new resolver would rebuild it).
++    final painter = canvas().painter;
++    doc.commands.execute(SetComponentCommand<PageComponent>(
++        doc.rootHandle, page().copyWith(background: 0xFFFAF6EC)));
++    await tester.pump();
++    await tester.pump();
++    expect(page().background, 0xFFFAF6EC);
++    expect(identical(canvas().painter, painter), isTrue,
++        reason: 'same foreground, same resolver');
++    expect(argbOnCanvas(tester, slot), 0xFF000000, reason: 'Ivory');
++  });
++
++  testWidgets(
++      'A21 a document that opens on Blueprint drafts white from the start, '
++      'and a load onto White turns it black (fix/post-07 F1b)', (tester) async {
++    final c = drawController(background: 0xFF1F3A5F).c;
++    final doc = c.document;
++    await pumpDraw(tester, c);
++    final slot = await draftLine(tester, c);
++    expect(argbOnCanvas(tester, slot), 0xFFFFFFFF, reason: 'at startup');
++
++    // Out of band, as a decode writes the registry before `notifyLoaded`.
++    doc.components.attach<PageComponent>(
++        doc.rootHandle,
++        doc.components
++            .get<PageComponent>(doc.rootHandle)!
++            .copyWith(background: 0xFFFFFFFF));
++    doc.commands.notifyLoaded();
++    await tester.pump();
++    await tester.pump(); // heard after the frame, as in A20
++    expect(argbOnCanvas(tester, slot), 0xFF000000, reason: 'after the load');
++  });
++
++  testWidgets(
++      'A22 a document without a page drafts black: no sheet is painted, so '
++      "the drafting lies on the shell's light surface (fix/post-07 F1b)",
++      (tester) async {
++    final c = pagelessController();
++    final doc = c.document;
++    expect(doc.components.get<PageComponent>(doc.rootHandle), isNull);
++    await pumpDraw(tester, c);
++    final slot = await draftLine(tester, c);
++    expect(argbOnCanvas(tester, slot), 0xFF000000);
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/canvas/canvas_layout_test.dart b/packages/jet_cad_2d_plan/test/canvas/canvas_layout_test.dart
+new file mode 100644
+index 00000000..7f80c7db
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/canvas/canvas_layout_test.dart
+@@ -0,0 +1,90 @@
++// Ported from jet_cad_floor_plan/test/planner_shell_test.dart; assertions unchanged.
++//
++// The canvas's own cases of the shell's test: the first fit to the page at
++// the drawing area's size, the page chrome and the rulers under the
++// canvas, the fit latch across a resize, and the interaction tree. The
++// palette fixture stands in for the sample flat: its page is off the
++// origin and its extents (the two lines) are not the page, so the page fit
++// and the extents fit differ as the sample's did. The sample's size premise
++// (500 entities and more) went with the sample.
++import 'package:flutter/material.dart';
++import 'package:flutter/rendering.dart' show RenderCustomPaint;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++
++import '../support/canvas_fixture.dart';
++
++/// The palette fixture's canvas on White, in an app; its controller.
++Future<PlanController> pumpSample(WidgetTester tester) async {
++  final c = paletteController(paper: white).c;
++  await tester
++      .pumpWidget(MaterialApp(home: Scaffold(body: PlanCanvas(controller: c))));
++  return c;
++}
++
++void main() {
++  testWidgets('the camera is fitted to the page at the drawing area\'s size',
++      (tester) async {
++    // M-04k. The drawing area is the RulerFrame's child, not the view.
++    final c = await pumpSample(tester);
++    await tester.pump();
++    final size = tester.getSize(find.byType(DraftCanvas));
++    final page =
++        c.document.components.get<PageComponent>(c.document.rootHandle)!;
++    final expected = fitToPage(page, size);
++    expect(c.camera.value.scale, closeTo(expected.scale, 1e-9));
++    expect(c.camera.value.worldToScreenMatrix.e,
++        closeTo(expected.worldToScreenMatrix.e, 1e-6));
++    final extentsFit = ViewportTransform.fit(c.document.extents, size);
++    expect(c.camera.value.scale, isNot(closeTo(extentsFit.scale, 1e-9)));
++  });
++
++  testWidgets(
++      'the page chrome and the rulers are in the tree, under the canvas',
++      (tester) async {
++    await pumpSample(tester);
++    await tester.pump();
++    expect(find.byType(RulerFrame), findsOneWidget);
++    final chrome = find.byWidgetPredicate(
++        (w) => w is CustomPaint && w.painter is PageChromePainter);
++    expect(chrome, findsOneWidget);
++    expect(tester.getSize(chrome), tester.getSize(find.byType(DraftCanvas)));
++  });
++
++  // Ruling 01-2's latch: the fit happens once. A resize after the user has
++  // moved the camera must not re-fit and throw their view away.
++  testWidgets('a resize after the first layout does not re-fit the camera',
++      (tester) async {
++    await tester.binding.setSurfaceSize(const Size(800, 600));
++    addTearDown(() => tester.binding.setSurfaceSize(null));
++    final c = await pumpSample(tester);
++    await tester.pump();
++    c.camera.zoomAt(const Offset(300, 200), 1.7);
++    c.camera.panBy(const Offset(40, -25));
++    final moved = c.camera.value.worldToScreenMatrix;
++
++    await tester.binding.setSurfaceSize(const Size(1100, 750));
++    await tester.pump();
++    await tester.pump();
++
++    expect(c.camera.value.worldToScreenMatrix, same(moved));
++    expect(tester.getSize(find.byType(DraftCanvas)).width, greaterThan(500),
++        reason: 'the canvas really did get a new size');
++  });
++
++  testWidgets('the interaction tree is in place', (tester) async {
++    await pumpSample(tester);
++    await tester.pump();
++
++    expect(find.byType(InteractionLayer), findsOneWidget);
++    final overlayFinder = find.byWidgetPredicate(
++        (w) => w is CustomPaint && w.painter is SelectionOverlayPainter);
++    expect(overlayFinder, findsOneWidget);
++
++    final overlaySize =
++        tester.renderObject<RenderCustomPaint>(overlayFinder).size;
++    expect(overlaySize, tester.getSize(find.byType(DraftCanvas)));
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/canvas/canvas_palette_test.dart b/packages/jet_cad_2d_plan/test/canvas/canvas_palette_test.dart
+new file mode 100644
+index 00000000..63bc82f9
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/canvas/canvas_palette_test.dart
+@@ -0,0 +1,235 @@
++// Ported from jet_cad_floor_plan/test/planner_palette_test.dart; assertions unchanged.
++//
++// Dark theme spec D1, D4, D5 (plan Task 4): the canvas hands
++// `PlanCanvasView` the chrome from the theme and the paper set from the
++// paper, and both follow a live switch without a camera move.
++//
++// The real canvas under the floor planner's seed, light and dark, at zero
++// theme animation; read back in pixels (support/canvas_fixture.dart). The
++// selection, the ink, the ruler bar, the corner box and the sheet's edge
++// are each asserted on their own, so a palette taken from the wrong source
++// shows up in the crossing that separates the two sources: a dark theme on
++// White paper, and a light theme on Blueprint.
++//
++// Dark canvas decision note K1 (2026-10-05) supersedes D4 for one crossing:
++// a dark theme on White now *shows* the sheet dark, so there the paper set
++// is the dark one and the ink is white. The light theme on Blueprint still
++// separates the paper from the theme.
++import 'package:flutter/material.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:jet_cad_2d_plan/src/canvas/plan_canvas_view.dart';
++
++import '../support/canvas_fixture.dart';
++
++/// [c]'s canvas in [mode], at 1440 x 900, with [selected] selected and the
++/// fixture's camera set after the view's own first fit.
++Future<PlanCanvasView> pumpShell(WidgetTester tester, PlanController c,
++    Handle selected, ThemeMode mode) async {
++  windowAt(tester, const Size(1440, 900));
++  await pumpThemed(tester, Scaffold(body: PlanCanvas(controller: c)), mode);
++  await tester.pump();
++  c.camera.value = paletteCamera;
++  c.selection.replace([SelectionKey.root(selected)]);
++  await tester.pump();
++  return tester.widget<PlanCanvasView>(find.byType(PlanCanvasView));
++}
++
++/// Pumps the same canvas under [mode] (the tree keeps its shape, so every
++/// state survives) and lets the zero-length theme change land.
++Future<void> switchTheme(
++    WidgetTester tester, PlanController c, ThemeMode mode) async {
++  await pumpThemed(tester, Scaffold(body: PlanCanvas(controller: c)), mode);
++  await tester.pump();
++}
++
++DraftCanvasState canvas(WidgetTester tester) =>
++    tester.state<DraftCanvasState>(find.byType(DraftCanvas));
++
++/// The colour ACI 7 resolves to on the canvas's own resolver.
++int inkArgb(WidgetTester tester, DraftDocument doc, Handle line) =>
++    canvas(tester)
++        .painter
++        .resolver
++        .styleFor(doc.entities.slotOf(line)!, StyleContext.documentRoot)
++        .argb;
++
++void main() {
++  test(
++      'premise: the seed\'s light surface takes black ink, its dark one '
++      'white; Blueprint and White take opposite sets', () {
++    expect(foregroundFor(lightTheme.colorScheme.surface.toARGB32()), 0x000000);
++    expect(foregroundFor(darkTheme.colorScheme.surface.toARGB32()), 0xFFFFFF);
++    expect(PaperPalette.forPaper(white), PaperPalette.light);
++    expect(PaperPalette.forPaper(blueprint), PaperPalette.dark);
++    // The chrome sets and the paper sets differ where the tests look.
++    expect(ChromePalette.light.rulerBackground,
++        isNot(ChromePalette.dark.rulerBackground));
++    expect(ChromePalette.light.sheetEdge, isNot(ChromePalette.dark.sheetEdge));
++    expect(PaperPalette.light.selection, isNot(PaperPalette.dark.selection));
++  });
++
++  // M-DT-1, M-DT-2 and review 2's note: all four crossings. The light theme
++  // on White pins what `PlanCanvasView` hands down when nothing is dark.
++  for (final (mode, paper, name) in [
++    (ThemeMode.light, white, 'light theme, White paper'),
++    (ThemeMode.light, blueprint, 'light theme, Blueprint paper'),
++    (ThemeMode.dark, white, 'dark theme, White paper'),
++    (ThemeMode.dark, blueprint, 'dark theme, Blueprint paper'),
++  ]) {
++    testWidgets(
++        'M-DT-1, M-DT-2: $name: the selection takes the paper\'s set, the '
++        'ruler bar, the corner and the sheet edge the theme\'s chrome, the '
++        'ink the paper\'s foreground', (tester) async {
++      final f = paletteController(paper: paper);
++      final view = await pumpShell(tester, f.c, f.selected, mode);
++      final chrome =
++          mode == ThemeMode.dark ? ChromePalette.dark : ChromePalette.light;
++      // K1: Blueprint is dark paper; a dark theme shows White dark too.
++      final darkPaper = paper == blueprint || mode == ThemeMode.dark;
++      final set = darkPaper ? PaperPalette.dark : PaperPalette.light;
++      final seen = look(tester, await shoot(tester));
++      expectSelection(seen, set, name);
++      expectChrome(seen, chrome, name);
++      if (darkPaper) {
++        expectLightInk(seen, name);
++        expect(inkArgb(tester, f.c.document, f.ink), 0xFFFFFFFF);
++      } else {
++        expectDarkInk(seen, name);
++        expect(inkArgb(tester, f.c.document, f.ink), 0xFF000000);
++      }
++      // What the shell hands the view, and the view its painters (the page
++      // chrome's paper set included, which the pixels above do not show).
++      expect(view.chrome, chrome);
++      expect(view.paper, set);
++      expectPainters(tester, chrome, set, name);
++    });
++  }
++
++  testWidgets(
++      'M-DT-9, K1: a theme switch over White with no camera move repaints '
++      'the ruler bar, the corner and the sheet edge in the dark chrome and '
++      'back; the sheet turns dark, so the selection and the ink take the '
++      'dark set and the canvas takes a new resolver', (tester) async {
++    final f = paletteController(paper: white);
++    final view = await pumpShell(tester, f.c, f.selected, ThemeMode.light);
++    final camera = view.camera.value;
++    var seen = look(tester, await shoot(tester));
++    expectChrome(seen, ChromePalette.light, 'light');
++    expectSelection(seen, PaperPalette.light, 'light');
++    final painter = canvas(tester).painter;
++
++    await switchTheme(tester, f.c, ThemeMode.dark);
++    expect(identical(view.camera.value, camera), isTrue,
++        reason: 'no camera move: only shouldRepaint can repaint');
++    seen = look(tester, await shoot(tester));
++    expectChrome(seen, ChromePalette.dark, 'after the switch to dark');
++    expectSelection(seen, PaperPalette.dark, 'White shown dark (K1)');
++    expectLightInk(seen, 'White shown dark: white ink');
++    expect(identical(canvas(tester).painter, painter), isFalse,
++        reason: 'the dark canvas re-tones, so a new resolver, so a new '
++            'painter');
++
++    await switchTheme(tester, f.c, ThemeMode.light);
++    seen = look(tester, await shoot(tester));
++    expectChrome(seen, ChromePalette.light, 'back to light');
++    expectSelection(seen, PaperPalette.light, 'back to light');
++    expectDarkInk(seen, 'back to light');
++  });
++
++  testWidgets(
++      'M-DT-9: with a line selected, White to Blueprint with no camera move '
++      'repaints the selection 0x7FB2FF and the ink white; White to Ivory '
++      'keeps the light set', (tester) async {
++    // The shell's rebuild on a foreground flip is what hands the view the
++    // new set. The overlay's repaint here also comes from the outline cache
++    // (every `DocChange` with a selection), so its `shouldRepaint` is
++    // witnessed by the no-page theme switch below (R-C4-2).
++    final f = paletteController(paper: white);
++    final view = await pumpShell(tester, f.c, f.selected, ThemeMode.light);
++    final camera = view.camera.value;
++    var seen = look(tester, await shoot(tester));
++    expectSelection(seen, PaperPalette.light, 'White');
++
++    PageComponent page() =>
++        f.c.document.components.get<PageComponent>(f.c.document.rootHandle)!;
++    Future<void> paper(int argb) async {
++      f.c.document.commands.execute(SetComponentCommand<PageComponent>(
++          f.c.document.rootHandle, page().copyWith(background: argb)));
++      await tester.pump();
++      // Heard after that frame (an asynchronous change stream; the canvas
++      // alone has no bar whose rebuild schedules it): a second pump draws.
++      await tester.pump();
++    }
++
++    await paper(blueprint);
++    expect(identical(view.camera.value, camera), isTrue);
++    seen = look(tester, await shoot(tester));
++    expectSelection(seen, PaperPalette.dark, 'Blueprint');
++    expect(rgbOf(PaperPalette.dark.selection), 0x7FB2FF);
++    expectLightInk(seen, 'Blueprint');
++    expectChrome(seen, ChromePalette.light, 'the chrome stays the theme\'s');
++
++    await paper(0xFFFAF6EC); // Ivory
++    seen = look(tester, await shoot(tester));
++    expectSelection(seen, PaperPalette.light, 'Ivory');
++    expectDarkInk(seen, 'Ivory');
++  });
++
++  testWidgets(
++      'M-DT-10: no page in the dark theme: ACI 7 is light on the dark '
++      'surface and the selection is the dark set', (tester) async {
++    final f = paletteController(paper: null);
++    expect(f.c.document.components.get<PageComponent>(f.c.document.rootHandle),
++        isNull);
++    final view = await pumpShell(tester, f.c, f.selected, ThemeMode.dark);
++    expect(view.paper, PaperPalette.dark);
++    final seen = look(tester, await shoot(tester));
++    expectLightInk(seen, 'no page, dark');
++    expectSelection(seen, PaperPalette.dark, 'no page, dark');
++    expect(inkArgb(tester, f.c.document, f.ink), 0xFFFFFFFF);
++  });
++
++  testWidgets(
++      'M-DT-10: no page in the light theme: ACI 7 is black and the selection '
++      'the light set (today\'s behaviour)', (tester) async {
++    final f = paletteController(paper: null);
++    final view = await pumpShell(tester, f.c, f.selected, ThemeMode.light);
++    expect(view.paper, PaperPalette.light);
++    final seen = look(tester, await shoot(tester));
++    expectDarkInk(seen, 'no page, light');
++    expectSelection(seen, PaperPalette.light, 'no page, light');
++    expect(inkArgb(tester, f.c.document, f.ink), 0xFF000000);
++  });
++
++  testWidgets(
++      'M-DT-9, M-DT-10, D4: no page, a theme switch re-derives the ink and '
++      'the paper set from the new surface: light to dark turns ACI 7 white '
++      'and the selection dark with no camera move, and back', (tester) async {
++    // The overlay's own repaint witness: no `DocChange` happens here, so
++    // nothing in the overlay's repaint merge fires, and only its
++    // `shouldRepaint` can show the new set (and only the canvas's can show
++    // the new ink). The paper flip below cannot be that witness: with a line
++    // selected, the page command's `DocChange` makes the `OutlineCache`, a
++    // member of the merge, notify (ruling R-C4-2).
++    final f = paletteController(paper: null);
++    await pumpShell(tester, f.c, f.selected, ThemeMode.light);
++    var seen = look(tester, await shoot(tester));
++    expectDarkInk(seen, 'light');
++    expectSelection(seen, PaperPalette.light, 'light');
++
++    await switchTheme(tester, f.c, ThemeMode.dark);
++    seen = look(tester, await shoot(tester));
++    expect(inkArgb(tester, f.c.document, f.ink), 0xFFFFFFFF);
++    expectLightInk(seen, 'after the switch to dark');
++    expectSelection(seen, PaperPalette.dark, 'after the switch to dark');
++
++    await switchTheme(tester, f.c, ThemeMode.light);
++    seen = look(tester, await shoot(tester));
++    expect(inkArgb(tester, f.c.document, f.ink), 0xFF000000);
++    expectDarkInk(seen, 'back to light');
++    expectSelection(seen, PaperPalette.light, 'back to light');
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/canvas/canvas_ui_test.dart b/packages/jet_cad_2d_plan/test/canvas/canvas_ui_test.dart
+new file mode 100644
+index 00000000..ebaf97e0
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/canvas/canvas_ui_test.dart
+@@ -0,0 +1,83 @@
++// Ported from jet_cad_floor_plan/test/canvas_ui_test.dart; assertions unchanged.
++//
++// Dark theme spec D6b, D7, R-5 (plan Task 5): the text entry is filled
++// with the scheme's `surfaceContainerHighest`, so the paper does not show
++// through it (M-DT-12). D6a, the page panel's swatch borders, is Task 18's.
++//
++// Under the floor planner's seed, light and dark (support/
++// canvas_fixture.dart).
++import 'package:flutter/material.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:jet_cad_2d_plan/src/canvas/text_entry_overlay.dart'
++    show kTextEntrySize;
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/canvas_fixture.dart';
++
++void main() {
++  test(
++      'premise: the seed schemes\' primaries differ by theme, and from '
++      'their outlines and from Colors.blue', () {
++    for (final s in [lightTheme.colorScheme, darkTheme.colorScheme]) {
++      expect(s.primary, isNot(s.outline));
++      expect(s.primary, isNot(Colors.blue));
++      expect(s.outline, isNot(Colors.black26));
++    }
++    expect(
++        lightTheme.colorScheme.primary, isNot(darkTheme.colorScheme.primary));
++    expect(
++        lightTheme.colorScheme.outline, isNot(darkTheme.colorScheme.outline));
++  });
++
++  // M-DT-12: dark theme on White, and the crossing, light theme on
++  // Blueprint. The sample is a pixel inside the field, right of the
++  // (empty) text and the caret, on the box's middle row: the paper before
++  // the field opens, the theme's surfaceContainerHighest after.
++  for (final (mode, theme, paper, name) in [
++    (ThemeMode.dark, darkTheme, white, 'dark theme, White paper'),
++    (ThemeMode.light, lightTheme, blueprint, 'light theme, Blueprint paper'),
++  ]) {
++    testWidgets(
++        'M-DT-12, $name: a pixel inside the text entry, away from the glyphs, '
++        'is surfaceContainerHighest, not the paper', (tester) async {
++      final f = paletteController(paper: paper);
++      windowAt(tester, const Size(1440, 900));
++      await pumpThemed(
++          tester, Scaffold(body: PlanCanvas(controller: f.c)), mode);
++      await tester.pump();
++      f.c.camera.value = paletteCamera;
++      await tester.pump();
++
++      // The insertion point, inside the sheet and clear of the lines.
++      final at = paletteCamera.worldToScreen(Vector2(10500, 6400));
++      final area = tester.getTopLeft(find.byType(InteractionLayer));
++      final click = area + Offset(at.x, at.y);
++      // Where the field will be: its box's bottom-left at the click.
++      final sample = (
++        (click.dx + 200).floor(),
++        (click.dy - kTextEntrySize.height / 2).floor()
++      );
++      // Dark canvas K1: a dark theme shows White as kDarkCanvasPaper.
++      final shown = mode == ThemeMode.dark ? kDarkCanvasPaper : paper;
++      final before = await shoot(tester);
++      expect(hex(before.rgbAt(sample.$1, sample.$2)), hex(shown & 0xFFFFFF),
++          reason: 'premise: the paper shows there before the field opens');
++
++      f.c.selectTool('plan.text');
++      await tester.pump();
++      await tester.tapAt(click);
++      await tester.pump();
++      expect(find.byKey(const Key('text-entry')), findsOneWidget);
++      final box = tester.getRect(find.byKey(const Key('text-entry-box')));
++      expect(box.contains(Offset(sample.$1 + 0.5, sample.$2 + 0.5)), isTrue,
++          reason: 'the sample lies inside the field');
++
++      final after = await shoot(tester);
++      expect(hex(after.rgbAt(sample.$1, sample.$2)),
++          hex(rgbOf(theme.colorScheme.surfaceContainerHighest)),
++          reason: '$name: the field is filled from the theme');
++    });
++  }
++}
+diff --git a/packages/jet_cad_2d_plan/test/canvas/dark_canvas_test.dart b/packages/jet_cad_2d_plan/test/canvas/dark_canvas_test.dart
+new file mode 100644
+index 00000000..1cea99d6
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/canvas/dark_canvas_test.dart
+@@ -0,0 +1,211 @@
++// Ported from jet_cad_floor_plan/test/dark_canvas_test.dart; assertions unchanged.
++//
++// Dark canvas decision note (2026-10-05) K1–K3, wired: the canvas, read
++// back in pixels under the floor planner's seed (support/
++// canvas_fixture.dart). Today's selection-mode run is 2b's; each test runs
++// once, in design mode.
++//
++// Beside the fixture's ACI 7 lines the document carries two fixed colours
++// as the planner draws them: a wall-black `TrueColor(0x000000)` line and a
++// floor-finish `TrueColor(0xBBBBBB)` line. Each lies a whole number of
++// pixels below the sheet's top, so it sits on pixel centres.
++//
++// Named mutants: M-DC-2 (Blueprint shown dark too), M-DC-3 (`_paperArgb`
++// back to the page's background), M-DC-4 (the re-toning resolver not
++// installed), M-DC-1 through the widgets (the sheet keeps the page's fill).
++import 'package:flutter/material.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:jet_cad_2d_plan/src/canvas/plan_canvas_view.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/canvas_fixture.dart';
++
++/// The fixed-colour lines' y: 3000 and 2800 mm below the sheet's top
++/// (7200), whole multiples of 8 mm.
++const double wallY = 4200, finishY = 4400;
++
++/// A sheet pixel clear of every line.
++final Vector2 bare = Vector2(10500, 6400);
++
++PlanController controllerOn(int paper) => paletteController(
++    paper: paper,
++    extra: (doc) {
++      for (final (y, rgb) in [(wallY, 0x000000), (finishY, 0xBBBBBB)]) {
++        doc.commands.execute(AddEntityCommand(
++          record: draftRecord(
++              doc.handleSeed.next(), doc.rootHandle, EntityKind.line,
++              layer: ReservedHandles.layerZero, color: TrueColor(rgb)),
++          payload: linePayload(Vector2(lineX0, y), Vector2(lineX1, y)),
++        ));
++      }
++    }).c;
++
++Future<void> pumpView(
++    WidgetTester tester, PlanController c, ThemeMode mode) async {
++  windowAt(tester, const Size(1440, 900));
++  await pumpThemed(tester, Scaffold(body: PlanCanvas(controller: c)), mode);
++  await tester.pump();
++  await tester.pump();
++  c.camera.value = paletteCamera;
++  await tester.pump();
++}
++
++/// The brightest pixel of the 3 x 3 block on the line at [y].
++int lineAt(WidgetTester tester, Shot shot, double y) {
++  final (x, py) = pixelOf(tester, Vector2(sampleX, y));
++  return shot.brightest(x, py);
++}
++
++/// The darkest pixel of the 3 x 3 block on the line at [y]: the line's
++/// own colour on a light paper.
++int darkLineAt(WidgetTester tester, Shot shot, double y) {
++  final (x, py) = pixelOf(tester, Vector2(sampleX, y));
++  return shot.darkest(x, py);
++}
++
++int bareAt(WidgetTester tester, Shot shot) {
++  final (x, y) = pixelOf(tester, bare);
++  return shot.rgbAt(x, y);
++}
++
++void main() {
++  testWidgets(
++      'M-DC-1, M-DC-3, M-DC-4: dark theme on White: the sheet is '
++      'kDarkCanvasPaper, the black wall white, the light-grey finish '
++      'dark grey, ACI 7 white, the overlays the dark set; the page '
++      'keeps White', (tester) async {
++    final c = controllerOn(white);
++    await pumpView(tester, c, ThemeMode.dark);
++    final shot = await shoot(tester);
++    expect(hex(bareAt(tester, shot)), hex(kDarkCanvasPaper & 0xFFFFFF));
++    final wall = lineAt(tester, shot, wallY);
++    expect(channelDistance(wall, 0xFFFFFF), lessThanOrEqualTo(24),
++        reason: 'wall ${hex(wall)}');
++    final finish = lineAt(tester, shot, finishY);
++    final want = darkCanvasTone(0xBBBBBB, kDarkCanvasPaper);
++    expect(channelDistance(finish, want), lessThanOrEqualTo(12),
++        reason: 'finish ${hex(finish)}, want ${hex(want)}');
++    final ink = lineAt(tester, shot, inkY);
++    expect(channelDistance(ink, 0xFFFFFF), lessThanOrEqualTo(24),
++        reason: 'ACI 7 ${hex(ink)}');
++
++    final view = tester.widget<PlanCanvasView>(find.byType(PlanCanvasView));
++    expect(view.paper, PaperPalette.dark);
++    expect(view.sheetArgb, kDarkCanvasPaper);
++    expect(view.resolver, isA<DarkCanvasStyleResolver>());
++    final doc = c.document;
++    expect(doc.components.get<PageComponent>(doc.rootHandle)!.background, white,
++        reason: 'display only (K4)');
++  });
++
++  testWidgets(
++      'M-DC-2: dark theme on Blueprint: the sheet stays Blueprint and '
++      'nothing is re-toned: the black wall stays black', (tester) async {
++    final c = controllerOn(blueprint);
++    await pumpView(tester, c, ThemeMode.dark);
++    final shot = await shoot(tester);
++    expect(hex(bareAt(tester, shot)), hex(blueprint & 0xFFFFFF));
++    final wall = lineAt(tester, shot, wallY);
++    expect(channelDistance(wall, blueprint & 0xFFFFFF), lessThanOrEqualTo(12),
++        reason: 'the black wall\'s brightest pixel is the paper '
++            '${hex(wall)}');
++    final view = tester.widget<PlanCanvasView>(find.byType(PlanCanvasView));
++    expect(view.sheetArgb, isNull);
++    expect(view.resolver, isA<DocumentStyleResolver>());
++  });
++
++  testWidgets(
++      'light theme on White: as before: a white sheet, black wall, the '
++      'finish its own grey; a live switch to dark and back re-tones and '
++      'restores', (tester) async {
++    final c = controllerOn(white);
++    await pumpView(tester, c, ThemeMode.light);
++    var shot = await shoot(tester);
++    expect(hex(bareAt(tester, shot)), hex(0xFFFFFF));
++    expect(channelDistance(darkLineAt(tester, shot, finishY), 0xBBBBBB),
++        lessThanOrEqualTo(12));
++    expect(channelDistance(darkLineAt(tester, shot, wallY), 0x000000),
++        lessThanOrEqualTo(24));
++    expect(tester.widget<PlanCanvasView>(find.byType(PlanCanvasView)).sheetArgb,
++        isNull);
++
++    await pumpThemed(
++        tester, Scaffold(body: PlanCanvas(controller: c)), ThemeMode.dark);
++    await tester.pump();
++    shot = await shoot(tester);
++    expect(hex(bareAt(tester, shot)), hex(kDarkCanvasPaper & 0xFFFFFF));
++    expect(channelDistance(lineAt(tester, shot, wallY), 0xFFFFFF),
++        lessThanOrEqualTo(24));
++
++    await pumpThemed(
++        tester, Scaffold(body: PlanCanvas(controller: c)), ThemeMode.light);
++    await tester.pump();
++    shot = await shoot(tester);
++    expect(hex(bareAt(tester, shot)), hex(0xFFFFFF));
++    expect(channelDistance(darkLineAt(tester, shot, finishY), 0xBBBBBB),
++        lessThanOrEqualTo(12));
++  });
++
++  testWidgets(
++      'review finding 8: dark theme, White to Ivory keeps the key, so the '
++      'resolver and the canvas painter stay the same objects', (tester) async {
++    final c = controllerOn(white);
++    await pumpView(tester, c, ThemeMode.dark);
++    final resolver =
++        tester.widget<PlanCanvasView>(find.byType(PlanCanvasView)).resolver;
++    final painter =
++        tester.state<DraftCanvasState>(find.byType(DraftCanvas)).painter;
++    final doc = c.document;
++    doc.commands.execute(SetComponentCommand<PageComponent>(
++        doc.rootHandle,
++        doc.components
++            .get<PageComponent>(doc.rootHandle)!
++            .copyWith(background: 0xFFFAF6EC)));
++    await tester.pump();
++    await tester.pump();
++    expect(
++        identical(
++            tester.widget<PlanCanvasView>(find.byType(PlanCanvasView)).resolver,
++            resolver),
++        isTrue);
++    expect(
++        identical(
++            tester.state<DraftCanvasState>(find.byType(DraftCanvas)).painter,
++            painter),
++        isTrue);
++    expect(hex(bareAt(tester, await shoot(tester))),
++        hex(kDarkCanvasPaper & 0xFFFFFF));
++  });
++
++  testWidgets(
++      'dark theme, White to Blueprint and back: the sheet and the '
++      'resolver follow the page', (tester) async {
++    final c = controllerOn(white);
++    await pumpView(tester, c, ThemeMode.dark);
++    final doc = c.document;
++    void setPaper(int argb) =>
++        doc.commands.execute(SetComponentCommand<PageComponent>(
++            doc.rootHandle,
++            doc.components
++                .get<PageComponent>(doc.rootHandle)!
++                .copyWith(background: argb)));
++    setPaper(blueprint);
++    await tester.pump();
++    await tester.pump();
++    var shot = await shoot(tester);
++    expect(hex(bareAt(tester, shot)), hex(blueprint & 0xFFFFFF));
++    expect(tester.widget<PlanCanvasView>(find.byType(PlanCanvasView)).resolver,
++        isA<DocumentStyleResolver>());
++
++    setPaper(0xFFFAF6EC); // Ivory: light, so shown dark again
++    await tester.pump();
++    await tester.pump();
++    shot = await shoot(tester);
++    expect(hex(bareAt(tester, shot)), hex(kDarkCanvasPaper & 0xFFFFFF));
++    expect(channelDistance(lineAt(tester, shot, wallY), 0xFFFFFF),
++        lessThanOrEqualTo(24));
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/canvas/plan_canvas_test.dart b/packages/jet_cad_2d_plan/test/canvas/plan_canvas_test.dart
+new file mode 100644
+index 00000000..e2c43ca7
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/canvas/plan_canvas_test.dart
+@@ -0,0 +1,311 @@
++// Spec 2a P2, "The widgets": PlanCanvas alone, with only a controller. It
++// fits the plan on its first frame (today's PlannerView), shows a
++// controller in one canvas at a time, follows the controller's document
++// swap, carries the rulers, grid and snapping options, pushes the app's
++// locale into the controller (spec P5) and shows the lock hint (spec P4).
++// The palette fixture: a 1:20 page off the origin, two ACI 7 lines.
++//
++// CV-8 and CV-9 are the carried items of Tasks 9 and 11: a locale report
++// that lands after its controller was disposed, and a grip drag in flight
++// whose type fails before the release. CV-10 pins the shortcut guard that
++// lands here (ruling R-l) through the text entry it wraps.
++import 'package:flutter/gestures.dart' show PointerDeviceKind;
++import 'package:flutter/material.dart';
++import 'package:flutter/scheduler.dart' show SchedulerBinding;
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:flutter_localizations/flutter_localizations.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:jet_cad_2d_plan/src/canvas/plan_canvas_view.dart';
++import 'package:jet_cad_2d_plan/src/controller/camera_bounds.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/canvas_fixture.dart';
++import '../support/harness.dart';
++import '../support/test_kit.dart' show addObject;
++import '../support/throwing_kit.dart';
++
++/// The six numbers of [v]'s world-to-screen matrix.
++List<double> m(ViewportTransform v) {
++  final t = v.worldToScreenMatrix;
++  return [t.a, t.b, t.c, t.d, t.e, t.f];
++}
++
++Future<void> pumpAlone(WidgetTester tester, Widget body) async {
++  windowAt(tester, const Size(1200, 700));
++  await tester.pumpWidget(MaterialApp(home: Scaffold(body: body)));
++  await tester.pump();
++}
++
++/// [c]'s page fitted to the drawing area, clamped as every fit is.
++List<double> pageFit(WidgetTester tester, PlanController c) {
++  final size = tester.getSize(find.byType(InteractionLayer));
++  final page = c.document.components.get<PageComponent>(c.document.rootHandle)!;
++  return m(clampCameraScale(fitToPage(page, size), size,
++      minScale: c.camera.minScale, maxScale: c.camera.maxScale));
++}
++
++void main() {
++  testWidgets(
++      'CV-1 the plan is fitted to the drawing area on the first frame, '
++      'inside the zoom bounds (M-CV-1)', (tester) async {
++    final c = paletteController(paper: white).c;
++    final before = m(c.camera.value);
++    await pumpAlone(tester, PlanCanvas(controller: c));
++    final want = pageFit(tester, c);
++    expect(want, isNot(before),
++        reason: 'premise: the controller\'s nominal camera is not the fit');
++    expect(m(c.camera.value), want);
++  });
++
++  testWidgets(
++      'CV-2 one controller in two canvases asserts after the frame; two '
++      'controllers, one canvas, and a canvas moved to another parent do not '
++      '(M-CV-2a, M-CV-2b)', (tester) async {
++    final c = paletteController(paper: white).c;
++    final d = paletteController(paper: blueprint).c;
++    windowAt(tester, const Size(1200, 700));
++    Widget row(List<PlanController> cs) => MaterialApp(
++            home: Row(children: [
++          for (final x in cs) Expanded(child: PlanCanvas(controller: x)),
++        ]));
++    await tester.pumpWidget(row([c, d]));
++    expect(tester.takeException(), isNull, reason: 'two controllers');
++    await tester.pumpWidget(row([c]));
++    expect(tester.takeException(), isNull, reason: 'one canvas');
++    // A Column in place of the Row: a new canvas for c, the old one
++    // disposed in the same frame.
++    await tester.pumpWidget(MaterialApp(
++        home: Column(children: [Expanded(child: PlanCanvas(controller: c))])));
++    expect(tester.takeException(), isNull,
++        reason: 'a canvas that replaces another is not a second one');
++    await tester.pumpWidget(row([c, c]));
++    final error = tester.takeException();
++    expect(error, isA<FlutterError>());
++    expect('$error', contains('one PlanCanvas at a time'));
++  });
++
++  testWidgets(
++      'CV-3 load: the canvas draws the controller\'s new document and fits '
++      'its page (M-CV-3)', (tester) async {
++    final c = paletteController(paper: white).c;
++    await pumpAlone(tester, PlanCanvas(controller: c));
++    final first = c.document;
++    c.load(paletteText(paper: blueprint, originX: -5000, originY: 8000).json);
++    await tester.pump();
++    await tester.pump();
++    expect(identical(c.document, first), isFalse,
++        reason: 'premise: load made a new document');
++    final canvas = tester.state<DraftCanvasState>(find.byType(DraftCanvas));
++    expect(identical(canvas.widget.document, c.document), isTrue);
++    expect(m(c.camera.value), pageFit(tester, c),
++        reason: 'the new plan is fitted on its first frame');
++    expect(tester.widget<PlanCanvasView>(find.byType(PlanCanvasView)).paper,
++        PaperPalette.dark,
++        reason: 'the paper set is the new page\'s (Blueprint)');
++  });
++
++  testWidgets(
++      'CV-4 the lock hint shows while controller.lockHint is set and clears '
++      'after kLockHintDuration (M-CV-4a, M-CV-4b)', (tester) async {
++    final c = paletteController(paper: white).c;
++    await pumpAlone(tester, PlanCanvas(controller: c));
++    final hint = find.byKey(const Key('plan-lock-hint'));
++    expect(hint, findsNothing);
++    c.lockHint.value = true;
++    await tester.pump();
++    expect(hint, findsOneWidget);
++    expect(
++        find.descendant(of: hint, matching: find.text('This object is locked')),
++        findsOneWidget);
++    await tester.pump(kLockHintDuration);
++    await tester.pump();
++    expect(c.lockHint.value, isFalse);
++    expect(hint, findsNothing);
++  });
++
++  testWidgets(
++      'CV-5 rulers: false and grid: false: no ruler frame and a page chrome '
++      'without the grid; the defaults draw both (M-CV-5)', (tester) async {
++    final c = paletteController(paper: white).c;
++    PageChromePainter chrome() => tester
++        .widgetList<CustomPaint>(find.byType(CustomPaint))
++        .map((p) => p.painter)
++        .whereType<PageChromePainter>()
++        .single;
++    await pumpAlone(
++        tester, PlanCanvas(controller: c, rulers: false, grid: false));
++    expect(find.byType(RulerFrame), findsNothing);
++    expect(chrome().grid, isFalse);
++    await tester.pumpWidget(
++        MaterialApp(home: Scaffold(body: PlanCanvas(controller: c))));
++    await tester.pump();
++    expect(find.byType(RulerFrame), findsOneWidget);
++    expect(chrome().grid, isTrue);
++  });
++
++  testWidgets(
++      'CV-6 snapping: false turns object snap off for the tools and keeps '
++      'the user\'s F3 setting; snapping: true turns it back (M-CV-6a, '
++      'M-CV-6b)', (tester) async {
++    final c = paletteController(paper: white).c;
++    await pumpAlone(tester, PlanCanvas(controller: c, snapping: false));
++    expect(c.snap.objectSnap, isTrue, reason: 'the user\'s setting');
++    expect(c.toolController.context.snap!.objectSnap, isFalse,
++        reason: 'what the tools read');
++    await tester.pumpWidget(
++        MaterialApp(home: Scaffold(body: PlanCanvas(controller: c))));
++    expect(c.toolController.context.snap!.objectSnap, isTrue);
++  });
++
++  testWidgets(
++      'CV-7 the canvas pushes the app\'s locale into controller.locale and '
++      'follows a change of language (M-CV-7)', (tester) async {
++    final c = paletteController(paper: white).c;
++    Future<void> pumpIn(Locale locale) async {
++      await tester.pumpWidget(MaterialApp(
++          locale: locale,
++          supportedLocales: const [Locale('en'), Locale('de'), Locale('tr')],
++          localizationsDelegates: GlobalMaterialLocalizations.delegates,
++          home: Scaffold(body: PlanCanvas(controller: c))));
++      await tester.pump();
++    }
++
++    await pumpIn(const Locale('tr'));
++    expect(c.locale.value, const Locale('tr'));
++    await pumpIn(const Locale('de'));
++    expect(c.locale.value, const Locale('de'));
++  });
++
++  testWidgets(
++      'CV-8 a locale report owed by a mounted canvas whose controller is '
++      'disposed in the same frame reports nothing and throws nothing '
++      '(M-CV-8)', (tester) async {
++    // Disposed by the test itself, not at tear-down: a second dispose
++    // asserts.
++    final c =
++        PlanController(kits: const [], json: paletteText(paper: white).json);
++    Widget app(Locale locale) => MaterialApp(
++        locale: locale,
++        supportedLocales: const [Locale('en'), Locale('de'), Locale('tr')],
++        localizationsDelegates: GlobalMaterialLocalizations.delegates,
++        home: Scaffold(body: PlanCanvas(controller: c)));
++    windowAt(tester, const Size(1200, 700));
++    await tester.pumpWidget(app(const Locale('tr')));
++    await tester.pump();
++    expect(c.locale.value, const Locale('tr'), reason: 'premise: it reports');
++    // The host lets the controller go at the end of the frame in which the
++    // language changes: its callback is queued before the canvas's report,
++    // which then finds a disposed controller under a mounted canvas.
++    SchedulerBinding.instance.addPostFrameCallback((_) => c.dispose());
++    await tester.pumpWidget(app(const Locale('de')));
++    expect(tester.takeException(), isNull,
++        reason: 'reportLocale on a disposed controller asserts');
++    await tester.pumpWidget(const SizedBox());
++    expect(tester.takeException(), isNull);
++  });
++
++  testWidgets(
++      'CV-9 a grip drag in flight whose type fails before the release ends '
++      'cleanly: no commit, no exception, plan.select idle, one diagnostic; '
++      'the same drag on a healthy type commits (M-CV-9)', (tester) async {
++    final boom = ThrowingKit();
++    late Handle block;
++    final json = planText([boom.kit], (d) {
++      // Grid snap off, so the drop is where the pointer is.
++      d.commands.execute(SetComponentCommand<PageComponent>(
++          d.rootHandle,
++          d.components
++              .get<PageComponent>(d.rootHandle)!
++              .copyWith(snapToGrid: false)));
++      block = addObject<BlockComponent>(d, const BlockComponent(size: 400),
++          at: Vector2(1300, -700));
++    });
++    final c = controllerFor(kits: [boom.kit], json: json);
++    await pumpAlone(tester, PlanCanvas(controller: c));
++    double size() => c.document.components.get<BlockComponent>(block)!.size;
++    Vector2 grip() => Vector2(1300 + size() / 2, -700);
++    Future<void> drag(double toX) async {
++      c.selection.replace([SelectionKey.root(block)]);
++      await tester.pump();
++      final g = grip();
++      final at = globalOf(tester, c, g.x, g.y);
++      final gesture =
++          await tester.startGesture(at, kind: PointerDeviceKind.mouse);
++      await tester.pump();
++      final to = globalOf(tester, c, toX, -700);
++      for (var i = 1; i <= 4; i++) {
++        await gesture.moveTo(Offset.lerp(at, to, i / 4)!);
++        await tester.pump();
++      }
++      await gesture.up();
++      await tester.pump();
++    }
++
++    // The positive control: a healthy drag to 1300 + 450 sets 900.
++    await drag(1750);
++    expect(size(), closeTo(900, 1e-6), reason: 'premise: the drag commits');
++    expect(c.canUndo.value, isTrue);
++    final committed = size();
++    c.document.commands.clearHistory();
++    final depth = c.document.commands.undoDepth;
++    final before = c.diagnostics.value.length;
++
++    // The type's preview throws from the first move on: the guard refuses
++    // the drag in flight, and the release's drag answers null.
++    boom.failing.add('gripsPreview');
++    await drag(2100);
++    expect(tester.takeException(), isNull);
++    expect(size(), committed, reason: 'nothing committed');
++    expect(c.document.commands.undoDepth, depth);
++    expect(c.planSelect.dragKind, isNull, reason: 'the drag ended');
++    final added = c.diagnostics.value.sublist(before);
++    expect(added.map((d) => (d.kitId, d.code)),
++        [('boom', KitDiagnosticCode.hookFailed)]);
++    await tester.pumpWidget(const SizedBox());
++    expect(tester.takeException(), isNull);
++  });
++
++  testWidgets(
++      'CV-10 the text entry keeps the plan\'s letters and Undo from a host\'s '
++      'shortcuts above the canvas; once it closes they reach the host '
++      '(M-CV-10)', (tester) async {
++    final c = drawController().c;
++    final hits = <String>[];
++    await pumpDraw(tester, c,
++        frame: (canvas) => CallbackShortcuts(bindings: {
++              const SingleActivator(LogicalKeyboardKey.keyL): () =>
++                  hits.add('L'),
++              const SingleActivator(LogicalKeyboardKey.keyF): () =>
++                  hits.add('F'),
++              const SingleActivator(LogicalKeyboardKey.keyZ, meta: true): () =>
++                  hits.add('undo'),
++            }, child: canvas));
++    c.selectTool('plan.text');
++    await tester.pump();
++    await tester.tapAt(globalOf(tester, c, 7100, 3050));
++    await tester.pump();
++    expect(find.byKey(const Key('text-entry')), findsOneWidget);
++    for (final key in [LogicalKeyboardKey.keyL, LogicalKeyboardKey.keyF]) {
++      expect(await tester.sendKeyEvent(key), isFalse,
++          reason: '$key reaches the platform as text');
++    }
++    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
++    await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
++    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
++    await tester.pump();
++    expect(hits, isEmpty, reason: 'no key reached the host');
++
++    // The positive control: Escape closes the entry, the focus goes back
++    // to the canvas, and L reaches the host's binding.
++    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
++    await tester.pump();
++    expect(find.byKey(const Key('text-entry')), findsNothing);
++    await tester.sendKeyEvent(LogicalKeyboardKey.keyL);
++    await tester.pump();
++    expect(hits, ['L']);
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/canvas/theme_canvas_test.dart b/packages/jet_cad_2d_plan/test/canvas/theme_canvas_test.dart
+new file mode 100644
+index 00000000..5273e031
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/canvas/theme_canvas_test.dart
+@@ -0,0 +1,356 @@
++// Ported from jet_cad_floor_plan/test/host/theme_canvas_test.dart; assertions unchanged.
++//
++// Host embedding API spec T-1's selection and canvas rows (Slice 3 plan
++// Task 2): `selectionOnLight`, `selectionOnDark` and `selectionWidth` reach
++// the selection overlay, per paper; `canvasBackground` is the surround and
++// a page-less plan's paper, so the ink, the paper's set and the selection
++// follow it as they follow `scheme.surface` today, a translucent one by its
++// RGB. Today's selection-mode runs are 2b's (each test runs once, in design
++// mode); invariant 4 (the export and the plan's text) is Tasks 19 and 20's.
++//
++// Read back in pixels on the dark theme's planner fixture
++// (support/canvas_fixture.dart: the real seed's themes at zero animation,
++// White, Blueprint and the dark canvas, a page or none, a y-up, off-origin
++// camera at 0.125 px/mm with the lines on pixel centres), through
++// `PlanCanvas` under a `PlanThemeScope`, and on a bare `PlanCanvas` for the
++// ambient-only path. The theme's colours are none of the sets' colours.
++import 'package:flutter/material.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:jet_cad_2d_plan/src/canvas/plan_canvas_view.dart';
++import 'package:jet_cad_2d_plan/src/theme/plan_theme.dart' show PlanThemeScope;
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/canvas_fixture.dart';
++
++/// The theme's colours: none is a palette colour or another's.
++const Color onLight = Color(0xFFD81B60);
++const Color onDark = Color(0xFFFFD54F);
++const Color canvas = Color(0xFF263238);
++
++/// A controller over the fixture's document on [paper] (null: no page),
++/// with the selected line's and the ink witness's handles (a decode keeps
++/// handles).
++({PlanController c, Handle selected, Handle ink}) controllerOn(int? paper) =>
++    paletteController(paper: paper);
++
++/// The fixture's light and dark themes, each carrying [ambient] when given.
++ThemeData withExtension(ThemeData theme, PlanTheme? ambient) =>
++    ambient == null ? theme : theme.copyWith(extensions: [ambient]);
++
++/// [home] under the seed's themes (carrying [ambient]) in [mode], at zero
++/// theme animation, inside the capture boundary. The tree keeps its shape
++/// across calls, so every state below survives a re-pump.
++Future<void> pumpHome(WidgetTester tester, Widget home, ThemeMode mode,
++        {PlanTheme? ambient}) =>
++    tester.pumpWidget(MaterialApp(
++      theme: withExtension(lightTheme, ambient),
++      darkTheme: withExtension(darkTheme, ambient),
++      themeMode: mode,
++      themeAnimationDuration: Duration.zero,
++      home: RepaintBoundary(key: shotKey, child: home),
++    ));
++
++/// [c]'s canvas under the view's own [theme] (Task 9's PlanThemeScope:
++/// the view's theme over the ambient one, as `FloorPlanView(theme:)`
++/// resolved it).
++Widget viewOf(PlanController c, {PlanTheme? theme}) => Scaffold(
++    body: PlanThemeScope(view: theme, child: PlanCanvas(controller: c)));
++
++/// Pumps [v]'s canvas under [mode], sets the fixture's camera and selects
++/// the line.
++Future<void> pumpView(WidgetTester tester,
++    ({PlanController c, Handle selected, Handle ink}) v, ThemeMode mode,
++    {PlanTheme? theme, PlanTheme? ambient}) async {
++  windowAt(tester, const Size(1440, 900));
++  await pumpHome(tester, viewOf(v.c, theme: theme), mode, ambient: ambient);
++  await tester.pump();
++  await tester.pump();
++  v.c.camera.value = paletteCamera;
++  v.c.selection.replace([SelectionKey.root(v.selected)]);
++  await tester.pump();
++}
++
++/// The selection overlay's painter in the view.
++SelectionOverlayPainter overlayOf(WidgetTester tester) => tester
++    .widgetList<CustomPaint>(find.descendant(
++        of: find.byType(PlanCanvasView), matching: find.byType(CustomPaint)))
++    .map((p) => p.painter)
++    .whereType<SelectionOverlayPainter>()
++    .single;
++
++/// The selection colour at the selected line's pixel is [want], within 3
++/// per channel.
++void expectSelectionRgb(
++    Shot shot, WidgetTester tester, Color want, String reason) {
++  final (sx, sy) = pixelOf(tester, Vector2(sampleX, selectedY));
++  final got = shot.nearest(sx, sy, rgbOf(want));
++  expect(channelDistance(got, rgbOf(want)), lessThanOrEqualTo(3),
++      reason: '$reason: selection ${hex(got)}, want ${hex(rgbOf(want))}');
++}
++
++/// Whether the rows one above and one below the selected line's are the
++/// selection colour [want] (within 3): a 2 px stroke centred on the row's
++/// centre covers them half, a 4 px one fully.
++(bool, bool) outerRowsAre(Shot shot, WidgetTester tester, Color want) {
++  final (sx, sy) = pixelOf(tester, Vector2(sampleX, selectedY));
++  bool near(int y) => channelDistance(shot.rgbAt(sx, y), rgbOf(want)) <= 3;
++  return (near(sy - 1), near(sy + 1));
++}
++
++/// The drawing area's pixel ([x], [y]) left of the sheet (whose left edge
++/// is at [edgeColumn]), or anywhere on a page-less plan: the surround.
++int surroundAt(Shot shot, WidgetTester tester) {
++  final (x, y) = areaPixel(tester, edgeColumn - 20, topRow + 150);
++  return shot.rgbAt(x, y);
++}
++
++void main() {
++  test('premise: the theme\'s colours are none of the sets\'', () {
++    for (final c in [onLight, onDark, canvas]) {
++      for (final set in [PaperPalette.light, PaperPalette.dark]) {
++        expect(c, isNot(set.selection));
++        expect(c, isNot(set.hover));
++      }
++    }
++    // The canvas colour is a dark paper: ACI 7 inks white on it, and the
++    // overlays take the dark set. The seed's light surface takes black.
++    expect(foregroundFor(canvas.toARGB32() & 0xFFFFFF), 0xFFFFFF);
++    expect(foregroundFor(lightTheme.colorScheme.surface.toARGB32() & 0xFFFFFF),
++        0x000000);
++    expect(rgbOf(canvas), isNot(rgbOf(lightTheme.colorScheme.surface)));
++    expect(rgbOf(canvas), isNot(rgbOf(darkTheme.colorScheme.surface)));
++  });
++
++  testWidgets(
++      'P-6: with no theme the view hands the overlay today\'s const '
++      'set and 2 px', (tester) async {
++    final v = controllerOn(white);
++    await pumpView(tester, v, ThemeMode.light);
++    final view = tester.widget<PlanCanvasView>(find.byType(PlanCanvasView));
++    expect(identical(view.paper, PaperPalette.light), isTrue);
++    expect(view.selectionStrokePixels, kSelectionStrokePixels);
++    expect(overlayOf(tester).selectionStrokePixels, kSelectionStrokePixels);
++    final shot = await shoot(tester);
++    expectSelectionRgb(shot, tester, PaperPalette.light.selection, 'none');
++    expect(surroundAt(shot, tester), rgbOf(lightTheme.colorScheme.surface));
++  });
++
++  testWidgets(
++      'M-H33(the editor\'s selection): White under the light theme '
++      'takes selectionOnLight, Blueprint selectionOnDark', (tester) async {
++    const theme = PlanTheme(selectionOnLight: onLight, selectionOnDark: onDark);
++    for (final (paper, want, set) in [
++      (white, onLight, PaperPalette.light),
++      (blueprint, onDark, PaperPalette.dark),
++    ]) {
++      final v = controllerOn(paper);
++      await pumpView(tester, v, ThemeMode.light, theme: theme);
++      final shot = await shoot(tester);
++      expectSelectionRgb(shot, tester, want, hex(paper));
++      expect(tester.widget<PlanCanvasView>(find.byType(PlanCanvasView)).paper,
++          set.withSelection(want));
++      expect(overlayOf(tester).paper, set.withSelection(want));
++      // A fresh tree for the next paper.
++      await tester.pumpWidget(const SizedBox());
++    }
++  });
++
++  testWidgets(
++      'selectionOnDark on the dark canvas: a White page under the '
++      'dark theme shows dark (K1) and takes the dark colour', (tester) async {
++    final v = controllerOn(white);
++    await pumpView(tester, v, ThemeMode.dark,
++        theme: const PlanTheme(
++            selectionOnLight: onLight, selectionOnDark: onDark));
++    final shot = await shoot(tester);
++    expectSelectionRgb(shot, tester, onDark, 'dark canvas');
++    expectLightInk(look(tester, shot), 'dark canvas');
++  });
++
++  testWidgets(
++      'only selectionOnLight: Blueprint keeps the dark set\'s '
++      '0xFF7FB2FF, White takes the theme\'s (per paper)', (tester) async {
++    const theme = PlanTheme(selectionOnLight: onLight);
++    var v = controllerOn(blueprint);
++    await pumpView(tester, v, ThemeMode.light, theme: theme);
++    var shot = await shoot(tester);
++    expectSelectionRgb(shot, tester, const Color(0xFF7FB2FF), 'Blueprint');
++    expect(
++        identical(
++            tester.widget<PlanCanvasView>(find.byType(PlanCanvasView)).paper,
++            PaperPalette.dark),
++        isTrue);
++    await tester.pumpWidget(const SizedBox());
++
++    v = controllerOn(white);
++    await pumpView(tester, v, ThemeMode.light, theme: theme);
++    shot = await shoot(tester);
++    expectSelectionRgb(shot, tester, onLight, 'White');
++  });
++
++  testWidgets(
++      'selectionWidth: 4 covers the rows a 2 px stroke covers only '
++      'half; the outline stays the paper\'s colour', (tester) async {
++    final v = controllerOn(white);
++    await pumpView(tester, v, ThemeMode.light);
++    var shot = await shoot(tester);
++    expect(outerRowsAre(shot, tester, PaperPalette.light.selection),
++        (false, false),
++        reason: 'the control: 2 px covers the rows beside its own half');
++
++    await pumpHome(
++        tester,
++        viewOf(v.c, theme: const PlanTheme(selectionWidth: 4)),
++        ThemeMode.light);
++    expect(tester.widget<PlanCanvasView>(find.byType(PlanCanvasView)).paper,
++        same(PaperPalette.light));
++    expect(overlayOf(tester).selectionStrokePixels, 4);
++    shot = await shoot(tester);
++    // T2-b: one pump, no camera move: the painter's width alone changed.
++    expect(
++        outerRowsAre(shot, tester, PaperPalette.light.selection), (true, true));
++    expectSelectionRgb(
++        shot, tester, PaperPalette.light.selection, 'the row itself');
++  });
++
++  testWidgets(
++      'M-H33(canvasBackground): a page-less plan under the light '
++      'theme on a dark canvasBackground: the surround is it, the ink '
++      'white, the selection the dark set\'s', (tester) async {
++    final v = controllerOn(null);
++    await pumpView(tester, v, ThemeMode.light,
++        theme: const PlanTheme(canvasBackground: canvas));
++    final shot = await shoot(tester);
++    expect(hex(surroundAt(shot, tester)), hex(rgbOf(canvas)));
++    final (cx, cy) = areaPixel(tester, 700, 20);
++    expect(hex(shot.rgbAt(cx, cy)), hex(rgbOf(canvas)),
++        reason: 'right of where a sheet would be: no sheet, all canvas');
++    expectLightInk(look(tester, shot), 'page-less on the canvas');
++    expectSelectionRgb(shot, tester, const Color(0xFF7FB2FF), 'page-less');
++    expect(
++        identical(
++            tester.widget<PlanCanvasView>(find.byType(PlanCanvasView)).paper,
++            PaperPalette.dark),
++        isTrue);
++  });
++
++  testWidgets(
++      'the guide: a translucent canvasBackground (0x40000000) on a '
++      'page-less plan under the light theme: the ink is chosen on its '
++      'RGB, black, so the ink is white and the overlays take the dark set',
++      (tester) async {
++    const translucent = Color(0x40000000);
++    expect(foregroundFor(rgbOf(translucent)), 0xFFFFFF);
++    expect(
++        foregroundFor(rgbOf(
++            Color.alphaBlend(translucent, lightTheme.colorScheme.surface))),
++        0x000000,
++        reason: 'premise: composited over the surface it would read light');
++    final v = controllerOn(null);
++    await pumpView(tester, v, ThemeMode.light,
++        theme: const PlanTheme(canvasBackground: translucent));
++    expect(
++        identical(
++            tester.widget<PlanCanvasView>(find.byType(PlanCanvasView)).paper,
++            PaperPalette.dark),
++        isTrue);
++    expect(identical(overlayOf(tester).paper, PaperPalette.dark), isTrue);
++    final seen = look(tester, await shoot(tester));
++    expectLightInk(seen, 'translucent canvas');
++    expectSelection(seen, PaperPalette.dark, 'translucent canvas');
++  });
++
++  testWidgets(
++      'T2-d: with a page, canvasBackground colours the surround only; '
++      'the sheet, the ink and the selection are the White page\'s',
++      (tester) async {
++    final v = controllerOn(white);
++    await pumpView(tester, v, ThemeMode.light,
++        theme: const PlanTheme(canvasBackground: canvas));
++    final shot = await shoot(tester);
++    expect(hex(surroundAt(shot, tester)), hex(rgbOf(canvas)),
++        reason: 'the pixel beside the sheet');
++    final (fx, fy) = areaPixel(tester, edgeColumn + 60, topRow + 60);
++    expect(hex(shot.rgbAt(fx, fy)), hex(0xFFFFFF),
++        reason: 'the sheet is the page\'s White');
++    final seen = look(tester, shot);
++    expectDarkInk(seen, 'White page');
++    expectSelection(seen, PaperPalette.light, 'White page');
++    expect(
++        identical(
++            tester.widget<PlanCanvasView>(find.byType(PlanCanvasView)).paper,
++            PaperPalette.light),
++        isTrue);
++  });
++
++  testWidgets(
++      'T2-a: a hovered line in the design mode reads the theme\'s selection '
++      'at 60% over what lies under it', (tester) async {
++    final v = controllerOn(white);
++    await pumpView(tester, v, ThemeMode.light,
++        theme: const PlanTheme(selectionOnLight: onLight));
++    final (ix, iy) = pixelOf(tester, Vector2(sampleX, inkY));
++    final under = (await shoot(tester)).rgbAt(ix, iy);
++
++    v.c.selection.setHover(SelectionKey.root(v.ink));
++    await tester.pump();
++    final hovered = (await shoot(tester)).rgbAt(ix, iy);
++    // Straight alpha at 0x99 / 0xFF over the pixel without the hover.
++    const alpha = 0x99 / 0xFF;
++    int channel(int s) => (((rgbOf(onLight) >> s) & 0xFF) * alpha +
++            ((under >> s) & 0xFF) * (1 - alpha))
++        .round();
++    final want = (channel(16) << 16) | (channel(8) << 8) | channel(0);
++    expect(channelDistance(hovered, want), lessThanOrEqualTo(3),
++        reason: 'hover ${hex(hovered)} over ${hex(under)}, want ${hex(want)}');
++    // Cleared before the tree goes: a hover alive at teardown makes the
++    // interaction layer's release notify the selection panel while it is
++    // being deactivated (an existing behaviour, not this test's subject).
++    v.c.selection.setHover(null);
++    await tester.pump();
++  });
++
++  testWidgets(
++      'a bare PlanCanvas reads the ambient extension: a page-less plan on '
++      'its canvasBackground, its selectionOnDark and its width',
++      (tester) async {
++    final f = paletteController(paper: null);
++    windowAt(tester, const Size(1440, 900));
++    const ambient = PlanTheme(
++        canvasBackground: canvas, selectionOnDark: onDark, selectionWidth: 4);
++    await pumpHome(
++        tester, Scaffold(body: PlanCanvas(controller: f.c)), ThemeMode.light,
++        ambient: ambient);
++    await tester.pump();
++    f.c.camera.value = paletteCamera;
++    f.c.selection.replace([SelectionKey.root(f.selected)]);
++    await tester.pump();
++
++    final shot = await shoot(tester);
++    expect(hex(surroundAt(shot, tester)), hex(rgbOf(canvas)));
++    expectLightInk(look(tester, shot), 'bare shell');
++    expectSelectionRgb(shot, tester, onDark, 'bare shell');
++    expect(outerRowsAre(shot, tester, onDark), (true, true));
++  });
++
++  testWidgets(
++      'R-1: a page-less plan under the dark theme on a '
++      'light canvasBackground: the surround is it, the ink black, the '
++      'selection selectionOnLight', (tester) async {
++    const lightCanvas = Color(0xFFFFF3E0);
++    expect(foregroundFor(lightCanvas.toARGB32() & 0xFFFFFF), 0x000000);
++    final v = controllerOn(null);
++    await pumpView(tester, v, ThemeMode.dark,
++        theme: const PlanTheme(
++            canvasBackground: lightCanvas,
++            selectionOnLight: onLight,
++            selectionOnDark: onDark));
++    final shot = await shoot(tester);
++    expect(hex(surroundAt(shot, tester)), hex(rgbOf(lightCanvas)));
++    expectDarkInk(look(tester, shot), 'page-less on a light canvas');
++    expectSelectionRgb(shot, tester, onLight, 'page-less, dark theme');
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/canvas/touch_tools_test.dart b/packages/jet_cad_2d_plan/test/canvas/touch_tools_test.dart
+new file mode 100644
+index 00000000..c3701a97
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/canvas/touch_tools_test.dart
+@@ -0,0 +1,55 @@
++// Ported from jet_cad_floor_plan/test/touch_tools_test.dart; assertions unchanged.
++//
++// Spec 14t R-1, T6: a pinch on the canvas. A polyline is pending between
++// taps: a finger held, moved and joined by a second finger commits nothing
++// and drops no pending shape, while the two fingers zoom the view. TD1 (the
++// Room tool) is sub-project 3's. The drawing fixture's sheet sits off the
++// origin under a rotated, non-reflecting camera.
++import 'package:flutter/gestures.dart' show PointerDeviceKind;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/canvas_fixture.dart';
++
++Future<TestGesture> finger(WidgetTester tester, int pointer, Offset at) =>
++    tester.startGesture(at, pointer: pointer, kind: PointerDeviceKind.touch);
++
++/// A pinch whose first finger was held [hold] and moved before the second
++/// landed; both fingers spread, then lift.
++Future<void> pinch(WidgetTester tester, Offset first,
++    {Duration hold = const Duration(milliseconds: 150)}) async {
++  final a = await finger(tester, 11, first);
++  await tester.pump(hold);
++  await a.moveTo(first + const Offset(30, 10));
++  final b = await finger(tester, 12, first + const Offset(160, 90));
++  for (var i = 1; i <= 3; i++) {
++    await a.moveTo(first + Offset(30.0 - 15 * i, 10.0 - 8 * i));
++    await b.moveTo(first + Offset(160.0 + 20 * i, 90.0 + 12 * i));
++  }
++  await a.up();
++  await b.up();
++  await tester.pump(const Duration(milliseconds: 200));
++}
++
++void main() {
++  testWidgets('TD2 a polyline pending between taps survives a pinch (M-14t-20)',
++      (tester) async {
++    final c = drawController().c;
++    await pumpDraw(tester, c);
++    final doc = c.document;
++    c.selectTool('plan.polyline');
++    await tester.pump();
++    for (final p in [Vector2(7010.5, 3020.25), Vector2(7060.5, 3090.25)]) {
++      final t = await finger(tester, 21, globalOf(tester, c, p.x, p.y));
++      await t.up();
++      await tester.pump();
++    }
++    final tool = c.toolController.active;
++    expect(tool.isMidShape, isTrue, reason: 'premise: two points placed');
++    final depth = doc.commands.undoDepth;
++    await pinch(tester, globalOf(tester, c, 7035.5, 3055.25));
++    expect(identical(c.toolController.active, tool), isTrue);
++    expect(tool.isMidShape, isTrue, reason: 'the shape is still pending');
++    expect(doc.commands.undoDepth, depth);
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/invariants/canvas_paint_allocation_test.dart b/packages/jet_cad_2d_plan/test/invariants/canvas_paint_allocation_test.dart
+new file mode 100644
+index 00000000..2c4050ab
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/invariants/canvas_paint_allocation_test.dart
+@@ -0,0 +1,114 @@
++// What a steady-state frame of the plan library's canvas allocates
++// (CLAUDE.md: "The frame path allocates nothing per entity in steady state,
++// and O(1) per flush"; spec 2a "Tests": a paint-allocation test for the
++// plan library's canvas).
++//
++// The drawing is the Flutter layer's DraftCanvas, whose own frame path
++// jet_cad_2d_flutter/test/invariants/paint_allocation_test.dart measures:
++// once a frame has drawn its widest view, the vertices sink never gives
++// capacity back, so `debugCapacityVertices` holds still across a later
++// frame or it does not, and `flush` reuses one Paint. What the plan library
++// adds is the composition around it: PlanCanvas rebuilds (a controller
++// notification, a theme, a parent's build) must hand DraftCanvas the same
++// resolver, document, index and camera, or DraftCanvas re-attaches
++// (`draft_canvas.dart:443-462`): a new DraftPainter, a new sink, every
++// cache made again, which is O(entities) per rebuild. So the frames below
++// rebuild PlanCanvas every frame and pin: the same DraftCanvasState, the
++// same painter, the same sink, a capacity that holds still and the same
++// Paint. The plan library paints nothing per entity of its own: the
++// overlay, the rulers and the page chrome are the Flutter layer's.
++//
++// The corpus is the Flutter layer's (4,000 entities, 400 instances nested
++// two deep, mirrored and non-uniform placements, groups, eight layers,
++// ByBlock and dashed styles), loaded through PlanController from its text,
++// with 50 root entities selected so the overlay draws outlines and grips.
++// The two cameras differ by one pixel of pan, off the origin.
++import 'package:flutter/material.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d/testing.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++
++void main() {
++  testWidgets(
++      'CV-alloc a rebuilt steady-state PlanCanvas frame allocates O(1) per '
++      'flush, not O(entities) (M-CV-alloc-1, M-CV-alloc-2)', (tester) async {
++    final corpus = generateDocument(
++      4000,
++      definitionCount: 40,
++      instanceCount: 400,
++      nestingDepth: 2,
++      mirroredFraction: 0.1,
++      nonUniformFraction: 0.2,
++      groupCount: 10,
++      layerCount: 8,
++      byBlockFraction: 0.3,
++      dashedFraction: 0.35,
++    );
++    final json = ensureManifest(DraftDocumentCodec.encodeToString(corpus));
++    final c = PlanController(kits: const [], json: json);
++    addTearDown(c.dispose);
++    await tester.binding.setSurfaceSize(const Size(1440, 900));
++    addTearDown(() => tester.binding.setSurfaceSize(null));
++    await tester.pumpWidget(
++        MaterialApp(home: Scaffold(body: PlanCanvas(controller: c))));
++    await tester.pump();
++
++    final doc = c.document;
++    final roots = [
++      for (final slot in doc.entities.liveSlots)
++        if (doc.entities.ownerAt(slot) == doc.rootHandle)
++          doc.entities.handleAt(slot),
++    ].take(50).toList();
++    expect(roots, hasLength(50), reason: 'premise: root entities to select');
++    c.selection.replace([for (final h in roots) SelectionKey.root(h)]);
++
++    final size = tester.getSize(find.byType(InteractionLayer));
++    final a = ViewportTransform.fit(doc.extents, size);
++    final b = ViewportTransform(
++        worldToScreenMatrix:
++            Transform2.translation(1, -1).multiply(a.worldToScreenMatrix));
++    Future<void> frames(int n) async {
++      for (var i = 0; i < n; i++) {
++        c.camera.value = i.isEven ? a : b;
++        tester.element(find.byType(PlanCanvas)).markNeedsBuild();
++        await tester.pump();
++      }
++    }
++
++    // Warm up: both views drawn, so the buffers are at their high water.
++    await frames(6);
++    final state = tester.state<DraftCanvasState>(find.byType(DraftCanvas));
++    final painter = state.painter;
++    final sink = state.vertices!;
++    final capacity = sink.debugCapacityVertices;
++    final paint = sink.debugPaint;
++    sink.resetCounters();
++
++    await frames(10);
++
++    // First what a rebuild kept: a remounted canvas or a new painter flushes
++    // into another sink, so the premise below would fail first and hide
++    // which one it was.
++    // M-CV-alloc-2: a key that changes per build remounts the canvas.
++    expect(
++        identical(
++            tester.state<DraftCanvasState>(find.byType(DraftCanvas)), state),
++        isTrue,
++        reason: 'a rebuild remounted DraftCanvas');
++    // M-CV-alloc-1: a resolver made per build rebuilds the painter.
++    expect(identical(state.painter, painter), isTrue,
++        reason: 'a rebuild handed DraftCanvas a new resolver: a new painter '
++            'and every cache made again');
++    expect(identical(state.vertices, sink), isTrue);
++    expect(sink.totalFlushCount, greaterThan(0),
++        reason: 'nothing was flushed, so nothing was measured');
++    expect(sink.frameTriangleCount, greaterThan(1000),
++        reason: 'a degenerate corpus would make the bound meaningless');
++    expect(sink.debugCapacityVertices, capacity,
++        reason: 'the buffer grew in a steady-state frame: O(entities)');
++    expect(identical(sink.debugPaint, paint), isTrue,
++        reason: 'flush() must reuse the one Paint of the sink\'s life');
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/support/canvas_fixture.dart b/packages/jet_cad_2d_plan/test/support/canvas_fixture.dart
+new file mode 100644
+index 00000000..6a5de3e7
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/support/canvas_fixture.dart
+@@ -0,0 +1,472 @@
++// Ported from jet_cad_floor_plan/test/support/palette_fixture.dart and planner_draw_test.dart's drawing fixture, over a PlanController.
++// The dark theme's planner fixture (spec D1, D4, D5; plan Task 4): the real
++// seed's light and dark themes switched at zero animation, a page or none,
++// two horizontal ACI 7 lines (one to select, one as the ink witness), an
++// axis-aligned, y-up, off-origin camera at 0.125 px/mm that puts the lines
++// and the sheet's left edge on pixel centres, and a capture of the whole
++// window at device pixel ratio 1.
++//
++// The pixel alignment is what lets a sample read a colour exactly: a 2 px
++// selection stroke centred on y = n + 0.5 covers row n fully, and the 1 px
++// sheet edge centred on x = m + 0.5 covers column m. The grid is off so no
++// grid line half-covers the edge column (the grid is not what these tests
++// are about; Task 2's painter tests carry it).
++import 'dart:async' show unawaited;
++import 'dart:convert' show jsonDecode;
++import 'dart:math' as math;
++import 'dart:typed_data';
++import 'dart:ui' as ui;
++
++import 'package:flutter/material.dart';
++import 'package:flutter/rendering.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:jet_cad_2d_plan/src/canvas/plan_canvas_view.dart';
++import 'package:jet_cad_2d_plan/src/kits/guard.dart' show GuardedTool;
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++/// The floor planner app's seed (F-1), its real light and dark schemes.
++const Color seed = Color(0xFF2266CC);
++final ThemeData lightTheme = ThemeData(colorSchemeSeed: seed);
++final ThemeData darkTheme =
++    ThemeData(colorSchemeSeed: seed, brightness: Brightness.dark);
++
++/// The page panel's White and Blueprint swatches (F-7).
++const int white = 0xFFFFFFFF;
++const int blueprint = 0xFF1F3A5F;
++
++/// The capture: a repaint boundary around the whole window.
++final GlobalKey shotKey = GlobalKey(debugLabel: 'shot');
++
++/// The sheet's lower-left corner (the page's origin) and its extent at 1:20
++/// (A4 landscape, 297 x 210 paper mm).
++const double sheetMinX = 7000, sheetMinY = 3000;
++const double sheetMaxY = sheetMinY + 210 * 20;
++
++/// The two lines, horizontal, inside the sheet: [selectedY] is selected,
++/// [inkY] is the ACI 7 ink witness. Both lie a whole number of 8 mm (one
++/// pixel at 0.125 px/mm) below the sheet's top, so both sit on pixel
++/// centres when the top does.
++const double lineX0 = 7600, lineX1 = 9800;
++const double selectedY = 4600, inkY = 3904;
++
++/// The sample column along the lines: a quarter of the way, clear of the
++/// end and middle grips.
++const double sampleX = lineX0 + (lineX1 - lineX0) / 4;
++
++/// The camera's scale, px/mm: a power of two, so whole millimetre steps of
++/// 8 mm are whole pixels.
++const double pxPerMm = 0.125;
++
++/// Where the camera puts the sheet's left edge and top, in the drawing
++/// area's pixels: on pixel centres.
++const double edgeColumn = 40, topRow = 30;
++
++/// Y up, off the origin, at [pxPerMm]: the sheet's left edge at
++/// x = [edgeColumn] + 0.5, its top at y = [topRow] + 0.5.
++final ViewportTransform paletteCamera = ViewportTransform(
++    worldToScreenMatrix: const Transform2(
++        pxPerMm,
++        0,
++        0,
++        -pxPerMm,
++        edgeColumn + 0.5 - pxPerMm * sheetMinX,
++        topRow + 0.5 + pxPerMm * sheetMaxY));
++
++/// A document with two ACI 7 lines (ByLayer, layer 0) and, unless [paper]
++/// is null, a 1:20 page of that background with the grid off, its origin
++/// at ([originX], [originY]). Null [paper] is the page-less document a file
++/// saved without a page decodes to. Units are millimetres, as
++/// `prepareDocument` set them (`floor_plan/lib/src/new_document.dart:18-24`).
++({DraftDocument doc, Handle selected, Handle ink}) paletteDoc(
++    TextMeasurer measurer,
++    {required int? paper,
++    double originX = sheetMinX,
++    double originY = sheetMinY}) {
++  final doc = DraftDocument.empty(measurer: measurer);
++  PageComponent.register(doc.components);
++  doc.header.units = DrawingUnits.millimeters;
++  if (paper != null) {
++    doc.commands.execute(SetComponentCommand<PageComponent>(
++        doc.rootHandle,
++        PageComponent(
++            scaleDenominator: 20,
++            originX: originX,
++            originY: originY,
++            background: paper,
++            gridVisible: false,
++            snapToGrid: false)));
++  }
++  Handle line(double y) {
++    final add = addDrafted(doc, EntityKind.line,
++        linePayload(Vector2(lineX0, y), Vector2(lineX1, y)),
++        layer: ReservedHandles.layerZero);
++    doc.commands.execute(add);
++    return add.record.handle;
++  }
++
++  final selected = line(selectedY);
++  final ink = line(inkY);
++  doc.commands.clearHistory();
++  expect(doc.entities.colorAt(doc.entities.slotOf(ink)!), kByLayer);
++  expect(doc.tables.layers[ReservedHandles.layerZero]!.color,
++      const IndexedColor(7));
++  return (doc: doc, selected: selected, ink: ink);
++}
++
++/// The window at [size] logical pixels, device pixel ratio 1, reset after
++/// the test.
++void windowAt(WidgetTester tester, Size size) {
++  tester.view.physicalSize = size;
++  tester.view.devicePixelRatio = 1.0;
++  addTearDown(tester.view.reset);
++}
++
++/// Pumps [home] under the seed's themes in [mode], at zero theme animation,
++/// inside the capture boundary. Pumping it again with another [mode] keeps
++/// every state below: the tree has the same shape.
++Future<void> pumpThemed(WidgetTester tester, Widget home, ThemeMode mode) =>
++    tester.pumpWidget(MaterialApp(
++      theme: lightTheme,
++      darkTheme: darkTheme,
++      themeMode: mode,
++      themeAnimationDuration: Duration.zero,
++      home: RepaintBoundary(key: shotKey, child: home),
++    ));
++
++/// `0xRRGGBB` of a colour.
++int rgbOf(Color c) => c.toARGB32() & 0xFFFFFF;
++
++String hex(int rgb) => '0x${rgb.toRadixString(16).padLeft(6, '0')}';
++
++/// The largest per-channel difference of two `0xRRGGBB` values.
++int channelDistance(int a, int b) => [16, 8, 0]
++    .map((s) => (((a >> s) & 0xFF) - ((b >> s) & 0xFF)).abs())
++    .reduce(math.max);
++
++/// One captured frame of the window, at device pixel ratio 1.
++final class Shot {
++  Shot(this.bytes, this.width, this.height);
++
++  final ByteData bytes;
++  final int width, height;
++
++  /// `0xRRGGBB` at pixel ([x], [y]).
++  int rgbAt(int x, int y) {
++    final i = (y * width + x) * 4;
++    return (bytes.getUint8(i) << 16) |
++        (bytes.getUint8(i + 1) << 8) |
++        bytes.getUint8(i + 2);
++  }
++
++  Iterable<int> _block(int x, int y) sync* {
++    for (var dy = -1; dy <= 1; dy++) {
++      for (var dx = -1; dx <= 1; dx++) {
++        yield rgbAt(x + dx, y + dy);
++      }
++    }
++  }
++
++  /// The pixel of the 3 x 3 block around ([x], [y]) nearest [rgb].
++  int nearest(int x, int y, int rgb) => _block(x, y).reduce(
++      (a, b) => channelDistance(a, rgb) <= channelDistance(b, rgb) ? a : b);
++
++  /// The 3 x 3 block's brightest (largest smallest channel) pixel.
++  int brightest(int x, int y) =>
++      _block(x, y).reduce((a, b) => _minChannel(a) >= _minChannel(b) ? a : b);
++
++  /// The 3 x 3 block's darkest (smallest largest channel) pixel.
++  int darkest(int x, int y) =>
++      _block(x, y).reduce((a, b) => _maxChannel(a) <= _maxChannel(b) ? a : b);
++
++  /// The most common colour of row [y] from [x0] to [x1] (exclusive).
++  int modeOfRow(int y, int x0, int x1) {
++    final counts = <int, int>{};
++    for (var x = x0; x < x1; x++) {
++      counts.update(rgbAt(x, y), (n) => n + 1, ifAbsent: () => 1);
++    }
++    return counts.entries.reduce((a, b) => a.value >= b.value ? a : b).key;
++  }
++}
++
++int _minChannel(int rgb) =>
++    math.min((rgb >> 16) & 0xFF, math.min((rgb >> 8) & 0xFF, rgb & 0xFF));
++int _maxChannel(int rgb) =>
++    math.max((rgb >> 16) & 0xFF, math.max((rgb >> 8) & 0xFF, rgb & 0xFF));
++
++/// Captures the window as it is now.
++Future<Shot> shoot(WidgetTester tester) async {
++  final boundary =
++      shotKey.currentContext!.findRenderObject()! as RenderRepaintBoundary;
++  return (await tester.runAsync(() async {
++    final image = await boundary.toImage();
++    final raw = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
++    final shot = Shot(raw!, image.width, image.height);
++    image.dispose();
++    return shot;
++  }))!;
++}
++
++/// The global pixel of world [w] in the [view]th drawing area: the pixel
++/// whose square holds the point.
++(int, int) pixelOf(WidgetTester tester, Vector2 w, {int view = 0}) {
++  final area = find.byType(InteractionLayer).at(view);
++  final camera = tester
++      .widget<CameraGestureDetector>(find
++          .ancestor(of: area, matching: find.byType(CameraGestureDetector))
++          .first)
++      .camera
++      .value;
++  final topLeft = tester.getTopLeft(area);
++  // The alignment needs a drawing area on whole pixels.
++  expect(topLeft.dx, topLeft.dx.roundToDouble());
++  expect(topLeft.dy, topLeft.dy.roundToDouble());
++  final s = camera.worldToScreen(w);
++  return ((topLeft.dx + s.x).floor(), (topLeft.dy + s.y).floor());
++}
++
++/// The global pixel at the drawing area's own ([x], [y]).
++(int, int) areaPixel(WidgetTester tester, double x, double y, {int view = 0}) {
++  final topLeft = tester.getTopLeft(find.byType(InteractionLayer).at(view));
++  return ((topLeft.dx + x).floor(), (topLeft.dy + y).floor());
++}
++
++/// What the canvas showed, sampled.
++final class Seen {
++  Seen(
++      {required this.selection,
++      required this.ink,
++      required this.rulerBar,
++      required this.corner,
++      required this.edge});
++
++  /// The pixel of the selected line's 3 x 3 block nearest [expected].
++  final int Function(int expected) selection;
++
++  /// The ink witness's block: its brightest and darkest pixels.
++  final (int, int) ink;
++
++  /// The top ruler's most common colour on a row clear of the labels and
++  /// minor ticks, and the corner box's pixel; null without rulers.
++  final int? rulerBar, corner;
++
++  /// The sheet's left edge column, between the lines and the top.
++  final int edge;
++}
++
++/// Samples the [view]th canvas of [shot].
++Seen look(WidgetTester tester, Shot shot, {int view = 0}) {
++  final (sx, sy) = pixelOf(tester, Vector2(sampleX, selectedY), view: view);
++  final (ix, iy) = pixelOf(tester, Vector2(sampleX, inkY), view: view);
++  final (ex, ey) = areaPixel(tester, edgeColumn, topRow + 150, view: view);
++  final top = find.byKey(const Key('ruler-top'));
++  int? bar, corner;
++  if (top.evaluate().isNotEmpty) {
++    final r = tester.getRect(top.at(view));
++    bar = shot.modeOfRow(r.top.floor() + 15, r.left.ceil(), r.right.floor());
++    final c = tester.getRect(find.byKey(const Key('ruler-corner')).at(view));
++    corner = shot.rgbAt(c.left.floor() + 2, c.top.floor() + 2);
++  }
++  return Seen(
++      selection: (expected) => shot.nearest(sx, sy, expected),
++      ink: (shot.brightest(ix, iy), shot.darkest(ix, iy)),
++      rulerBar: bar,
++      corner: corner,
++      edge: shot.rgbAt(ex, ey));
++}
++
++/// The selection colour seen is [paper]'s, within 3 per channel.
++void expectSelection(Seen seen, PaperPalette paper, String reason) {
++  final want = rgbOf(paper.selection);
++  final got = seen.selection(want);
++  expect(channelDistance(got, want), lessThanOrEqualTo(3),
++      reason: '$reason: selection ${hex(got)}, want ${hex(want)}');
++}
++
++/// The ruler bar, the corner box and the sheet edge are [chrome]'s.
++void expectChrome(Seen seen, ChromePalette chrome, String reason) {
++  expect(hex(seen.rulerBar!), hex(rgbOf(chrome.rulerBackground)),
++      reason: '$reason: ruler bar');
++  expect(hex(seen.corner!), hex(rgbOf(chrome.rulerBackground)),
++      reason: '$reason: ruler corner');
++  expectEdge(seen, chrome, reason);
++}
++
++/// The sheet edge column is [chrome]'s edge, exactly.
++void expectEdge(Seen seen, ChromePalette chrome, String reason) =>
++    expect(hex(seen.edge), hex(rgbOf(chrome.sheetEdge)),
++        reason: '$reason: sheet edge');
++
++/// The ink witness is light (its brightest pixel above 200 per channel).
++void expectLightInk(Seen seen, String reason) =>
++    expect(_minChannel(seen.ink.$1), greaterThan(200),
++        reason: '$reason: ink brightest ${hex(seen.ink.$1)}');
++
++/// The ink witness is dark (its darkest pixel below 60 per channel).
++void expectDarkInk(Seen seen, String reason) =>
++    expect(_maxChannel(seen.ink.$2), lessThan(60),
++        reason: '$reason: ink darkest ${hex(seen.ink.$2)}');
++
++/// The palettes the [view]th canvas's painters hold: each ruler's and the
++/// corner's chrome (none without rulers), the page chrome's chrome and
++/// paper set, and the selection overlay's paper set. What `PlannerView`
++/// handed down, including the page chrome's paper set, which the pixels
++/// here do not show (the fixture's grid is off and its page breaks too).
++void expectPainters(WidgetTester tester, ChromePalette chrome,
++    PaperPalette paper, String reason,
++    {int view = 0, bool withRulers = true}) {
++  final painters = [
++    for (final p in tester.widgetList<CustomPaint>(find.descendant(
++        of: find.byType(PlanCanvasView).at(view),
++        matching: find.byType(CustomPaint))))
++      if (p.painter case final painter?) painter,
++  ];
++  final rulers = painters.whereType<RulerPainter>().toList();
++  final corners = painters.whereType<RulerCornerPainter>().toList();
++  final chromes = painters.whereType<PageChromePainter>().toList();
++  final overlays = painters.whereType<SelectionOverlayPainter>().toList();
++  expect(rulers, hasLength(withRulers ? 2 : 0), reason: reason);
++  expect(corners, hasLength(withRulers ? 1 : 0), reason: reason);
++  expect(chromes, hasLength(1), reason: reason);
++  expect(overlays, hasLength(1), reason: reason);
++  for (final r in rulers) {
++    expect(r.chrome, chrome, reason: '$reason: ruler');
++  }
++  for (final c in corners) {
++    expect(c.chrome, chrome, reason: '$reason: corner');
++  }
++  expect(chromes.single.chrome, chrome, reason: '$reason: page chrome');
++  expect(chromes.single.paper, paper, reason: '$reason: page chrome paper');
++  expect(overlays.single.paper, paper, reason: '$reason: overlay');
++}
++
++/// [paletteDoc] as a plan's text: [extra] draws on it, then it is encoded
++/// with the empty manifest an imported drawing gets (Task 7). The two
++/// lines' handles survive the encoding.
++({String json, Handle selected, Handle ink}) paletteText(
++    {required int? paper,
++    double originX = sheetMinX,
++    double originY = sheetMinY,
++    void Function(DraftDocument doc)? extra}) {
++  final m = FlutterTextMeasurer();
++  final f = paletteDoc(m, paper: paper, originX: originX, originY: originY);
++  extra?.call(f.doc);
++  f.doc.commands.clearHistory();
++  final json = ensureManifest(DraftDocumentCodec.encodeToString(f.doc));
++  unawaited(f.doc.dispose());
++  m.clear();
++  return (json: json, selected: f.selected, ink: f.ink);
++}
++
++/// A controller with no kit over [paletteText]. Disposed at the end of the
++/// test.
++({PlanController c, Handle selected, Handle ink}) paletteController(
++    {required int? paper, void Function(DraftDocument doc)? extra}) {
++  final t = paletteText(paper: paper, extra: extra);
++  final c = PlanController(kits: const [], json: t.json);
++  addTearDown(c.dispose);
++  return (c: c, selected: t.selected, ink: t.ink);
++}
++
++/// Pumps [c]'s canvas alone, in a Scaffold, under the seed's themes in
++/// [mode], at 1440 x 900 and device pixel ratio 1.
++Future<void> pumpCanvas(WidgetTester tester, PlanController c, ThemeMode mode,
++    {bool rulers = true}) async {
++  windowAt(tester, const Size(1440, 900));
++  await pumpThemed(
++      tester, Scaffold(body: PlanCanvas(controller: c, rulers: rulers)), mode);
++  await tester.pump();
++}
++
++/// `planner_draw_test.dart`'s `drawDoc` (`:16-32`) as a plan: a 1:20 page
++/// anchored at (7000, 3000), grid snap off, its background [background],
++/// and one line to select.
++({PlanController c, Handle line}) drawController({int background = white}) {
++  final m = FlutterTextMeasurer();
++  final doc = DraftDocument.empty(measurer: m);
++  PageComponent.register(doc.components);
++  doc.commands.execute(SetComponentCommand<PageComponent>(
++      doc.rootHandle,
++      PageComponent(
++          scaleDenominator: 20,
++          originX: 7000,
++          originY: 3000,
++          background: background,
++          snapToGrid: false)));
++  final add = addDrafted(doc, EntityKind.line,
++      linePayload(Vector2(7137.3, 3161.7), Vector2(7300.9, 3190.1)),
++      layer: ReservedHandles.layerZero);
++  doc.commands.execute(add);
++  doc.commands.clearHistory();
++  final json = ensureManifest(DraftDocumentCodec.encodeToString(doc));
++  unawaited(doc.dispose());
++  m.clear();
++  final c = PlanController(kits: const [], json: json);
++  addTearDown(c.dispose);
++  return (c: c, line: add.record.handle);
++}
++
++/// A controller over a document with no page and nothing drawn.
++PlanController pagelessController() {
++  final m = FlutterTextMeasurer();
++  final doc = DraftDocument.empty(measurer: m);
++  final json = ensureManifest(DraftDocumentCodec.encodeToString(doc));
++  unawaited(doc.dispose());
++  m.clear();
++  final c = PlanController(kits: const [], json: json);
++  addTearDown(c.dispose);
++  return c;
++}
++
++/// `planner_draw_test.dart`'s `pumpDraw` (`:38-53`): pumps [c]'s canvas
++/// (inside [frame] when given: Tasks 16 and 17 put the palette, the panels
++/// and the shortcuts around it), then sets a zoomed, rotated,
++/// **non-reflecting** camera centred on (7150, 3110).
++Future<void> pumpDraw(WidgetTester tester, PlanController c,
++    {Widget Function(Widget canvas)? frame}) async {
++  await tester.binding.setSurfaceSize(const Size(1440, 900));
++  addTearDown(() => tester.binding.setSurfaceSize(null));
++  final canvas = PlanCanvas(controller: c);
++  await tester.pumpWidget(
++      MaterialApp(home: Scaffold(body: frame?.call(canvas) ?? canvas)));
++  await tester.pump();
++  final size = tester.getSize(find.byType(InteractionLayer));
++  final linear = Transform2.rotation(0.35).multiply(Transform2.scale(2.0, 2.0));
++  final mid = linear.transformPoint(Vector2(7150, 3110));
++  c.camera.value = ViewportTransform(
++      worldToScreenMatrix: Transform2.translation(
++              size.width / 2 - mid.x, size.height / 2 - mid.y)
++          .multiply(linear));
++  await tester.pump();
++}
++
++/// `planner_draw_test.dart`'s `globalOf` (`:55-58`).
++Offset globalOf(WidgetTester tester, PlanController c, double x, double y) {
++  final s = c.camera.value.worldToScreen(Vector2(x, y));
++  return tester.getTopLeft(find.byType(InteractionLayer)) + Offset(s.x, s.y);
++}
++
++/// `planner_draw_test.dart`'s `bytes` and `withoutSeed` (`:69-75`).
++String bytes(PlanController c) => DraftDocumentCodec.encodeToString(c.document);
++
++Map<String, Object?> withoutSeed(PlanController c) =>
++    (jsonDecode(bytes(c)) as Map<String, Object?>)..remove('handleSeed');
++
++/// `planner_draw_test.dart`'s `entryEditable` and `ofKind` (`:79-87`).
++final Finder entryEditable = find.descendant(
++    of: find.byKey(const Key('text-entry')),
++    matching: find.byType(EditableText));
++
++List<Handle> ofKind(DraftDocument doc, EntityKind kind) => [
++      for (final slot in doc.entities.liveSlots)
++        if (doc.entities.kindAt(slot) == kind) doc.entities.handleAt(slot),
++    ];
++
++/// The active tool with Task 11's guarding decorator taken off, for a test
++/// that reads a drawing tool's own state.
++Tool activeTool(PlanController c) {
++  final t = c.toolController.active;
++  return t is GuardedTool ? t.inner : t;
++}

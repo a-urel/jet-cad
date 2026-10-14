@@ -1,0 +1,1735 @@
+# Review package: eb369f81..HEAD
+
+## Commits
+06ee312e feat(kit): retired symbols, code-side conformance, rule 11 by width (R2, R3, R5, R7)
+
+## Files changed
+ docs/kits.md                                       | 267 +++++++++++++++++++--
+ packages/jet_cad_2d_kit/CHANGELOG.md               |   3 +
+ packages/jet_cad_2d_kit/README.md                  |  14 +-
+ packages/jet_cad_2d_kit/example/cafe_code.dart     | 137 +++++++++++
+ .../jet_cad_2d_kit/lib/src/authoring/builder.dart  |   1 +
+ .../jet_cad_2d_kit/lib/src/authoring/catalog.dart  |   5 +-
+ .../lib/src/authoring/conformance.dart             |  63 ++++-
+ .../jet_cad_2d_kit/lib/src/model/json_fields.dart  |   7 +
+ .../lib/src/model/symbol_component.dart            |  20 +-
+ .../lib/src/model/symbol_library.dart              |  30 ++-
+ .../test/authoring/builder_test.dart               |  27 +++
+ .../test/authoring/conformance_test.dart           | 139 ++++++++++-
+ .../test/authoring/snapshot_test.dart              |  23 ++
+ .../test/invariants/doc_snippets_test.dart         |   2 +-
+ .../jet_cad_2d_kit/test/kit/example_code_test.dart |  51 ++++
+ .../test/model/symbol_component_test.dart          |  57 +++++
+ .../test/model/symbol_library_test.dart            |  57 +++--
+ 17 files changed, 843 insertions(+), 60 deletions(-)
+
+## Diff
+diff --git a/docs/kits.md b/docs/kits.md
+index eb1e7e4d..151dfd13 100644
+--- a/docs/kits.md
++++ b/docs/kits.md
+@@ -1,21 +1,22 @@
+ # Writing a kit
+ 
+ A **kit** brings a domain to jet_cad_2d plans: a restaurant's tables and
+ booths, a house's furniture, a cinema's seats. The plan library
+ (`jet_cad_2d_plan`) knows no domain; it loads the kits a host gives it.
+ Every kit and the plan library depend on one contract, `jet_cad_2d_kit`.
+ 
+-This document is the kit author's contract. It covers the **symbol side**:
+-symbols, their library, their words and their tests. Parametric types,
+-tools, properties and attachment providers (the code side) are added by
+-the plan library's sub-project and documented here then.
++This document is the kit author's contract. Sections 1 to 9 cover the
++**symbol side**: symbols, their library, their words and their tests.
++Section 10 covers the **code side**: parametric types, tools, property
++specs, colour targets and attachment providers, which the plan library
++composes.
+ 
+ ## 1. Packages and dependencies
+ 
+ ```
+ jet_cad_2d               the engine
+ └─ jet_cad_2d_flutter    the Flutter layer
+    └─ jet_cad_2d_kit     the contract
+       ├─ jet_cad_2d_plan          the plan library
+       ├─ jet_cad_2d_kit_<domain>  a kit
+       └─ ...
+@@ -35,39 +36,44 @@ jet_cad_2d               the engine
+ | What | Rule | Example |
+ |---|---|---|
+ | Kit id | a lower-case letter, then lower-case letters and digits | `restaurant` |
+ | Kit package | `jet_cad_2d_kit_<kit id>` | `jet_cad_2d_kit_restaurant` |
+ | Symbol key | the kit id, then two or more segments of lower-case letters and digits joined by single hyphens | `restaurant.table.rect.four` |
+ | Symbol version | an integer from 1; `key@version` names one geometry | `restaurant.table.rect.four@1` |
+ | Type id, tool id | `<kit id>.<name>` | `architecture.wall` |
+ | Target kind, size family, unit kind | lower-case letters and digits joined by single hyphens | `wall-face`, `bed-double`, `table` |
+ | Contract component | `jetcad.<name>` | `jetcad.symbol` |
+ 
+-A kit's keys, types and tools all start with its own id. Today the
+-conformance test (§8) refuses a key that does not; it checks type and tool
+-ids when the code side arrives (the plan library's sub-project).
+-`PlanKit.validate` (§6) already reports a word under another kit's id,
+-`tool:` and `type:` words included.
++A kit's keys, types and tools all start with its own id. The conformance
++test (§8) refuses a key that does not, and, given the kit's type, tool and
++property ids, an id that does not. `PlanKit.validate` (§6) reports a type
++or tool id that is not `<kit id>.<name>` or is given twice, and a word
++under another kit's id, `tool:` and `type:` words included.
+ 
+ ## 3. What a plan stores
+ 
+ | Component | On | Fields |
+ |---|---|---|
+-| `jetcad.symbol` (`SymbolComponent`) | a symbol's definition | `key`, `version`, `name` (English), `category` (English), `tags` (search words only, lower case, no duplicates), `attachTo` (target kinds, empty for none), `family` (a size family or null) |
++| `jetcad.symbol` (`SymbolComponent`) | a symbol's definition | `key`, `version`, `name` (English), `category` (English), `tags` (search words only, lower case, no duplicates), `attachTo` (target kinds, empty for none), `family` (a size family or null), `retired` (true: the gallery no longer offers it) |
+ | `jetcad.unit` (`UnitComponent`) | a service unit's definition | `kind` (`UnitKinds.table`, `UnitKinds.seat` or another kind), `capacity` (1 or more), `labelling` (`numbered`: the plan numbers it; `assigned`: a kit's type labels it) |
+ | `jetcad.library` (`LibraryComponent`) | a library's root | `kit`, `format` (1) |
+ | `jetcad.manifest` (`ManifestComponent`) | a plan's root | `format` (1), `kits` (kit id → the version that last saved the plan) |
+ 
+ Every component refuses a bad value in its constructor (an
+ `ArgumentError`) and writes its JSON keys in alphabetical order.
+ `registerKitComponents(registry)` registers the four and nothing else.
+ 
++A field added after a component was first written is optional when read,
++so what was saved before it still reads. `retired` is one: it is written
++only when true and read as false when absent, so a library or a plan
++without a retired symbol keeps its bytes.
++
+ Behaviour is in fields, never in tags: a symbol that stands against a wall
+ says `attachTo: ['wall-face']`; a symbol in a size family says
+ `family: 'bed-double'`.
+ 
+ ## 4. The library format, `.jetlib`
+ 
+ A `.jetlib` is the engine codec's JSON of a document holding a root group
+ with `jetcad.library`, one definition per `key@version` named
+ `key@version` carrying `jetcad.symbol` (and `jetcad.unit` for a unit), and
+ each definition's leaves. `SymbolLibrary.decode(bytes)` refuses, with a
+@@ -79,23 +85,24 @@ each definition's leaves. `SymbolLibrary.decode(bytes)` refuses, with a
+ 3. any node but the root (an instance, a group);
+ 4. a definition without `jetcad.symbol`, with children, external, or with
+    no leaf; a symbol component off a definition;
+ 5. a key that breaks §2, or that is not under the library's kit;
+ 6. a repeated `key@version` (the same key at two versions is fine);
+ 7. a definition not named `key@version`;
+ 8. a tag, target kind, family or unit kind that breaks §2 or §3;
+ 9. a unit in a size family;
+ 10. a unit component off a symbol's definition;
+ 11. a unit whose first leaf is not closed (a closed polyline or a circle),
+-    or is a closed polyline enclosing no more area than the engine's
+-    tolerance squared: a unit's first leaf is its outline, which service
+-    mode fills;
++    or is a closed polyline no wider than the engine's tolerance, its
++    width being 2·area/perimeter (a 600 mm sliver 1e-9 mm wide is
++    refused, a 600 mm by 1 mm bar is not): a unit's first leaf is its
++    outline, which service mode fills;
+ 12. a non-finite base point;
+ 13. a leaf owned by anything but a definition; a text, fill, attribute or
+     point leaf;
+ 14. a leaf style other than layer 0, BYBLOCK linetype at scale 1, BYBLOCK
+     colour, lineweight and transparency, no flag, text style STANDARD;
+ 15. bad geometry: wrong counts, a non-finite value, a coordinate beyond
+     1e6 mm, a zero-length line, a polyline under 2 points or whose points
+     all lie in a box the engine's tolerance wide and high, a radius or a
+     sweep within the engine's tolerance of zero.
+ 
+@@ -104,21 +111,24 @@ in two of them.
+ 
+ ## 5. Words
+ 
+ `KitNames` holds a kit's words: one map per locale (a language code), from
+ a word id to the word.
+ 
+ | Word id | For |
+ |---|---|
+ | `symbol:<key>` | a symbol's name (all versions of the key) |
+ | `category:<kit id>/<English category>` | a category, under the kit's id: two kits may both have a `Bar` |
+-| `tool:<tool id>`, `type:<type id>`, `property:<type id>.<property>` | the code side's words |
++| `type:<type id>` | a type's name: its panel section's title (§10.2) |
++| `tool:<tool id>` | a tool's name in the palette (§10.5) |
++| `property:<type or tool id>.<property id>` | a field of a type, or of a tool's settings (§10.3) |
++| `property:<type or tool id>.<property id>.<value>` | a choice's value: an enum's name, else the value's text |
+ 
+ Every word id carries its kit's id, so two kits never share one;
+ `PlanKit.validate` reports a word under another kit's id. Lookup
+ (`symbolName(locale, symbol)`, `categoryName(locale, kit, category)`)
+ falls back from the locale to English, then, for a symbol or a category,
+ to the library's stored English. English is required for every
+ word with no stored English. A kit's other locales are optional, and a kit
+ that declares one declares it complete.
+ 
+ ## 6. The descriptor
+@@ -146,20 +156,27 @@ final PlanKit cafeKit = PlanKit(
+ );
+ ```
+ 
+ `bundledLibrary` reads the asset (from `rootBundle` unless a bundle is
+ given) when the plan library loads the kit. Every library a kit's sources
+ read carries that kit's id. `cafeKit.validate()` lists a bad id, an empty
+ version, a word under another kit's id, a word in no known namespace, a
+ code-side word without English. A source's `read` is a call, so a kit's
+ descriptor is `final`, not `const`.
+ 
++The code side (§10) adds `types`, `tools` and `attachments`. `validate()`
++then also lists a type or tool id that is not `<kit id>.<name>`
++(`typeOutsideKit`, `toolOutsideKit`), one given twice (`duplicateType`,
++`duplicateTool`), and every word a type, tool or property needs that has
++no English (`missingEnglish`). `propertyIds` lists the kit's property ids,
++choice values included, for the conformance test.
++
+ ## 7. The authoring toolkit
+ 
+ `package:jet_cad_2d_kit/authoring.dart`:
+ 
+ ```dart
+ Catalog buildCafeCatalog() => Catalog(kit: 'cafe', symbols: [
+       CatalogSymbol(
+         key: 'cafe.table.round-two',
+         name: 'Round table, 2 seats',
+         category: 'Tables',
+@@ -207,24 +224,26 @@ void main() {
+       : <String, String>{};
+   file.writeAsStringSync(encodeSnapshot(
+       updateSnapshot(committed, geometrySnapshot(buildCafeCatalog()))));
+ }
+ ```
+ 
+ ## 8. Keys, versions and the conformance test
+ 
+ - **A published `key@N` never changes its geometry or its unit.** A change
+   of either is a new `key@N+1`, beside the old one. A key is never removed
+-  and never reused: a retired symbol stays in the library. Taking a retired
+-  symbol out of the gallery is the plan library's sub-project: the contract
+-  has no retired mark yet. A plan never needs a library to draw: it copies
+-  every placed symbol's definition.
++  and never reused: a retired symbol stays in the library, marked
++  `retired: true` in its catalog entry (`CatalogSymbol.retired`). The
++  gallery stops offering it; a plan that holds it keeps drawing it. A plan
++  never needs a library to draw: it copies every placed symbol's
++  definition. Retiring changes no geometry, so the snapshot does not
++  change; the library does, so run the generator.
+ - **Names, categories, words and tags may change at any version**; they are
+   not geometry.
+ - **Semver at 0.x:** a new symbol, a new `@N`, words or tags is a patch; a
+   removed or renamed Dart name, a type's parameters changed or the kit id
+   changed is a minor (0.x+1.0).
+ 
+ A kit's test:
+ 
+ ```dart
+ import 'dart:io';
+@@ -251,27 +270,237 @@ void main() {
+ ```
+ 
+ It reports: a catalog that does not build; keys, tags, kinds and families
+ not in lower case; a key under another kit's id; a committed library that
+ is not the built one, that the format refuses, or that is another kit's; a
+ committed `key@N` whose geometry or unit changed, that was removed, or a
+ new one the snapshot lacks; a declared locale missing a word, or giving the
+ English word unless `sameAsEnglish` allows it; a word for a key or category
+ the catalog lacks; a locale with words that is not declared.
+ 
++A kit with a code side also passes its ids: `typeIds:` (`[for (final t in
++kit.types) t.id]`), `toolIds:` (`[for (final t in kit.tools) t.id]`) and
++`propertyIds:` (`kit.propertyIds`). Each id must be under the kit's id
++(`typeOutsideKit`, `toolOutsideKit`, and `foreignWordId` for a property),
++its word must have English (`missingEnglish`), and every declared locale
++holds it like a symbol's word (`wordMissing`, `wordUntranslated`). Without
++them, the code side is not checked.
++
+ ## 9. A new kit, the symbol part
+ 
+ 1. A package `packages/jet_cad_2d_kit_<id>` depending on `jet_cad_2d_kit`
+    (and nothing of the plan library or another kit).
+ 2. Its catalog (`lib/src/catalog.dart`), keys under its id.
+ 3. Its words (`KitNames`), English for everything without stored English,
+    each declared locale complete.
+ 4. Its generator (`tool/generate.dart`), run once: the `.jetlib` asset,
+    declared in its pubspec, and the snapshot under `test/`.
+ 5. Its source and descriptor (`PlanKit`), reading the asset with
+    `bundledLibrary`.
+ 6. Its conformance test, expecting no problem, and a test that
+    `kit.validate()` is empty: a word under another kit's id or in no known
+    namespace, and a `tool:`, `type:` or `property:` word without English,
+    are caught only there.
+-7. Its CI line, a demo and its README pictures (the plan library's
++7. Its code side, if it has one (§10): its types and tools under its id,
++   their words in English and in every declared locale, its ids passed to
++   the conformance test.
++8. Its CI line, a demo and its README pictures (the plan library's
+    sub-projects describe these).
++
++## 10. The code side
++
++A kit contributes the engine's own types and the Flutter layer's own tools,
++each wrapped in a contract descriptor. The plan library composes them: it
++registers the types, arms the tools, shows the fields, and calls every hook
++through a guard. A kit never registers into the engine itself.
++
++The snippets of this section are `example/cafe_code.dart`'s: a cafe's menu
++board, `CafeSign`, a component with a width, a face and a colour, drawn by
++`CafeSignType`, the engine's `ParametricType<CafeSign>`.
++
++### 10.1 The descriptor
++
++```dart
++final PlanKit cafeCodeKit = PlanKit(
++  id: 'cafe',
++  version: '0.1.0',
++  types: [
++    PlanType<CafeSign>(
++      id: CafeSign.id,
++      fromJson: CafeSign.fromJson,
++      parametric: const CafeSignType(),
++      properties: signProperties,
++      colour: signColour,
++    ),
++  ],
++  names: cafeCodeNames,
++);
++```
++
++`PlanKit` carries `types` (`PlanType`), `tools` (`PlanTool`) and
++`attachments` (factories of `AttachmentProvider`) beside its symbols and
++words. Its factories (a tool's `create`, a type's `grips`, the
++`attachments`) run **once per document**: when the plan is replaced
++(`load`, `newPlan`, an import), the plan library disposes what they made
++and runs them again, so nothing a kit holds outlives its document.
++
++### 10.2 A parametric type
++
++| `PlanType` field | What it is |
++|---|---|
++| `id` | `<kit id>.<name>`, equal to the component's `typeId`: a plan's manifest finds its kits by it |
++| `fromJson` | the component's factory |
++| `parametric` | the engine's `ParametricType<T>`: `reach`, `generate`, `references`, the place hooks |
++| `grips` | `ObjectGripProvider Function(PlanServices)?`: the Flutter layer's grips for its objects |
++| `properties` | the panel's fields (§10.3) |
++| `section` | the escape hatch: `(context, value, commit, words) => Widget`, for what specs cannot say; `commit(T)` is one undo step |
++| `title` | a word id for the section's title, from the value; default `type:<id>` |
++| `colour` | a `ColourTarget` (§10.4) |
++| `exported` | false leaves the type's objects out of every export |
++
++**Covariance.** The plan library holds every type as `PlanType<Component>`.
++A member whose type takes a `T` (a section builder, a spec's `read`) fails
++Dart's runtime type check when read through that supertype, and
++`register` would infer `T = Component`. So `PlanType` keeps those members
++private and offers erased operations that run over its own `T`:
++`registerInto`, `fieldsOf`, `commitField`, `titleWordOf`, `colourOf`,
++`recolour`, `sectionFor`, `gripsFor`. The plan library calls only these. A
++kit calls none of them, and never reads a spec's `read`, `write` or
++`enabled` through a supertype either.
++
++### 10.3 Property specs
++
++```dart
++final List<PropertySpec<CafeSign>> signProperties = [
++  LengthProperty<CafeSign>(
++    id: 'width',
++    read: (s) => s.width,
++    write: (s, v) => s.copyWith(width: v),
++    min: 300,
++    max: 2400,
++  ),
++  ChoiceProperty<CafeSign, SignFace>(
++    id: 'face',
++    values: SignFace.values,
++    read: (s) => s.face,
++    write: (s, v) => s.copyWith(face: v),
++  ),
++  ValueDisplay<CafeSign>(
++    id: 'area',
++    read: (s) => s.width * 80,
++    unit: ValueUnit.area,
++  ),
++];
++
++final ColourTarget<CafeSign> signColour = ColourTarget<CafeSign>(
++  read: (s) => s.swatch,
++  write: (s, swatch) => s.withSwatch(swatch),
++);
++```
++
++| Kind | Holds | The panel |
++|---|---|---|
++| `LengthProperty` | `read`, `write`, `min`, `max` | millimetres, with the plan's decimal separator |
++| `AngleProperty` | `read`, `write` | radians stored, degrees shown |
++| `NumberProperty` | `read`, `write`, `min`, `max`, `decimals` (0 to 10) | rounded to `decimals` on commit |
++| `ChoiceProperty<T, V>` | `values`, `read`, `write` | one of `values`, compared with `==` |
++| `ToggleProperty` | `read`, `write` | a switch |
++| `TextProperty` | `read`, `write`, `maxLength` (code points) | a text field |
++| `ValueDisplay` | `read`, `unit` (`length`, `area`, `angle`, `none`) | read-only: a room's area |
++| `ActionProperty` | `apply` | a button: a door's Flip hinge |
++
++- Every spec has an `id` (a lower-case letter, then lower-case letters,
++  digits and hyphens), an optional `enabled(T)` that greys the field out,
++  and an optional `gate`, the `PlanGate` permission it needs.
++- `write` and `apply` return a changed copy; the plan library commits it
++  as one `SetComponentCommand<T>`, the parametric system regenerates, and
++  the edit is one undo step.
++- Out of range, not finite, not one of the values, too long: the input is
++  refused and the field shows its stored value again. A bad `min`, `max`,
++  `decimals`, `maxLength`, `values` or `id` is an `ArgumentError` when the
++  spec is made.
++- Words: `property:<type id>.<id>`, a choice's values
++  `property:<type id>.<id>.<value>`.
++
++### 10.4 Colour
++
++A `ColourTarget` reads a component's swatch, a name from the plan's palette,
++and writes a copy with another (null clears it). The panel's colour row
++recolours every selected object whose type has one, of any kit, in one
++command; the `recolor` permission gates it.
++
++### 10.5 Tools
++
++| `PlanTool` field | What it is |
++|---|---|
++| `id` | `<kit id>.<name>`; its word is `tool:<id>` |
++| `icon` | the palette's icon |
++| `letter` | a suggested shortcut. The plan library's tools keep V, L, P, R, C, A and T; F is reserved; kits' letters follow in load order, and a letter already taken goes to no later tool (a `letterTaken` diagnostic) |
++| `needs` | the `Capability`s its commits need; the palette disables it where the document's permissions deny one |
++| `settings` | `PlanToolSettings<S>(initial: ..., specs: [...])`: one `S` per tool, edited in the panel with the same specs while the tool is active (words `property:<tool id>.<id>`), read by the tool through `PlanServices.settingsOf` |
++| `create` | `Tool Function(PlanServices)`: the Flutter layer's `Tool` |
++
++### 10.6 The services
++
++`PlanServices` is a live view of one plan, one per kit:
++
++| Member | |
++|---|---|
++| `document`, `index`, `camera` | the current document, its spatial index, the camera (apertures in world units) |
++| `objectSnap` | the effective object-snap flag: F3 and the editor's snapping |
++| `attachments` | every loaded kit's attachment providers (§10.7) |
++| `words` | `KitWords`: this kit's words at the plan's locale, falling back to English, read live |
++| `settingsOf<S>(toolId)` | a tool's current settings |
++| `shared<T>(create)` | one `T` per kit and document, made on first use: what a kit's tools, grips and providers share (a wall's bands). A `T` that implements `Disposable` is disposed with its document |
++
++### 10.7 Attachment
++
++An `AttachmentProvider` offers one target kind (`wall-face`). Asked with an
++`AttachmentQuery` (the symbol's footprint and transform, the pointer, the
++capture distances, whether it is mirrored, whether it may rotate, what to
++exclude, the previous answer), it answers an `Attachment` (where the symbol
++goes, where the plan library draws its marker, a token of its own) or null.
++The plan library asks the providers of every kind in a symbol's `attachTo`
++and keeps the answer whose marker is nearest the pointer. Under
++`rotate: false`, a provider offers only targets the symbol's current turn
++already fits.
++
++### 10.8 When a kit's code fails
++
++Every hook is called through a guard. A failure never stops the plan; it
++becomes a `KitDiagnostic` (kit, subject, `KitDiagnosticCode`, message),
++once per subject and code:
++
++| What throws | What happens |
++|---|---|
++| a `ParametricType` hook | the edit is rolled back; the type's objects are probed, and each one whose hooks throw is frozen (treated as a plain group) and locked; the edit is tried once more. One broken object blocks one edit, once |
++| a component's `fromJson`, on load | the component is kept as stored, and its object is locked |
++| grips, an attachment provider | none for that object; no attachment |
++| a tool's `create` | the tool is disabled |
++| a tool's event or painting | the tool is cancelled and selection is armed |
++| a spec's `write` or `apply` | the field shows its stored value |
++| a section | a small "section failed" box in its place |
++
++A plan that names a kit the host did not load opens: that kit's objects
++draw, are locked, and are saved back unchanged (`kitMissing`). A plan saved
++by a newer version of a loaded kit opens with a warning (`kitNewer`).
++
++### 10.9 The engine's types, and byte equality
++
++**The engine's types bind the contract.** A `PlanType` takes the engine's
++`ParametricType<T>` and `Component`; a tool commits the engine's
++`DraftCommand`s to its `DraftDocument`; a library's `SymbolLeaf` exposes
++`EntityRecord` and `GeometryPayload`, a `SymbolEntry` its `Definition`.
++Wrapping them in contract types would rewrite the parametric and grip
++layers, so the contract uses them as they are. A breaking change of one of
++them in `jet_cad_2d` 0.x is a breaking change of the contract and of every
++kit that uses it.
++
++**Byte equality ties a kit's CI to the codec.** The conformance test
++compares the committed `.jetlib` with `encodeLibrary(catalog)` byte for
++byte, and those bytes are the engine codec's `encodeToString`. An engine
++release that changes that output (a key order, a number's spelling, a new
++field) turns every kit's conformance test red with `builtDiffers` until the
++kit runs its generator again. That is a regeneration, not a change of
++geometry: the snapshot is unaffected and every published `key@N` keeps its
++shapes. A kit that raises its `jet_cad_2d` constraint runs its generator
++and commits the new library in the same change.
+diff --git a/packages/jet_cad_2d_kit/CHANGELOG.md b/packages/jet_cad_2d_kit/CHANGELOG.md
+index d5d8eeaa..7eaa708b 100644
+--- a/packages/jet_cad_2d_kit/CHANGELOG.md
++++ b/packages/jet_cad_2d_kit/CHANGELOG.md
+@@ -12,10 +12,13 @@
+ - Property specs (`LengthProperty`, `AngleProperty`, `NumberProperty`,
+   `ChoiceProperty`, `ToggleProperty`, `TextProperty`, `ValueDisplay`,
+   `ActionProperty`), their erased binding `PropertyField`, `PlanGate`,
+   `ValueUnit` and `ColourTarget`.
+ - The code side: `PlanType`, `PropertySectionBuilder`, `TypeGuard`,
+   `PlanTool`, `PlanToolSettings`, `PlanServices`, `KitWords`,
+   `KitNamesWords`, `Disposable`, the attachment types and `KitDiagnostic`.
+   `PlanKit` gains `types`, `tools`, `attachments` and `propertyIds`, and
+   `validate` checks them; seven `KitProblemCode`s for the code side and the
+   kit set; `isCodeId`. The contract depends on `jet_cad_2d_flutter`.
++- `retired` on `jetcad.symbol` and `CatalogSymbol`, written only when true;
++  `conformance` takes `typeIds`, `toolIds` and `propertyIds`; rule 11
++  refuses a unit outline by its width, 2·area/perimeter, not by its area.
+diff --git a/packages/jet_cad_2d_kit/README.md b/packages/jet_cad_2d_kit/README.md
+index f791a872..1bd11a5f 100644
+--- a/packages/jet_cad_2d_kit/README.md
++++ b/packages/jet_cad_2d_kit/README.md
+@@ -1,24 +1,26 @@
+ # jet_cad_2d_kit
+ 
+ The kit contract of jet_cad_2d plans. A kit — restaurant, architecture,
+-cinema — ships its symbols (and, later, its parametric types and tools) on
+-this contract, and the plan library loads any kit without knowing its
+-domain. No kit depends on the plan library, and no kit depends on another.
++cinema — ships its symbols, its parametric types and its tools on this
++contract, and the plan library loads any kit without knowing its domain.
++No kit depends on the plan library, and no kit depends on another.
+ 
+ Two libraries:
+ 
+ - `package:jet_cad_2d_kit/jet_cad_2d_kit.dart`, the contract (Flutter): the
+   components a plan stores (`jetcad.symbol`, `jetcad.unit`,
+   `jetcad.manifest`, `jetcad.library`), the `.jetlib` library format and its
+-  validator, `KitNames`, `SymbolLibrarySource`, `bundledLibrary` and the
+-  `PlanKit` descriptor.
++  validator, `KitNames`, `SymbolLibrarySource`, `bundledLibrary`, the code
++  side (`PlanType`, `PlanTool`, the property specs, `ColourTarget`,
++  attachment providers, `PlanServices`, `KitDiagnostic`) and the `PlanKit`
++  descriptor.
+ - `package:jet_cad_2d_kit/authoring.dart`, the authoring toolkit (pure Dart,
+   runs under `dart run`): the catalog language, the library builder, shape
+   helpers, the geometry snapshot and the conformance test.
+ 
+ ## A kit's catalog
+ 
+ ```dart
+ Catalog buildCafeCatalog() => Catalog(kit: 'cafe', symbols: [
+       CatalogSymbol(
+         key: 'cafe.table.round-two',
+@@ -35,12 +37,12 @@ Catalog buildCafeCatalog() => Catalog(kit: 'cafe', symbols: [
+     ]);
+ ```
+ 
+ `encodeLibrary(catalog)` gives the `.jetlib` bytes a kit commits as an
+ asset; `SymbolLibrary.decode(bytes)` validates and reads them. A kit's own
+ test runs `conformance(...)` and expects no problem: the committed library
+ is the built one, every published `key@N` keeps its geometry, and every
+ declared locale is complete.
+ 
+ The kit author's contract — naming, components, the format's rules, words,
+-versions and the new-kit checklist — is
++versions, the new-kit checklist and the code side — is
+ [docs/kits.md](https://github.com/a-urel/jet-cad/blob/main/docs/kits.md).
+diff --git a/packages/jet_cad_2d_kit/example/cafe_code.dart b/packages/jet_cad_2d_kit/example/cafe_code.dart
+new file mode 100644
+index 00000000..00fa8a36
+--- /dev/null
++++ b/packages/jet_cad_2d_kit/example/cafe_code.dart
+@@ -0,0 +1,137 @@
++// A kit's code side (docs/kits.md section 10): a parametric type, its
++// property specs, its colour target and its descriptor. Analysed with the
++// package; test/kit/example_code_test.dart runs it.
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++enum SignFace { chalk, board }
++
++/// A cafe's menu board: its width in millimetres, its face and its colour.
++final class CafeSign implements Component {
++  const CafeSign({required this.width, required this.face, this.swatch});
++
++  static const String id = 'cafe.sign';
++
++  final double width;
++  final SignFace face;
++  final String? swatch;
++
++  CafeSign copyWith({double? width, SignFace? face}) => CafeSign(
++      width: width ?? this.width, face: face ?? this.face, swatch: swatch);
++
++  CafeSign withSwatch(String? swatch) =>
++      CafeSign(width: width, face: face, swatch: swatch);
++
++  @override
++  String get typeId => id;
++
++  @override
++  Map<String, Object?> toJson() =>
++      {'face': face.name, 'swatch': swatch, 'width': width};
++
++  static CafeSign fromJson(Map<String, Object?> json) => CafeSign(
++        width: (json['width']! as num).toDouble(),
++        face: SignFace.values.byName(json['face']! as String),
++        swatch: json['swatch'] as String?,
++      );
++
++  @override
++  bool operator ==(Object other) =>
++      other is CafeSign &&
++      other.width == width &&
++      other.face == face &&
++      other.swatch == swatch;
++
++  @override
++  int get hashCode => Object.hash(width, face, swatch);
++}
++
++/// The sign's geometry: a closed outline, its width by 80 mm, centred on
++/// its group's origin.
++final class CafeSignType extends ParametricType<CafeSign> {
++  const CafeSignType();
++
++  static List<Vector2> outline(CafeSign sign) => [
++        Vector2(-sign.width / 2, -40),
++        Vector2(sign.width / 2, -40),
++        Vector2(sign.width / 2, 40),
++        Vector2(-sign.width / 2, 40),
++      ];
++
++  @override
++  Capability get editCapability => Capability.geometry;
++
++  @override
++  Aabb2 reach(CafeSign params, Transform2 toWorld) => Aabb2.fromPoints(
++      [for (final p in outline(params)) toWorld.transformPoint(p)]);
++
++  @override
++  List<Generated> generate(ParametricView view, Handle self) {
++    final sign = view.paramsOf<CafeSign>(self)!;
++    return [
++      Generated(
++          EntityKind.polyline, polylinePayload(outline(sign), closed: true)),
++    ];
++  }
++}
++
++final List<PropertySpec<CafeSign>> signProperties = [
++  LengthProperty<CafeSign>(
++    id: 'width',
++    read: (s) => s.width,
++    write: (s, v) => s.copyWith(width: v),
++    min: 300,
++    max: 2400,
++  ),
++  ChoiceProperty<CafeSign, SignFace>(
++    id: 'face',
++    values: SignFace.values,
++    read: (s) => s.face,
++    write: (s, v) => s.copyWith(face: v),
++  ),
++  ValueDisplay<CafeSign>(
++    id: 'area',
++    read: (s) => s.width * 80,
++    unit: ValueUnit.area,
++  ),
++];
++
++final ColourTarget<CafeSign> signColour = ColourTarget<CafeSign>(
++  read: (s) => s.swatch,
++  write: (s, swatch) => s.withSwatch(swatch),
++);
++
++final PlanKit cafeCodeKit = PlanKit(
++  id: 'cafe',
++  version: '0.1.0',
++  types: [
++    PlanType<CafeSign>(
++      id: CafeSign.id,
++      fromJson: CafeSign.fromJson,
++      parametric: const CafeSignType(),
++      properties: signProperties,
++      colour: signColour,
++    ),
++  ],
++  names: cafeCodeNames,
++);
++
++const KitNames cafeCodeNames = KitNames({
++  'en': {
++    'type:cafe.sign': 'Menu board',
++    'property:cafe.sign.width': 'Width',
++    'property:cafe.sign.face': 'Face',
++    'property:cafe.sign.face.chalk': 'Chalk',
++    'property:cafe.sign.face.board': 'Board',
++    'property:cafe.sign.area': 'Area',
++  },
++  'tr': {
++    'type:cafe.sign': 'Menü panosu',
++    'property:cafe.sign.width': 'Genişlik',
++    'property:cafe.sign.face': 'Yüzey',
++    'property:cafe.sign.face.chalk': 'Tebeşir',
++    'property:cafe.sign.face.board': 'Pano',
++    'property:cafe.sign.area': 'Alan',
++  },
++});
+diff --git a/packages/jet_cad_2d_kit/lib/src/authoring/builder.dart b/packages/jet_cad_2d_kit/lib/src/authoring/builder.dart
+index 90e8b325..04c3b75b 100644
+--- a/packages/jet_cad_2d_kit/lib/src/authoring/builder.dart
++++ b/packages/jet_cad_2d_kit/lib/src/authoring/builder.dart
+@@ -35,20 +35,21 @@ DraftDocument buildLibraryDocument(Catalog catalog) {
+   final symbols = [
+     for (final s in catalog.symbols)
+       SymbolComponent(
+         key: s.key,
+         version: s.version,
+         name: s.name,
+         category: s.category,
+         tags: s.tags,
+         attachTo: s.attachTo,
+         family: s.family,
++        retired: s.retired,
+       ),
+   ];
+   final units = [
+     for (final s in catalog.symbols)
+       if (s.unit case final unit?)
+         UnitComponent(
+             kind: unit.kind, capacity: unit.capacity, labelling: unit.labelling)
+       else
+         null,
+   ];
+diff --git a/packages/jet_cad_2d_kit/lib/src/authoring/catalog.dart b/packages/jet_cad_2d_kit/lib/src/authoring/catalog.dart
+index ea49a763..82bd43b7 100644
+--- a/packages/jet_cad_2d_kit/lib/src/authoring/catalog.dart
++++ b/packages/jet_cad_2d_kit/lib/src/authoring/catalog.dart
+@@ -55,45 +55,48 @@ final class CatalogUnit {
+     required this.capacity,
+     this.labelling = UnitLabelling.numbered,
+   });
+ 
+   final String kind;
+   final int capacity;
+   final UnitLabelling labelling;
+ }
+ 
+ /// One symbol of a kit's library. A unit draws its outline first (K3 rule
+-/// 11): a closed polyline or a circle.
++/// 11): a closed polyline or a circle. A [retired] symbol stays in the
++/// library and leaves the gallery (contract R2).
+ final class CatalogSymbol {
+   const CatalogSymbol({
+     required this.key,
+     this.version = 1,
+     required this.name,
+     required this.category,
+     this.tags = const [],
+     this.attachTo = const [],
+     this.family,
+     this.unit,
+     required this.base,
+     required this.shapes,
++    this.retired = false,
+   });
+ 
+   final String key;
+   final int version;
+   final String name;
+   final String category;
+   final List<String> tags;
+   final List<String> attachTo;
+   final String? family;
+   final CatalogUnit? unit;
+   final CatalogPoint base;
+   final List<CatalogShape> shapes;
++  final bool retired;
+ 
+   /// `key@version`.
+   String get id => '$key@$version';
+ }
+ 
+ /// A kit's symbols, in library order.
+ final class Catalog {
+   const Catalog({required this.kit, required this.symbols});
+ 
+   final String kit;
+diff --git a/packages/jet_cad_2d_kit/lib/src/authoring/conformance.dart b/packages/jet_cad_2d_kit/lib/src/authoring/conformance.dart
+index 98a64124..7ab15af1 100644
+--- a/packages/jet_cad_2d_kit/lib/src/authoring/conformance.dart
++++ b/packages/jet_cad_2d_kit/lib/src/authoring/conformance.dart
+@@ -13,29 +13,39 @@ import '../model/kit_problem.dart';
+ import '../model/symbol_library.dart';
+ import 'builder.dart';
+ import 'catalog.dart';
+ import 'snapshot.dart';
+ 
+ /// The problems of a kit: its [catalog], its [committedLibrary] bytes, its
+ /// [committedSnapshot] text, its [names] and its declared non-English
+ /// [locales]. [sameAsEnglish] lists, per locale, the word ids whose right
+ /// word is the English one. Empty when the kit conforms.
+ ///
++/// The code side (contract R3): [typeIds], [toolIds] and [propertyIds] (a
++/// `PlanKit`'s `propertyIds`, without the `property:` prefix) must be under
++/// the kit's id, and each one's word (`type:<id>`, `tool:<id>`,
++/// `property:<id>`) must have English and a word in every declared locale.
++/// A code-side word that names none of them is not reported: a kit may pass
++/// a part of its ids.
++///
+ /// Throws [ArgumentError] when [locales] lists English: English is always
+ /// required, by stored text or by words.
+ List<KitProblem> conformance({
+   required Catalog catalog,
+   required Uint8List committedLibrary,
+   required String committedSnapshot,
+   required KitNames names,
+   required List<String> locales,
+   Map<String, Set<String>> sameAsEnglish = const {},
++  Iterable<String> typeIds = const [],
++  Iterable<String> toolIds = const [],
++  Iterable<String> propertyIds = const [],
+ }) {
+   if (locales.contains(KitNames.english)) {
+     throw ArgumentError.value(locales, 'locales',
+         "lists the kit's other locales; English is always required");
+   }
+   final problems = _catalogProblems(catalog);
+   if (problems.isNotEmpty) return problems;
+   final Uint8List built;
+   try {
+     built = encodeLibrary(catalog);
+@@ -54,26 +64,56 @@ List<KitProblem> conformance({
+     if (library.kits.single != catalog.kit) {
+       problems.add(KitProblem(
+           KitProblemCode.libraryKitMismatch,
+           'the committed library holds the kit "${library.kits.single}", not '
+           '"${catalog.kit}"'));
+     }
+   } on SymbolLibraryError catch (e) {
+     problems.add(KitProblem(KitProblemCode.libraryInvalid,
+         'the committed library is refused, rule ${e.rule}: ${e.message}'));
+   }
++  final code = _codeIds(catalog.kit, typeIds, toolIds, propertyIds);
+   problems
+     ..addAll(_snapshotProblems(catalog, committedSnapshot))
+-    ..addAll(_wordProblems(catalog, names, locales, sameAsEnglish));
++    ..addAll(code.problems)
++    ..addAll(_wordProblems(catalog, names, locales, sameAsEnglish, code.words));
+   return problems;
+ }
+ 
++/// Contract R3: type and tool ids are `<kit>.<name>` (spec 2a P1), a
++/// property id is under the kit. The words of those that are.
++({List<KitProblem> problems, Set<String> words}) _codeIds(
++    String kit,
++    Iterable<String> typeIds,
++    Iterable<String> toolIds,
++    Iterable<String> propertyIds) {
++  final problems = <KitProblem>[];
++  final words = <String>{};
++  void check(String what, Iterable<String> ids, KitProblemCode outside,
++      bool Function(String) wellFormed) {
++    for (final id in ids) {
++      if (!wellFormed(id) || kitOfKey(id) != kit) {
++        problems.add(KitProblem(
++            outside, 'the $what id "$id" is not under the kit "$kit"'));
++      } else {
++        words.add('$what:$id');
++      }
++    }
++  }
++
++  check('type', typeIds, KitProblemCode.typeOutsideKit, isCodeId);
++  check('tool', toolIds, KitProblemCode.toolOutsideKit, isCodeId);
++  check('property', propertyIds, KitProblemCode.foreignWordId,
++      (id) => id.contains('.'));
++  return (problems: problems, words: words);
++}
++
+ /// Checks 3 and 6, on the catalog itself: keys under the kit, lower case.
+ List<KitProblem> _catalogProblems(Catalog catalog) {
+   final problems = <KitProblem>[];
+   void lower(CatalogSymbol s, String what, String value) {
+     if (value != value.toLowerCase()) {
+       problems.add(KitProblem(KitProblemCode.notLowerCase,
+           '${s.id}: the $what "$value" is not lower case'));
+     }
+   }
+ 
+@@ -128,23 +168,28 @@ List<KitProblem> _snapshotProblems(Catalog catalog, String text) {
+   for (final id in current.keys) {
+     if (!committed.containsKey(id)) {
+       problems.add(KitProblem(KitProblemCode.snapshotMissing,
+           "$id is not in the committed snapshot: run the kit's generator"));
+     }
+   }
+   return problems;
+ }
+ 
+ /// Check 5: every declared locale complete, no word the catalog lacks, no
+-/// undeclared locale.
+-List<KitProblem> _wordProblems(Catalog catalog, KitNames names,
+-    List<String> locales, Map<String, Set<String>> sameAsEnglish) {
++/// undeclared locale; and R3: every code-side word in [codeWords] has
++/// English, and is then held to the declared locales like the others.
++List<KitProblem> _wordProblems(
++    Catalog catalog,
++    KitNames names,
++    List<String> locales,
++    Map<String, Set<String>> sameAsEnglish,
++    Set<String> codeWords) {
+   // The English of each word id: a key's newest version's name, a
+   // category's own text.
+   final newest = <String, int>{};
+   final english = <String, String>{};
+   for (final s in catalog.symbols) {
+     if (s.version >= (newest[s.key] ?? 0)) {
+       newest[s.key] = s.version;
+       english[KitNames.symbolWord(s.key)] = s.name;
+     }
+   }
+@@ -161,20 +206,30 @@ List<KitProblem> _wordProblems(Catalog catalog, KitNames names,
+   }
+   for (final MapEntry(key: locale, value: words) in names.words.entries) {
+     for (final id in words.keys) {
+       final ours = id.startsWith('symbol:') || id.startsWith('category:');
+       if (ours && !english.containsKey(id)) {
+         problems.add(KitProblem(KitProblemCode.wordOrphan,
+             '$locale: "$id" names nothing in the catalog'));
+       }
+     }
+   }
++  final stored = names.words[KitNames.english] ?? const <String, String>{};
++  for (final id in codeWords) {
++    final en = stored[id];
++    if (en == null) {
++      problems.add(KitProblem(
++          KitProblemCode.missingEnglish, '"$id" has no English word'));
++    } else {
++      english[id] = en;
++    }
++  }
+   for (final locale in locales) {
+     final words = names.words[locale] ?? const <String, String>{};
+     final allowed = sameAsEnglish[locale] ?? const <String>{};
+     for (final MapEntry(key: id, value: en) in english.entries) {
+       final word = words[id];
+       if (word == null) {
+         problems.add(KitProblem(
+             KitProblemCode.wordMissing, '$locale: no word for "$id"'));
+       } else if (word == en && !allowed.contains(id)) {
+         problems.add(KitProblem(
+diff --git a/packages/jet_cad_2d_kit/lib/src/model/json_fields.dart b/packages/jet_cad_2d_kit/lib/src/model/json_fields.dart
+index 9d7fc54a..98b79982 100644
+--- a/packages/jet_cad_2d_kit/lib/src/model/json_fields.dart
++++ b/packages/jet_cad_2d_kit/lib/src/model/json_fields.dart
+@@ -9,20 +9,27 @@ T field<T>(Map<String, Object?> json, String key, String type) {
+   if (!json.containsKey(key)) {
+     throw FormatException('$type: missing "$key"');
+   }
+   final value = json[key];
+   if (value is! T) {
+     throw FormatException('$type: "$key" is not a $T: $value');
+   }
+   return value;
+ }
+ 
++/// [json]'s value at [key], or [absent] when [json] has no [key]: a field
++/// added after a format was first written, so that what was saved before it
++/// still reads (contract R2). A present value must be a [T].
++T optionalField<T>(
++        Map<String, Object?> json, String key, String type, T absent) =>
++    json.containsKey(key) ? field<T>(json, key, type) : absent;
++
+ /// [json]'s list of strings at [key].
+ List<String> stringList(Map<String, Object?> json, String key, String type) {
+   final list = field<List<Object?>>(json, key, type);
+   return [
+     for (final item in list)
+       item is String
+           ? item
+           : throw FormatException('$type: "$key" holds $item, not a string'),
+   ];
+ }
+diff --git a/packages/jet_cad_2d_kit/lib/src/model/symbol_component.dart b/packages/jet_cad_2d_kit/lib/src/model/symbol_component.dart
+index ab9dc934..36f94691 100644
+--- a/packages/jet_cad_2d_kit/lib/src/model/symbol_component.dart
++++ b/packages/jet_cad_2d_kit/lib/src/model/symbol_component.dart
+@@ -8,32 +8,36 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:meta/meta.dart';
+ 
+ import 'json_fields.dart';
+ import 'kit_ids.dart';
+ 
+ /// A symbol's identity and display data, on a definition's handle.
+ ///
+ /// Immutable and value-equal, [tags] and [attachTo] compared in order;
+ /// [toJson] keys are alphabetical. Every bad value is an [ArgumentError]
+ /// from the constructor, named by its field.
++///
++/// [retired] (contract R2) is written only when true and read as false when
++/// absent: a library or a plan saved before it keeps its bytes.
+ @immutable
+ final class SymbolComponent implements Component {
+   /// Throws [ArgumentError] (never an assert: a release build refuses too)
+   /// when a field breaks spec K2.
+   SymbolComponent({
+     required this.key,
+     required this.version,
+     required this.name,
+     required this.category,
+     required List<String> tags,
+     List<String> attachTo = const [],
+     this.family,
++    this.retired = false,
+   })  : tags = List.unmodifiable(tags),
+         attachTo = List.unmodifiable(attachTo) {
+     if (!isSymbolKey(key)) {
+       throw ArgumentError.value(
+           key,
+           'key',
+           'must be a kit id, then two or more dot-separated segments of '
+               'lower-case letters and digits joined by single hyphens');
+     }
+     if (version < 1) {
+@@ -90,61 +94,69 @@ final class SymbolComponent implements Component {
+   /// Search words only, lower case, no duplicates. They carry no behaviour.
+   final List<String> tags;
+ 
+   /// The attachment target kinds this symbol attaches to (umbrella A5);
+   /// empty for none.
+   final List<String> attachTo;
+ 
+   /// The size family this symbol belongs to, or null.
+   final String? family;
+ 
++  /// True: the symbol stays in its library, so plans that hold it keep
++  /// drawing it, but the plan library's gallery no longer offers it.
++  final bool retired;
++
+   /// `key@version`, the definition's name in a library.
+   String get id => '$key@$version';
+ 
+   @override
+   String get typeId => componentTypeId;
+ 
+   @override
+   Map<String, Object?> toJson() => {
+         'attachTo': attachTo,
+         'category': category,
+         'family': family,
+         'key': key,
+         'name': name,
++        if (retired) 'retired': true,
+         'tags': tags,
+         'version': version,
+       };
+ 
+   /// Throws [FormatException] for a missing or mistyped field, and the
+   /// constructor's [ArgumentError] for a value K2 refuses. A field this
+-  /// build does not know is ignored.
++  /// build does not know is ignored; an absent `retired` reads false.
+   static SymbolComponent fromJson(Map<String, Object?> json) {
+     const t = 'SymbolComponent';
+     return SymbolComponent(
+       key: field<String>(json, 'key', t),
+       version: field<int>(json, 'version', t),
+       name: field<String>(json, 'name', t),
+       category: field<String>(json, 'category', t),
+       tags: stringList(json, 'tags', t),
+       attachTo: stringList(json, 'attachTo', t),
+       family: field<String?>(json, 'family', t),
++      retired: optionalField<bool>(json, 'retired', t, false),
+     );
+   }
+ 
+   @override
+   bool operator ==(Object other) =>
+       other is SymbolComponent &&
+       other.key == key &&
+       other.version == version &&
+       other.name == name &&
+       other.category == category &&
+       listEquals(other.tags, tags) &&
+       listEquals(other.attachTo, attachTo) &&
+-      other.family == family;
++      other.family == family &&
++      other.retired == retired;
+ 
+   @override
+   int get hashCode => Object.hash(key, version, name, category,
+-      Object.hashAll(tags), Object.hashAll(attachTo), family);
++      Object.hashAll(tags), Object.hashAll(attachTo), family, retired);
+ 
+   @override
+-  String toString() => 'SymbolComponent($id, $name, $category)';
++  String toString() =>
++      'SymbolComponent($id, $name, $category${retired ? ', retired' : ''})';
+ }
+diff --git a/packages/jet_cad_2d_kit/lib/src/model/symbol_library.dart b/packages/jet_cad_2d_kit/lib/src/model/symbol_library.dart
+index d13c005a..73f45d60 100644
+--- a/packages/jet_cad_2d_kit/lib/src/model/symbol_library.dart
++++ b/packages/jet_cad_2d_kit/lib/src/model/symbol_library.dart
+@@ -1,19 +1,20 @@
+ // The library format (spec K3): bytes in, typed and validated entries out.
+ // A decoded library is not trusted: every rule is checked here, none is left
+ // to the tree or the codec. Ported from jet_cad_floor_plan's
+ // symbol_library.dart, with the contract's components and K3's fifteen
+ // rules, each refusal carrying its rule number.
+ //
+ // Pure Dart: no Flutter, no dart:io.
+ import 'dart:async';
+ import 'dart:convert';
++import 'dart:math' as math;
+ import 'dart:typed_data';
+ 
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ 
+ import 'kit_ids.dart';
+ import 'library_component.dart';
+ import 'register.dart';
+ import 'symbol_component.dart';
+ import 'unit_component.dart';
+ 
+@@ -291,21 +292,21 @@ final class SymbolLibrary {
+               '$who is a ${record.kind.name}: a symbol holds lines, '
+               'polylines, circles and arcs only');
+       }
+       _checkStyle(record, who);
+       final payload = doc.geometry.read(entities.geomIndexAt(slot));
+       _checkGeometry(record.kind, payload, who);
+       owned.add((record: record, payload: payload));
+     }
+ 
+     // Rules 4 and 11, per definition: at least one leaf, a unit's outline
+-    // (closed, and enclosing more than the tolerance squared).
++    // (closed, and wider than the tolerance, contract R7).
+     final entries = <SymbolEntry>[];
+     for (final (definition, symbol, unit) in drafts) {
+       final who = 'definition ${definition.handle.toHex()} (${symbol.id})';
+       final leaves = leavesOf[definition.handle]!
+         ..sort(
+             (a, b) => a.record.handle.value.compareTo(b.record.handle.value));
+       if (leaves.isEmpty) {
+         throw SymbolLibraryError(4, '$who has no leaf');
+       }
+       if (unit != null) {
+@@ -313,29 +314,34 @@ final class SymbolLibrary {
+         final closed = first.record.kind == EntityKind.circle ||
+             (first.record.kind == EntityKind.polyline &&
+                 isClosedPolyline(first.payload));
+         if (!closed) {
+           throw SymbolLibraryError(
+               11,
+               '$who is a unit whose first leaf, '
+               '${first.record.handle.toHex()}, is not a closed polyline or a '
+               'circle');
+         }
+-        // A circle's radius is already above the tolerance (rule 15).
++        // A circle's radius is already above the tolerance (rule 15). A
++        // closed polyline's width is 2·area/perimeter: a sliver of any
++        // length is as thin as it is wide, so the test scales (R7). Rule 15
++        // has already refused a polyline whose points all lie within the
++        // tolerance, so the perimeter is not zero.
+         if (first.record.kind == EntityKind.polyline) {
+-          final area = _enclosedArea(first.payload);
+-          final linear = Tolerance.standard.linear;
+-          if (area <= linear * linear) {
++          final width =
++              2 * _enclosedArea(first.payload) / _perimeter(first.payload);
++          if (width <= Tolerance.standard.linear) {
+             throw SymbolLibraryError(
+                 11,
+                 '$who is a unit whose outline, '
+-                '${first.record.handle.toHex()}, encloses no area ($area)');
++                '${first.record.handle.toHex()}, is too thin (width $width): '
++                'service mode would fill nothing');
+           }
+         }
+       }
+       entries.add(SymbolEntry(
+           symbol: symbol, unit: unit, definition: definition, leaves: leaves));
+     }
+     return SymbolLibrary._([library.kit], entries);
+   }
+ 
+   /// Rule 14: exactly the style the builder writes.
+@@ -395,20 +401,32 @@ final class SymbolLibrary {
+     final c = p.coords;
+     final x0 = c[0], y0 = c[1];
+     var twice = 0.0;
+     for (var i = 1; i + 1 < p.pointCount; i++) {
+       twice += (c[i * 2] - x0) * (c[i * 2 + 3] - y0) -
+           (c[i * 2 + 2] - x0) * (c[i * 2 + 1] - y0);
+     }
+     return twice.abs() / 2;
+   }
+ 
++  /// Rule 11: the length of [p]'s path, the closing pair included (a closed
++  /// polyline repeats its first point).
++  static double _perimeter(GeometryPayload p) {
++    final c = p.coords;
++    var length = 0.0;
++    for (var i = 0; i + 1 < p.pointCount; i++) {
++      final dx = c[i * 2 + 2] - c[i * 2], dy = c[i * 2 + 3] - c[i * 2 + 1];
++      length += math.sqrt(dx * dx + dy * dy);
++    }
++    return length;
++  }
++
+   /// Rule 15: counts, finiteness, bounds, degeneracy against [Tolerance].
+   static void _checkGeometry(EntityKind kind, GeometryPayload p, String who) {
+     final (int? coords, int scalars) = switch (kind) {
+       EntityKind.line => (4, 0),
+       EntityKind.circle => (2, 1),
+       EntityKind.arc => (2, 3),
+       _ => (null, 0), // a polyline: any even count, no scalar
+     };
+     if (p.coords.length.isOdd ||
+         (coords != null && p.coords.length != coords) ||
+diff --git a/packages/jet_cad_2d_kit/test/authoring/builder_test.dart b/packages/jet_cad_2d_kit/test/authoring/builder_test.dart
+index b9d278a1..2976e3a7 100644
+--- a/packages/jet_cad_2d_kit/test/authoring/builder_test.dart
++++ b/packages/jet_cad_2d_kit/test/authoring/builder_test.dart
+@@ -217,11 +217,38 @@ void main() {
+       base: (700, 300),
+       shapes: [
+         CatalogCircle((700, 300), 120),
+         CatalogPolyline([], closed: true),
+       ],
+     );
+     const throwing = Catalog(kit: 'sample', symbols: [empty]);
+     expect(() => buildLibraryDocument(throwing), throwsStateError);
+     expect(() => encodeLibrary(throwing), throwsStateError);
+   });
++
++  test('R2-5 a retired symbol is built retired, the others not', () {
++    const retiredLamp = CatalogSymbol(
++      key: 'sample.lamp.wall',
++      name: 'Wall lamp',
++      category: 'Lighting',
++      tags: ['lamp', 'light'],
++      attachTo: ['wall-face'],
++      family: 'lamp-wall',
++      base: (640, 220),
++      shapes: [
++        CatalogArc((640, 220), 180, 0.25, -2.75),
++        CatalogPolyline([(460, 220), (820, 220), (700, 90)]),
++      ],
++      retired: true,
++    );
++    final bytes = encodeLibrary(
++        const Catalog(kit: 'sample', symbols: [table, retiredLamp, seat]));
++    // M-R2e: the builder leaves `retired` out.
++    expect(
++        [for (final e in SymbolLibrary.decode(bytes).entries) e.symbol.retired],
++        [false, true, false]);
++    expect('"retired":true'.allMatches(utf8.decode(bytes)), hasLength(1));
++    // Not retired, nothing is written: a library built before R2 keeps its
++    // bytes.
++    expect(utf8.decode(encodeLibrary(catalog)), isNot(contains('retired')));
++  });
+ }
+diff --git a/packages/jet_cad_2d_kit/test/authoring/conformance_test.dart b/packages/jet_cad_2d_kit/test/authoring/conformance_test.dart
+index f61d3a71..89ff621f 100644
+--- a/packages/jet_cad_2d_kit/test/authoring/conformance_test.dart
++++ b/packages/jet_cad_2d_kit/test/authoring/conformance_test.dart
+@@ -41,32 +41,34 @@ CatalogSymbol symbolOf(String id) =>
+     sampleSymbols.firstWhere((s) => s.id == id);
+ 
+ CatalogSymbol copyOf(CatalogSymbol s,
+         {String? key,
+         int? version,
+         String? name,
+         List<String>? tags,
+         List<String>? attachTo,
+         String? family,
+         CatalogUnit? unit,
+-        List<CatalogShape>? shapes}) =>
++        List<CatalogShape>? shapes,
++        bool? retired}) =>
+     CatalogSymbol(
+       key: key ?? s.key,
+       version: version ?? s.version,
+       name: name ?? s.name,
+       category: s.category,
+       tags: tags ?? s.tags,
+       attachTo: attachTo ?? s.attachTo,
+       family: family ?? s.family,
+       unit: unit ?? s.unit,
+       base: s.base,
+       shapes: shapes ?? s.shapes,
++      retired: retired ?? s.retired,
+     );
+ 
+ /// The sample catalog with [symbol] in place of the one of its id.
+ Catalog replacing(CatalogSymbol symbol) => Catalog(kit: 'sample', symbols: [
+       for (final s in sampleSymbols) s.id == symbol.id ? symbol : s,
+     ]);
+ 
+ /// [names] with [edits] applied to [locale]: a null value removes the word.
+ KitNames editing(KitNames names, String locale, Map<String, String?> edits) {
+   final words = {...?names.words[locale]};
+@@ -339,11 +341,146 @@ void main() {
+           catalog: catalog,
+           library: g.library,
+           snapshot: g.snapshot,
+           names:
+               editing(sampleNames, 'tr', {'symbol:sample.stool.bar': word})));
+       expect(withTurkish('High bar stool'), [KitProblemCode.wordUntranslated],
+           reason: order);
+       expect(withTurkish('Bar stool'), isEmpty, reason: order);
+     }
+   });
++
++  test('R2-7 a retired published key conforms once regenerated', () {
++    final retired =
++        replacing(copyOf(symbolOf('sample.stool.bar@1'), retired: true));
++    // The library changes (the symbol carries the mark), so the committed
++    // one is stale until the generator runs.
++    expect(codes(problems(catalog: retired)), [KitProblemCode.builtDiffers]);
++    final g = generated(retired);
++    // M-R2f (snapshot_test R2-6) turns this red as snapshotChanged.
++    expect(problems(catalog: retired, library: g.library, snapshot: g.snapshot),
++        isEmpty);
++    expect(g.snapshot, committedSnapshot());
++  });
++
++  group('the code side (contract R3)', () {
++    const Map<String, String> en = {
++      'type:sample.wall': 'Wall',
++      'tool:sample.wall': 'Wall tool',
++      'property:sample.wall.height': 'Height',
++      'property:sample.wall.finish.oiled': 'Oiled',
++    };
++    const Map<String, String> de = {
++      'type:sample.wall': 'Wand',
++      'tool:sample.wall': 'Wandwerkzeug',
++      'property:sample.wall.height': 'Höhe',
++      'property:sample.wall.finish.oiled': 'Geölt',
++    };
++    const Map<String, String> tr = {
++      'type:sample.wall': 'Duvar',
++      'tool:sample.wall': 'Duvar aracı',
++      'property:sample.wall.height': 'Yükseklik',
++      'property:sample.wall.finish.oiled': 'Yağlı',
++    };
++
++    /// The sample kit's words with the code side's added.
++    KitNames codeNames({
++      Map<String, String> english = en,
++      Map<String, String> german = de,
++      Map<String, String> turkish = tr,
++    }) =>
++        KitNames({
++          'en': english,
++          'de': {...sampleNames.words['de']!, ...german},
++          'tr': {...sampleNames.words['tr']!, ...turkish},
++        });
++
++    List<KitProblem> codeProblems({
++      KitNames? names,
++      List<String> types = const ['sample.wall'],
++      List<String> tools = const ['sample.wall'],
++      List<String> properties = const [
++        'sample.wall.height',
++        'sample.wall.finish.oiled',
++      ],
++      Map<String, Set<String>> sameAsEnglish = sampleSameAsEnglish,
++    }) =>
++        conformance(
++          catalog: sampleCatalog,
++          committedLibrary: committedLibrary(),
++          committedSnapshot: committedSnapshot(),
++          names: names ?? codeNames(),
++          locales: sampleLocales,
++          sameAsEnglish: sameAsEnglish,
++          typeIds: types,
++          toolIds: tools,
++          propertyIds: properties,
++        );
++
++    test('R3-1 a kit with types, tools and properties conforms', () {
++      // A positive control for R3-2 to R3-4.
++      expect(codeProblems(), isEmpty);
++    });
++
++    test('R3-2 an id that is not under the kit', () {
++      // M-R3a: drop the check. M-R3b: test `kitOfKey` only ('sample.Wall').
++      for (final id in ['other.wall', 'sample', 'sample.Wall']) {
++        final found = codeProblems(types: [id]);
++        expect(codes(found), [KitProblemCode.typeOutsideKit], reason: id);
++        expect(found.single.message, contains('"$id"'));
++        expect(
++            codes(codeProblems(tools: [id])), [KitProblemCode.toolOutsideKit],
++            reason: id);
++      }
++      // M-R3c: drop the property check. M-R3f: drop its dot test ('sample'
++      // is then under the kit).
++      for (final id in ['other.wall.height', 'height', 'sample']) {
++        expect(codes(codeProblems(properties: [id])),
++            [KitProblemCode.foreignWordId],
++            reason: id);
++      }
++    });
++
++    test('R3-3 a code-side word without English', () {
++      for (final id in en.keys) {
++        // M-R3d: drop the English check.
++        final found =
++            codeProblems(names: codeNames(english: {...en}..remove(id)));
++        expect(codes(found), [KitProblemCode.missingEnglish], reason: id);
++        expect(found.single.message, contains('"$id"'));
++      }
++    });
++
++    test('R3-4 a declared locale holds the code side to the same rule', () {
++      // M-R3e: leave the code words out of the declared-locale check.
++      final found = codeProblems(
++          names: codeNames(german: {...de}..remove('tool:sample.wall')));
++      expect(codes(found), [KitProblemCode.wordMissing]);
++      expect(found.single.message, contains('tool:sample.wall'));
++      final untranslated =
++          codeNames(turkish: {...tr, 'type:sample.wall': 'Wall'});
++      expect(codes(codeProblems(names: untranslated)),
++          [KitProblemCode.wordUntranslated]);
++      expect(
++          codeProblems(names: untranslated, sameAsEnglish: {
++            ...sampleSameAsEnglish,
++            'tr': {...sampleSameAsEnglish['tr']!, 'type:sample.wall'},
++          }),
++          isEmpty);
++    });
++
++    test('R3-5 without ids, the code side is not checked (additive)', () {
++      // A positive control: a kit calling conformance as before 2a, with
++      // code-side words, is held to nothing new.
++      expect(
++          conformance(
++            catalog: sampleCatalog,
++            committedLibrary: committedLibrary(),
++            committedSnapshot: committedSnapshot(),
++            names: codeNames(german: const {}),
++            locales: sampleLocales,
++            sameAsEnglish: sampleSameAsEnglish,
++          ),
++          isEmpty);
++    });
++  });
+ }
+diff --git a/packages/jet_cad_2d_kit/test/authoring/snapshot_test.dart b/packages/jet_cad_2d_kit/test/authoring/snapshot_test.dart
+index 99ca103a..5e774aab 100644
+--- a/packages/jet_cad_2d_kit/test/authoring/snapshot_test.dart
++++ b/packages/jet_cad_2d_kit/test/authoring/snapshot_test.dart
+@@ -93,11 +93,34 @@ void main() {
+     );
+     // M-N7 (the spec's own): `{...committed, ...current}` lets the changed
+     // geometry overwrite the committed entry.
+     expect(merged, {
+       'a.b.c@1': 'committed',
+       'b.c.d@1': 'new',
+       'c.d.e@1': 'retired',
+     });
+     expect(merged.keys.toList(), ['a.b.c@1', 'b.c.d@1', 'c.d.e@1']);
+   });
++
++  test('R2-6 retiring a symbol changes no snapshot entry', () {
++    const retired = CatalogSymbol(
++      key: 'sample.x.y',
++      version: 3,
++      name: 'X',
++      category: 'C',
++      unit: CatalogUnit(
++          kind: UnitKinds.seat, capacity: 1, labelling: UnitLabelling.assigned),
++      base: (120.5, -40),
++      shapes: [
++        CatalogLine((10, 20), (30, 40)),
++        CatalogPolyline([(1, 2), (3, 4), (5, 6)], closed: true),
++        CatalogCircle((7, 8), 9),
++        CatalogArc((1, 1), 2, 0.5, -1.25),
++      ],
++      retired: true,
++    );
++    // M-R2f: write `retired` into the entry; a retired key@N would read as
++    // changed geometry.
++    expect(geometrySnapshot(const Catalog(kit: 'sample', symbols: [retired])),
++        geometrySnapshot(const Catalog(kit: 'sample', symbols: [every])));
++  });
+ }
+diff --git a/packages/jet_cad_2d_kit/test/invariants/doc_snippets_test.dart b/packages/jet_cad_2d_kit/test/invariants/doc_snippets_test.dart
+index 74328bec..02e8479a 100644
+--- a/packages/jet_cad_2d_kit/test/invariants/doc_snippets_test.dart
++++ b/packages/jet_cad_2d_kit/test/invariants/doc_snippets_test.dart
+@@ -46,21 +46,21 @@ void main() {
+   final examples = {
+     for (final f in Directory('example')
+         .listSync(recursive: true)
+         .whereType<File>()
+         .where((f) => f.path.endsWith('.dart')))
+       f.path: f.readAsStringSync(),
+   };
+ 
+   // The number of blocks pins the parser to the documents: a parser that
+   // finds no block would pass every check below vacuously.
+-  for (final (doc, count) in [('../../docs/kits.md', 4), ('README.md', 1)]) {
++  for (final (doc, count) in [('../../docs/kits.md', 6), ('README.md', 1)]) {
+     test('DOC1 every ```dart block of $doc is verbatim in example/', () {
+       final blocks = dartBlocks(File(doc).readAsStringSync());
+       expect(blocks, hasLength(count));
+       for (final block in blocks) {
+         // M-DOC1: change one character of a block in the document; M-DOC1e:
+         // change one character of the example file the block stands in.
+         expect(examples.values.any((file) => holdsRun(file, block)), isTrue,
+             reason: 'not in any of ${examples.keys}:\n$block');
+       }
+     });
+diff --git a/packages/jet_cad_2d_kit/test/kit/example_code_test.dart b/packages/jet_cad_2d_kit/test/kit/example_code_test.dart
+new file mode 100644
+index 00000000..5dcdb2b8
+--- /dev/null
++++ b/packages/jet_cad_2d_kit/test/kit/example_code_test.dart
+@@ -0,0 +1,51 @@
++// Spec 2a P6 (R5): the code side docs/kits.md shows is the example's, and it
++// validates, registers, edits and regenerates.
++import 'dart:math' as math;
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++
++import '../../example/cafe_code.dart';
++
++void main() {
++  test('R5-1 the documented code kit validates, edits and regenerates', () {
++    expect(cafeCodeKit.validate(), isEmpty);
++    expect(cafeCodeKit.propertyIds, [
++      'cafe.sign.width',
++      'cafe.sign.face',
++      'cafe.sign.face.chalk',
++      'cafe.sign.face.board',
++      'cafe.sign.area',
++    ]);
++    final type = cafeCodeKit.types.single;
++    final catalog = ParametricCatalog();
++    type.registerInto(catalog);
++    final doc = DraftDocument.empty();
++    addTearDown(doc.dispose);
++    ParametricSystem(doc, catalog).install();
++    const sign = Handle(3100);
++    doc.commands.execute(CompoundCommand([
++      AddNodeCommand(GroupNode(
++          handle: sign,
++          parent: doc.rootHandle,
++          transform: Transform2.translation(1820.5, 640.25)
++              .multiply(Transform2.rotation(math.pi / 5)),
++          children: const [])),
++      SetComponentCommand<CafeSign>(
++          sign, const CafeSign(width: 900, face: SignFace.chalk)),
++    ], label: 'Add sign'));
++    final width = type.fieldsOf(doc, sign).first;
++    expect(width.value, 900.0);
++    // M-R5: the example's `min: 300` lowered to 200.
++    expect(() => type.commitField(doc, sign, width, 250), throwsArgumentError);
++    doc.commands.execute(type.commitField(doc, sign, width, 1500));
++    final outline = [
++      for (final slot in doc.entities.liveSlots)
++        if (doc.entities.ownerAt(slot) == sign)
++          doc.geometry.read(doc.entities.geomIndexAt(slot)).coords,
++    ].single;
++    expect(outline.sublist(0, 4), [-750.0, -40.0, 750.0, -40.0]);
++    doc.commands.execute(type.recolour(doc, sign, 'ochre')!);
++    expect(type.colourOf(doc, sign), 'ochre');
++  });
++}
+diff --git a/packages/jet_cad_2d_kit/test/model/symbol_component_test.dart b/packages/jet_cad_2d_kit/test/model/symbol_component_test.dart
+index e56dc0c5..be5ac904 100644
+--- a/packages/jet_cad_2d_kit/test/model/symbol_component_test.dart
++++ b/packages/jet_cad_2d_kit/test/model/symbol_component_test.dart
+@@ -11,29 +11,31 @@ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+ /// attachment kinds, a family.
+ SymbolComponent sofa({
+   String key = 'sample.sofa.three',
+   int version = 3,
+   String name = 'Three-seat sofa',
+   String category = 'Living Room',
+   List<String> tags = const ['sofa', 'seating', 'couch'],
+   List<String> attachTo = const ['wall-face', 'room-corner'],
+   String? family = 'sofa-long',
+   bool noFamily = false,
++  bool retired = false,
+ }) =>
+     SymbolComponent(
+       key: key,
+       version: version,
+       name: name,
+       category: category,
+       tags: tags,
+       attachTo: attachTo,
+       family: noFamily ? null : family,
++      retired: retired,
+     );
+ 
+ Matcher refusedOn(String field) =>
+     throwsA(isA<ArgumentError>().having((e) => e.name, 'name', field));
+ 
+ const Map<String, Object?> full = {
+   'attachTo': ['wall-face', 'room-corner'],
+   'category': 'Living Room',
+   'family': 'sofa-long',
+   'key': 'sample.sofa.three',
+@@ -209,11 +211,66 @@ void main() {
+       expect(
+           () => SymbolComponent.fromJson({...full, 'key': 'Sample.sofa.three'}),
+           refusedOn('key'));
+     });
+ 
+     test('C12 a field this build does not know is ignored', () {
+       // Review Focus 3. M-C12: refuse unknown keys; this goes red.
+       expect(SymbolComponent.fromJson({...full, 'newerField': 1}), sofa());
+     });
+   });
++
++  group('retired (contract R2)', () {
++    test('R2-1 written only when true, in its alphabetical place', () {
++      expect(sofa().retired, isFalse);
++      // M-R2a: always write the key; C7's pinned text goes red too.
++      expect(sofa().toJson().containsKey('retired'), isFalse);
++      expect(sofa(retired: true).toJson().keys.toList(), [
++        'attachTo',
++        'category',
++        'family',
++        'key',
++        'name',
++        'retired',
++        'tags',
++        'version',
++      ]);
++      expect(
++          jsonEncode(sofa(retired: true).toJson()),
++          '{"attachTo":["wall-face","room-corner"],"category":"Living Room",'
++          '"family":"sofa-long","key":"sample.sofa.three",'
++          '"name":"Three-seat sofa","retired":true,'
++          '"tags":["sofa","seating","couch"],"version":3}');
++    });
++
++    test('R2-2 absent reads false; present must be a bool', () {
++      // M-R2b: read it with `field` (required): a map without it, every
++      // library and plan saved before R2, is refused.
++      expect(SymbolComponent.fromJson(full).retired, isFalse);
++      expect(SymbolComponent.fromJson({...full, 'retired': true}),
++          sofa(retired: true));
++      expect(SymbolComponent.fromJson({...full, 'retired': false}), sofa());
++      // M-R2c: `json['retired'] == true` (anything else reads false).
++      for (final bad in <Object?>['true', 1, null]) {
++        expect(() => SymbolComponent.fromJson({...full, 'retired': bad}),
++            throwsFormatException,
++            reason: '$bad');
++      }
++    });
++
++    test('R2-3 equality and the hash see it', () {
++      // M-R2d: drop `retired` from ==.
++      expect(sofa(retired: true), isNot(sofa()));
++      expect(sofa(retired: true), sofa(retired: true));
++      expect(sofa(retired: true).hashCode, sofa(retired: true).hashCode);
++      expect('${sofa(retired: true)}', endsWith(', retired)'));
++    });
++
++    test('R2-4 it reads back through JSON text', () {
++      final s = sofa(retired: true, noFamily: true);
++      expect(
++          SymbolComponent.fromJson((jsonDecode(jsonEncode(s.toJson())) as Map)
++              .cast<String, Object?>()),
++          s);
++    });
++  });
+ }
+diff --git a/packages/jet_cad_2d_kit/test/model/symbol_library_test.dart b/packages/jet_cad_2d_kit/test/model/symbol_library_test.dart
+index bbc242b0..1ff6113d 100644
+--- a/packages/jet_cad_2d_kit/test/model/symbol_library_test.dart
++++ b/packages/jet_cad_2d_kit/test/model/symbol_library_test.dart
+@@ -438,51 +438,72 @@ void main() {
+       final j = validLibraryJson();
+       final units = componentsJson(j, UnitComponent.componentTypeId);
+       units['${sofaDef.value}'] = units.remove('${tableDef.value}');
+       componentJson(
+           j, SymbolComponent.componentTypeId, sofaDef.value)['family'] = null;
+       // Two edits: the sofa's family would be rule 9. M-V11b: take the last
+       // leaf instead of the first.
+       expectRefused(bytesOfJson(j), 11, ['sample.sofa.three@3', hex(sofaLine)]);
+     });
+ 
+-    // Amended by the final review: an outline must enclose more than
+-    // Tolerance.standard.linear squared, either winding.
++    // Amended by the final review, then by contract R7: an outline must be
++    // wider than Tolerance.standard.linear, its width 2·area/perimeter,
++    // either winding.
+     void outline(String name, List<double> coords, List<String> parts) {
+       test(name, () {
+         final j = validLibraryJson();
+         geometryJson(j, tableTop)['coords'] = coords;
+         expectRefused(bytesOfJson(j), 11,
+             ['sample.table.high-top@2', hex(tableTop), ...parts]);
+       });
+     }
+ 
+-    // M-V11c: drop the area check.
++    void loads(String name, List<double> coords) {
++      test(name, () {
++        final j = validLibraryJson();
++        geometryJson(j, tableTop)['coords'] = coords;
++        final lib = SymbolLibrary.decode(bytesOfJson(j));
++        expect(lib.entries[1].leaves.first.payload.coords, coords);
++      });
++    }
++
++    // M-V11c: drop the width check.
+     outline(
+         'V11c a closed outline on one diagonal, off the origin',
+         [950.0, 560.0, 1250.0, 860.0, 1550.0, 1160.0, 950.0, 560.0],
+-        ['encloses no area (0.0)']);
+-    // Area 5e-19, under linear² (1e-18), and not zero: near the origin, the
+-    // only place a double can hold so thin a triangle. M-V11d: `area == 0`.
++        ['is too thin (width 0.0)']);
++    // R7's own case: 600 mm long, 1e-9 mm wide, off the origin. Its area
++    // (6e-7) is far above linear² (1e-18): the area test let it load.
++    // M-R7a: the area test back (`area <= linear * linear`).
++    outline('R7-1 a 600 mm by 1e-9 mm sliver is refused', [
++      950.0, 560.0, 1550.0, 560.0, 1550.0, 560.000000001, 950.0, //
++      560.000000001, 950.0, 560.0
++    ], [
++      'is too thin'
++    ]);
++    // V11e's triangle, of area 2 * linear², loaded under the area test; it
++    // is about 2e-15 mm wide. M-R7a turns this red too.
+     outline(
+-        'V11d an outline of area linear² / 2',
+-        [1e-3, 2e-3, 2e-3, 2e-3, 1e-3, 2e-3 + 1e-15, 1e-3, 2e-3],
+-        ['encloses no area']);
+-    test('V11e an outline of area 2 * linear² loads', () {
+-      // Positive control. M-V11e: `area <= linear` (not squared).
+-      final j = validLibraryJson();
+-      geometryJson(j, tableTop)['coords'] = [
+-        1e-3, 2e-3, 2e-3, 2e-3, 1e-3, 2e-3 + 4e-15, 1e-3, 2e-3, //
+-      ];
+-      final lib = SymbolLibrary.decode(bytesOfJson(j));
+-      expect(lib.entries[1].leaves.first.payload.coords[5], 2e-3 + 4e-15);
+-    });
++        'R7-2 a triangle of area 2 * linear² is refused',
++        [1e-3, 2e-3, 2e-3, 2e-3, 1e-3, 2e-3 + 4e-15, 1e-3, 2e-3],
++        ['is too thin']);
++    // Twice the tolerance wide. M-R7c: drop the factor 2 (area/perimeter is
++    // then just under linear).
++    loads('R7-3 a 600 mm by 2e-9 mm outline loads', [
++      950.0, 560.0, 1550.0, 560.0, 1550.0, 560.000000002, 950.0, //
++      560.000000002, 950.0, 560.0,
++    ]);
++    // A healthy thin unit, a positive control: a 600 mm by 1 mm bar.
++    loads('R7-4 a 600 mm by 1 mm outline loads', [
++      950.0, 560.0, 1550.0, 560.0, 1550.0, 561.0, 950.0, 561.0, 950.0, //
++      560.0,
++    ]);
+     test('V11f a clockwise outline loads', () {
+       // The table's top, its winding reversed. M-V11f: drop `.abs()`.
+       final j = validLibraryJson();
+       geometryJson(j, tableTop)['coords'] = [
+         950.0, 560.0, 950.0, 1160.0, 1550.0, 1160.0, 1550.0, 560.0, //
+         950.0, 560.0,
+       ];
+       final lib = SymbolLibrary.decode(bytesOfJson(j));
+       expect(lib.entries[1].leaves.first.payload.coords[3], 1160.0);
+     });

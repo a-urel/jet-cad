@@ -1,0 +1,4801 @@
+# Review package: 953356d8..HEAD
+
+## Commits
+29aaea73 test(plan): MV-2 pins that a symbol attaching nowhere asks no registry
+b2a6f29a feat(plan): attachment, plan.symbol and the move resolver (P3)
+
+## Files changed
+ .../lib/src/attach/attachment_painter.dart         |   19 +
+ .../lib/src/attach/attachment_registry.dart        |  122 ++
+ .../lib/src/controller/plan_controller.dart        |   54 +-
+ .../lib/src/controller/session.dart                |   42 +-
+ .../lib/src/symbols/symbol_box.dart                |  152 ++
+ .../lib/src/symbols/symbol_ghost.dart              |  149 ++
+ .../lib/src/tools/move_resolver.dart               |  103 ++
+ .../lib/src/tools/plan_symbol_tool.dart            |  508 +++++++
+ .../test/attach/attachment_registry_test.dart      |  145 ++
+ .../controller/attachment_controller_test.dart     |  225 +++
+ .../test/controller/lifetimes_test.dart            |   22 +-
+ .../test/panels/plan_symbol_gallery_test.dart      |   34 +
+ .../test/support/attach_fixtures.dart              |   74 +
+ .../test/symbols/symbol_box_test.dart              |  343 +++++
+ .../test/symbols/symbol_ghost_test.dart            |  547 +++++++
+ .../test/tools/move_resolver_test.dart             |  183 +++
+ .../test/tools/plan_symbol_tool_test.dart          | 1576 ++++++++++++++++++++
+ 17 files changed, 4285 insertions(+), 13 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_plan/lib/src/attach/attachment_painter.dart b/packages/jet_cad_2d_plan/lib/src/attach/attachment_painter.dart
+new file mode 100644
+index 00000000..d7d18f9f
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/attach/attachment_painter.dart
+@@ -0,0 +1,19 @@
++// Spec P3 "Drawing" (Task 14): the plan library draws every kit's
++// attachment marker alike: the nearest glyph at the marker's screen point
++// (today's attached marker, symbol_place_tool.dart:503-522).
++import 'dart:ui' show Canvas, Offset, Paint;
++
++import 'package:jet_cad_2d/jet_cad_2d.dart' show SnapKind;
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
++    show ViewportTransform, drawSnapMarker;
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++/// Draws the attachment marker at world [marker] with [paint]. Allocates
++/// only the screen offset.
++void paintAttachmentMarker(
++    Canvas canvas, ViewportTransform camera, Vector2 marker, Paint paint) {
++  final m = camera.worldToScreenMatrix;
++  final at = Offset(m.a * marker.x + m.c * marker.y + m.e,
++      m.b * marker.x + m.d * marker.y + m.f);
++  drawSnapMarker(canvas, at, SnapKind.nearest, grid: false, paint: paint);
++}
+diff --git a/packages/jet_cad_2d_plan/lib/src/attach/attachment_registry.dart b/packages/jet_cad_2d_plan/lib/src/attach/attachment_registry.dart
+new file mode 100644
+index 00000000..5fc5c778
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/attach/attachment_registry.dart
+@@ -0,0 +1,122 @@
++// Spec P3 "Attachment" (Task 14): the registry over the kits' providers,
++// one per document (spec P1 "Lifetimes": a kit's factories run once per
++// document). plan.symbol and plan.select's move resolver use it, and
++// nothing else.
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++
++import '../kits/guard.dart' show guardAttachment;
++
++/// The providers of one document, by kind, in the order they were added
++/// (kit load order).
++///
++/// [attach] asks every provider of each kind in its `kinds` and returns
++/// the answer whose marker is nearest the query's pointer (the earlier on
++/// a tie). A query's `keep` reaches only the provider that made it. A
++/// provider that throws is taken as no attachment and reported; so is a
++/// factory that throws, which adds no provider.
++final class PlanAttachmentRegistry implements AttachmentRegistry {
++  PlanAttachmentRegistry(
++      {required void Function(KitDiagnostic diagnostic) report})
++      : _report = report;
++
++  final void Function(KitDiagnostic diagnostic) _report;
++  final Map<String, List<_Provider>> _byKind = <String, List<_Provider>>{};
++  final Expando<_Provider> _origin = Expando<_Provider>('attachment origin');
++
++  /// Runs [factory] over [services] and adds its provider.
++  void add(String kitId, AttachmentProvider Function(PlanServices) factory,
++      PlanServices services) {
++    final AttachmentProvider provider;
++    final String kind;
++    try {
++      provider = factory(services);
++      kind = provider.kind;
++    } catch (e) {
++      _report(KitDiagnostic(
++          kitId: kitId,
++          subject: 'attachments',
++          code: KitDiagnosticCode.hookFailed,
++          message: 'an attachment provider factory of "$kitId" threw: $e',
++          error: e));
++      return;
++    }
++    (_byKind[kind] ??= <_Provider>[]).add(_Provider(kitId, provider));
++  }
++
++  @override
++  Set<String> get kinds => Set.unmodifiable(_byKind.keys);
++
++  @override
++  Attachment? attach(List<String> kinds, AttachmentQuery query) {
++    final keep = query.keep;
++    final keeper = keep == null ? null : _origin[keep];
++    AttachmentQuery? bare;
++    Attachment? best;
++    var bestDistance = double.infinity;
++    for (final kind in kinds) {
++      final providers = _byKind[kind];
++      if (providers == null) continue;
++      for (final p in providers) {
++        final q = keep == null || identical(p, keeper)
++            ? query
++            : (bare ??= _withoutKeep(query));
++        final a = _ask(p, q);
++        if (a == null) continue;
++        _origin[a] = p;
++        final d = a.marker.distanceToSquared(query.pointer);
++        if (d < bestDistance) {
++          best = a;
++          bestDistance = d;
++        }
++      }
++    }
++    return best;
++  }
++
++  /// [p]'s answer through Task 11's guard: a throw is no attachment and
++  /// one hookFailed (subject: the provider's kind).
++  Attachment? _ask(_Provider p, AttachmentQuery q) =>
++      guardAttachment(p.kitId, p.provider, q, _report);
++
++  static AttachmentQuery _withoutKeep(AttachmentQuery q) => AttachmentQuery(
++        footprint: q.footprint,
++        current: q.current,
++        pointer: q.pointer,
++        capture: q.capture,
++        edgeCapture: q.edgeCapture,
++        mirrored: q.mirrored,
++        mayRotate: q.mayRotate,
++        exclude: q.exclude,
++      );
++
++  /// Disposes every provider that is [Disposable] and empties the
++  /// registry (the document is going). A provider's dispose that throws is
++  /// reported (subject: its kind), and the others are still disposed.
++  void dispose() {
++    for (final entry in _byKind.entries) {
++      for (final p in entry.value) {
++        // Disposable is no AttachmentProvider: a pattern, not a promotion.
++        if (p.provider case final Disposable disposable) {
++          try {
++            disposable.dispose();
++          } catch (e) {
++            _report(KitDiagnostic(
++                kitId: p.kitId,
++                subject: entry.key,
++                code: KitDiagnosticCode.hookFailed,
++                message: 'dispose: $e',
++                error: e));
++          }
++        }
++      }
++    }
++    _byKind.clear();
++  }
++}
++
++final class _Provider {
++  const _Provider(this.kitId, this.provider);
++
++  final String kitId;
++  final AttachmentProvider provider;
++}
+diff --git a/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart b/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
+index 1b77affc..aa4586df 100644
+--- a/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
++++ b/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
+@@ -20,21 +20,23 @@ import '../file/plan_format_exception.dart';
+ import '../kits/guard.dart';
+ import '../kits/kit_set.dart';
+ import '../kits/locks.dart';
+ import '../l10n/document_separator.dart';
+ import '../l10n/strings.dart';
+ import '../export/registries.dart';
+ import '../symbols/plan_symbol.dart';
+ import '../symbols/plan_symbol_loader.dart';
+ import '../symbols/plan_symbols_state.dart';
+ import '../tools/generic_tools.dart';
++import '../tools/move_resolver.dart';
+ import '../tools/plan_select_gates.dart';
++import '../tools/plan_symbol_tool.dart';
+ import 'camera_bounds.dart';
+ import 'new_plan.dart';
+ import 'permissions.dart';
+ import 'plan_change.dart';
+ import 'services.dart';
+ import 'session.dart';
+ import 'tool_settings_store.dart';
+ 
+ /// The thumbnail capacity of a controller's own cache (today's
+ /// `kFloorPlanThumbnailCapacity`).
+@@ -267,20 +269,27 @@ class PlanController extends ChangeNotifier {
+       _out.stream.where((_) => !_disposed);
+ 
+   final List<VoidCallback> _settles = [];
+ 
+   /// The editor's permissions (spec P2); the Fill toggle; each known tool
+   /// id's needs. Kept across document swaps.
+   PlanPermissions _permissions;
+   final ValueNotifier<bool> _fill = ValueNotifier<bool>(false);
+   final Map<String, Set<Capability>> _toolNeeds = <String, Set<Capability>>{};
+ 
++  /// plan.select's move resolver (Task 14): one for the controller's life,
++  /// reading the current document from each call's context and the current
++  /// registry from the session.
++  late final PlanMoveResolver _moveResolver = PlanMoveResolver(
++      attachments: () => _session.attachments,
++      canRotate: () => _permissions.rotate);
++
+   // ---------------------------------------------------------------------
+   // The plan.
+ 
+   /// The plan's document. Replaced by [load] and [newPlan].
+   DraftDocument get document => _session.document;
+ 
+   /// Whether the plan differs from its save point.
+   ValueListenable<bool> get dirty => _dirty;
+ 
+   int _savedState = 0;
+@@ -534,22 +543,32 @@ class PlanController extends ChangeNotifier {
+         document: document,
+         measurer: measurer,
+         catalog: catalog,
+         camera: camera,
+         snap: _snap,
+         kitLoaded: (kitId) => kits.kitOf(kitId) != null,
+         locked: _locked,
+         log: _diagnostics,
+         permissions: () => _permissions,
+         fill: _fill,
+-        guard: _guardTool);
++        guard: _guardTool,
++        moveResolver: _moveResolver);
+     _session = session;
++    // The attachment providers, once per document, before the kits' tools
++    // (the kits' services read this session's registry), then plan.symbol
++    // over the registry (Task 14).
++    session.runAttachmentFactories(kits, _services, _diagnostics.add);
++    session.addSymbolTool(PlanSymbolTool(_armed,
++        attachments: session.attachments,
++        canRotate: () => _permissions.rotate,
++        canMirror: () => _permissions.mirror));
++    registerToolNeeds(PlanToolIds.symbol, PlanToolIds.symbolNeeds);
+     _locked.value = session.locks.objects;
+     session.boundary = FailureBoundary(
+         document: document,
+         catalog: catalog,
+         system: session.parametric,
+         frozen: session.frozen,
+         log: _diagnostics,
+         lock: lockBroken,
+         damage: _damage);
+     session.lockExpander
+@@ -561,20 +580,21 @@ class PlanController extends ChangeNotifier {
+       if (!_disposed) _refreshFlags();
+     });
+     _loadDiagnostics = List.unmodifiable(loadDiagnostics);
+     _readManifest();
+     _tracker.attach(document);
+     // The load's checks (spec P4), once the views, the kit products and the
+     // manifest's diagnostics are in place: E4's unreadable components, then
+     // one dry run of the plan.
+     session.boundary.reportUnreadable(_loadDiagnostics);
+     session.boundary.probeLoaded();
++    _reportUnofferedKinds();
+   }
+ 
+   /// What the plan's manifest says against the loaded kits (Task 7).
+   void _readManifest() {
+     _diagnostics.clearPlanScoped();
+     final d = _session.document;
+     final manifest = manifestOf(d);
+     if (manifest == null) {
+       _missingKits = const {};
+       return;
+@@ -701,35 +721,37 @@ class PlanController extends ChangeNotifier {
+     if (tool == null || !_allowsTool(id)) return false;
+     if (id != planSelectToolId) session.selection.clear();
+     session.tools.activate(tool);
+     return true;
+   }
+ 
+   /// Whether [id] may be armed: offered by the permissions' ids, a tool
+   /// this controller knows, and every capability its commits need allowed
+   /// by the document's engine permissions (spec P2).
+   bool _allowsTool(String id) {
++    // plan.symbol is refused with nothing armed (planner_shell.dart:945).
++    if (id == PlanToolIds.symbol && _armed.value == null) return false;
+     if (!_permissions.allowsTool(id)) return false;
+     final needs = _toolNeeds[id];
+     if (needs == null) return false;
+     final engine = document.commands.permissions;
+     for (final c in needs) {
+       if (!engine.allows(c)) return false;
+     }
+     return true;
+   }
+ 
+   /// [id]'s needs, or null for an id this controller does not know.
+   @internal
+   Set<Capability>? needsOf(String id) => _toolNeeds[id];
+ 
+-  /// For Task 14's plan.symbol, which is built outside the generic set.
++  /// plan.symbol's needs (Task 14), which is built outside the generic set.
+   @internal
+   void registerToolNeeds(String id, Set<Capability> needs) =>
+       _toolNeeds[id] = needs;
+ 
+   /// The editor's permissions. Settable at runtime: the widgets rebuild
+   /// (this notifies), the document's engine permissions follow
+   /// ([PlanPermissions.draft]), a drag whose gate closes is cancelled now,
+   /// and an active tool no longer allowed is cancelled and plan.select
+   /// armed.
+   PlanPermissions get permissions => _permissions;
+@@ -740,21 +762,28 @@ class PlanController extends ChangeNotifier {
+     document.commands.permissions = value.draft;
+     final select = _session.select;
+     final stale = switch (select.dragKind) {
+       DragKind.move => old.move && !value.move,
+       DragKind.rotate => old.rotate && !value.rotate,
+       DragKind.reshape => old.reshape && !value.reshape,
+       DragKind.band || null => false,
+     };
+     if (stale) select.cancel(toolController.context);
+     grips.gatesChanged();
+-    if (!_allowsTool(activeTool.value)) selectTool(PlanToolIds.select);
++    if (!_allowsTool(activeTool.value)) {
++      selectTool(PlanToolIds.select);
++    } else if (activeTool.value == PlanToolIds.symbol &&
++        (old.rotate != value.rotate || old.mirror != value.mirror)) {
++      // The ghost never shows a turn or a mirror a click would not place
++      // (planner_shell.dart:1100-1104).
++      _session.symbolTool.gatesChanged();
++    }
+     notifyListeners();
+   }
+ 
+   @internal
+   PlanSelectGates get selectGates => _session.gates;
+ 
+   @internal
+   SelectTool get planSelect => _session.select;
+ 
+   /// The Fill toggle (Task 16's palette row and F key).
+@@ -941,23 +970,42 @@ class PlanController extends ChangeNotifier {
+     if (load == null) {
+       _symbolsState.value = PlanSymbolsState.failed;
+       debugPrint('The symbol libraries could not be loaded: $error');
+       return;
+     }
+     _symbols = load.symbols;
+     _symbolsById = {for (final s in load.symbols) s.id: s};
+     for (final d in load.diagnostics) {
+       _diagnostics.add(d);
+     }
++    _reportUnofferedKinds();
+     _symbolsState.value = load.state;
+   }
+ 
++  /// One attachmentKindUnoffered per kit and kind (the log keeps one per
++  /// kit, subject and code) for each loaded symbol's attachTo kind that no
++  /// provider of the current document offers.
++  void _reportUnofferedKinds() {
++    final offered = _session.attachments.kinds;
++    for (final s in _symbols) {
++      for (final kind in s.component.attachTo) {
++        if (offered.contains(kind)) continue;
++        _diagnostics.add(KitDiagnostic(
++            kitId: s.kitId,
++            subject: kind,
++            code: KitDiagnosticCode.attachmentKindUnoffered,
++            message: '${s.id} attaches to "$kind", which no loaded kit '
++                'offers'));
++      }
++    }
++  }
++
+   /// The plan's changes (spec P2 "Events"), a broadcast stream delivered
+   /// asynchronously, one report per synchronous step. Closed by [dispose]:
+   /// nothing reaches a listener after it.
+   Stream<PlanChange> get changes => _changeStream;
+ 
+   void _emit(PlanChange change) {
+     if (!_disposed) _out.add(change);
+   }
+ 
+   @visibleForTesting
+diff --git a/packages/jet_cad_2d_plan/lib/src/controller/session.dart b/packages/jet_cad_2d_plan/lib/src/controller/session.dart
+index 1641e833..b86511af 100644
+--- a/packages/jet_cad_2d_plan/lib/src/controller/session.dart
++++ b/packages/jet_cad_2d_plan/lib/src/controller/session.dart
+@@ -4,46 +4,49 @@
+ // construction (planner_shell.dart:277-280, :428-437, :625-671, :1050-1057)
+ // and disposal (:1114-1170), and FloorPlanController's _Plan
+ // (floor_plan_controller.dart:67-99).
+ import 'dart:async';
+ 
+ import 'package:flutter/foundation.dart' show ValueListenable;
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+ 
++import '../attach/attachment_registry.dart';
+ import '../kits/guard.dart';
+ import '../kits/kit_set.dart';
+ import '../kits/locks.dart';
+ import '../tools/generic_tools.dart';
+ import '../tools/plan_select_gates.dart';
++import '../tools/plan_symbol_tool.dart';
+ import 'grip_dispatch.dart';
+ import 'permissions.dart';
+ import 'services.dart';
+ import 'shared_cache.dart';
+ 
+ /// The plan library's own select tool (spec P1 reserved ids).
+ const String planSelectToolId = 'plan.select';
+ 
+ final class DocumentSession {
+   DocumentSession(
+       {required this.document,
+       required this.measurer,
+       required ParametricCatalog catalog,
+       required CameraController camera,
+       required SnapSettings snap,
+       required bool Function(String kitId) kitLoaded,
+       required ValueListenable<Set<Handle>> locked,
+       required DiagnosticsLog log,
+       required PlanPermissions Function() permissions,
+       required ValueListenable<bool> fill,
+-      required Tool Function(String kitId, String toolId, Tool tool) guard})
++      required Tool Function(String kitId, String toolId, Tool tool) guard,
++      MoveResolver? moveResolver})
+       : _log = log,
+         _guard = guard,
+         page = PageNotifier(document),
+         index = SpatialIndex(document),
+         dispatch = GripDispatch(catalog) {
+     locks = LockSet.scan(document, kitLoaded);
+     // planner_shell.dart:625-671, the order load-bearing: the selection
+     // prunes a dead key before the outline cache walks it; the gates
+     // listen to the selection before the outline and grip caches do; the
+     // grip cache rebuilds after the outlines.
+@@ -58,21 +61,22 @@ final class DocumentSession {
+     toolContext = ToolContext(
+         document: document,
+         index: index,
+         camera: camera,
+         selection: selection,
+         page: page,
+         snap: snap,
+         grips: grips);
+     // The session's one plan.select: the generic set's, gated (spec P2
+     // permissions, P4 locks).
+-    generic = buildGenericTools(gates: gates, fill: fill);
++    generic =
++        buildGenericTools(gates: gates, fill: fill, moveResolver: moveResolver);
+     select = generic.select;
+     // Every tool in the map is guarded (spec P4), the plan's own under the
+     // kit id `plan`; the tool controller knows the guarded one.
+     final guardedSelect = guard('plan', planSelectToolId, select);
+     _entries.add((id: planSelectToolId, tool: guardedSelect, kit: false));
+     tools = ToolController(initial: guardedSelect, context: toolContext);
+     // The other generic tools, before any kit's (runKitFactories runs
+     // later, from the controller's _open). The map owns and disposes them.
+     for (final e in generic.byId.entries) {
+       if (e.key != planSelectToolId) addTool(e.key, e.value);
+@@ -117,23 +121,28 @@ final class DocumentSession {
+   /// The select tool's and the grip cache's gates: the permissions and the
+   /// locks (spec P2, P4).
+   late final PlanSelectGates gates;
+ 
+   /// The generic tools (Task 12). The map holds each of them, guarded, and
+   /// disposes them: never [GenericToolSet.dispose] here (a second dispose
+   /// of a tool asserts).
+   late final GenericToolSet generic;
+   final SharedCache shared = SharedCache();
+ 
+-  /// The registry until Task 14 runs the providers' factories.
++  /// This document's attachment registry: none until
++  /// [runAttachmentFactories] makes it (Task 14).
+   AttachmentRegistry attachments = const NoAttachments();
+ 
++  /// plan.symbol of this document (Task 14); in the tool map, which owns
++  /// and disposes it.
++  late final PlanSymbolTool symbolTool;
++
+   /// The tools by id: select, the other generic tools, then each kit's in
+   /// load order.
+   final List<({String id, Tool tool, bool kit})> _entries = [];
+   final List<({String kitId, String typeId, Object provider})> _providers = [];
+ 
+   /// The document's change subscription, for the history flags.
+   StreamSubscription<DocChange>? history;
+ 
+   /// Registers a tool that is not a kit's (the generic tools; Task 14's
+   /// plan.symbol).
+@@ -161,51 +170,74 @@ final class DocumentSession {
+         final provider = guardFactory(
+             kitOfKey(type.id), type.id, () => type.gripsFor(s), _log);
+         if (provider == null) continue;
+         dispatch.add(type.id, provider);
+         _providers.add(
+             (kitId: kitOfKey(type.id), typeId: type.id, provider: provider));
+       }
+     }
+   }
+ 
++  /// Runs every kit's attachment-provider factories over this document,
++  /// once (spec P1 lifetimes), before its tools: the registry is what
++  /// `PlanServices.attachments` returns from here on.
++  void runAttachmentFactories(KitSet kits, Map<String, PlanServices> services,
++      void Function(KitDiagnostic) report) {
++    final registry = PlanAttachmentRegistry(report: report);
++    attachments = registry;
++    for (final kit in kits.kits) {
++      for (final factory in kit.attachments) {
++        registry.add(kit.id, factory, services[kit.id]!);
++      }
++    }
++  }
++
++  /// Puts [tool] in the map as plan.symbol, after the generic tools and
++  /// before the kits'.
++  void addSymbolTool(PlanSymbolTool tool) {
++    symbolTool = tool;
++    addTool(PlanToolIds.symbol, tool);
++  }
++
+   Tool? toolById(String id) {
+     for (var i = 0; i < _entries.length; i++) {
+       if (_entries[i].id == id) return _entries[i].tool;
+     }
+     return null;
+   }
+ 
+   /// [tool]'s id; select's for a tool this session does not hold.
+   String idOf(Tool tool) {
+     for (var i = 0; i < _entries.length; i++) {
+       if (identical(_entries[i].tool, tool)) return _entries[i].id;
+     }
+     return planSelectToolId;
+   }
+ 
+-  /// Spec P1 lifetimes, 2: the kit tools, the grip (and, Task 14,
+-  /// attachment) providers and the shared cache disposed, in that order.
++  /// Spec P1 lifetimes, 2: the kit tools, the grip and attachment
++  /// providers and the shared cache disposed, in that order.
+   /// The active tool must be select already.
+   void disposeKitProducts() {
+     for (final e in _entries) {
+       if (e.kit) e.tool.dispose();
+     }
+     _entries.removeWhere((e) => e.kit);
+     dispatch.close();
+     for (final p in _providers) {
+       final provider = p.provider;
+       if (provider is Disposable) {
+         _disposeGuarded(p.kitId, p.typeId, provider);
+       }
+     }
+     _providers.clear();
++    final registry = attachments;
++    if (registry is PlanAttachmentRegistry) registry.dispose();
+     shared.dispose(
+         onError: (kitId, error) => _disposeFailed(kitId, null, error));
+   }
+ 
+   /// [value]'s `dispose`, a kit's: what it throws is reported, so a swap
+   /// completes (spec P4).
+   void _disposeGuarded(String kitId, String subject, Disposable value) {
+     try {
+       value.dispose();
+     } catch (error) {
+diff --git a/packages/jet_cad_2d_plan/lib/src/symbols/symbol_box.dart b/packages/jet_cad_2d_plan/lib/src/symbols/symbol_box.dart
+new file mode 100644
+index 00000000..e5b057fb
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/symbols/symbol_box.dart
+@@ -0,0 +1,152 @@
++// The symbol's local box (spec 09c D2): the axis-aligned bounds of a
++// symbol's leaves in its definition's coordinates (the base point not
++// subtracted). The catalog's frame (F-1) puts the front of a piece on its
++// smallest y and its back on its largest, so `front = minY` and
++// `back = maxY`.
++//
++// No Flutter import and no `dart:ui`: this file is Dart over
++// `package:jet_cad_2d` and the kit's `SymbolEntry` only (spec D1, T-4;
++// ported to the plan library by Task 14).
++import 'dart:math' as math;
++
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show SymbolEntry;
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++/// The local box of a symbol: `left = minX`, `right = maxX`,
++/// `front = minY`, `back = maxY` in the definition's coordinates.
++final class SymbolBox {
++  final double left, right, front, back;
++
++  const SymbolBox({
++    required this.left,
++    required this.right,
++    required this.front,
++    required this.back,
++  });
++
++  /// `W = right − left`.
++  double get width => right - left;
++
++  /// `D = back − front`.
++  double get depth => back - front;
++
++  /// The middle of the back edge, `((left + right) / 2, back)`: the point
++  /// that lands on a wall's face (spec D4).
++  Vector2 get backCentre => Vector2((left + right) / 2, back);
++
++  @override
++  bool operator ==(Object other) =>
++      other is SymbolBox &&
++      other.left == left &&
++      other.right == right &&
++      other.front == front &&
++      other.back == back;
++
++  @override
++  int get hashCode => Object.hash(left, right, front, back);
++
++  @override
++  String toString() =>
++      'SymbolBox(left: $left, right: $right, front: $front, back: $back)';
++}
++
++/// The axis directions an arc's sweep can pass, `k · π/2` for k = 0..3, and
++/// the unit offset of the circle's extreme in each: exact, so an extreme is
++/// `c ± r` with no rounding.
++const List<double> _axisAngles = [0, 0.5 * math.pi, math.pi, 1.5 * math.pi];
++const List<double> _axisX = [1, 0, -1, 0];
++const List<double> _axisY = [0, 1, 0, -1];
++
++/// The local box of [leaves] (each a kind and its payload, in the
++/// definition's coordinates), or null when none of them draws.
++///
++/// A line's and a polyline's vertices; a circle's centre ± r; an arc's two
++/// end points plus each axis extreme its sweep passes (its **true** extents,
++/// spec D2), whichever way it turns. Any other kind (a point, a text, a
++/// fill, an attribute: the library holds none, spec 09 D5) and a malformed
++/// payload are skipped, as the ghost path skips them.
++SymbolBox? boxOfLeaves(Iterable<(EntityKind, GeometryPayload)> leaves) {
++  var minX = double.infinity, maxX = double.negativeInfinity;
++  var minY = double.infinity, maxY = double.negativeInfinity;
++  void add(double x, double y) {
++    if (x < minX) minX = x;
++    if (x > maxX) maxX = x;
++    if (y < minY) minY = y;
++    if (y > maxY) maxY = y;
++  }
++
++  for (final (kind, p) in leaves) {
++    final c = p.coords;
++    switch (kind) {
++      case EntityKind.line:
++      case EntityKind.polyline:
++        for (var i = 0; i + 1 < c.length; i += 2) {
++          add(c[i], c[i + 1]);
++        }
++      case EntityKind.circle:
++        if (c.length < 2 || p.scalars.isEmpty) continue;
++        final r = p.scalars[0];
++        add(c[0] - r, c[1] - r);
++        add(c[0] + r, c[1] + r);
++      case EntityKind.arc:
++        if (c.length < 2 || p.scalars.length < 3) continue;
++        final r = p.scalars[0], start = p.scalars[1], sweep = p.scalars[2];
++        final end = start + sweep;
++        add(c[0] + r * math.cos(start), c[1] + r * math.sin(start));
++        add(c[0] + r * math.cos(end), c[1] + r * math.sin(end));
++        for (var k = 0; k < 4; k++) {
++          if (angleInSweep(_axisAngles[k], start, sweep)) {
++            add(c[0] + r * _axisX[k], c[1] + r * _axisY[k]);
++          }
++        }
++      case EntityKind.point:
++      case EntityKind.text:
++      case EntityKind.attrib:
++      case EntityKind.fill:
++        continue;
++    }
++  }
++  if (minX > maxX) return null;
++  return SymbolBox(left: minX, right: maxX, front: minY, back: maxY);
++}
++
++final Expando<_Memo> _entryBoxes = Expando<_Memo>('symbolBox');
++
++/// Holds a memoised box, null included (an entry with no drawn leaf).
++final class _Memo {
++  final SymbolBox? box;
++  const _Memo(this.box);
++}
++
++/// The local box of [entry], computed on the first call and the same object
++/// on every later call for the same entry (spec D2: once per entry).
++SymbolBox? boxOfEntry(SymbolEntry entry) =>
++    (_entryBoxes[entry] ??= _Memo(boxOfLeaves(
++            [for (final l in entry.leaves) (l.record.kind, l.payload)])))
++        .box;
++
++/// The local box of the definition [definition] in [doc], from its **live**
++/// leaves (the entities it owns); null when [definition] names no definition
++/// or none of its leaves draws.
++///
++/// Not memoised: O(entities) per call. The per-document memo cleared on a
++/// document change belongs to the caller (`WallFaces`, spec D3, D4).
++SymbolBox? boxOfDefinition(DraftDocument doc, Handle definition) {
++  if (doc.tree.definition(definition) == null) return null;
++  final entities = doc.entities;
++  return boxOfLeaves([
++    for (final slot in entities.liveSlots)
++      if (entities.ownerAt(slot) == definition)
++        (
++          entities.kindAt(slot),
++          doc.geometry.read(entities.geomIndexAt(slot)),
++        ),
++  ]);
++}
++
++/// [box] as the engine's box, the shape `AttachmentQuery.footprint` takes:
++/// x from left to right, y from front to back, in the definition's
++/// coordinates.
++Aabb2 footprintOf(SymbolBox box) =>
++    Aabb2.raw(box.left, box.front, box.right, box.back);
+diff --git a/packages/jet_cad_2d_plan/lib/src/symbols/symbol_ghost.dart b/packages/jet_cad_2d_plan/lib/src/symbols/symbol_ghost.dart
+new file mode 100644
+index 00000000..54851d03
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/symbols/symbol_ghost.dart
+@@ -0,0 +1,149 @@
++// The symbol placement ghost (spec 09b D6 "The ghost", F-14, R-3): the
++// symbol's leaves as one cached `ui.Path` in the symbol's local frame, and
++// the matrix that carries that frame to `world − origin` for a tool's
++// `paintWorldOverlay`.
++//
++// `dart:ui` only, no widget: the placement tool (plan Task 6) owns the
++// painting. Nothing here allocates per paint: the path is built once per
++// entry, the placement transform is computed by the tool on events (spec 09c
++// D5), and its linear part is written only when it changes; a paint writes
++// two doubles of a reused `Float64List(16)`.
++import 'dart:typed_data';
++import 'dart:ui' as ui;
++
++import 'package:flutter/foundation.dart' show visibleForTesting;
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show SymbolEntry;
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++final Expando<ui.Path> _ghostPaths = Expando<ui.Path>('ghostPath');
++
++/// The outline of [entry]'s leaves in the symbol's **local** frame (the
++/// definition's coordinates, base point not subtracted), built on the first
++/// call and the same object on every later call for the same entry.
++///
++/// A line is a segment, a polyline its segments (closed when
++/// [isClosedPolyline]), a circle `addOval` and an arc `addArc` with the
++/// payload's start and sweep unchanged (`[r, start, sweep]`): the path's
++/// angles are the engine's `c + r·(cos θ, sin θ)`, and a matrix with a
++/// y-flip or a mirror carries them as it carries every other point (F-14).
++/// Points, texts and fills draw nothing.
++ui.Path ghostPathFor(SymbolEntry entry) =>
++    _ghostPaths[entry] ??= _buildGhostPath(entry);
++
++ui.Path _buildGhostPath(SymbolEntry entry) {
++  final path = ui.Path();
++  for (final leaf in entry.leaves) {
++    final p = leaf.payload;
++    final c = p.coords;
++    switch (leaf.record.kind) {
++      case EntityKind.line:
++      case EntityKind.polyline:
++        if (c.length < 4) continue;
++        path.moveTo(c[0], c[1]);
++        for (var i = 2; i + 1 < c.length; i += 2) {
++          path.lineTo(c[i], c[i + 1]);
++        }
++        if (leaf.record.kind == EntityKind.polyline && isClosedPolyline(p)) {
++          path.close();
++        }
++      case EntityKind.circle:
++        if (c.length < 2 || p.scalars.isEmpty) continue;
++        path.addOval(ui.Rect.fromCircle(
++            center: ui.Offset(c[0], c[1]), radius: p.scalars[0]));
++      case EntityKind.arc:
++        if (c.length < 2 || p.scalars.length < 3) continue;
++        path.addArc(
++            ui.Rect.fromCircle(
++                center: ui.Offset(c[0], c[1]), radius: p.scalars[0]),
++            p.scalars[1],
++            p.scalars[2]);
++      case EntityKind.point:
++      case EntityKind.text:
++      case EntityKind.attrib:
++      case EntityKind.fill:
++        continue;
++    }
++  }
++  return path;
++}
++
++/// A column-major 4×4 identity, the storage [writeGhostMatrix] expects.
++Float64List identityGhostMatrix() => Float64List(16)
++  ..[0] = 1
++  ..[5] = 1
++  ..[10] = 1
++  ..[15] = 1;
++
++/// Writes `translate(−origin) ∘ p` into [m], an identity-initialised
++/// column-major 4×4 (`canvas.transform`'s layout): the linear part of [p] in
++/// `[0] [1] [4] [5]`, its translation less [origin] in `[12] [13]`. Composed
++/// in doubles; the other ten entries are left as they are.
++void writeGhostMatrix(Float64List m, Transform2 p, Vector2 origin) {
++  _writeLinear(m, p);
++  _writeTranslation(m, p, origin);
++}
++
++void _writeLinear(Float64List m, Transform2 p) {
++  m[0] = p.a;
++  m[1] = p.b;
++  m[4] = p.c;
++  m[5] = p.d;
++}
++
++void _writeTranslation(Float64List m, Transform2 p, Vector2 origin) {
++  m[12] = p.e - origin.x;
++  m[13] = p.f - origin.y;
++}
++
++/// The ghost's reused matrix (spec 09b D6, 09c D5): the placement transform
++/// `P` is handed in by the tool, which computes it on pointer, key, camera
++/// and re-arm events (spec 09c D12); its linear part is written only
++/// when one of its six doubles differs from the last ([update]); a paint
++/// ([forOrigin]) writes only the translation less the rebase origin.
++final class GhostMatrix {
++  /// The column-major storage handed to `canvas.transform`, reused for the
++  /// holder's life.
++  final Float64List storage = identityGhostMatrix();
++
++  Transform2? _p;
++  int _computations = 0;
++
++  /// How many times a new `P` was taken: a test's count (spec D6).
++  @visibleForTesting
++  int get computations => _computations;
++
++  /// The current placement transform, or null before the first [update].
++  Transform2? get placement => _p;
++
++  /// Sets the placement; takes [placement] and rewrites the linear part only
++  /// when one of its six doubles differs from the last call's (stored
++  /// values, compared exactly with `==`, so `-0.0` equals `0.0`). An equal
++  /// placement keeps the earlier object.
++  void update({required Transform2 placement}) {
++    final p = _p;
++    if (p != null &&
++        placement.a == p.a &&
++        placement.b == p.b &&
++        placement.c == p.c &&
++        placement.d == p.d &&
++        placement.e == p.e &&
++        placement.f == p.f) {
++      return;
++    }
++    _p = placement;
++    _computations++;
++    _writeLinear(storage, placement);
++  }
++
++  /// [storage] with its translation set for [origin] (`world − origin`, the
++  /// frame `paintWorldOverlay` paints in). Call [update] first.
++  Float64List forOrigin(Vector2 origin) {
++    final p = _p;
++    if (p == null) {
++      throw StateError('GhostMatrix.forOrigin before update');
++    }
++    _writeTranslation(storage, p, origin);
++    return storage;
++  }
++}
+diff --git a/packages/jet_cad_2d_plan/lib/src/tools/move_resolver.dart b/packages/jet_cad_2d_plan/lib/src/tools/move_resolver.dart
+new file mode 100644
+index 00000000..3fe23eb6
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/tools/move_resolver.dart
+@@ -0,0 +1,103 @@
++// Spec P3 "Attachment" (Task 14): plan.select's move resolver, ported from
++// jet_cad_floor_plan's symbol_move.dart (spec 09c D8) over the registry.
++// A root-level symbol instance whose jetcad.symbol names attachment kinds,
++// dragged by its body with object snap on, attaches as a placement does,
++// anchored on its plain-moved back-centre.
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
++    show MoveResolver, ToolContext;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart'
++    show Attachment, AttachmentQuery, AttachmentRegistry, SymbolComponent;
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../symbols/symbol_box.dart';
++import 'plan_symbol_tool.dart' show kAttachPixels;
++
++/// Whether [g]'s linear part is orthonormal (spec 09c W-8, S-10; ported
++/// from wall_attach.dart:402-407): a mirror is, a scale is not.
++bool isOrthonormal(Transform2 g) {
++  final tol = Tolerance.standard.linear;
++  return (g.a * g.a + g.b * g.b - 1).abs() <= tol &&
++      (g.c * g.c + g.d * g.d - 1).abs() <= tol &&
++      (g.a * g.c + g.b * g.d).abs() <= tol;
++}
++
++/// plan.select's [MoveResolver] over the current document's attachment
++/// registry (spec P3; today's `SymbolMoveResolver`, spec 09c D8).
++final class PlanMoveResolver implements MoveResolver {
++  PlanMoveResolver({required this.attachments, this.canRotate});
++
++  /// The current document's registry, read at each call.
++  final AttachmentRegistry Function() attachments;
++
++  /// Whether a move may turn the symbol (the permissions' rotate), read at
++  /// each call; null allows.
++  final bool Function()? canRotate;
++
++  /// The document of the last call, weakly: the resolver lives as long as
++  /// its controller and must not keep a replaced plan alive.
++  WeakReference<DraftDocument>? _document;
++  int _state = -1;
++  Handle? _node;
++  Attachment? _last;
++  final Map<Handle, SymbolBox?> _boxes = <Handle, SymbolBox?>{};
++
++  /// For a root-level instance of a live definition whose `SymbolComponent`
++  /// names attachment kinds, with object snap on and an orthonormal
++  /// transform (a scaled instance never attaches, so its scale is never
++  /// dropped): the registry's answer for the plain move `delta · T`; else
++  /// null.
++  @override
++  ({Transform2 transform, Vector2 marker})? resolveMove(
++      ToolContext ctx, Handle node, Transform2 delta) {
++    final doc = ctx.document;
++    if (!(ctx.snap?.objectSnap ?? true)) return null;
++    final n = doc.tree[node];
++    if (n is! InstanceNode || n.parent != doc.rootHandle) return null;
++    if (doc.tree.definition(n.definition) == null) return null;
++    final symbol = doc.components.get<SymbolComponent>(n.definition);
++    if (symbol == null || symbol.attachTo.isEmpty) return null;
++    final t = n.transform;
++    if (!isOrthonormal(t)) return null;
++    _sync(doc, node);
++    final box = _boxes.putIfAbsent(
++        n.definition, () => boxOfDefinition(doc, n.definition));
++    if (box == null) return null;
++    final moved = delta.multiply(t);
++    final scale = ctx.camera.value.scale;
++    final a = attachments().attach(
++        symbol.attachTo,
++        AttachmentQuery(
++          footprint: footprintOf(box),
++          current: moved,
++          pointer: moved.transformPoint(box.backCentre),
++          capture: kAttachPixels / scale,
++          edgeCapture: kSnapAperturePixels / scale,
++          mirrored: t.a * t.d - t.b * t.c < 0,
++          mayRotate: canRotate?.call() ?? true,
++          exclude: {node},
++          keep: _last,
++        ));
++    _last = a;
++    if (a == null) return null;
++    return (transform: a.transform, marker: a.marker);
++  }
++
++  /// One drag is one document state and one node: outside it the boxes
++  /// and the keep start afresh.
++  void _sync(DraftDocument doc, Handle node) {
++    final state = doc.commands.stateId;
++    if (identical(doc, _document?.target) && state == _state) {
++      if (node != _node) {
++        _node = node;
++        _last = null;
++      }
++      return;
++    }
++    _document = WeakReference(doc);
++    _state = state;
++    _node = node;
++    _last = null;
++    _boxes.clear();
++  }
++}
+diff --git a/packages/jet_cad_2d_plan/lib/src/tools/plan_symbol_tool.dart b/packages/jet_cad_2d_plan/lib/src/tools/plan_symbol_tool.dart
+new file mode 100644
+index 00000000..21daff9f
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/tools/plan_symbol_tool.dart
+@@ -0,0 +1,508 @@
++// Spec P3 "Attachment" (Task 14): plan.symbol, ported from
++// jet_cad_floor_plan's symbol_place_tool.dart (spec 09b D6, F-5, F-6,
++// F-12, F-14, F-16; 09c D5, D6, D12). A ghost of the armed symbol's
++// outline follows the pointer, snapping like the drawing tools; press,
++// drag, release places it at the release point; one undo step per
++// placement; the tool stays armed. A symbol whose jetcad.symbol names
++// attachment kinds attaches through the registry, while object snap is on.
++import 'dart:typed_data';
++import 'dart:ui' as ui;
++
++import 'package:flutter/foundation.dart'
++    show ValueListenable, visibleForTesting;
++import 'package:flutter/gestures.dart' show kPrimaryButton;
++import 'package:flutter/services.dart'
++    show
++        HardwareKeyboard,
++        KeyDownEvent,
++        KeyEvent,
++        KeyUpEvent,
++        LogicalKeyboardKey,
++        MouseCursor,
++        SystemMouseCursors;
++import 'package:flutter/widgets.dart' show KeyEventResult;
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart'
++    show Attachment, AttachmentQuery, AttachmentRegistry;
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../attach/attachment_painter.dart';
++import '../symbols/plan_symbol.dart';
++import '../symbols/symbol_box.dart';
++import '../symbols/symbol_ghost.dart';
++import '../symbols/symbol_placer.dart';
++import 'generic_tools.dart' show PlanToolIds;
++
++/// The half-size of the ghost's base-point cross, in screen pixels.
++const double kGhostCrossPixels = 6.0;
++
++/// How near, in screen pixels, the raw pointer may be for an attachment
++/// (today's kWallAttachPixels, spec 09c D4, D6): larger than the snap
++/// aperture, since the pointer is often the symbol's centre.
++const double kAttachPixels = 16.0;
++
++/// Places the [armed] symbol on release (spec 09b D6; see the header).
++///
++/// - Nothing armed is idle: every pointer event is ignored, every key
++///   bubbles, the cursor defers.
++/// - A hover (mouse) moves the ghost; a primary press starts a placement
++///   and shows the ghost at the press (touch has no hover, F-6); a move
++///   while pressed follows; the release places at the **snapped release
++///   point**. [cancel] drops the press and hides the ghost.
++/// - It listens to [armed]: a re-arm drops the press, looks up the new
++///   ghost path and notifies; the turns and the mirror are kept.
++/// - R, Shift+R and M turn and mirror the next placement while
++///   [canRotate] / [canMirror] allow (null allows); a refused turn or
++///   mirror is not used (the stored one returns with the flag).
++/// - Spec 09c D12: while the ghost is shown it listens to the camera, and
++///   a camera change re-resolves the ghost from the last pointer's screen
++///   point.
++/// - Attachment (spec P3): for a symbol whose component's `attachTo` is not
++///   empty, with object snap on and [attachments] given, each recompute
++///   asks `attachments.attach(attachTo, query)` with the symbol's
++///   footprint, the free placement as `current`, the raw pointer, the
++///   captures `kAttachPixels / scale` and `kSnapAperturePixels / scale`,
++///   the mirror, `mayRotate` ([canRotate]) and the last answer as `keep`.
++///   Attached, the ghost and the release use the answer's transform
++///   verbatim and the marker is drawn at its marker; M mirrors in place.
++class PlanSymbolTool extends Tool {
++  PlanSymbolTool(this.armed,
++      {this.attachments, this.canRotate, this.canMirror}) {
++    armed.addListener(_onArmed);
++    _syncPath();
++  }
++
++  /// The armed symbol; the controller's, read here.
++  final ValueListenable<PlanSymbol?> armed;
++
++  /// The document's attachment registry, or null: nothing attaches.
++  final AttachmentRegistry? attachments;
++
++  /// Whether `R` and `Shift+R` turn the next placement (the permissions'
++  /// `rotate`), read at each use; null allows.
++  final bool Function()? canRotate;
++
++  /// Whether `M` mirrors the next placement (the permissions' `mirror`),
++  /// read at each use; null allows.
++  final bool Function()? canMirror;
++
++  final DragPoint _at = DragPoint();
++  final SnapResult _scratch = SnapResult();
++  final GhostMatrix _matrix = GhostMatrix();
++  // Coloured from the overlay's paper set where they are drawn (dark theme
++  // spec D5): the ghost `preview`, the marker `snap`.
++  final ui.Paint _ghostPaint = ui.Paint()..style = ui.PaintingStyle.stroke;
++  final ui.Paint _markerPaint = ui.Paint()
++    ..style = ui.PaintingStyle.stroke
++    ..strokeWidth = kSnapMarkerStrokePixels;
++
++  ui.Path? _path;
++  bool _ghostVisible = false;
++  bool _pressed = false;
++  int _pressPointer = -1;
++  int _quarterTurns = 0;
++  bool _mirrored = false;
++
++  /// The ghost's placement transform, computed on pointer, key, arm and
++  /// camera events, never in a paint (spec 09c D5, W-15).
++  Transform2? _placement;
++
++  /// The attachment of the last recompute, or null (free placement).
++  Attachment? _attached;
++
++  /// The inputs of the last attachment query, kept so a key (`M`) can ask
++  /// again for the same pointer: the raw world point, whether object snap
++  /// was on, the camera scale. [_hasRaw] is false until the first
++  /// recompute with a context.
++  final Vector2 _raw = Vector2.zero();
++  bool _rawObjectSnap = true;
++  double _rawScale = 1;
++  bool _hasRaw = false;
++
++  /// Spec 09c D12: the last pointer event's screen point and context.
++  ui.Offset _lastScreen = ui.Offset.zero;
++  ToolContext? _context;
++
++  /// The context whose camera this tool listens to; non-null exactly while
++  /// [ghostVisible] (after a pointer event brought a context).
++  ToolContext? _listening;
++
++  /// What a placement commits (spec D6: the definition copy, its leaves and
++  /// its jetcad.symbol).
++  static const Set<Capability> needs = PlanToolIds.symbolNeeds;
++
++  @override
++  String get name => 'Symbol';
++
++  @override
++  ToolPhase get phase => _pressed ? ToolPhase.pressed : ToolPhase.idle;
++
++  /// A down only classifies a press and `cancel` executes nothing, so a
++  /// finger reaches this tool after the hold-back (spec 14t R-1).
++  @override
++  TouchPress get touchPress => TouchPress.press;
++
++  /// True while a press is down.
++  @override
++  bool get isMidShape => _pressed;
++
++  @override
++  MouseCursor get cursor =>
++      armed.value == null ? MouseCursor.defer : SystemMouseCursors.precise;
++
++  /// Whether the ghost (and its marker) is painted.
++  bool get ghostVisible => _ghostVisible && armed.value != null;
++
++  /// The resolved (snapped) point the ghost's base point sits on while it
++  /// places freely. Read only; reused.
++  Vector2 get ghostAt => _at.point;
++
++  /// The ghost's cached local path, or null while idle.
++  @visibleForTesting
++  ui.Path? get ghostPath => _path;
++
++  /// The ghost's placement transform as last computed on an event, or null
++  /// while idle or before the first pointer event.
++  @visibleForTesting
++  Transform2? get ghostPlacement => _placement;
++
++  /// The ghost's reused matrix.
++  @visibleForTesting
++  GhostMatrix get ghostMatrix => _matrix;
++
++  /// The attachment the ghost (and a release) uses, or null.
++  @visibleForTesting
++  Attachment? get ghostAttachment => _attached;
++
++  /// The rotation, in counter-clockwise quarter turns, of the next
++  /// placement as stored; a placement uses it only while [canRotate]
++  /// allows.
++  int get quarterTurns => _quarterTurns;
++
++  /// Whether the next placement is mirrored, as stored; a placement uses it
++  /// only while [canMirror] allows.
++  bool get mirrored => _mirrored;
++
++  int get _turns => (canRotate?.call() ?? true) ? _quarterTurns : 0;
++  bool get _mirror => _mirrored && (canMirror?.call() ?? true);
++
++  /// The permissions may have changed: the ghost and its attachment are
++  /// computed again with the turn and the mirror now allowed.
++  void gatesChanged() {
++    if (armed.value == null) return;
++    final ctx = _listening ?? _context;
++    if (ctx != null) _syncAttachment(ctx);
++    _syncPlacement();
++    notifyListeners();
++  }
++
++  void _syncPath() {
++    final symbol = armed.value;
++    _path = symbol == null ? null : ghostPathFor(symbol.entry);
++  }
++
++  void _onArmed() {
++    _syncPath();
++    _syncCamera();
++    // The previous symbol's answer is no keep for this one.
++    _attached = null;
++    final ctx = _listening;
++    if (ctx != null) {
++      _update(ctx, _worldUnderPointer(ctx));
++    } else {
++      _syncPlacement();
++    }
++    _pressed = false;
++    _pressPointer = -1;
++    notifyListeners();
++  }
++
++  /// The free placement: the resolved point, the turns, the mirror.
++  Transform2? _free() {
++    final symbol = armed.value;
++    return symbol == null
++        ? null
++        : placementTransform(
++            at: _at.point,
++            basePoint: symbol.entry.definition.basePoint,
++            quarterTurns: _turns,
++            mirrored: _mirror);
++  }
++
++  void _syncPlacement() => _placement = _attached?.transform ?? _free();
++
++  void _syncAttachment(ToolContext ctx) {
++    final previous = _attached;
++    _attached = null;
++    final registry = attachments;
++    final symbol = armed.value;
++    if (registry == null || symbol == null || !_hasRaw || !_rawObjectSnap) {
++      return;
++    }
++    final kinds = symbol.component.attachTo;
++    if (kinds.isEmpty) return;
++    final box = boxOfEntry(symbol.entry);
++    if (box == null) return;
++    _attached = registry.attach(
++        kinds,
++        AttachmentQuery(
++          footprint: footprintOf(box),
++          current: _free()!,
++          pointer: _raw.clone(),
++          capture: kAttachPixels / _rawScale,
++          edgeCapture: kSnapAperturePixels / _rawScale,
++          mirrored: _mirror,
++          mayRotate: canRotate?.call() ?? true,
++          exclude: const {},
++          keep: previous,
++        ));
++  }
++
++  /// F-5: object snap at `kSnapAperturePixels / scale`, else the grid, else
++  /// the raw point. No ortho base: a symbol has no previous point.
++  void _resolve(ToolContext ctx, Vector2 raw) {
++    final cam = ctx.camera.value;
++    final page = ctx.page?.value;
++    resolveDragPoint(
++      raw: raw,
++      orthoBase: null,
++      index: ctx.index,
++      apertureWorld: kSnapAperturePixels / cam.scale,
++      objectSnap: ctx.snap?.objectSnap ?? true,
++      page: page,
++      gridStepMm: dragGridStepMm(page, cam.scale),
++      scratch: _scratch,
++      out: _at,
++    );
++  }
++
++  /// The tool's one recompute path: the raw point resolved, then the
++  /// attachment, then the placement.
++  void _update(ToolContext ctx, Vector2 raw) {
++    _resolve(ctx, raw);
++    _raw.setFrom(raw);
++    _rawObjectSnap = ctx.snap?.objectSnap ?? true;
++    _rawScale = ctx.camera.value.scale;
++    _hasRaw = true;
++    _syncAttachment(ctx);
++    _syncPlacement();
++  }
++
++  /// A pointer event's screen point and context, for [_onCamera].
++  void _track(ToolPointerEvent e, ToolContext ctx) {
++    _lastScreen = e.screen;
++    _context = ctx;
++  }
++
++  Vector2 _worldUnderPointer(ToolContext ctx) =>
++      ctx.camera.value.screenToWorld(Vector2(_lastScreen.dx, _lastScreen.dy));
++
++  /// Spec 09c D12: listens to the camera exactly while [ghostVisible].
++  void _syncCamera() {
++    final want = ghostVisible ? _context : null;
++    if (identical(want, _listening)) return;
++    _listening?.camera.removeListener(_onCamera);
++    _listening = want;
++    want?.camera.addListener(_onCamera);
++  }
++
++  void _onCamera() {
++    final ctx = _listening;
++    if (ctx == null) return;
++    _update(ctx, _worldUnderPointer(ctx));
++    notifyListeners();
++  }
++
++  @override
++  void onPointerDown(ToolPointerEvent e, ToolContext ctx) {
++    if (armed.value == null) return;
++    if (e.buttons & kPrimaryButton == 0) return;
++    _pressed = true;
++    _pressPointer = e.pointer;
++    _track(e, ctx);
++    _update(ctx, e.world);
++    _ghostVisible = true;
++    _syncCamera();
++    notifyListeners();
++  }
++
++  @override
++  void onPointerMove(ToolPointerEvent e, ToolContext ctx) {
++    if (armed.value == null) return;
++    final pressedMove = e.buttons & kPrimaryButton != 0;
++    // A cancelled press's remaining moves (F-6), or another pointer's.
++    if (pressedMove && (!_pressed || e.pointer != _pressPointer)) return;
++    _track(e, ctx);
++    _update(ctx, e.world);
++    _ghostVisible = true;
++    _syncCamera();
++    notifyListeners();
++  }
++
++  @override
++  void onPointerUp(ToolPointerEvent e, ToolContext ctx) {
++    if (!_pressed || e.pointer != _pressPointer) return;
++    _pressed = false;
++    _pressPointer = -1;
++    final symbol = armed.value;
++    if (symbol != null) {
++      _track(e, ctx);
++      _update(ctx, e.world);
++      _ghostVisible = true;
++      _syncCamera();
++      _place(ctx, symbol);
++    }
++    notifyListeners();
++  }
++
++  @override
++  void onPointerExit(ToolContext ctx) {
++    if (!_ghostVisible) return;
++    _ghostVisible = false;
++    _syncCamera();
++    notifyListeners();
++  }
++
++  /// Spec D6 Keys, F-12. Idle (nothing armed) every key bubbles.
++  ///
++  /// - `R` turns the next placement one quarter turn counter-clockwise,
++  ///   `Shift+R` clockwise, `M` toggles the mirror; only with no Ctrl, Meta
++  ///   or Alt held (Cmd/Ctrl+R is a browser reload, Ctrl+M passes through).
++  ///   One step per key-down; a repeat is consumed with no effect. They work
++  ///   armed idle and mid-press; the ghost repaints.
++  /// - Mid-press: `Esc` cancels the press (its remaining moves and its up
++  ///   place nothing, Ruling R-B6-1); F and F3 with no modifier bubble (the
++  ///   drawing tools' rule, `placement_tool.dart`); every other key-down and
++  ///   repeat is swallowed, so undo never lands mid-placement.
++  /// - Armed, not pressed: every key but R and M bubbles (the shell's
++  ///   letters, undo and `Esc` work).
++  /// - A key-up always bubbles.
++  @override
++  KeyEventResult onKey(KeyEvent event, ToolContext ctx) {
++    if (armed.value == null || event is KeyUpEvent) {
++      return KeyEventResult.ignored;
++    }
++    final key = event.logicalKey;
++    final modifier = _hasModifier();
++    if (!modifier &&
++        ((key == LogicalKeyboardKey.keyR && (canRotate?.call() ?? true)) ||
++            (key == LogicalKeyboardKey.keyM && (canMirror?.call() ?? true)))) {
++      if (event is KeyDownEvent) {
++        if (key == LogicalKeyboardKey.keyR) {
++          final step = HardwareKeyboard.instance.isShiftPressed ? -1 : 1;
++          _quarterTurns = (_quarterTurns + step) % 4;
++        } else {
++          _mirrored = !_mirrored;
++        }
++        // Spec 09c D6, decision 5: the same pointer asks the registry again
++        // with the new mirror (an attached `M` mirrors in place); the
++        // attached transform ignores the turns, which apply off the face.
++        _syncAttachment(ctx);
++        _syncPlacement();
++        notifyListeners();
++      }
++      return KeyEventResult.handled;
++    }
++    if (!_pressed) return KeyEventResult.ignored;
++    if (event is KeyDownEvent) {
++      if (key == LogicalKeyboardKey.escape) {
++        cancel(ctx);
++        return KeyEventResult.handled;
++      }
++      if ((key == LogicalKeyboardKey.f3 || key == LogicalKeyboardKey.keyF) &&
++          !modifier) {
++        return KeyEventResult.ignored;
++      }
++    }
++    return KeyEventResult.handled;
++  }
++
++  static bool _hasModifier() {
++    final hw = HardwareKeyboard.instance;
++    return hw.isControlPressed || hw.isMetaPressed || hw.isAltPressed;
++  }
++
++  /// Every cancel path: the press is dropped (its up places nothing) and the
++  /// ghost hides; the document is never touched. Idempotent: an idle,
++  /// hidden tool returns before notifying.
++  @override
++  void cancel(ToolContext ctx) {
++    if (!_pressed && !_ghostVisible) return;
++    _pressed = false;
++    _pressPointer = -1;
++    _ghostVisible = false;
++    _syncCamera();
++    notifyListeners();
++  }
++
++  /// The one commit path: one command, one undo step; the permissions are
++  /// checked before placeSymbol allocates a handle (Ruling 05-3, F-16). An
++  /// attached placement commits the attachment's transform verbatim.
++  void _place(ToolContext ctx, PlanSymbol symbol) {
++    if (!needs.every(ctx.document.commands.permissions.allows)) return;
++    ctx.execute(placeSymbol(ctx.document, symbol.entry,
++        at: _at.point,
++        quarterTurns: _turns,
++        mirrored: _mirror,
++        transform: _attached?.transform));
++  }
++
++  /// The snap marker, in screen space; attached, the nearest glyph at the
++  /// attachment's marker.
++  @override
++  void paintOverlay(ui.Canvas canvas, ViewportTransform camera,
++      ui.Size viewport, PaperPalette paper) {
++    if (!ghostVisible) return;
++    _markerPaint.color = paper.snap;
++    final attached = _attached;
++    if (attached != null) {
++      paintAttachmentMarker(canvas, camera, attached.marker, _markerPaint);
++      return;
++    }
++    final m = camera.worldToScreenMatrix;
++    final p = _at.point;
++    final at =
++        ui.Offset(m.a * p.x + m.c * p.y + m.e, m.b * p.x + m.d * p.y + m.f);
++    drawSnapMarker(canvas, at, _at.objectKind,
++        grid: _at.grid, paint: _markerPaint);
++  }
++
++  /// Spec D6: the cached local path under `translate(−origin) ∘ P`, then a
++  /// cross at the local base point. Allocates no path, transform, matrix or
++  /// paint: `P` is the transform stored on the last event (09c D5, W-15),
++  /// and the matrix rewrites its linear part only when `P` changed.
++  @override
++  void paintWorldOverlay(
++      ui.Canvas canvas, Vector2 origin, double scale, PaperPalette paper) {
++    final entry = armed.value?.entry;
++    final path = _path;
++    final placement = _placement;
++    if (!_ghostVisible || entry == null || path == null || placement == null) {
++      return;
++    }
++    final base = entry.definition.basePoint;
++    _matrix.update(placement: placement);
++    final Float64List m = _matrix.forOrigin(origin);
++    _ghostPaint.color = paper.preview;
++    _ghostPaint.strokeWidth = kPreviewStrokePixels / scale;
++    final k = kGhostCrossPixels / scale;
++    canvas.save();
++    canvas.transform(m);
++    canvas.drawPath(path, _ghostPaint);
++    canvas.drawLine(ui.Offset(base.x - k, base.y),
++        ui.Offset(base.x + k, base.y), _ghostPaint);
++    canvas.drawLine(ui.Offset(base.x, base.y - k),
++        ui.Offset(base.x, base.y + k), _ghostPaint);
++    canvas.restore();
++  }
++
++  @override
++  void dispose() {
++    armed.removeListener(_onArmed);
++    _listening?.camera.removeListener(_onCamera);
++    _listening = null;
++    _context = null;
++    super.dispose();
++  }
++}
+diff --git a/packages/jet_cad_2d_plan/test/attach/attachment_registry_test.dart b/packages/jet_cad_2d_plan/test/attach/attachment_registry_test.dart
+new file mode 100644
+index 00000000..4dc68f10
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/attach/attachment_registry_test.dart
+@@ -0,0 +1,145 @@
++// Spec P3 "Attachment" (Task 14): the registry asks the providers of every
++// kind the symbol attaches to; the marker nearest the pointer wins; a
++// keep goes back to the provider that made it; a throwing provider is no
++// attachment and one diagnostic. Fixtures off the origin.
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:jet_cad_2d_plan/src/attach/attachment_registry.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/attach_fixtures.dart';
++
++final Vector2 p = Vector2(41250.5, -17320.25);
++
++final class _NoServices implements PlanServices {
++  @override
++  dynamic noSuchMethod(Invocation invocation) =>
++      throw StateError('a provider factory read the services');
++}
++
++final class Rig {
++  final List<KitDiagnostic> reported = [];
++  late final PlanAttachmentRegistry registry =
++      PlanAttachmentRegistry(report: reported.add);
++  final PlanServices services = _NoServices();
++
++  void add(String kit, AttachmentProvider provider) =>
++      registry.add(kit, (_) => provider, services);
++}
++
++Attachment at(double dx, double dy, Object token) => attachment(
++    Transform2.translation(p.x + dx, p.y + dy), p + Vector2(dx, dy), token);
++
++void main() {
++  test('AT-1 kinds: every provider\'s kind, once', () {
++    final r = Rig()
++      ..add('alpha', RecordingProvider('wall-face', (_) => null))
++      ..add('beta', RecordingProvider('wall-face', (_) => null))
++      ..add('beta', RecordingProvider('room-corner', (_) => null));
++    expect(r.registry.kinds, {'wall-face', 'room-corner'});
++    expect(() => r.registry.kinds.add('x'), throwsUnsupportedError);
++  });
++
++  test(
++      'AT-2 the marker nearest the pointer wins across kinds and providers; '
++      'a tie goes to the earlier', () {
++    final r = Rig();
++    final far = RecordingProvider('wall-face', (_) => at(300, 0, 'far'));
++    final near = RecordingProvider('room-corner', (_) => at(0, -120, 'near'));
++    final same = RecordingProvider('room-corner', (_) => at(120, 0, 'tie'));
++    r
++      ..add('alpha', far)
++      ..add('beta', near)
++      ..add('beta', same);
++    // M-AT2a: the first non-null answer wins.
++    expect(r.registry.attach(['wall-face', 'room-corner'], queryAt(p))!.token,
++        'near');
++    expect(far.queries, hasLength(1));
++    expect(same.queries, hasLength(1));
++    // 'near' (0, -120) and 'tie' (120, 0) are equally far: the earlier
++    // provider wins. M-AT2b: `<` written `<=` (the later wins).
++    expect(r.registry.attach(['room-corner', 'wall-face'], queryAt(p))!.token,
++        'near');
++  });
++
++  test('AT-3 only the asked kinds\' providers are asked; none is null', () {
++    final r = Rig();
++    final wall = RecordingProvider('wall-face', (_) => at(10, 0, 'w'));
++    final corner = RecordingProvider('room-corner', (_) => at(5, 0, 'c'));
++    r
++      ..add('alpha', wall)
++      ..add('alpha', corner);
++    // M-AT3: every provider asked whatever the kinds.
++    expect(r.registry.attach(['wall-face'], queryAt(p))!.token, 'w');
++    expect(corner.queries, isEmpty);
++    expect(r.registry.attach(['ceiling'], queryAt(p)), isNull);
++    expect(r.registry.attach(const [], queryAt(p)), isNull);
++  });
++
++  test(
++      'AT-4 a keep goes only to the provider that made it; the others are '
++      'asked without one', () {
++    final r = Rig();
++    final a = RecordingProvider('wall-face', (_) => at(10, 0, 'a'));
++    final b = RecordingProvider('wall-face', (_) => at(400, 0, 'b'));
++    r
++      ..add('alpha', a)
++      ..add('beta', b);
++    final first = r.registry.attach(['wall-face'], queryAt(p))!;
++    expect(first.token, 'a');
++    r.registry.attach(['wall-face'], queryAt(p, keep: first));
++    // M-AT4: the query passed on unchanged.
++    expect(a.queries.last.keep, same(first));
++    expect(b.queries.last.keep, isNull);
++    // Every other field reaches the provider asked without the keep.
++    final q = b.queries.last;
++    expect(q.pointer, p);
++    expect(q.capture, 160);
++    expect(q.edgeCapture, 100);
++    expect(q.footprint.maxX, 1750);
++    // A keep no provider of this registry made reaches none.
++    final foreign = at(1, 1, 'foreign');
++    r.registry.attach(['wall-face'], queryAt(p, keep: foreign));
++    expect(a.queries.last.keep, isNull);
++    expect(b.queries.last.keep, isNull);
++  });
++
++  test(
++      'AT-5 a throwing provider is no attachment and a hookFailed; the '
++      'others still answer', () {
++    final r = Rig();
++    final broken = ThrowingProvider('wall-face');
++    r
++      ..add('alpha', broken)
++      ..add('beta', RecordingProvider('wall-face', (_) => at(50, 0, 'ok')));
++    // M-AT5: `_ask` calling the provider bare (the error escapes).
++    expect(r.registry.attach(['wall-face'], queryAt(p))!.token, 'ok');
++    expect(broken.calls, 1);
++    expect([for (final d in r.reported) (d.kitId, d.subject, d.code)],
++        [('alpha', 'wall-face', KitDiagnosticCode.hookFailed)]);
++    expect(r.reported.single.error, isA<StateError>());
++  });
++
++  test('AT-6 dispose disposes the Disposable providers and empties it', () {
++    final r = Rig();
++    final d = DisposableProvider('wall-face', (_) => null);
++    r
++      ..add('alpha', d)
++      ..add('alpha', RecordingProvider('room-corner', (_) => null));
++    r.registry.dispose();
++    // M-AT6: dispose leaves the providers alone.
++    expect(d.disposals, 1);
++    expect(r.registry.kinds, isEmpty);
++  });
++
++  test('AT-7 a factory that throws adds nothing and reports hookFailed', () {
++    final r = Rig();
++    r.registry.add('alpha', (_) => throw ArgumentError('no faces'), r.services);
++    r.add('beta', RecordingProvider('room-corner', (_) => null));
++    // M-AT7: `add` without its try/catch.
++    expect(r.registry.kinds, {'room-corner'});
++    expect([for (final d in r.reported) (d.kitId, d.subject, d.code)],
++        [('alpha', 'attachments', KitDiagnosticCode.hookFailed)]);
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/controller/attachment_controller_test.dart b/packages/jet_cad_2d_plan/test/controller/attachment_controller_test.dart
+new file mode 100644
+index 00000000..b41eb18c
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/controller/attachment_controller_test.dart
+@@ -0,0 +1,225 @@
++// Spec P1 "Lifetimes", P3 "Attachment", P4 diagnostics (Task 14), through
++// the controller: the providers run once per document and go with it; a
++// throwing factory or provider is a diagnostic; an attachTo kind no
++// provider offers is a diagnostic; plan.symbol is armed by the gallery's
++// symbol and attaches through a kit's provider; plan.select's move
++// resolver asks the same registry.
++import 'dart:typed_data';
++
++import 'package:flutter/services.dart'
++    show KeyDownEvent, LogicalKeyboardKey, PhysicalKeyboardKey;
++import 'package:flutter/widgets.dart' show KeyEventResult;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:jet_cad_2d_kit/authoring.dart' show Catalog, encodeLibrary;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:jet_cad_2d_plan/src/tools/plan_symbol_tool.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/attach_fixtures.dart';
++import '../support/symbol_fixtures.dart';
++import '../support/tool_events.dart';
++
++Uint8List shelfBytes() => encodeLibrary(Catalog(kit: 'demo', symbols: [
++      box('demo.shelf.wall', 'Wall shelf', 'Storage', ['shelf'],
++          attachTo: ['test-edge'], base: (950, 410)),
++      box('demo.lamp.corner', 'Corner lamp', 'Lighting', ['lamp'],
++          attachTo: ['room-corner'], base: (402.75, 233.5)),
++    ]));
++
++List<(String, String?, KitDiagnosticCode)> problemsOf(PlanController c) => [
++      for (final d in c.diagnostics.value) (d.kitId, d.subject, d.code),
++    ];
++
++KeyDownEvent keyDown(
++        LogicalKeyboardKey logical, PhysicalKeyboardKey physical) =>
++    KeyDownEvent(
++        physicalKey: physical, logicalKey: logical, timeStamp: Duration.zero);
++
++/// The sign of [t]'s linear part's determinant: negative when mirrored.
++double det(Transform2 t) => t.a * t.d - t.b * t.c;
++
++void main() {
++  TestWidgetsFlutterBinding.ensureInitialized();
++
++  test(
++      'AT-14 the providers run once per document: a new plan makes new '
++      'ones, disposes the old, and the services see the current registry',
++      () async {
++    final made = <DisposableProvider>[];
++    PlanServices? seen;
++    final c = PlanController(kits: [
++      PlanKit(id: 'demo', version: '1.0.0', attachments: [
++        (services) {
++          seen = services;
++          final p = DisposableProvider('test-edge', (_) => null);
++          made.add(p);
++          return p;
++        },
++      ]),
++    ]);
++    addTearDown(c.dispose);
++    expect(made, hasLength(1));
++    expect(seen!.attachments.kinds, {'test-edge'});
++    c.newPlan();
++    // M-AT14: the per-document registry not disposed on a swap.
++    expect(made, hasLength(2));
++    expect(made.first.disposals, 1);
++    expect(made.last.disposals, 0);
++    expect(seen!.attachments.kinds, {'test-edge'});
++  });
++
++  test('AT-15 a throwing factory is a hookFailed; the plan still opens',
++      () async {
++    final c = PlanController(kits: [
++      PlanKit(id: 'demo', version: '1.0.0', attachments: [
++        (_) => throw StateError('no faces'),
++      ]),
++    ]);
++    addTearDown(c.dispose);
++    expect(problemsOf(c),
++        contains(('demo', 'attachments', KitDiagnosticCode.hookFailed)));
++  });
++
++  test(
++      'AT-16 an attachTo kind no provider offers is one '
++      'attachmentKindUnoffered per kit and kind; an offered one is none',
++      () async {
++    final c = PlanController(kits: [
++      PlanKit(id: 'demo', version: '1.0.0', symbols: [
++        SymbolLibrarySource(label: 'demo', read: () async => shelfBytes()),
++      ], attachments: [
++        (_) => RecordingProvider('test-edge', (_) => null)
++      ]),
++    ]);
++    addTearDown(c.dispose);
++    await settle();
++    // M-AT16: `_reportUnofferedKinds` not called after the load.
++    expect(
++        problemsOf(c)
++            .where((p) => p.$3 == KitDiagnosticCode.attachmentKindUnoffered),
++        [('demo', 'room-corner', KitDiagnosticCode.attachmentKindUnoffered)]);
++    c.newPlan();
++    expect(
++        problemsOf(c)
++            .where((p) => p.$3 == KitDiagnosticCode.attachmentKindUnoffered),
++        hasLength(1),
++        reason: 'once per kit, subject and code');
++  });
++
++  test(
++      'AT-17 plan.symbol: refused with nothing armed (T4-b); armed, it '
++      'places through the kit\'s provider; under rotate: false R is not the '
++      'tool\'s', () async {
++    final turned = Transform2.translation(4600.5, -1200.25)
++        .multiply(Transform2.rotation(0.7));
++    final edge = RecordingProvider(
++        'test-edge', (_) => attachment(turned, Vector2(4610.5, -1190.25), 'e'));
++    final c = PlanController(kits: [
++      PlanKit(id: 'demo', version: '1.0.0', symbols: [
++        SymbolLibrarySource(label: 'demo', read: () async => shelfBytes()),
++      ], attachments: [
++        (_) => edge
++      ]),
++    ]);
++    addTearDown(c.dispose);
++    useTestCamera(c);
++    await settle();
++    // M-AT17a: the "nothing armed" refusal dropped.
++    expect(c.selectTool('plan.symbol'), isFalse);
++    expect(c.activeTool.value, 'plan.select');
++    final shelf = c.symbolById('demo.shelf.wall@1')!;
++    expect(c.armSymbol(shelf), isTrue);
++    expect(c.activeTool.value, 'plan.symbol');
++    tapAt(c, Vector2(4500.25, -1300.75));
++    final placed = c.document.tree.nodes.whereType<InstanceNode>().single;
++    expect([placed.transform.a, placed.transform.e], [turned.a, turned.e]);
++    expect(edge.queries.last.exclude, isEmpty);
++
++    c.permissions = PlanPermissions.full.copyWith(rotate: false);
++    expect(c.activeTool.value, 'plan.symbol', reason: 'still allowed');
++    final r = c.toolController.active.onKey(
++        keyDown(LogicalKeyboardKey.keyR, PhysicalKeyboardKey.keyR),
++        c.toolController.context);
++    // M-AT17b: canRotate wired as `() => true`.
++    expect(r, KeyEventResult.ignored);
++    c.permissions = PlanPermissions.full.copyWith(tools: {'plan.select'});
++    expect(c.activeTool.value, 'plan.select');
++    expect(c.armSymbol(shelf), isFalse, reason: 'plan.symbol not permitted');
++  });
++
++  test(
++      'AT-18 plan.select\'s body drag of an attaching symbol asks the same '
++      'registry, the instance excluded, and commits its answer', () async {
++    Attachment? answer;
++    final edge = RecordingProvider('test-edge', (_) => answer);
++    final c = PlanController(kits: [
++      PlanKit(id: 'demo', version: '1.0.0', symbols: [
++        SymbolLibrarySource(label: 'demo', read: () async => shelfBytes()),
++      ], attachments: [
++        (_) => edge
++      ]),
++    ]);
++    addTearDown(c.dispose);
++    useTestCamera(c);
++    await settle();
++    c.armSymbol(c.symbolById('demo.shelf.wall@1')!);
++    tapAt(c, Vector2(4500.25, -1300.75));
++    final node = c.document.tree.nodes.whereType<InstanceNode>().single;
++    c.selectTool('plan.select');
++    c.selection.replace([SelectionKey.root(node.handle)]);
++    final target = Transform2.translation(5200.5, -900.25)
++        .multiply(Transform2.rotation(-0.35));
++    answer = attachment(target, Vector2(5210.5, -890.25), 'f');
++    edge.queries.clear();
++    final inside =
++        node.transform.transformPoint(Vector2(950, 585)); // on its middle line
++    dragFrom(c, inside, inside + Vector2(600, 300));
++    // M-AT18: buildGenericTools given no move resolver.
++    expect(edge.queries, isNotEmpty);
++    expect(edge.queries.last.exclude, {node.handle});
++    final moved = c.document.tree[node.handle]! as InstanceNode;
++    expect([moved.transform.a, moved.transform.b, moved.transform.e],
++        [target.a, target.b, target.e]);
++  });
++
++  test(
++      'AT-19 plan.symbol\'s M respects PlanPermissions.mirror: refused, M '
++      'is not the tool\'s, a stored mirror is dropped from the ghost at '
++      'once and from the placement', () async {
++    final c = PlanController(kits: [
++      PlanKit(id: 'demo', version: '1.0.0', symbols: [
++        SymbolLibrarySource(label: 'demo', read: () async => shelfBytes()),
++      ]),
++    ]);
++    addTearDown(c.dispose);
++    useTestCamera(c);
++    await settle();
++    expect(c.armSymbol(c.symbolById('demo.shelf.wall@1')!), isTrue);
++    final tool = c.toolFor('plan.symbol')! as PlanSymbolTool;
++    final at = Vector2(4500.25, -1300.75);
++    final tools = c.toolController;
++    tools.active.onPointerMove(eventAt(c, at), tools.context);
++    final m = keyDown(LogicalKeyboardKey.keyM, PhysicalKeyboardKey.keyM);
++    expect(tools.active.onKey(m, tools.context), KeyEventResult.handled);
++    expect(det(tool.ghostPlacement!), lessThan(0), reason: 'premise: mirrored');
++
++    c.permissions = PlanPermissions.full.copyWith(mirror: false);
++    expect(c.activeTool.value, 'plan.symbol', reason: 'still allowed');
++    // M-AT19b: the setter's gatesChanged not called on a mirror change.
++    expect(det(tool.ghostPlacement!), greaterThan(0),
++        reason: 'the ghost drops the stored mirror at once');
++    // M-AT19a: canMirror wired as `() => true`.
++    expect(tools.active.onKey(m, tools.context), KeyEventResult.ignored);
++    expect(tool.mirrored, isTrue, reason: 'the stored mirror is kept');
++    tapAt(c, at);
++    final placed = c.document.tree.nodes.whereType<InstanceNode>().single;
++    expect(det(placed.transform), greaterThan(0), reason: 'placed unmirrored');
++
++    c.permissions = PlanPermissions.full;
++    expect(det(tool.ghostPlacement!), lessThan(0),
++        reason: 'the stored mirror returns with the flag');
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/controller/lifetimes_test.dart b/packages/jet_cad_2d_plan/test/controller/lifetimes_test.dart
+index 31f60fcd..46141345 100644
+--- a/packages/jet_cad_2d_plan/test/controller/lifetimes_test.dart
++++ b/packages/jet_cad_2d_plan/test/controller/lifetimes_test.dart
+@@ -18,37 +18,48 @@ final class _Probe {}
+ 
+ final class _Loop {}
+ 
+ void main() {
+   testWidgets(
+       'C-life1 the factories run once per document; after a swap every '
+       'product of the previous document is disposed and new ones are made',
+       (tester) async {
+     final log = KitLog();
+     final c = controllerFor(kits: [testKit(log: log)]);
+-    expect(log.events, ['cache+1', 'tool+1', 'grips+1']);
++    // The attachment provider first (Task 14: before the kit's tools).
++    expect(log.events, ['edge+1', 'cache+1', 'tool+1', 'grips+1']);
+     final tool = c.toolFor('test.slab')! as SlabTool;
+     expect(
+         c
+             .servicesOf('test')
+             .shared<SlabCache>((_) => throw StateError('made twice')),
+         same(tool.cache),
+         reason: 'the tool and the grips share one cache per document');
+     expect(c.selectTool('test.slab'), isTrue);
+     expect(c.selectTool('plan.select'), isTrue);
+     expect(c.selectTool('test.slab'), isTrue);
+-    expect(log.events, hasLength(3),
++    expect(log.events, hasLength(4),
+         reason: 'once per document, not per arming');
+     // M-C-life1: the kit products not disposed at a swap.
+     c.newPlan();
+-    expect(log.events.skip(3),
+-        ['tool-1', 'grips-1', 'cache-1', 'cache+2', 'tool+2', 'grips+2']);
++    // Spec P1 lifetimes, 2: the kit tools, the grip and attachment
++    // providers, the shared cache; then 3: the next document's.
++    expect(log.events.skip(4), [
++      'tool-1',
++      'grips-1',
++      'edge-1',
++      'cache-1',
++      'edge+2',
++      'cache+2',
++      'tool+2',
++      'grips+2'
++    ]);
+     expect(tool.cache.disposed, isTrue);
+     expect(c.toolFor('test.slab'), isNot(same(tool)));
+     expect(c.activeTool.value, 'plan.select',
+         reason: 'a tool armed before the swap is gone');
+     await tester.pump();
+   });
+ 
+   testWidgets(
+       "C-life2 shared is keyed by kit and type: two kits asking for one type "
+       'get two values; a value that asks for itself is refused',
+@@ -109,21 +120,22 @@ void main() {
+     expect(s.objectSnap, isTrue);
+     c.snap.toggleObjectSnap();
+     expect(s.objectSnap, isFalse);
+     c.snap.toggleObjectSnap();
+     // M-C-svc-d: the canvas's snapping option ignored.
+     c.snappingAllowed = false;
+     expect(s.objectSnap, isFalse);
+     expect(s.document, same(c.document));
+     expect(s.index, same(c.index));
+     expect(s.camera, same(c.camera));
+-    expect(s.attachments.kinds, isEmpty, reason: 'the registry is Task 14');
++    // The current document's registry (Task 14): the test kit's edge.
++    expect(s.attachments.kinds, {testEdgeKind});
+     await tester.pump();
+   });
+ 
+   testWidgets(
+       "C-grips the grip cache asks each object's own type: a slab gives its "
+       'grip and drags it, a disc and a plain group none; a swap lets the old '
+       "plan's providers go", (tester) async {
+     final c = controllerFor(kits: [testKit(), discKit()]);
+     final d = c.document;
+     final slab = addObject<SlabComponent>(
+diff --git a/packages/jet_cad_2d_plan/test/panels/plan_symbol_gallery_test.dart b/packages/jet_cad_2d_plan/test/panels/plan_symbol_gallery_test.dart
+index 35a6c1e0..a511cec9 100644
+--- a/packages/jet_cad_2d_plan/test/panels/plan_symbol_gallery_test.dart
++++ b/packages/jet_cad_2d_plan/test/panels/plan_symbol_gallery_test.dart
+@@ -411,20 +411,54 @@ void main() {
+       await focusField(tester, h);
+       // The canvas stand-in requests no focus on a tap of its own.
+       await tester.tapAt(tester.getCenter(find.byKey(const Key('canvas'))));
+       await tester.pump();
+       expect(h.canvas.hasFocus, isTrue);
+       expect(h.searchFocus.hasFocus, isFalse);
+     });
+   });
+ 
+   group('the gallery', () {
++    // Ported from symbol_panel_test.dart (Task 14), assertions unchanged;
++    // the state is reached through the controller: armSymbol then
++    // selectTool('plan.select') stands for "armed, another tool active",
++    // selectTool('plan.symbol') for activating the placement tool.
++    testWidgets(
++        'the highlight follows the active tool and the armed entry '
++        '(M-09b9)', (tester) async {
++      final h = Host(tester);
++      await h.pump();
++      await tester.enterText(field, 'bed');
++      await tester.pump();
++      expect(gallery(tester).selectedId, isNull);
++
++      h.controller.armSymbol(h.loaded('demo.bed.double'));
++      h.controller.selectTool('plan.select');
++      await tester.pump();
++      expect(gallery(tester).selectedId, isNull,
++          reason: 'armed, but another tool is active');
++
++      h.controller.selectTool('plan.symbol');
++      await tester.pump();
++      expect(gallery(tester).selectedId, 'demo.bed.double@1');
++
++      h.controller.armSymbol(h.loaded('demo.bed.single'));
++      await tester.pump();
++      expect(gallery(tester).selectedId, 'demo.bed.single@1');
++
++      h.controller.selectTool('plan.select');
++      await tester.pump();
++      expect(gallery(tester).selectedId, isNull,
++          reason: 'another tool chosen: the highlight clears, armed stays');
++      expect(h.controller.armedSymbol.value, same(h.loaded('demo.bed.single')));
++    });
++
+     testWidgets(
+         'a tap reports the entry; a denied structure, geometry or '
+         'components disables the cells (M-09b22)', (tester) async {
+       final h = Host(tester);
+       for (final (denied, permissions) in [
+         (
+           'structure',
+           const DraftPermissions(
+               transform: true,
+               components: true,
+diff --git a/packages/jet_cad_2d_plan/test/support/attach_fixtures.dart b/packages/jet_cad_2d_plan/test/support/attach_fixtures.dart
+new file mode 100644
+index 00000000..f09d43b6
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/support/attach_fixtures.dart
+@@ -0,0 +1,74 @@
++// Attachment providers for tests (Task 14): scripted answers, recorded
++// queries, a provider that throws and one that is Disposable. The
++// geometry of a real provider (a wall face) is a kit's (sub-project 3);
++// here only the plan library's plumbing is under test.
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++// Disposable is the kit's (jet_cad_2d_kit, Task 4; controller ruling
++// R-d), imported above.
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++/// An attachment: [transform], its [marker], and a [token].
++Attachment attachment(Transform2 transform, Vector2 marker, Object token) =>
++    Attachment(transform: transform, marker: marker, token: token);
++
++/// Answers with [answer] and records every query.
++final class RecordingProvider implements AttachmentProvider {
++  RecordingProvider(this.kind, this.answer);
++
++  @override
++  final String kind;
++
++  Attachment? Function(AttachmentQuery query) answer;
++  final List<AttachmentQuery> queries = [];
++
++  @override
++  Attachment? attach(AttachmentQuery query) {
++    queries.add(query);
++    return answer(query);
++  }
++}
++
++/// Throws on every query.
++final class ThrowingProvider implements AttachmentProvider {
++  ThrowingProvider(this.kind);
++
++  @override
++  final String kind;
++  int calls = 0;
++
++  @override
++  Attachment? attach(AttachmentQuery query) {
++    calls++;
++    throw StateError('the $kind provider broke');
++  }
++}
++
++/// A provider with a dispose (the kit's Disposable, Task 4).
++final class DisposableProvider extends RecordingProvider implements Disposable {
++  DisposableProvider(super.kind, super.answer);
++
++  int disposals = 0;
++
++  @override
++  void dispose() => disposals++;
++}
++
++/// A query near the fixtures' world (off the origin, a turned current).
++AttachmentQuery queryAt(Vector2 pointer,
++        {Attachment? keep,
++        bool mayRotate = true,
++        bool mirrored = false,
++        Set<Handle> exclude = const {}}) =>
++    AttachmentQuery(
++      footprint: const Aabb2.raw(150, 210, 1750, 960),
++      current: Transform2.translation(pointer.x, pointer.y)
++          .multiply(Transform2.rotation(0.4)),
++      pointer: pointer,
++      capture: 160,
++      edgeCapture: 100,
++      mirrored: mirrored,
++      mayRotate: mayRotate,
++      exclude: exclude,
++      keep: keep,
++    );
+diff --git a/packages/jet_cad_2d_plan/test/symbols/symbol_box_test.dart b/packages/jet_cad_2d_plan/test/symbols/symbol_box_test.dart
+new file mode 100644
+index 00000000..675cdd42
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/symbols/symbol_box_test.dart
+@@ -0,0 +1,343 @@
++// Spec 09c D2 (ported to the plan library, Task 14): the symbol's local
++// box. Ported from jet_cad_floor_plan's symbol_box_test.dart, assertions
++// unchanged; the furniture asset's literal boxes stay with that asset's kit
++// (sub-project 3), and the library entries are the plan library's fixture
++// library (kit "fixture"). Fixtures avoid the degenerate cases (P-2): the
++// box rules are pinned by leaves far from the origin, with every side of a
++// box set by a different kind of leaf, by an interior polyline vertex, by
++// an arc's axis extreme and by an arc's end point; arcs cross each axis
++// separately, none, from a negative start and clockwise.
++import 'dart:math' as math;
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:jet_cad_2d_plan/src/symbols/symbol_box.dart';
++import 'package:jet_cad_2d_plan/src/symbols/symbol_placer.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/symbol_fixtures.dart';
++
++SymbolEntry entryIn(SymbolLibrary lib, String key) =>
++    lib.entries.firstWhere((e) => e.symbol.key == key);
++
++/// Far from the origin, as the plan's P-2 asks.
++const double cx = 1e5 + 37.5, cy = -7e4 + 12.25, r = 410.0;
++
++(EntityKind, GeometryPayload) arc(double start, double sweep) =>
++    (EntityKind.arc, arcPayload(Vector2(cx, cy), r, start, sweep));
++
++SymbolBox boxOfArc(double start, double sweep) =>
++    boxOfLeaves([arc(start, sweep)])!;
++
++/// The box of an arc from [start] through [sweep] by its end points only.
++({double minX, double maxX, double minY, double maxY}) ends(
++    double start, double sweep) {
++  final xs = [cx + r * math.cos(start), cx + r * math.cos(start + sweep)];
++  final ys = [cy + r * math.sin(start), cy + r * math.sin(start + sweep)];
++  return (
++    minX: math.min(xs[0], xs[1]),
++    maxX: math.max(xs[0], xs[1]),
++    minY: math.min(ys[0], ys[1]),
++    maxY: math.max(ys[0], ys[1]),
++  );
++}
++
++Matcher near(double v) => closeTo(v, 1e-9);
++
++DraftDocument target() {
++  final doc = DraftDocument.empty();
++  registerKitComponents(doc.components);
++  doc.header.units = DrawingUnits.millimeters;
++  return doc;
++}
++
++Handle definitionOf(DraftDocument doc, String key) {
++  for (final h in doc.components.withComponent<SymbolComponent>()) {
++    if (doc.components.get<SymbolComponent>(h)!.key == key &&
++        doc.tree.definition(h) != null) {
++      return h;
++    }
++  }
++  throw StateError('no $key');
++}
++
++void main() {
++  group('SymbolBox', () {
++    test('width, depth and the back-centre of an off-origin box', () {
++      const b =
++          SymbolBox(left: -310.5, right: 1240.25, front: -75, back: 905.5);
++      expect(b.width, 1550.75);
++      expect(b.depth, 980.5);
++      expect(b.backCentre, Vector2(464.875, 905.5));
++    });
++
++    test('equality is exact on all four sides', () {
++      const b =
++          SymbolBox(left: -310.5, right: 1240.25, front: -75, back: 905.5);
++      // A box computed from a leaf: equal values, a distinct object (two
++      // equal `const` boxes would be one canonical object).
++      final computed = boxOfLeaves([
++        (
++          EntityKind.line,
++          linePayload(Vector2(1240.25, 905.5), Vector2(-310.5, -75))
++        )
++      ])!;
++      expect(identical(computed, b), isFalse);
++      expect(computed, b);
++      expect(computed.hashCode, b.hashCode);
++      for (final other in const [
++        SymbolBox(left: -310.4, right: 1240.25, front: -75, back: 905.5),
++        SymbolBox(left: -310.5, right: 1240.3, front: -75, back: 905.5),
++        SymbolBox(left: -310.5, right: 1240.25, front: -75.1, back: 905.5),
++        SymbolBox(left: -310.5, right: 1240.25, front: -75, back: 905.6),
++      ]) {
++        expect(b == other, isFalse, reason: '$other');
++      }
++    });
++  });
++
++  group('boxOfLeaves', () {
++    test('each side set by a different kind of leaf, far from the origin', () {
++      // left: a circle's centre − r; right: a polyline's interior vertex;
++      // front: an arc's axis extreme (3π/2); back: a line's second end.
++      final box = boxOfLeaves([
++        (
++          EntityKind.line,
++          linePayload(
++              Vector2(1e5 + 100, -7e4 + 200), Vector2(1e5 + 300, -7e4 + 950))
++        ),
++        (
++          EntityKind.polyline,
++          polylinePayload([
++            Vector2(1e5 + 50, -7e4 + 100),
++            Vector2(1e5 + 1200, -7e4 + 400),
++            Vector2(1e5 + 60, -7e4 + 700),
++          ])
++        ),
++        (EntityKind.circle, circlePayload(Vector2(1e5 - 20, -7e4 + 300), 180)),
++        (
++          EntityKind.arc,
++          arcPayload(Vector2(1e5 + 500, -7e4 + 100), 250, math.pi + 0.3, 2.5)
++        ),
++      ])!;
++      expect(
++          box,
++          const SymbolBox(
++              left: 1e5 - 200,
++              right: 1e5 + 1200,
++              front: -7e4 - 150,
++              back: -7e4 + 950));
++    });
++
++    test('a circle is its centre ± r on every side', () {
++      final box = boxOfLeaves([
++        (EntityKind.circle, circlePayload(Vector2(-2400.5, 3100.25), 72.5))
++      ])!;
++      expect(
++          box,
++          const SymbolBox(
++              left: -2473, right: -2328, front: 3027.75, back: 3172.75));
++    });
++
++    test('a closed polyline counts every vertex once, a line both ends', () {
++      final box = boxOfLeaves([
++        (
++          EntityKind.polyline,
++          polylinePayload([
++            Vector2(-50, 20),
++            Vector2(10, -40),
++            Vector2(70, 15),
++            Vector2(5, 90),
++          ], closed: true)
++        ),
++        (EntityKind.line, linePayload(Vector2(-10, 30), Vector2(95, 10))),
++      ])!;
++      expect(box, const SymbolBox(left: -50, right: 95, front: -40, back: 90));
++    });
++
++    test('no leaf has no box; a leaf of another kind draws nothing', () {
++      expect(boxOfLeaves(const []), isNull);
++      expect(
++          boxOfLeaves([
++            (
++              EntityKind.point,
++              linePayload(Vector2(9e4, 9e4), Vector2(9e4, 9e4))
++            )
++          ]),
++          isNull);
++      final box = boxOfLeaves([
++        (EntityKind.circle, circlePayload(Vector2(-2400.5, 3100.25), 72.5)),
++        (EntityKind.point, polylinePayload([Vector2(9e4, -9e4)])),
++        (EntityKind.text, textPayload(Vector2(-9e4, 9e4), 250)),
++      ])!;
++      expect(
++          box,
++          const SymbolBox(
++              left: -2473, right: -2328, front: 3027.75, back: 3172.75));
++    });
++  });
++
++  group('an arc by its true extents', () {
++    test('a sweep that crosses 0 rad only', () {
++      const s = -math.pi / 6, w = math.pi / 3;
++      final b = boxOfArc(s, w), e = ends(s, w);
++      expect(b.right, cx + r);
++      expect(b.left, near(e.minX));
++      expect(b.front, near(e.minY));
++      expect(b.back, near(e.maxY));
++    });
++
++    test('a sweep that crosses π/2 only', () {
++      const s = math.pi / 3, w = math.pi / 3;
++      final b = boxOfArc(s, w), e = ends(s, w);
++      expect(b.back, cy + r);
++      expect(b.left, near(e.minX));
++      expect(b.right, near(e.maxX));
++      expect(b.front, near(e.minY));
++    });
++
++    test('a sweep that crosses π only', () {
++      const s = 5 * math.pi / 6, w = math.pi / 3;
++      final b = boxOfArc(s, w), e = ends(s, w);
++      expect(b.left, cx - r);
++      expect(b.right, near(e.maxX));
++      expect(b.front, near(e.minY));
++      expect(b.back, near(e.maxY));
++    });
++
++    test('a sweep that crosses 3π/2 only', () {
++      const s = 4 * math.pi / 3, w = math.pi / 3;
++      final b = boxOfArc(s, w), e = ends(s, w);
++      expect(b.front, cy - r);
++      expect(b.left, near(e.minX));
++      expect(b.right, near(e.maxX));
++      expect(b.back, near(e.maxY));
++    });
++
++    test('a sweep that crosses no axis is its end points', () {
++      const s = math.pi / 12, w = math.pi / 3;
++      final b = boxOfArc(s, w), e = ends(s, w);
++      expect(b.left, near(e.minX));
++      expect(b.right, near(e.maxX));
++      expect(b.front, near(e.minY));
++      expect(b.back, near(e.maxY));
++      expect(b.right, lessThan(cx + r - 1));
++      expect(b.back, lessThan(cy + r - 1));
++    });
++
++    test('a negative start (−120° through 90°) crosses −π/2', () {
++      const s = -2 * math.pi / 3, w = math.pi / 2;
++      final b = boxOfArc(s, w), e = ends(s, w);
++      expect(b.front, cy - r);
++      expect(b.left, near(cx - r / 2));
++      expect(b.right, near(cx + r * math.cos(math.pi / 6)));
++      expect(b.back, near(cy - r / 2));
++      expect(b.left, near(e.minX));
++    });
++
++    test('a start past 2π crosses π', () {
++      const s = 2 * math.pi + 5 * math.pi / 6, w = math.pi / 3;
++      final b = boxOfArc(s, w);
++      expect(b.left, cx - r);
++      expect(b.back, near(cy + r / 2));
++      expect(b.front, near(cy - r / 2));
++    });
++
++    test('a clockwise sweep from π/3 back through 0 to −π/6', () {
++      const s = math.pi / 3, w = -math.pi / 2;
++      final b = boxOfArc(s, w), e = ends(s, w);
++      expect(b.right, cx + r);
++      expect(b.back, near(e.maxY));
++      expect(b.front, near(e.minY));
++      expect(b.left, near(e.minX));
++      expect(b.back, lessThan(cy + r - 1));
++    });
++
++    test('a full turn is the whole circle', () {
++      final b = boxOfArc(0.7, 2 * math.pi);
++      expect(b,
++          SymbolBox(left: cx - r, right: cx + r, front: cy - r, back: cy + r));
++    });
++  });
++
++  group('library entries', () {
++    test('the off-centre fixtures: back and left from an arc', () {
++      final lib = SymbolLibrary.decode(bytesOf(buildValidLibrary()));
++      // Sofa: the arc (900, 900) r 250 from 0.5 through 1.75 rad crosses
++      // π/2, so its back is 1150, beyond the polyline's 950.
++      expect(boxOfEntry(entryIn(lib, 'fixture.sofa.three')),
++          const SymbolBox(left: 120, right: 1680, front: 340, back: 1150));
++      // Armchair: the arc (500, 500) r 300 from 0.25 through 2.5 rad sets
++      // the left and right by its end points and the back by π/2; the
++      // circle (510, 480) r 120 sets the front.
++      final a = boxOfEntry(entryIn(lib, 'fixture.armchair.single'))!;
++      expect(a.left, near(500 + 300 * math.cos(2.75)));
++      expect(a.right, near(500 + 300 * math.cos(0.25)));
++      expect(a.front, 360);
++      expect(a.back, 800);
++      expect(a.backCentre.x, near((a.left + a.right) / 2));
++      expect(a.backCentre.y, 800);
++      expect(boxOfEntry(entryIn(lib, 'fixture.nightstand.single')),
++          const SymbolBox(left: 50, right: 450, front: 60, back: 410));
++    });
++
++    test('memoised per entry: the same object on every call', () {
++      final lib = SymbolLibrary.decode(bytesOf(buildValidLibrary()));
++      final toilet = entryIn(lib, 'fixture.sofa.three');
++      final tub = entryIn(lib, 'fixture.armchair.single');
++      expect(identical(boxOfEntry(toilet), boxOfEntry(toilet)), isTrue);
++      expect(boxOfEntry(tub), isNot(boxOfEntry(toilet)));
++    });
++  });
++
++  group('boxOfDefinition', () {
++    test('a placed definition gives the same box as its entry', () {
++      final lib = SymbolLibrary.decode(bytesOf(buildValidLibrary()));
++      final doc = target();
++      final keys = [
++        'fixture.sofa.three',
++        'fixture.nightstand.single',
++        'fixture.armchair.single'
++      ];
++      // Three definitions in one document (each box must read only its own
++      // leaves), placed far from the origin, turned and mirrored or not:
++      // the box is in the definition's coordinates, whatever the instance.
++      for (var i = 0; i < keys.length; i++) {
++        doc.commands.execute(placeSymbol(doc, entryIn(lib, keys[i]),
++            at: Vector2(1e5 + 250.0 * i, -7e4 - 125.0 * i),
++            quarterTurns: i + 1,
++            mirrored: i.isOdd));
++      }
++      for (final key in keys) {
++        expect(boxOfDefinition(doc, definitionOf(doc, key)),
++            boxOfEntry(entryIn(lib, key)),
++            reason: key);
++      }
++    });
++
++    test(
++        'not a definition (the root, a leaf, nothing), or a definition '
++        'without leaves: no box', () {
++      final doc = target();
++      doc.commands.execute(AddDefinitionCommand(Definition(
++          handle: const Handle(0x7A1),
++          name: 'empty',
++          basePoint: Vector2(-40, 75),
++          children: const [])));
++      // The root owns a drawn line and a circle: it is not a definition.
++      doc.commands.execute(CompoundCommand([
++        AddEntityCommand(
++            record: leafRecord(0x7B0, doc.rootHandle, EntityKind.line),
++            payload: linePayload(Vector2(1e5, -7e4), Vector2(1e5 + 900, -7e4))),
++        AddEntityCommand(
++            record: leafRecord(0x7B1, doc.rootHandle, EntityKind.circle),
++            payload: circlePayload(Vector2(-310, 925), 60)),
++      ], label: 'Model space'));
++      expect(boxOfDefinition(doc, const Handle(0x7A1)), isNull);
++      expect(boxOfDefinition(doc, const Handle(0x7A2)), isNull);
++      expect(boxOfDefinition(doc, doc.rootHandle), isNull);
++      expect(boxOfDefinition(doc, const Handle(0x7B0)), isNull);
++    });
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/symbols/symbol_ghost_test.dart b/packages/jet_cad_2d_plan/test/symbols/symbol_ghost_test.dart
+new file mode 100644
+index 00000000..56f5f893
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/symbols/symbol_ghost_test.dart
+@@ -0,0 +1,547 @@
++// Spec 09b D6 "The ghost", F-14 (ported to the plan library, Task 14): the
++// ghost's local path and its matrix. Ported whole from jet_cad_floor_plan's
++// symbol_ghost_test.dart, assertions unchanged; the asset's entries are
++// replaced by a fixture library of the same make (see below).
++//
++// Fixtures (plan P-3): a library built here with the authoring toolkit
++// (kit "ghost") whose three named entries carry what the committed
++// furniture asset's did (that asset moves with its kit, sub-project 3):
++// `ghost.office.chair` two circles and an arc (start π/4, sweep π/2),
++// `ghost.bath.toilet` two arcs (start π, sweep π, so their endpoints alone
++// cannot tell the sweep's sign: the mid point can), `ghost.dining.table`
++// eight closed polylines and six lines; and twenty-one arc-free items.
++// Decoded by `SymbolLibrary.decode`; every base point is off the origin.
++// The placement point and the rebase origin are both far from zero and
++// from each other; every quarter turn, mirrored and not.
++//
++// The expected values are computed here independently of the code under
++// test: the quarter-turn directions are a literal table, the mirror flips
++// the local x before the turn, and the arc points come from the engine's
++// `leafGrips` (its `c + r·(cos θ, sin θ)` convention).
++import 'dart:math' as math;
++import 'dart:typed_data';
++import 'dart:ui' as ui;
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/authoring.dart'
++    show
++        Catalog,
++        CatalogArc,
++        CatalogCircle,
++        CatalogLine,
++        CatalogPolyline,
++        CatalogShape,
++        CatalogSymbol,
++        encodeLibrary;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:jet_cad_2d_plan/src/symbols/symbol_ghost.dart';
++import 'package:jet_cad_2d_plan/src/symbols/symbol_placer.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++/// A closed rectangle from (x0, y0) to (x1, y1).
++CatalogPolyline rect(double x0, double y0, double x1, double y1) =>
++    CatalogPolyline([(x0, y0), (x1, y0), (x1, y1), (x0, y1)], closed: true);
++
++CatalogSymbol symbol(
++        String key, (double, double) base, List<CatalogShape> shapes) =>
++    CatalogSymbol(
++        key: key,
++        name: key,
++        category: 'Ghost',
++        tags: const ['ghost'],
++        base: base,
++        shapes: shapes);
++
++final SymbolLibrary library =
++    SymbolLibrary.decode(encodeLibrary(Catalog(kit: 'ghost', symbols: [
++  symbol('ghost.office.chair', (
++    305.5,
++    20.25
++  ), const [
++    CatalogCircle((300, 300), 260),
++    CatalogCircle((300, 300), 45),
++    CatalogArc((300, 300), 300, math.pi / 4, math.pi / 2),
++  ]),
++  symbol('ghost.bath.toilet', (
++    200.5,
++    700.25
++  ), [
++    rect(20, 520, 380, 700),
++    const CatalogArc((200, 300), 180, math.pi, math.pi),
++    const CatalogArc((200, 300), 140, math.pi, math.pi),
++  ]),
++  symbol('ghost.dining.table', (
++    1250.5,
++    800.25
++  ), [
++    rect(450, 450, 2050, 1150),
++    for (var i = 0; i < 3; i++) ...[
++      rect(500 + 550.0 * i, 50, 950 + 550.0 * i, 400),
++      rect(500 + 550.0 * i, 1200, 950 + 550.0 * i, 1550),
++    ],
++    rect(20, 625, 400, 975),
++    for (var i = 0; i < 3; i++) ...[
++      CatalogLine((520 + 550.0 * i, 60), (930 + 550.0 * i, 60)),
++      CatalogLine((520 + 550.0 * i, 1540), (930 + 550.0 * i, 1540)),
++    ],
++  ]),
++  for (var i = 0; i < 21; i++)
++    symbol('ghost.item.$i', (
++      410.5 + 10 * i,
++      95.25 + 5 * i
++    ), [
++      rect(30.0 + i, 40.0 + 2 * i, 820.0 + 3 * i, 610.0 + i),
++      CatalogLine((30.0 + i, 300.0), (820.0 + 3 * i, 300.0 + i)),
++      CatalogCircle((400.0 + 7 * i, 450.0 - i), 60.0 + i),
++    ]),
++])));
++
++SymbolEntry entry(String key) =>
++    library.entries.singleWhere((e) => e.symbol.key == key);
++
++/// Local +x after `q` counter-clockwise quarter turns: a literal table.
++const List<(double, double)> turned = [(1, 0), (0, 1), (-1, 0), (0, -1)];
++
++final Vector2 at = Vector2(73250.5, -41810.25);
++final Vector2 origin = Vector2(70000, -40000);
++
++/// Far from the origin (plan P-2) and from [at] and [origin].
++final Vector2 far = Vector2(100000.25, -70000.75);
++
++/// A 30° rotation vector.
++final (double, double) r30 = (math.sqrt(3) / 2, 0.5);
++
++/// The next double above [v] (one ulp).
++double nextUp(double v) {
++  final d = ByteData(8)..setFloat64(0, v);
++  if (v == 0) return double.minPositive;
++  final bits = d.getInt64(0);
++  d.setInt64(0, v > 0 ? bits + 1 : bits - 1);
++  return d.getFloat64(0);
++}
++
++/// [m] (column-major 4×4) applied to the point (x, y).
++(double, double) apply(Float64List m, double x, double y) =>
++    (m[0] * x + m[4] * y + m[12], m[1] * x + m[5] * y + m[13]);
++
++/// The placement of the local point (x, y), less [origin]: `at + R(q) ·
++/// S(mirror) · (p − base) − origin`, from the table.
++(double, double) expectedWorld(SymbolEntry e, int q, bool mirrored, double x,
++    double y, Vector2 at, Vector2 origin) {
++  final b = e.definition.basePoint;
++  final u = (x - b.x) * (mirrored ? -1 : 1), v = y - b.y;
++  final (xx, xy) = turned[q];
++  final (yx, yy) = turned[(q + 1) % 4];
++  return (
++    at.x + u * xx + v * yx - origin.x,
++    at.y + u * xy + v * yy - origin.y,
++  );
++}
++
++/// Every stored coordinate pair of every leaf of [e], local.
++Iterable<(double, double)> leafPoints(SymbolEntry e) sync* {
++  for (final l in e.leaves) {
++    final c = l.payload.coords;
++    for (var i = 0; i + 1 < c.length; i += 2) {
++      yield (c[i], c[i + 1]);
++    }
++  }
++}
++
++void expectPoint((double, double) actual, (double, double) expected,
++    double tolerance, String reason) {
++  expect(actual.$1, closeTo(expected.$1, tolerance), reason: '$reason (x)');
++  expect(actual.$2, closeTo(expected.$2, tolerance), reason: '$reason (y)');
++}
++
++(double, double) offsetOf(ui.Offset o) => (o.dx, o.dy);
++
++const keys = ['ghost.office.chair', 'ghost.bath.toilet', 'ghost.dining.table'];
++
++void main() {
++  test('the fixtures are not degenerate', () {
++    for (final key in keys) {
++      final b = entry(key).definition.basePoint;
++      expect(b.x != 0 || b.y != 0, isTrue, reason: '$key base point');
++    }
++    expect(entry('ghost.office.chair').leaves.map((l) => l.record.kind),
++        containsAll([EntityKind.circle, EntityKind.arc]));
++    expect(entry('ghost.bath.toilet').leaves.map((l) => l.record.kind),
++        contains(EntityKind.arc));
++    expect(at.x != origin.x && at.y != origin.y, isTrue);
++  });
++
++  group('the matrix', () {
++    test(
++        'maps the base point to at − origin, local +x and +y to the turned '
++        'and mirrored directions, and every leaf point to its placement', () {
++      for (final key in keys) {
++        final e = entry(key);
++        final b = e.definition.basePoint;
++        for (var q = 0; q < 4; q++) {
++          for (final mirrored in [false, true]) {
++            final why = '$key q=$q mirrored=$mirrored';
++            final g = GhostMatrix()
++              ..update(
++                  placement: placementTransform(
++                      at: at,
++                      basePoint: b,
++                      quarterTurns: q,
++                      mirrored: mirrored));
++            final m = g.forOrigin(origin);
++            expectPoint(apply(m, b.x, b.y), (at.x - origin.x, at.y - origin.y),
++                1e-9, '$why base point');
++            final (xx, xy) = turned[q];
++            final s = mirrored ? -1.0 : 1.0;
++            // The linear part is exact for quarter turns.
++            expect((m[0], m[1]), (s * xx, s * xy), reason: '$why local +x');
++            expect((m[4], m[5]), turned[(q + 1) % 4], reason: '$why local +y');
++            for (final (x, y) in leafPoints(e)) {
++              expectPoint(apply(m, x, y),
++                  expectedWorld(e, q, mirrored, x, y, at, origin), 1e-9, why);
++            }
++            // The rest of the storage stays the identity's.
++            for (final i in [2, 3, 6, 7, 8, 9, 11, 14]) {
++              expect(m[i], 0.0, reason: '$why m[$i]');
++            }
++            expect([m[10], m[15]], [1.0, 1.0], reason: why);
++          }
++        }
++      }
++    });
++
++    test('writeGhostMatrix writes translate(−origin) ∘ P into an identity', () {
++      final e = entry('ghost.office.chair');
++      final b = e.definition.basePoint;
++      final p = placementTransform(
++          at: at, basePoint: b, quarterTurns: 3, mirrored: true);
++      final m = identityGhostMatrix();
++      writeGhostMatrix(m, p, origin);
++      expect(m.toList(), [
++        p.a, p.b, 0, 0, //
++        p.c, p.d, 0, 0, //
++        0, 0, 1, 0, //
++        p.e - origin.x, p.f - origin.y, 0, 1,
++      ]);
++      expectPoint(apply(m, b.x, b.y), (at.x - origin.x, at.y - origin.y), 1e-9,
++          'base point');
++      for (final (x, y) in leafPoints(e)) {
++        expectPoint(apply(m, x, y), expectedWorld(e, 3, true, x, y, at, origin),
++            1e-9, '($x, $y)');
++      }
++    });
++
++    test('P is computed only when the placement changes, not the origin', () {
++      final b = entry('ghost.bath.toilet').definition.basePoint;
++      final g = GhostMatrix()
++        ..update(
++            placement: placementTransform(
++                at: at, basePoint: b, quarterTurns: 1, mirrored: true));
++      expect(g.computations, 1);
++      final linear = [g.storage[0], g.storage[1], g.storage[4], g.storage[5]];
++
++      // Three paints at three origins: the translation follows each, P stays.
++      for (final o in [origin, Vector2(-5000, 92000), Vector2(70001, -40000)]) {
++        g.update(
++            placement: placementTransform(
++                at: at.clone(),
++                basePoint: b.clone(),
++                quarterTurns: 1,
++                mirrored: true));
++        final m = g.forOrigin(o);
++        expect((m[12], m[13]), (g.placement!.e - o.x, g.placement!.f - o.y));
++        expect([m[0], m[1], m[4], m[5]], linear);
++      }
++      expect(g.computations, 1);
++      expect(identical(g.forOrigin(origin), g.storage), isTrue);
++
++      g.update(
++          placement: placementTransform(
++              at: at + Vector2(10, 0),
++              basePoint: b,
++              quarterTurns: 1,
++              mirrored: true));
++      expect(g.computations, 2, reason: 'at changed');
++      g.update(
++          placement: placementTransform(
++              at: at + Vector2(10, 0),
++              basePoint: b,
++              quarterTurns: 2,
++              mirrored: true));
++      expect(g.computations, 3, reason: 'turns changed');
++      g.update(
++          placement: placementTransform(
++              at: at + Vector2(10, 0),
++              basePoint: b,
++              quarterTurns: 2,
++              mirrored: false));
++      expect(g.computations, 4, reason: 'mirror changed');
++      final other = entry('ghost.office.chair').definition.basePoint;
++      g.update(
++          placement: placementTransform(
++              at: at + Vector2(10, 0),
++              basePoint: other,
++              quarterTurns: 2,
++              mirrored: false));
++      expect(g.computations, 5, reason: 'base point changed');
++      expectPoint(apply(g.forOrigin(origin), other.x, other.y),
++          (at.x + 10 - origin.x, at.y - origin.y), 1e-9, 'new base point');
++    });
++
++    test(
++        'a change of the base point\'s x alone, then of its y alone, each '
++        'recomputes P once', () {
++      final b = entry('ghost.office.chair').definition.basePoint;
++      final g = GhostMatrix()
++        ..update(
++            placement: placementTransform(
++                at: at, basePoint: b, quarterTurns: 3, mirrored: true));
++      expect(g.computations, 1);
++      final onlyX = Vector2(b.x + 125, b.y);
++      g.update(
++          placement: placementTransform(
++              at: at, basePoint: onlyX, quarterTurns: 3, mirrored: true));
++      expect(g.computations, 2, reason: 'base point x changed');
++      expectPoint(apply(g.forOrigin(origin), onlyX.x, onlyX.y),
++          (at.x - origin.x, at.y - origin.y), 1e-9, 'x-moved base point');
++      final onlyY = Vector2(onlyX.x, onlyX.y - 75);
++      g.update(
++          placement: placementTransform(
++              at: at, basePoint: onlyY, quarterTurns: 3, mirrored: true));
++      expect(g.computations, 3, reason: 'base point y changed');
++      expectPoint(apply(g.forOrigin(origin), onlyY.x, onlyY.y),
++          (at.x - origin.x, at.y - origin.y), 1e-9, 'y-moved base point');
++    });
++
++    // Plan 09c-1 Task 5 (spec D5): the matrix keyed on the placement's six
++    // doubles. A 30° placement (no 0 or ±1 in its linear part), mirrored
++    // and not, far from the origin and from the rebase origin.
++
++    test(
++        'a 30° placement far from the origin: the storage holds its linear '
++        'part and its translation less the origin, and every leaf of the '
++        'toilet lands where the transform puts it', () {
++      final e = entry('ghost.bath.toilet');
++      final b = e.definition.basePoint;
++      for (final mirrored in [false, true]) {
++        final p = placementTransform(
++            at: far, basePoint: b, rotation: r30, mirrored: mirrored);
++        final g = GhostMatrix()..update(placement: p);
++        expect(identical(g.placement, p), isTrue);
++        final m = g.forOrigin(origin);
++        expect([
++          m[0],
++          m[1],
++          m[4],
++          m[5],
++          m[12],
++          m[13]
++        ], [
++          p.a,
++          p.b,
++          p.c,
++          p.d,
++          p.e - origin.x,
++          p.f - origin.y
++        ], reason: 'mirrored=$mirrored');
++        // Independently: mirror the local x, turn by 30°, base point to far.
++        final s = mirrored ? -1.0 : 1.0;
++        final (cos, sin) = r30;
++        for (final (x, y) in leafPoints(e)) {
++          final u = (x - b.x) * s, v = y - b.y;
++          expectPoint(
++              apply(m, x, y),
++              (
++                far.x + cos * u - sin * v - origin.x,
++                far.y + sin * u + cos * v - origin.y
++              ),
++              1e-9,
++              'mirrored=$mirrored ($x, $y)');
++        }
++      }
++    });
++
++    test(
++        'equal placements recompute once; a change of one ulp in any one of '
++        'the six doubles recomputes once, and the storage follows', () {
++      final b = entry('ghost.bath.toilet').definition.basePoint;
++      for (final mirrored in [false, true]) {
++        final p = placementTransform(
++            at: far, basePoint: b, rotation: r30, mirrored: mirrored);
++        final g = GhostMatrix()..update(placement: p);
++        expect(g.computations, 1);
++        // Equal doubles in another object: nothing recomputed, nothing kept.
++        for (var k = 0; k < 3; k++) {
++          g.update(placement: Transform2.fromJson(p.toJson()));
++        }
++        expect(g.computations, 1, reason: 'mirrored=$mirrored equal');
++        expect(identical(g.placement, p), isTrue);
++        var expected = 1;
++        for (var i = 0; i < 6; i++) {
++          final v = p.toJson();
++          v[i] = nextUp(v[i]);
++          final q = Transform2.fromJson(v);
++          g.update(placement: q);
++          expect(g.computations, ++expected,
++              reason: 'mirrored=$mirrored component $i changed');
++          expect(identical(g.placement, q), isTrue);
++          final m = g.forOrigin(origin);
++          expect([
++            m[0],
++            m[1],
++            m[4],
++            m[5],
++            m[12],
++            m[13]
++          ], [
++            q.a,
++            q.b,
++            q.c,
++            q.d,
++            q.e - origin.x,
++            q.f - origin.y
++          ], reason: 'mirrored=$mirrored component $i storage');
++          g.update(placement: p);
++          expect(g.computations, ++expected,
++              reason: 'mirrored=$mirrored component $i back');
++        }
++      }
++    });
++
++    test('-0.0 and 0.0 compare equal: no recompute (stated, not a mutant)', () {
++      final g = GhostMatrix()
++        ..update(placement: const Transform2(0.0, 1.0, -1.0, 0.0, 5, 7));
++      g.update(placement: const Transform2(-0.0, 1.0, -1.0, -0.0, 5, 7));
++      expect(g.computations, 1);
++    });
++  });
++
++  group('the path', () {
++    test('a closed polyline\'s contour is closed, a line\'s is not', () {
++      final e = entry('ghost.dining.table');
++      final metrics = ghostPathFor(e).computeMetrics().toList();
++      expect(metrics.length, e.leaves.length);
++      var closed = 0, open = 0;
++      for (var i = 0; i < e.leaves.length; i++) {
++        final leaf = e.leaves[i];
++        final isClosed = leaf.record.kind == EntityKind.polyline &&
++            isClosedPolyline(leaf.payload);
++        expect(metrics[i].isClosed, isClosed,
++            reason: '${leaf.record.kind.name} leaf $i');
++        if (isClosed) {
++          closed++;
++        } else if (leaf.record.kind == EntityKind.line) {
++          open++;
++        }
++      }
++      expect(closed, 8, reason: 'closed polylines');
++      expect(open, 6, reason: 'lines');
++    });
++
++    test('is cached: the same object on a second call, one per entry', () {
++      final chair = entry('ghost.office.chair');
++      final toilet = entry('ghost.bath.toilet');
++      final p = ghostPathFor(chair);
++      expect(identical(ghostPathFor(chair), p), isTrue);
++      expect(identical(ghostPathFor(toilet), p), isFalse);
++      expect(identical(ghostPathFor(toilet), ghostPathFor(toilet)), isTrue);
++    });
++
++    test(
++        'has one contour per leaf, and its bounds are the leaves\' local '
++        'bounds (every entry with no arc)', () {
++      var checked = 0;
++      for (final e in library.entries) {
++        final path = ghostPathFor(e);
++        expect(path.computeMetrics().length, e.leaves.length,
++            reason: '${e.symbol.key} contours');
++        if (e.leaves.any((l) => l.record.kind == EntityKind.arc)) continue;
++        var l = double.infinity, t = double.infinity;
++        var r = double.negativeInfinity, btm = double.negativeInfinity;
++        for (final leaf in e.leaves) {
++          final c = leaf.payload.coords;
++          final rad = leaf.record.kind == EntityKind.circle
++              ? leaf.payload.scalars[0]
++              : 0;
++          for (var i = 0; i + 1 < c.length; i += 2) {
++            l = math.min(l, c[i] - rad);
++            r = math.max(r, c[i] + rad);
++            t = math.min(t, c[i + 1] - rad);
++            btm = math.max(btm, c[i + 1] + rad);
++          }
++        }
++        final bounds = path.getBounds();
++        // Path coordinates are float32.
++        expect(bounds.left, closeTo(l, 1e-3), reason: e.symbol.key);
++        expect(bounds.top, closeTo(t, 1e-3), reason: e.symbol.key);
++        expect(bounds.right, closeTo(r, 1e-3), reason: e.symbol.key);
++        expect(bounds.bottom, closeTo(btm, 1e-3), reason: e.symbol.key);
++        checked++;
++      }
++      expect(checked, greaterThan(20));
++    });
++
++    test(
++        'an arc runs from the payload start to start + sweep, through the '
++        'engine\'s mid point', () {
++      var arcs = 0;
++      for (final key in ['ghost.office.chair', 'ghost.bath.toilet']) {
++        final e = entry(key);
++        final metrics = ghostPathFor(e).computeMetrics().toList();
++        for (var i = 0; i < e.leaves.length; i++) {
++          final leaf = e.leaves[i];
++          if (leaf.record.kind != EntityKind.arc) continue;
++          final grips = leafGrips(leaf.record.kind, leaf.payload);
++          final metric = metrics[i];
++          (double, double) pos(double d) =>
++              offsetOf(metric.getTangentForOffset(d)!.position);
++          final start = (grips[1].x, grips[1].y);
++          final end = (grips[2].x, grips[2].y);
++          final mid = (grips[3].x, grips[3].y);
++          expectPoint(pos(0), start, 1e-2, '$key leaf $i start');
++          expectPoint(pos(metric.length), end, 1e-2, '$key leaf $i end');
++          // Arc length metrics are approximate on conics.
++          expectPoint(pos(metric.length / 2), mid, 0.5, '$key leaf $i mid');
++          final r = leaf.payload.scalars[0];
++          final sweep = leaf.payload.scalars[2];
++          expect(metric.length, closeTo(r * sweep.abs(), 0.5));
++          arcs++;
++        }
++      }
++      expect(arcs, 3);
++    });
++
++    test(
++        'drawn under the matrix, an arc lands where its placement puts it '
++        '(mirrored and turned, far from the origin)', () {
++      final e = entry('ghost.office.chair');
++      final b = e.definition.basePoint;
++      final i = e.leaves.indexWhere((l) => l.record.kind == EntityKind.arc);
++      final leaf = e.leaves[i];
++      final grips = leafGrips(leaf.record.kind, leaf.payload);
++      for (var q = 0; q < 4; q++) {
++        for (final mirrored in [false, true]) {
++          final g = GhostMatrix()
++            ..update(
++                placement: placementTransform(
++                    at: at, basePoint: b, quarterTurns: q, mirrored: mirrored));
++          final world = ghostPathFor(e).transform(g.forOrigin(origin));
++          final metric = world.computeMetrics().toList()[i];
++          final why = 'q=$q mirrored=$mirrored';
++          for (final (d, grip) in [
++            (0.0, grips[1]),
++            (metric.length, grips[2]),
++            (metric.length / 2, grips[3]),
++          ]) {
++            expectPoint(
++                offsetOf(metric.getTangentForOffset(d)!.position),
++                expectedWorld(e, q, mirrored, grip.x, grip.y, at, origin),
++                d == 0 || d == metric.length ? 1e-2 : 0.5,
++                '$why at $d');
++          }
++        }
++      }
++    });
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/tools/move_resolver_test.dart b/packages/jet_cad_2d_plan/test/tools/move_resolver_test.dart
+new file mode 100644
+index 00000000..189122c2
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/tools/move_resolver_test.dart
+@@ -0,0 +1,183 @@
++// Spec P3 "Attachment" (Task 14): plan.select's move resolver asks the
++// registry for a root-level symbol instance whose jetcad.symbol attaches
++// somewhere; the query is the plain-moved transform, anchored on the moved
++// footprint's back-centre, the node excluded. A turned, mirrored placement
++// far from the origin; a camera at 0.1 px/mm.
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:jet_cad_2d_kit/authoring.dart' show Catalog, encodeLibrary;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:jet_cad_2d_plan/src/attach/attachment_registry.dart';
++import 'package:jet_cad_2d_plan/src/symbols/symbol_box.dart';
++import 'package:jet_cad_2d_plan/src/symbols/symbol_placer.dart';
++import 'package:jet_cad_2d_plan/src/tools/move_resolver.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/attach_fixtures.dart';
++import '../support/symbol_fixtures.dart';
++
++final class _ServicesStub implements PlanServices {
++  @override
++  dynamic noSuchMethod(Invocation invocation) =>
++      throw StateError('a provider factory read the services');
++}
++
++final SymbolLibrary lib =
++    SymbolLibrary.decode(encodeLibrary(Catalog(kit: 'demo', symbols: [
++  box('demo.shelf.wall', 'Wall shelf', 'Storage', ['shelf'],
++      attachTo: ['test-edge'], base: (950, 410)),
++  box('demo.table.free', 'Table', 'Dining', ['table'], base: (950, 410)),
++])));
++
++SymbolEntry entry(String key) =>
++    lib.entries.singleWhere((e) => e.symbol.key == key);
++
++final class Scene {
++  Scene({String key = 'demo.shelf.wall', bool objectSnap = true}) {
++    doc = DraftDocument.empty();
++    registerKitComponents(doc.components);
++    doc.header.units = DrawingUnits.millimeters;
++    doc.commands.execute(placeSymbol(doc, entry(key),
++        at: Vector2(100000.25, -70000.75), quarterTurns: 1, mirrored: true));
++    instance = doc.tree.nodes.whereType<InstanceNode>().single.handle;
++    index = SpatialIndex(doc);
++    selection = SelectionController(doc);
++    camera = CameraController(ViewportTransform(
++        worldToScreenMatrix: Transform2(0.1, 0, 0, -0.1, -9600, -6600)));
++    snap = SnapSettings(objectSnap: objectSnap);
++    ctx = ToolContext(
++        document: doc,
++        index: index,
++        camera: camera,
++        selection: selection,
++        snap: snap);
++    registry = PlanAttachmentRegistry(report: reported.add);
++    edge = RecordingProvider('test-edge', (q) => answer?.call(q));
++    registry.add('demo', (_) => edge, _ServicesStub());
++    resolver = PlanMoveResolver(
++        attachments: () {
++          asked++;
++          return registry;
++        },
++        canRotate: () => rotate);
++    addTearDown(() {
++      registry.dispose();
++      snap.dispose();
++      selection.dispose();
++      index.dispose();
++      camera.dispose();
++    });
++  }
++
++  late final DraftDocument doc;
++  late final Handle instance;
++  late final SpatialIndex index;
++  late final SelectionController selection;
++  late final CameraController camera;
++  late final SnapSettings snap;
++  late final ToolContext ctx;
++  late final PlanAttachmentRegistry registry;
++  late final RecordingProvider edge;
++  late final PlanMoveResolver resolver;
++  final List<KitDiagnostic> reported = [];
++  Attachment? Function(AttachmentQuery q)? answer;
++  bool rotate = true;
++
++  /// How many times the resolver read the registry to ask it.
++  int asked = 0;
++
++  Transform2 get transform => (doc.tree[instance]! as InstanceNode).transform;
++}
++
++List<double> partsOf(Transform2 t) => [t.a, t.b, t.c, t.d, t.e, t.f];
++
++final Transform2 delta = Transform2.translation(310.5, -125.25);
++
++void main() {
++  test(
++      'MV-1 the query: the plain move, its back-centre, the node excluded, '
++      'its mirror, mayRotate; the answer is the move', () {
++    final s = Scene();
++    final placed = attachment(Transform2.translation(99000.5, -69000.25),
++        Vector2(99010.25, -69020.5), 'face');
++    s.answer = (_) => placed;
++    final r = s.resolver.resolveMove(s.ctx, s.instance, delta)!;
++    expect(partsOf(r.transform), partsOf(placed.transform));
++    expect(r.marker, placed.marker);
++    final q = s.edge.queries.single;
++    final moved = delta.multiply(s.transform);
++    expect(partsOf(q.current), partsOf(moved));
++    final box = boxOfEntry(entry('demo.shelf.wall'))!;
++    // M-MV1a: the raw transform's back-centre (no delta).
++    expect(q.pointer, moved.transformPoint(box.backCentre));
++    // M-MV1b: the node not excluded.
++    expect(q.exclude, {s.instance});
++    expect(q.mirrored, isTrue, reason: 'placed mirrored');
++    expect(q.mayRotate, isTrue);
++    expect(q.capture, closeTo(16 / 0.1, 1e-9));
++    expect(q.edgeCapture, closeTo(kSnapAperturePixels / 0.1, 1e-9));
++    expect([q.footprint.minX, q.footprint.maxY], [box.left, box.back]);
++    s.rotate = false;
++    s.resolver.resolveMove(s.ctx, s.instance, delta);
++    expect(s.edge.queries.last.mayRotate, isFalse);
++  });
++
++  test(
++      'MV-2 nothing is asked for a symbol that attaches to nothing, a '
++      'non-symbol, with object snap off, or for a scaled instance', () {
++    final free = Scene(key: 'demo.table.free');
++    // M-MV2a: the attachTo test dropped.
++    expect(free.resolver.resolveMove(free.ctx, free.instance, delta), isNull);
++    expect(free.edge.queries, isEmpty);
++    expect(free.asked, 0, reason: 'no attachTo: the registry is not asked');
++
++    final off = Scene(objectSnap: false);
++    off.answer = (_) => attachment(Transform2.identity(), Vector2(1, 1), 't');
++    // M-MV2b: the object snap test dropped.
++    expect(off.resolver.resolveMove(off.ctx, off.instance, delta), isNull);
++    expect(off.edge.queries, isEmpty);
++
++    final scaled = Scene();
++    scaled.doc.commands.execute(TransformNodeCommand(
++        scaled.instance, Transform2.scale(2, 2).multiply(scaled.transform)));
++    expect(scaled.resolver.resolveMove(scaled.ctx, scaled.instance, delta),
++        isNull);
++    expect(scaled.edge.queries, isEmpty);
++
++    final line = addDrafted(scaled.doc, EntityKind.line,
++        linePayload(Vector2(100500, -70500), Vector2(101500, -70100)),
++        layer: ReservedHandles.layerZero);
++    scaled.doc.commands.execute(line);
++    expect(scaled.resolver.resolveMove(scaled.ctx, line.record.handle, delta),
++        isNull);
++  });
++
++  test(
++      'MV-3 within one drag a query keeps the last answer; after the '
++      'document changes it starts afresh', () {
++    final s = Scene();
++    final a = attachment(Transform2.translation(99000.5, -69000.25),
++        Vector2(99010.25, -69020.5), 'face');
++    s.answer = (_) => a;
++    s.resolver.resolveMove(s.ctx, s.instance, delta);
++    s.resolver.resolveMove(s.ctx, s.instance, delta);
++    // M-MV3a: keep always null.
++    expect(s.edge.queries.last.keep, same(a));
++    s.doc.commands.execute(TransformNodeCommand(s.instance, a.transform));
++    s.resolver.resolveMove(s.ctx, s.instance, delta);
++    // M-MV3b: the stateId reset dropped.
++    expect(s.edge.queries.last.keep, isNull);
++  });
++
++  test('MV-4 the footprint is the definition\'s live leaves', () {
++    final s = Scene();
++    final node = s.doc.tree[s.instance]! as InstanceNode;
++    final box = boxOfDefinition(s.doc, node.definition)!;
++    s.answer = (_) => null;
++    s.resolver.resolveMove(s.ctx, s.instance, delta);
++    final f = s.edge.queries.single.footprint;
++    expect([f.minX, f.minY, f.maxX, f.maxY],
++        [box.left, box.front, box.right, box.back]);
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/tools/plan_symbol_tool_test.dart b/packages/jet_cad_2d_plan/test/tools/plan_symbol_tool_test.dart
+new file mode 100644
+index 00000000..9cafa709
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/tools/plan_symbol_tool_test.dart
+@@ -0,0 +1,1576 @@
++// Spec 09b D6, F-5, F-6, F-12, F-14, F-16 (ported to the plan library,
++// Task 14): plan.symbol's pointer, snap, ghost, keys and permission check,
++// driven directly with `ToolPointerEvent`s and `KeyEvent`s; spec 09c D12:
++// the ghost follows a camera change (a wheel zoom, a pan). Ported from
++// jet_cad_floor_plan's symbol_place_tool_test.dart, assertions unchanged;
++// its wall attachment moves to sub-project 3 with the wall-face provider.
++// Spec P3 "Attachment" (Task 14): the attachment through the registry.
++//
++// Fixtures (plan P-3): entries of the plan library's fixture library
++// (every base point is off the origin); a camera at 0.05 px/mm with y up,
++// centred far from the origin, so the snap aperture is 10 / 0.05 = 200 mm,
++// not 10 mm; a page whose grid (25 mm, origin off every round number) moves
++// every raw point; one line whose start E is the object snap target. The
++// ghost is painted with a rebase origin far from zero.
++import 'dart:typed_data';
++import 'dart:ui' as ui;
++
++import 'package:flutter/foundation.dart' show ValueNotifier;
++import 'package:flutter/gestures.dart' show kPrimaryButton, kSecondaryButton;
++import 'package:flutter/services.dart'
++    show
++        HardwareKeyboard,
++        KeyDownEvent,
++        KeyEvent,
++        KeyRepeatEvent,
++        KeyUpEvent,
++        LogicalKeyboardKey,
++        MouseCursor,
++        PhysicalKeyboardKey,
++        SystemMouseCursors;
++import 'package:flutter/widgets.dart'
++    show
++        Align,
++        Alignment,
++        Directionality,
++        KeyEventResult,
++        SizedBox,
++        TextDirection;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:jet_cad_2d_kit/authoring.dart' show Catalog, encodeLibrary;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:jet_cad_2d_plan/src/attach/attachment_registry.dart';
++import 'package:jet_cad_2d_plan/src/symbols/symbol_box.dart';
++import 'package:jet_cad_2d_plan/src/symbols/symbol_ghost.dart';
++import 'package:jet_cad_2d_plan/src/symbols/symbol_placer.dart';
++import 'package:jet_cad_2d_plan/src/tools/plan_symbol_tool.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/attach_fixtures.dart';
++import '../support/symbol_fixtures.dart';
++import '../support/test_kit.dart' show TestEdge;
++
++final SymbolLibrary library =
++    SymbolLibrary.decode(bytesOf(buildValidLibrary()));
++
++PlanSymbol entry(String key) => PlanSymbol(
++    kitId: 'fixture',
++    names: KitNames.empty,
++    entry: library.entries.singleWhere((e) => e.symbol.key == key));
++
++/// Today's office chair: a symbol whose base point is off its leaves and
++/// far (beyond the 200 mm aperture) from every snap point of its own
++/// leaves, so a later placement near an earlier one lands on the grid, as
++/// the asset's chair did. (Not the fixture sofa: its line's midpoint sits
++/// 60 mm from its base point and catches the third placement of "keys
++/// compose".)
++final PlanSymbol chair = entry('fixture.armchair.single');
++
++/// Today's toilet: the second symbol a re-arm swaps to.
++final PlanSymbol toilet = entry('fixture.nightstand.single');
++
++/// The camera's pixels per mm: the aperture is 200 mm.
++const double scale = 0.05;
++
++/// The line's start: the object snap target, off the grid.
++final Vector2 e0 = Vector2(73250.5, -41810.25);
++
++/// The page grid: 25 mm from an origin off every round number.
++const double gridStep = 25;
++const double gridOriginX = 70000.3, gridOriginY = -40000.7;
++
++Vector2 gridOf(Vector2 p) => Vector2(
++    gridOriginX + ((p.x - gridOriginX) / gridStep).roundToDouble() * gridStep,
++    gridOriginY + ((p.y - gridOriginY) / gridStep).roundToDouble() * gridStep);
++
++/// Far from [e0] (more than the aperture) and from each other.
++final Vector2 pA = Vector2(80123.4, -35211.7);
++final Vector2 pMid = Vector2(80741.15, -36013.35);
++final Vector2 pB = Vector2(81377.9, -36904.2);
++final Vector2 pC = Vector2(76402.6, -45518.85);
++
++/// The rebase origin the overlay paints with.
++final Vector2 origin = Vector2(70000, -40000);
++
++final class Rig {
++  /// [objectSnap] non-null: a `SnapSettings` with it in the context (null:
++  /// none, object snap on). [step] null: the page has no fixed grid step,
++  /// so the drag uses the zoom-adaptive one. [attachments], [canRotate]
++  /// and [canMirror] are handed to the tool.
++  Rig(
++      {bool page = true,
++      bool? objectSnap,
++      double? step = gridStep,
++      AttachmentRegistry? attachments,
++      bool Function()? canRotate,
++      bool Function()? canMirror}) {
++    document = DraftDocument.empty(measurer: const InsertionPointMeasurer());
++    PageComponent.register(document.components);
++    registerKitComponents(document.components);
++    document.header.units = DrawingUnits.millimeters;
++    if (page) {
++      document.commands.execute(SetComponentCommand<PageComponent>(
++          document.rootHandle,
++          PageComponent(
++              originX: gridOriginX, originY: gridOriginY, gridStepMm: step)));
++    }
++    document.commands.execute(addDrafted(
++        document, EntityKind.line, linePayload(e0, e0 + Vector2(1200, 700)),
++        layer: ReservedHandles.layerZero));
++    document.commands.clearHistory();
++    index = SpatialIndex(document);
++    final linear = Transform2.scale(scale, -scale);
++    final mid = linear.transformPoint(Vector2(76000, -41000));
++    camera = CountingCamera(ViewportTransform(
++        worldToScreenMatrix:
++            Transform2.translation(400 - mid.x, 300 - mid.y).multiply(linear)));
++    selection = SelectionController(document);
++    pages = PageNotifier(document);
++    snap = objectSnap == null ? null : SnapSettings(objectSnap: objectSnap);
++    ctx = ToolContext(
++        document: document,
++        index: index,
++        camera: camera,
++        selection: selection,
++        page: pages,
++        snap: snap);
++    armed = CountingNotifier(chair);
++    tool = PlanSymbolTool(armed,
++        attachments: attachments, canRotate: canRotate, canMirror: canMirror);
++    tool.addListener(() => notifications.add(tool.isMidShape));
++    addTearDown(() {
++      if (!disposed) tool.dispose();
++      armed.dispose();
++      pages.dispose();
++      snap?.dispose();
++      selection.dispose();
++      camera.dispose();
++      index.dispose();
++    });
++  }
++
++  late final DraftDocument document;
++  late final SpatialIndex index;
++  late final CountingCamera camera;
++  late final SelectionController selection;
++  late final PageNotifier pages;
++  late final SnapSettings? snap;
++  late final ToolContext ctx;
++  late final CountingNotifier armed;
++  late final PlanSymbolTool tool;
++  bool disposed = false;
++
++  /// `isMidShape` at each notification.
++  final List<bool> notifications = [];
++
++  ToolPointerEvent at(Vector2 world, {int buttons = 0, int pointer = 7}) {
++    final s = camera.value.worldToScreen(world);
++    return ToolPointerEvent(
++        screen: ui.Offset(s.x, s.y),
++        world: world,
++        pointer: pointer,
++        buttons: buttons,
++        shift: false,
++        control: false,
++        meta: false,
++        alt: false,
++        pickRadiusWorld: kPickRadiusPixels / scale);
++  }
++
++  void hover(Vector2 w) => tool.onPointerMove(at(w), ctx);
++  void down(Vector2 w, {int pointer = 7}) =>
++      tool.onPointerDown(at(w, buttons: kPrimaryButton, pointer: pointer), ctx);
++  void drag(Vector2 w, {int pointer = 7}) =>
++      tool.onPointerMove(at(w, buttons: kPrimaryButton, pointer: pointer), ctx);
++  void up(Vector2 w, {int pointer = 7}) =>
++      tool.onPointerUp(at(w, pointer: pointer), ctx);
++
++  List<InstanceNode> get instances =>
++      document.tree.nodes.whereType<InstanceNode>().toList();
++
++  /// Where an instance put its symbol's base point: its `at`.
++  Vector2 placedAt(InstanceNode n) => n.transform
++      .transformPoint(document.tree.definition(n.definition)!.basePoint);
++
++  List<Handle> get symbolDefinitions => [
++        for (final h in document.components.withComponent<SymbolComponent>())
++          if (document.tree.definition(h) != null) h
++      ];
++}
++
++/// The armed notifier, counting its listeners.
++final class CountingNotifier extends ValueNotifier<PlanSymbol?> {
++  CountingNotifier(super.value);
++
++  int listeners = 0;
++
++  @override
++  void addListener(ui.VoidCallback listener) {
++    listeners++;
++    super.addListener(listener);
++  }
++
++  @override
++  void removeListener(ui.VoidCallback listener) {
++    listeners--;
++    super.removeListener(listener);
++  }
++}
++
++/// The camera, counting its listeners (spec 09c D12: the tool listens while
++/// the ghost is shown, and only then).
++final class CountingCamera extends CameraController {
++  CountingCamera(super.initial);
++
++  int listeners = 0;
++
++  @override
++  void addListener(ui.VoidCallback listener) {
++    listeners++;
++    super.addListener(listener);
++  }
++
++  @override
++  void removeListener(ui.VoidCallback listener) {
++    listeners--;
++    super.removeListener(listener);
++  }
++}
++
++/// A canvas that records every call.
++final class RecordingCanvas implements ui.Canvas {
++  final List<Invocation> calls = [];
++
++  Iterable<Invocation> named(String name) =>
++      calls.where((c) => c.memberName == Symbol(name));
++
++  @override
++  dynamic noSuchMethod(Invocation invocation) {
++    calls.add(invocation);
++    return null;
++  }
++}
++
++/// [m] (column-major 4×4) applied to (x, y).
++(double, double) apply(Float64List m, double x, double y) =>
++    (m[0] * x + m[4] * y + m[12], m[1] * x + m[5] * y + m[13]);
++
++void expectAt(Vector2 actual, Vector2 expected, String reason) {
++  expect(actual.x, expected.x, reason: '$reason (x)');
++  expect(actual.y, expected.y, reason: '$reason (y)');
++}
++
++/// A key: its logical and physical halves.
++typedef Key2 = (LogicalKeyboardKey, PhysicalKeyboardKey);
++
++const Key2 kR = (LogicalKeyboardKey.keyR, PhysicalKeyboardKey.keyR);
++const Key2 kM = (LogicalKeyboardKey.keyM, PhysicalKeyboardKey.keyM);
++const Key2 kW = (LogicalKeyboardKey.keyW, PhysicalKeyboardKey.keyW);
++const Key2 kZ = (LogicalKeyboardKey.keyZ, PhysicalKeyboardKey.keyZ);
++const Key2 kF = (LogicalKeyboardKey.keyF, PhysicalKeyboardKey.keyF);
++const Key2 kF3 = (LogicalKeyboardKey.f3, PhysicalKeyboardKey.f3);
++const Key2 kEsc = (LogicalKeyboardKey.escape, PhysicalKeyboardKey.escape);
++const Key2 kShift =
++    (LogicalKeyboardKey.shiftLeft, PhysicalKeyboardKey.shiftLeft);
++const Key2 kCtrl =
++    (LogicalKeyboardKey.controlLeft, PhysicalKeyboardKey.controlLeft);
++const Key2 kMeta = (LogicalKeyboardKey.metaLeft, PhysicalKeyboardKey.metaLeft);
++const Key2 kAlt = (LogicalKeyboardKey.altLeft, PhysicalKeyboardKey.altLeft);
++
++KeyEvent keyDown(Key2 k) =>
++    KeyDownEvent(logicalKey: k.$1, physicalKey: k.$2, timeStamp: Duration.zero);
++
++/// Runs [body] with [modifiers] held in `HardwareKeyboard.instance`, which
++/// the tool reads (as `PlacementTool._hasModifier` does).
++T holding<T>(List<Key2> modifiers, T Function() body) {
++  final hw = HardwareKeyboard.instance;
++  for (final k in modifiers) {
++    hw.handleKeyEvent(keyDown(k));
++  }
++  try {
++    return body();
++  } finally {
++    for (final k in modifiers) {
++      hw.handleKeyEvent(KeyUpEvent(
++          logicalKey: k.$1, physicalKey: k.$2, timeStamp: Duration.zero));
++    }
++  }
++}
++
++extension on Rig {
++  KeyEventResult key(Key2 k, {List<Key2> held = const []}) =>
++      holding(held, () => tool.onKey(keyDown(k), ctx));
++
++  KeyEventResult repeat(Key2 k) => tool.onKey(
++      KeyRepeatEvent(
++          logicalKey: k.$1, physicalKey: k.$2, timeStamp: Duration.zero),
++      ctx);
++
++  /// One full placement: a press at [a], a drag, a release at [b].
++  void place(Vector2 a, Vector2 b) {
++    down(a);
++    drag(pMid);
++    up(b);
++  }
++
++  /// The newest instance's transform must be exactly the independently
++  /// computed placement of the chair at the snapped [b].
++  void expectPlaced(Vector2 b, int turns, bool mirrored, String reason) {
++    final t = instances.last.transform;
++    final want = placementTransform(
++        at: gridOf(b),
++        basePoint: chair.entry.definition.basePoint,
++        quarterTurns: turns,
++        mirrored: mirrored);
++    expect([
++      t.a,
++      t.b,
++      t.c,
++      t.d,
++      t.e,
++      t.f
++    ], [
++      want.a,
++      want.b,
++      want.c,
++      want.d,
++      want.e,
++      want.f
++    ], reason: reason);
++  }
++}
++
++/// [t]'s linear part.
++List<double> linear(Transform2 t) => [t.a, t.b, t.c, t.d];
++
++final class _ServicesStub implements PlanServices {
++  @override
++  dynamic noSuchMethod(Invocation invocation) =>
++      throw StateError('a provider factory read the services');
++}
++
++List<double> partsOf(Transform2 t) => [t.a, t.b, t.c, t.d, t.e, t.f];
++
++void main() {
++  // The tool reads HardwareKeyboard.instance (F-12, `_hasModifier`), which
++  // needs a bound ServicesBinding even in plain unit tests.
++  TestWidgetsFlutterBinding.ensureInitialized();
++
++  test('the fixtures are not degenerate', () {
++    for (final e in [chair, toilet]) {
++      final b = e.entry.definition.basePoint;
++      expect(b.x != 0 || b.y != 0, isTrue,
++          reason: '${e.component.key} base point');
++    }
++    for (final p in [pA, pMid, pB, pC]) {
++      expect(gridOf(p) == p, isFalse, reason: 'the grid moves $p');
++      expect(p.distanceTo(e0), greaterThan(kSnapAperturePixels / scale * 3));
++    }
++    expect(gridOf(pA) == gridOf(pB), isFalse);
++    expect(gridOf(e0) == e0, isFalse, reason: 'E is off the grid');
++    final rig = Rig();
++    expect(rig.camera.value.scale, closeTo(scale, 1e-15));
++  });
++
++  group('pointer', () {
++    test('a release places at the snapped release point, not the press', () {
++      final rig = Rig();
++      rig.hover(pA);
++      rig.down(pA);
++      expect(rig.instances, isEmpty, reason: 'nothing before the release');
++      // The up arrives at a point no move reported.
++      rig.up(pB);
++      final placed = rig.instances.single;
++      expectAt(rig.placedAt(placed), gridOf(pB), 'at the release');
++      expect(rig.placedAt(placed) == gridOf(pA), isFalse);
++      final t = placed.transform;
++      expect([t.a, t.b, t.c, t.d], [1.0, 0.0, 0.0, 1.0]);
++      expect(rig.document.commands.undoDepth, 1);
++    });
++
++    test('touch: a press, a move and a release with no hover place', () {
++      final rig = Rig();
++      expect(rig.tool.ghostVisible, isFalse, reason: 'no hover, no ghost');
++      rig.down(pA, pointer: 21);
++      expect(rig.tool.ghostVisible, isTrue, reason: 'shown at the press');
++      expectAt(rig.tool.ghostAt, gridOf(pA), 'the ghost at the press');
++      rig.drag(pMid, pointer: 21);
++      expectAt(rig.tool.ghostAt, gridOf(pMid), 'the ghost follows');
++      rig.drag(pB, pointer: 21);
++      expect(rig.instances, isEmpty, reason: 'nothing before the release');
++      rig.up(pB, pointer: 21);
++      expectAt(rig.placedAt(rig.instances.single), gridOf(pB), 'placed');
++    });
++
++    test('isMidShape is true between press and release, and notifies', () {
++      final rig = Rig();
++      rig.hover(pA);
++      expect(rig.tool.isMidShape, isFalse);
++      rig.notifications.clear();
++      rig.down(pA);
++      expect(rig.tool.isMidShape, isTrue);
++      expect(rig.notifications, [true]);
++      rig.drag(pB);
++      expect(rig.tool.isMidShape, isTrue);
++      rig.up(pB);
++      expect(rig.tool.isMidShape, isFalse);
++      expect(rig.notifications.last, isFalse);
++      expect(rig.instances, hasLength(1));
++    });
++
++    test(
++        'a pointer cancel drops the press: its moves are ignored and its up '
++        'places nothing; the next press places', () {
++      final rig = Rig();
++      rig.down(pA);
++      rig.drag(pMid);
++      rig.tool.cancel(rig.ctx);
++      expect(rig.tool.isMidShape, isFalse);
++      expect(rig.tool.ghostVisible, isFalse, reason: 'hidden on cancel');
++      rig.drag(pB);
++      expect(rig.tool.ghostVisible, isFalse,
++          reason: 'the cancelled press moves no ghost');
++      rig.up(pB);
++      expect(rig.instances, isEmpty);
++      expect(rig.document.commands.undoDepth, 0);
++      rig.hover(pC);
++      expect(rig.tool.ghostVisible, isTrue, reason: 'a hover shows it again');
++      rig.down(pC, pointer: 8);
++      rig.up(pC, pointer: 8);
++      expectAt(rig.placedAt(rig.instances.single), gridOf(pC), 'next press');
++    });
++
++    test('a secondary press does nothing; idle (nothing armed) is inert', () {
++      final rig = Rig();
++      rig.tool.onPointerDown(rig.at(pA, buttons: kSecondaryButton), rig.ctx);
++      expect(rig.tool.isMidShape, isFalse);
++      rig.up(pA);
++      expect(rig.instances, isEmpty);
++      expect(rig.tool.cursor, SystemMouseCursors.precise);
++
++      rig.armed.value = null;
++      rig.notifications.clear();
++      rig.hover(pA);
++      rig.down(pA);
++      rig.up(pA);
++      expect(rig.notifications, isEmpty);
++      expect(rig.instances, isEmpty);
++      expect(rig.tool.ghostVisible, isFalse);
++      expect(rig.tool.cursor, MouseCursor.defer);
++      final canvas = RecordingCanvas();
++      rig.tool.paintWorldOverlay(canvas, origin, scale, PaperPalette.light);
++      rig.tool.paintOverlay(canvas, rig.camera.value, const ui.Size(800, 600),
++          PaperPalette.light);
++      expect(canvas.calls, isEmpty);
++    });
++
++    test(
++        'it stays armed; one undo step per placement; a second placement '
++        'reuses the definition', () {
++      final rig = Rig();
++      rig.down(pA);
++      rig.up(pA);
++      rig.hover(pC);
++      rig.down(pC);
++      rig.up(pC);
++      expect(rig.armed.value, same(chair));
++      expect(rig.tool.ghostVisible, isTrue);
++      final placed = rig.instances;
++      expect(placed, hasLength(2));
++      expectAt(rig.placedAt(placed[0]), gridOf(pA), 'first');
++      expectAt(rig.placedAt(placed[1]), gridOf(pC), 'second');
++      expect(rig.symbolDefinitions, hasLength(1));
++      expect(placed[1].definition, placed[0].definition);
++      expect(rig.selection.isEmpty, isTrue, reason: 'not selected');
++      expect(rig.document.commands.undoDepth, 2);
++      rig.document.commands.undo();
++      expect(rig.instances.single.handle, placed[0].handle);
++      expect(rig.symbolDefinitions, hasLength(1));
++      rig.document.commands.undo();
++      expect(rig.instances, isEmpty);
++      expect(rig.symbolDefinitions, isEmpty);
++    });
++
++    test(
++        're-arming notifies, drops the press and swaps the ghost path; '
++        'the next placement is the new symbol', () {
++      final rig = Rig();
++      rig.down(pA);
++      expect(rig.tool.ghostPath, same(ghostPathFor(chair.entry)));
++      rig.notifications.clear();
++      rig.armed.value = toilet;
++      expect(rig.notifications, [false]);
++      expect(rig.tool.ghostPath, same(ghostPathFor(toilet.entry)));
++      rig.up(pA);
++      expect(rig.instances, isEmpty, reason: 'the old press places nothing');
++      rig.down(pB, pointer: 9);
++      rig.up(pB, pointer: 9);
++      final def = rig.instances.single.definition;
++      expect(rig.document.components.get<SymbolComponent>(def)!.key,
++          toilet.component.key);
++    });
++
++    test('dispose removes the armed listener', () {
++      final rig = Rig();
++      expect(rig.armed.listeners, 1);
++      rig.tool.dispose();
++      rig.disposed = true;
++      expect(rig.armed.listeners, 0);
++      expect(() => rig.armed.value = toilet, returnsNormally);
++    });
++  });
++
++  group('snap', () {
++    test('with object snap off (F3), a release near E lands on the grid', () {
++      final rig = Rig(objectSnap: false);
++      final near = e0 + Vector2(60, -45);
++      rig.hover(near);
++      rig.down(near);
++      rig.up(near);
++      final placed = rig.placedAt(rig.instances.single);
++      expectAt(placed, gridOf(near), 'the grid point');
++      expect(placed == e0, isFalse, reason: 'not the endpoint');
++      expect(placed == near, isFalse, reason: 'not the raw point');
++    });
++
++    test(
++        'with no fixed grid step, a release lands on the zoom-adaptive step '
++        'of dragGridStepMm', () {
++      final rig = Rig(step: null);
++      final page = rig.pages.value!;
++      expect(page.gridStepMm, isNull);
++      final step = dragGridStepMm(page, scale)!;
++      expect(step, isNot(gridStep), reason: 'the adaptive step is not 25');
++      Vector2 adaptive(Vector2 p) => Vector2(
++          gridOriginX + ((p.x - gridOriginX) / step).roundToDouble() * step,
++          gridOriginY + ((p.y - gridOriginY) / step).roundToDouble() * step);
++      final want = adaptive(pB);
++      expect(want == pB, isFalse, reason: 'the grid moves the raw point');
++      expect(want == gridOf(pB), isFalse, reason: 'not the 25 mm grid');
++      rig.hover(pA);
++      rig.down(pA);
++      rig.up(pB);
++      expectAt(rig.placedAt(rig.instances.single), want, 'the adaptive grid');
++    });
++
++    test(
++        'a release within 10 px (not 10 mm) of an endpoint places on it; '
++        'beyond the aperture, on the grid', () {
++      final rig = Rig();
++      // 75 mm from E: 3.75 px, inside the 200 mm aperture, outside 10 mm.
++      final near = e0 + Vector2(60, -45);
++      // 234 mm from E: 11.7 px, outside the aperture.
++      final far = e0 + Vector2(-180, 150);
++      // Hovered first: once a symbol is placed, its own leaves snap too.
++      rig.hover(far);
++      expectAt(rig.tool.ghostAt, gridOf(far), 'beyond the aperture: grid');
++      rig.hover(near);
++      expectAt(rig.tool.ghostAt, e0, 'the ghost snaps to E');
++      rig.down(near);
++      rig.up(near);
++      final first = rig.placedAt(rig.instances.single);
++      expectAt(first, e0, 'placed on E');
++      expect(first == near, isFalse);
++      expect(first == gridOf(near), isFalse);
++    });
++
++    test('the snap marker is drawn in screen space at the snapped point', () {
++      final rig = Rig();
++      rig.hover(e0 + Vector2(60, -45));
++      final canvas = RecordingCanvas();
++      rig.tool.paintOverlay(canvas, rig.camera.value, const ui.Size(800, 600),
++          PaperPalette.light);
++      final rect =
++          canvas.named('drawRect').single.positionalArguments[0] as ui.Rect;
++      final s = rig.camera.value.worldToScreen(e0);
++      expect(rect.center.dx, closeTo(s.x, 1e-9));
++      expect(rect.center.dy, closeTo(s.y, 1e-9));
++    });
++  });
++
++  group('the ghost', () {
++    test(
++        'paints the cached path under translate(−origin) ∘ P, at the preview '
++        'stroke, with a cross at the local base point', () {
++      final rig = Rig();
++      rig.hover(pB);
++      final canvas = RecordingCanvas();
++      rig.tool.paintWorldOverlay(canvas, origin, scale, PaperPalette.light);
++      expect(canvas.calls.map((c) => c.memberName), [
++        #save,
++        #transform,
++        #drawPath,
++        #drawLine,
++        #drawLine,
++        #restore,
++      ]);
++      final m = canvas.named('transform').single.positionalArguments[0]
++          as Float64List;
++      final b = chair.entry.definition.basePoint;
++      final want = gridOf(pB);
++      final (x, y) = apply(m, b.x, b.y);
++      expect(x, closeTo(want.x - origin.x, 1e-9));
++      expect(y, closeTo(want.y - origin.y, 1e-9));
++      final draw = canvas.named('drawPath').single.positionalArguments;
++      expect(draw[0], same(ghostPathFor(chair.entry)));
++      final paint = draw[1] as ui.Paint;
++      expect(paint.strokeWidth, closeTo(kPreviewStrokePixels / scale, 1e-12));
++      expect(paint.color.toARGB32(), PaperPalette.light.preview.toARGB32());
++      expect(paint.style, ui.PaintingStyle.stroke);
++      const k = kGhostCrossPixels / scale;
++      final lines = canvas.named('drawLine').toList();
++      expect([lines[0].positionalArguments[0], lines[0].positionalArguments[1]],
++          [ui.Offset(b.x - k, b.y), ui.Offset(b.x + k, b.y)]);
++      expect([lines[1].positionalArguments[0], lines[1].positionalArguments[1]],
++          [ui.Offset(b.x, b.y - k), ui.Offset(b.x, b.y + k)]);
++    });
++
++    test('a second paint reuses the path, the matrix storage and the paint',
++        () {
++      final rig = Rig();
++      rig.hover(pA);
++      final first = RecordingCanvas();
++      rig.tool.paintWorldOverlay(first, origin, scale, PaperPalette.light);
++      rig.hover(pC);
++      final second = RecordingCanvas();
++      rig.tool.paintWorldOverlay(second, origin, scale, PaperPalette.light);
++      Object? arg(RecordingCanvas c, String name, int i) =>
++          c.named(name).single.positionalArguments[i];
++      expect(arg(second, 'drawPath', 0), same(arg(first, 'drawPath', 0)));
++      expect(arg(second, 'drawPath', 1), same(arg(first, 'drawPath', 1)));
++      expect(arg(second, 'transform', 0), same(arg(first, 'transform', 0)));
++      expect(rig.tool.ghostPath, same(ghostPathFor(chair.entry)));
++      // The reused storage now holds the second placement.
++      final m = arg(second, 'transform', 0) as Float64List;
++      final b = chair.entry.definition.basePoint;
++      final (x, y) = apply(m, b.x, b.y);
++      expect(x, closeTo(gridOf(pC).x - origin.x, 1e-9));
++      expect(y, closeTo(gridOf(pC).y - origin.y, 1e-9));
++    });
++
++    test(
++        'the placement is computed on events, never in a paint (spec D5, '
++        'W-15): hover, R, M and a re-arm each set it; repeated paints pass '
++        'the stored transform and compute nothing', () {
++      final rig = Rig();
++      Transform2 want(PlanSymbol e, Vector2 p, int turns, bool mirrored) =>
++          placementTransform(
++              at: gridOf(p),
++              basePoint: e.entry.definition.basePoint,
++              quarterTurns: turns,
++              mirrored: mirrored);
++      void paints(int n) {
++        for (var i = 0; i < n; i++) {
++          rig.tool.paintWorldOverlay(
++              RecordingCanvas(), origin, scale, PaperPalette.light);
++        }
++      }
++
++      final matrix = rig.tool.ghostMatrix;
++      rig.hover(pB);
++      expect(
++          rig.tool.ghostPlacement!.toJson(), want(chair, pB, 0, false).toJson(),
++          reason: 'set by the hover, before any paint');
++      expect(matrix.computations, 0, reason: 'no paint yet');
++      paints(3);
++      expect(matrix.computations, 1);
++      expect(identical(matrix.placement, rig.tool.ghostPlacement), isTrue,
++          reason: 'the paint passed the stored transform');
++
++      rig.key(kR);
++      expect(
++          rig.tool.ghostPlacement!.toJson(), want(chair, pB, 1, false).toJson(),
++          reason: 'R with no pointer move');
++      paints(2);
++      expect(matrix.computations, 2);
++      expect(identical(matrix.placement, rig.tool.ghostPlacement), isTrue);
++
++      rig.key(kM);
++      expect(
++          rig.tool.ghostPlacement!.toJson(), want(chair, pB, 1, true).toJson(),
++          reason: 'M with no pointer move');
++      paints(2);
++      expect(matrix.computations, 3);
++      final m = rig.tool.ghostMatrix.storage;
++      // q=1 mirrored: local +x to −y, local +y to −x.
++      expect([m[0], m[1], m[4], m[5]], [0.0, -1.0, -1.0, 0.0]);
++
++      rig.armed.value = toilet;
++      expect(
++          rig.tool.ghostPlacement!.toJson(), want(toilet, pB, 1, true).toJson(),
++          reason: 're-armed: the new base point');
++      paints(2);
++      expect(matrix.computations, 4);
++      final tb = toilet.entry.definition.basePoint;
++      final (x, y) = apply(rig.tool.ghostMatrix.forOrigin(origin), tb.x, tb.y);
++      expect(x, closeTo(gridOf(pB).x - origin.x, 1e-9));
++      expect(y, closeTo(gridOf(pB).y - origin.y, 1e-9));
++
++      rig.hover(pC);
++      expect(rig.tool.ghostPlacement!.toJson(),
++          want(toilet, pC, 1, true).toJson());
++      paints(1);
++      expect(matrix.computations, 5);
++    });
++
++    test(
++        'touch: the press and the release each set the placement (spec D5, '
++        'F-6): with no hover the ghost is drawn at the press, and after a '
++        'release away from the drag it sits at the release point', () {
++      final rig = Rig();
++      Transform2 want(Vector2 p) => placementTransform(
++          at: gridOf(p),
++          basePoint: chair.entry.definition.basePoint,
++          quarterTurns: 3,
++          mirrored: true);
++      List<double> bytes(Transform2? t) =>
++          t == null ? const [] : [t.a, t.b, t.c, t.d, t.e, t.f];
++      void paintOnce() => rig.tool.paintWorldOverlay(
++          RecordingCanvas(), origin, scale, PaperPalette.light);
++      final matrix = rig.tool.ghostMatrix;
++      final b = chair.entry.definition.basePoint;
++
++      // Turned clockwise and mirrored, armed idle, before any pointer event.
++      rig.key(kR, held: [kShift]);
++      rig.key(kM);
++      expect(rig.tool.ghostVisible, isFalse, reason: 'no hover, no ghost');
++
++      rig.down(pA, pointer: 21);
++      expect(bytes(rig.tool.ghostPlacement), bytes(want(pA)),
++          reason: 'set by the press, with no hover');
++      paintOnce();
++      expect(matrix.computations, 1, reason: 'one paint computes once');
++      expect(identical(matrix.placement, rig.tool.ghostPlacement), isTrue);
++      var (x, y) = apply(matrix.storage, b.x, b.y);
++      expect(x, closeTo(gridOf(pA).x - origin.x, 1e-9));
++      expect(y, closeTo(gridOf(pA).y - origin.y, 1e-9));
++      // q=3 mirrored: local +x to +y, local +y to +x.
++      expect([matrix.storage[0], matrix.storage[1]], [0.0, 1.0]);
++      expect([matrix.storage[4], matrix.storage[5]], [1.0, 0.0]);
++
++      rig.drag(pMid, pointer: 21);
++      expect(bytes(rig.tool.ghostPlacement), bytes(want(pMid)));
++      paintOnce();
++      expect(matrix.computations, 2);
++
++      // The up arrives at a point no move reported.
++      rig.up(pB, pointer: 21);
++      expect(bytes(rig.tool.ghostPlacement), bytes(want(pB)),
++          reason: 'set by the release, not left at the drag');
++      expect(bytes(rig.instances.single.transform), bytes(want(pB)),
++          reason: 'the ghost sits where the instance landed');
++      paintOnce();
++      expect(matrix.computations, 3);
++      expect(identical(matrix.placement, rig.tool.ghostPlacement), isTrue);
++      (x, y) = apply(matrix.storage, b.x, b.y);
++      expect(x, closeTo(gridOf(pB).x - origin.x, 1e-9));
++      expect(y, closeTo(gridOf(pB).y - origin.y, 1e-9));
++    });
++
++    test('hides on pointer exit and on cancel', () {
++      final rig = Rig();
++      rig.hover(pA);
++      expect(rig.tool.ghostVisible, isTrue);
++      rig.notifications.clear();
++      rig.tool.onPointerExit(rig.ctx);
++      expect(rig.tool.ghostVisible, isFalse);
++      expect(rig.notifications, hasLength(1), reason: 'the overlay repaints');
++      var canvas = RecordingCanvas();
++      rig.tool.paintWorldOverlay(canvas, origin, scale, PaperPalette.light);
++      rig.tool.paintOverlay(canvas, rig.camera.value, const ui.Size(800, 600),
++          PaperPalette.light);
++      expect(canvas.calls, isEmpty);
++
++      rig.hover(pB);
++      rig.tool.cancel(rig.ctx);
++      expect(rig.tool.ghostVisible, isFalse);
++      canvas = RecordingCanvas();
++      rig.tool.paintWorldOverlay(canvas, origin, scale, PaperPalette.light);
++      rig.tool.paintOverlay(canvas, rig.camera.value, const ui.Size(800, 600),
++          PaperPalette.light);
++      expect(canvas.calls, isEmpty);
++    });
++  });
++
++  group('keys', () {
++    test('the eight placements are distinct: each turn and mirror is seen', () {
++      final b = chair.entry.definition.basePoint;
++      final seen = <String>{};
++      for (final m in [false, true]) {
++        for (var q = 0; q < 4; q++) {
++          seen.add(linear(placementTransform(
++                  at: gridOf(pB), basePoint: b, quarterTurns: q, mirrored: m))
++              .join(','));
++        }
++      }
++      expect(seen, hasLength(8));
++    });
++
++    test('R turns the next placement one quarter turn counter-clockwise', () {
++      final rig = Rig();
++      rig.hover(pA);
++      rig.notifications.clear();
++      expect(rig.key(kR), KeyEventResult.handled);
++      expect(rig.tool.quarterTurns, 1);
++      expect(rig.notifications, [false], reason: 'the ghost repaints');
++      rig.place(pA, pB);
++      rig.expectPlaced(pB, 1, false, 'one counter-clockwise quarter turn');
++      // Counter-clockwise: the local x axis maps to world +y.
++      expect(linear(rig.instances.single.transform), [0.0, 1.0, -1.0, 0.0]);
++    });
++
++    test('Shift+R turns it clockwise', () {
++      final rig = Rig();
++      expect(rig.key(kR, held: [kShift]), KeyEventResult.handled);
++      expect(rig.tool.quarterTurns, 3);
++      rig.place(pA, pB);
++      rig.expectPlaced(pB, -1, false, 'one clockwise quarter turn');
++      expect(linear(rig.instances.single.transform), [0.0, -1.0, 1.0, 0.0]);
++    });
++
++    test('M toggles the mirror', () {
++      final rig = Rig();
++      expect(rig.key(kM), KeyEventResult.handled);
++      expect(rig.tool.mirrored, isTrue);
++      rig.place(pA, pB);
++      rig.expectPlaced(pB, 0, true, 'mirrored');
++      expect(rig.key(kM), KeyEventResult.handled);
++      expect(rig.tool.mirrored, isFalse);
++      rig.place(pA, pC);
++      rig.expectPlaced(pC, 0, false, 'M again: not mirrored');
++    });
++
++    test('keys compose (R, R, M) and work mid-press; the tool keeps them', () {
++      final rig = Rig();
++      rig.key(kR);
++      rig.key(kR);
++      rig.key(kM);
++      rig.place(pA, pB);
++      rig.expectPlaced(pB, 2, true, 'R, R, M');
++      // Mid-press: a Shift+R between the press and the release.
++      rig.down(pA);
++      rig.notifications.clear();
++      expect(rig.key(kR, held: [kShift]), KeyEventResult.handled);
++      expect(rig.notifications, [true], reason: 'repaints mid-press');
++      expect(rig.tool.isMidShape, isTrue, reason: 'the press is kept');
++      rig.drag(pMid);
++      rig.up(pC);
++      rig.expectPlaced(pC, 1, true, 'R, R, M, Shift+R');
++      // Mid-press R from the identity: the turn applies to this placement.
++      rig.key(kM);
++      rig.key(kR);
++      rig.down(pA);
++      rig.key(kR);
++      rig.up(pB);
++      expect(rig.instances, hasLength(3));
++      rig.expectPlaced(pB, 3, false, 'R mid-press');
++      expect(rig.document.commands.undoDepth, 3);
++    });
++
++    test('Ctrl, Meta or Alt with R or M is ignored and changes nothing', () {
++      final rig = Rig();
++      rig.hover(pA);
++      rig.notifications.clear();
++      for (final (k, held) in [
++        (kR, [kCtrl]),
++        (kR, [kMeta]),
++        (kR, [kAlt]),
++        (kR, [kCtrl, kShift]),
++        (kM, [kCtrl]),
++        (kM, [kMeta]),
++        (kM, [kAlt]),
++      ]) {
++        expect(rig.key(k, held: held), KeyEventResult.ignored,
++            reason: '${held.map((h) => h.$1.keyLabel)} + ${k.$1.keyLabel}');
++      }
++      expect(rig.tool.quarterTurns, 0);
++      expect(rig.tool.mirrored, isFalse);
++      expect(rig.notifications, isEmpty);
++      rig.place(pA, pB);
++      rig.expectPlaced(pB, 0, false, 'no turn, no mirror');
++    });
++
++    test('a key repeat is consumed with no effect', () {
++      final rig = Rig();
++      rig.key(kR);
++      rig.notifications.clear();
++      expect(rig.repeat(kR), KeyEventResult.handled);
++      expect(rig.repeat(kR), KeyEventResult.handled);
++      expect(rig.repeat(kM), KeyEventResult.handled);
++      expect(rig.tool.quarterTurns, 1);
++      expect(rig.tool.mirrored, isFalse);
++      expect(rig.notifications, isEmpty);
++      rig.place(pA, pB);
++      rig.expectPlaced(pB, 1, false, 'one step for one key-down');
++    });
++
++    test('Esc mid-press cancels: the remaining moves and the up place nothing',
++        () {
++      final rig = Rig();
++      rig.key(kR);
++      final seed = rig.document.handleSeed.current;
++      rig.down(pA);
++      expect(rig.key(kEsc), KeyEventResult.handled);
++      expect(rig.tool.isMidShape, isFalse);
++      rig.drag(pMid);
++      rig.drag(pC);
++      expectAt(rig.tool.ghostAt, gridOf(pA), 'the moves are ignored');
++      rig.up(pB);
++      expect(rig.instances, isEmpty);
++      expect(rig.document.handleSeed.current, seed);
++      expect(rig.document.commands.undoDepth, 0);
++      // The next press places, still turned.
++      rig.place(pA, pC);
++      rig.expectPlaced(pC, 1, false, 'the next press places');
++    });
++
++    test('mid-press F and F3 bubble; W, Z, Ctrl+Z and Ctrl+F are swallowed',
++        () {
++      final rig = Rig();
++      rig.down(pA);
++      expect(rig.key(kF), KeyEventResult.ignored);
++      expect(rig.key(kF3), KeyEventResult.ignored);
++      expect(rig.key(kW), KeyEventResult.handled);
++      expect(rig.key(kZ), KeyEventResult.handled);
++      expect(rig.key(kZ, held: [kCtrl]), KeyEventResult.handled);
++      expect(rig.key(kZ, held: [kMeta]), KeyEventResult.handled);
++      expect(rig.key(kF, held: [kCtrl]), KeyEventResult.handled);
++      expect(rig.repeat(kW), KeyEventResult.handled);
++      expect(rig.tool.isMidShape, isTrue, reason: 'still pressed');
++      rig.up(pB);
++      rig.expectPlaced(pB, 0, false, 'the press still places');
++    });
++
++    test('armed, not pressed: every key but R and M bubbles', () {
++      final rig = Rig();
++      rig.hover(pA);
++      for (final k in [kW, kEsc, kF, kF3, kZ]) {
++        expect(rig.key(k), KeyEventResult.ignored, reason: k.$1.keyLabel);
++      }
++      expect(rig.key(kZ, held: [kCtrl]), KeyEventResult.ignored);
++      expect(rig.key(kZ, held: [kMeta, kShift]), KeyEventResult.ignored);
++      expect(rig.tool.ghostVisible, isTrue, reason: 'Esc is the shell\'s');
++      expect(
++          rig.tool.onKey(
++              KeyUpEvent(
++                  logicalKey: kR.$1,
++                  physicalKey: kR.$2,
++                  timeStamp: Duration.zero),
++              rig.ctx),
++          KeyEventResult.ignored);
++    });
++
++    test('idle (nothing armed) every key bubbles and changes nothing', () {
++      final rig = Rig();
++      rig.armed.value = null;
++      rig.notifications.clear();
++      for (final k in [kR, kM, kW, kEsc]) {
++        expect(rig.key(k), KeyEventResult.ignored, reason: k.$1.keyLabel);
++      }
++      expect(rig.tool.quarterTurns, 0);
++      expect(rig.tool.mirrored, isFalse);
++      expect(rig.notifications, isEmpty);
++    });
++  });
++
++  group('permissions', () {
++    const all = DraftPermissions.all;
++    DraftPermissions denying(Capability c) => DraftPermissions(
++        transform: true,
++        components: c != Capability.components,
++        geometry: c != Capability.geometry,
++        structure: c != Capability.structure);
++
++    for (final denied in [
++      Capability.structure,
++      Capability.geometry,
++      Capability.components,
++    ]) {
++      test(
++          'a denied ${denied.name} allocates nothing and throws nothing; '
++          'lifted, the next placement happens', () {
++        final rig = Rig();
++        rig.key(kR);
++        rig.key(kM);
++        rig.document.commands.permissions = denying(denied);
++        final seed = rig.document.handleSeed.current;
++        rig.place(pA, pB);
++        expect(rig.document.handleSeed.current, seed,
++            reason: 'no handle allocated');
++        expect(rig.instances, isEmpty);
++        expect(rig.symbolDefinitions, isEmpty);
++        expect(rig.document.commands.undoDepth, 0);
++        expect(rig.tool.isMidShape, isFalse);
++        rig.document.commands.permissions = all;
++        rig.place(pA, pB);
++        rig.expectPlaced(pB, 1, true, 'placed once allowed');
++        expect(rig.document.commands.undoDepth, 1);
++      });
++    }
++  });
++
++  testWidgets(
++      'SP-T1 a finger held on the canvas presses after the hold-back, and '
++      'places on its lift (press mode, spec 14t R-1, review F-3)',
++      (tester) async {
++    final rig = Rig();
++    final tools = ToolController(initial: rig.tool, context: rig.ctx);
++    addTearDown(tools.dispose);
++    addTearDown(() => tester.pumpWidget(const SizedBox.shrink()));
++    await tester.pumpWidget(Directionality(
++        textDirection: TextDirection.ltr,
++        child: Align(
++            alignment: Alignment.topLeft,
++            child: SizedBox(
++                width: 800,
++                height: 600,
++                child: InteractionLayer(
++                    tools: tools, child: const SizedBox.expand())))));
++    final s = rig.camera.value.worldToScreen(pA);
++    final g = await tester.startGesture(ui.Offset(s.x, s.y),
++        pointer: 41, kind: ui.PointerDeviceKind.touch);
++    await tester.pump(const Duration(milliseconds: 150));
++    expect(rig.tool.isMidShape, isTrue, reason: 'pressed, not yet placed');
++    expect(rig.tool.ghostVisible, isTrue);
++    expect(rig.instances, isEmpty);
++    await g.up();
++    expect(rig.instances, hasLength(1));
++  });
++
++  group('the camera (spec 09c D12)', () {
++    /// A zoom focus far from every pointer the tests rest at, so the world
++    /// point under the pointer moves.
++    const focus = ui.Offset(90, 520);
++
++    Vector2 under(Rig rig, ui.Offset s) =>
++        rig.camera.value.screenToWorld(Vector2(s.dx, s.dy));
++
++    /// A zoom by [factor] about [focus] moves the ghost to the resolved world
++    /// point now under the resting pointer [s], and repaints once.
++    void expectFollows(Rig rig, ui.Offset s, double factor, String reason) {
++      final before = rig.tool.ghostAt.clone();
++      rig.notifications.clear();
++      rig.camera.zoomAt(focus, factor);
++      final w = under(rig, s);
++      expect(w.distanceTo(e0),
++          greaterThan(kSnapAperturePixels / rig.camera.value.scale),
++          reason: '$reason: E is outside the aperture');
++      expect(gridOf(w) == before, isFalse,
++          reason: '$reason: the zoom moves the point under the pointer');
++      expectAt(rig.tool.ghostAt, gridOf(w), reason);
++      expect(rig.notifications, [rig.tool.isMidShape],
++          reason: '$reason: one repaint');
++    }
++
++    /// A camera change does nothing: the ghost's point and placement stay,
++    /// nothing is notified, nothing throws.
++    void expectInert(Rig rig, String reason) {
++      final at = rig.tool.ghostAt.clone();
++      final placement = rig.tool.ghostPlacement;
++      rig.notifications.clear();
++      expect(() => rig.camera.zoomAt(focus, 1.7), returnsNormally,
++          reason: reason);
++      expect(() => rig.camera.panBy(const ui.Offset(-37.5, 61.25)),
++          returnsNormally,
++          reason: reason);
++      expectAt(rig.tool.ghostAt, at, reason);
++      expect(rig.tool.ghostPlacement, same(placement), reason: reason);
++      expect(rig.notifications, isEmpty, reason: '$reason: no repaint');
++    }
++
++    test(
++        'a zoom about another point moves the ghost and its placement to the '
++        'world point now under the pointer; a pan too', () {
++      final rig = Rig();
++      rig.key(kR);
++      rig.key(kM);
++      rig.hover(pA);
++      final s = rig.at(pA).screen;
++      expectAt(rig.tool.ghostAt, gridOf(pA), 'the hover');
++      rig.notifications.clear();
++      rig.camera.zoomAt(focus, 1.7);
++      expect(rig.camera.value.scale, closeTo(scale * 1.7, 1e-12));
++      final w = under(rig, s);
++      expect(w.distanceTo(pA), greaterThan(1000),
++          reason: 'the zoom is not about the pointer');
++      expect(w.distanceTo(e0),
++          greaterThan(kSnapAperturePixels / rig.camera.value.scale),
++          reason: 'E is outside the aperture');
++      expectAt(rig.tool.ghostAt, gridOf(w), 'the zoom');
++      expect(rig.notifications, [false], reason: 'one repaint');
++      final want = placementTransform(
++          at: gridOf(w),
++          basePoint: chair.entry.definition.basePoint,
++          quarterTurns: 1,
++          mirrored: true);
++      final t = rig.tool.ghostPlacement!;
++      expect([
++        t.a,
++        t.b,
++        t.c,
++        t.d,
++        t.e,
++        t.f
++      ], [
++        want.a,
++        want.b,
++        want.c,
++        want.d,
++        want.e,
++        want.f
++      ], reason: 'the placement follows, turned and mirrored');
++
++      rig.notifications.clear();
++      rig.camera.panBy(const ui.Offset(-37.5, 61.25));
++      expectAt(rig.tool.ghostAt, gridOf(under(rig, s)), 'the pan');
++      expect(rig.notifications, [false]);
++      // Mid-press, the ghost follows as well; the release places where the
++      // up lands.
++      rig.down(pB);
++      expectFollows(rig, rig.at(pB).screen, 0.6, 'mid-press');
++      final p = under(rig, rig.at(pB).screen);
++      rig.up(p);
++      expectAt(rig.placedAt(rig.instances.single), gridOf(p), 'placed');
++    });
++
++    test(
++        'one camera listener while the ghost is shown, however many events; '
++        'none before the first pointer event', () {
++      final rig = Rig();
++      expect(rig.camera.listeners, 0, reason: 'armed, no pointer yet');
++      rig.hover(pA);
++      rig.hover(pB);
++      rig.down(pB);
++      rig.drag(pMid);
++      rig.up(pC);
++      rig.hover(pA);
++      expect(rig.camera.listeners, 1);
++      rig.armed.value = toilet;
++      expect(rig.camera.listeners, 1, reason: 're-armed while shown');
++      rig.hover(pB);
++      expect(rig.camera.listeners, 1);
++    });
++
++    test(
++        'after the ghost hides (pointer exit) a camera change does nothing; '
++        'a hover listens again', () {
++      final rig = Rig();
++      rig.hover(pA);
++      rig.tool.onPointerExit(rig.ctx);
++      expect(rig.camera.listeners, 0);
++      expectInert(rig, 'hidden');
++      // A re-arm while hidden does not listen: the ghost stays hidden.
++      rig.armed.value = null;
++      rig.armed.value = toilet;
++      expect(rig.camera.listeners, 0, reason: 're-armed while hidden');
++      expectInert(rig, 're-armed while hidden');
++      rig.hover(pB);
++      expect(rig.camera.listeners, 1);
++      expectFollows(rig, rig.at(pB).screen, 0.75, 'shown again');
++    });
++
++    test(
++        'after cancel (a hover, or a press and Esc) a camera change does '
++        'nothing', () {
++      final rig = Rig();
++      rig.hover(pA);
++      rig.tool.cancel(rig.ctx);
++      expect(rig.camera.listeners, 0);
++      expectInert(rig, 'cancelled hover');
++      rig.down(pB);
++      expect(rig.camera.listeners, 1);
++      expect(rig.key(kEsc), KeyEventResult.handled);
++      expect(rig.camera.listeners, 0);
++      expectInert(rig, 'Esc mid-press');
++    });
++
++    test(
++        'after a disarm a camera change does nothing; a re-arm listens again '
++        'and puts the ghost under the pointer for the camera now', () {
++      final rig = Rig();
++      rig.hover(pA);
++      final s = rig.at(pA).screen;
++      rig.armed.value = null;
++      expect(rig.camera.listeners, 0);
++      expect(rig.tool.ghostPlacement, isNull, reason: 'idle: no placement');
++      expectInert(rig, 'disarmed');
++      rig.armed.value = toilet;
++      expect(rig.camera.listeners, 1);
++      final w = under(rig, s);
++      expect(gridOf(w) == gridOf(pA), isFalse,
++          reason: 'the camera moved while disarmed');
++      expectAt(rig.tool.ghostAt, gridOf(w), 're-armed');
++      final t = rig.tool.ghostPlacement!;
++      final want = placementTransform(
++          at: gridOf(w),
++          basePoint: toilet.entry.definition.basePoint,
++          quarterTurns: 0,
++          mirrored: false);
++      expect([t.e, t.f], [want.e, want.f], reason: 'the placement follows');
++      expectFollows(rig, s, 0.75, 'after the re-arm');
++    });
++
++    test(
++        'a release with no move before it: a zoom puts the ghost under the '
++        'release point, not the press', () {
++      final rig = Rig();
++      final sB = rig.at(pB).screen;
++      rig.down(pB);
++      rig.up(pC);
++      final s = rig.at(pC).screen;
++      expectAt(rig.placedAt(rig.instances.single), gridOf(pC), 'placed');
++      expectFollows(rig, s, 1.7, 'under the release point');
++      expect(gridOf(under(rig, sB)) == rig.tool.ghostAt, isFalse,
++          reason: 'not under the press point');
++    });
++
++    test(
++        'a re-arm from one entry to another while the ghost is shown '
++        're-resolves it under the pointer: a snap change since the last '
++        'event shows', () {
++      final rig = Rig(objectSnap: true);
++      // 75 mm from E: 3.75 px, inside the 200 mm aperture.
++      final near = e0 + Vector2(60, -45);
++      rig.key(kR);
++      rig.hover(near);
++      expectAt(rig.tool.ghostAt, e0, 'the hover snaps to E');
++      // The fixture: the tool does not listen to F3, so only the re-arm can
++      // move the ghost off E.
++      rig.snap!.toggleObjectSnap();
++      expectAt(rig.tool.ghostAt, e0, 'F3 alone moves nothing');
++      rig.notifications.clear();
++      rig.armed.value = toilet;
++      expect(rig.camera.listeners, 1, reason: 'still listening');
++      expectAt(rig.tool.ghostAt, gridOf(near), 're-armed: object snap off');
++      expect(gridOf(near) == e0, isFalse);
++      final want = placementTransform(
++          at: gridOf(near),
++          basePoint: toilet.entry.definition.basePoint,
++          quarterTurns: 1,
++          mirrored: false);
++      final t = rig.tool.ghostPlacement!;
++      expect([
++        t.a,
++        t.b,
++        t.c,
++        t.d,
++        t.e,
++        t.f
++      ], [
++        want.a,
++        want.b,
++        want.c,
++        want.d,
++        want.e,
++        want.f
++      ], reason: 'the placement follows the re-resolved point');
++      expect(rig.notifications, [false], reason: 'one repaint');
++    });
++
++    test(
++        'dispose with a live camera removes the listener; a camera change '
++        'after it does nothing and does not throw', () {
++      final rig = Rig();
++      rig.hover(pA);
++      expect(rig.camera.listeners, 1);
++      final at = rig.tool.ghostAt.clone();
++      rig.tool.dispose();
++      rig.disposed = true;
++      expect(rig.camera.listeners, 0);
++      // The camera reports (and swallows) a listener's error, so "does not
++      // throw" alone cannot see a listener left behind; the count and the
++      // ghost's point can.
++      expect(() => rig.camera.zoomAt(focus, 1.7), returnsNormally);
++      expectAt(rig.tool.ghostAt, at, 'nothing re-resolves after dispose');
++    });
++  });
++
++  // Dark theme spec D5 "Tools", Task 3 (M-DT-8): the ghost and the snap
++  // marker take the overlay's paper set, handed to each paint method. The
++  // page is Blueprint and the set is `forPaper(page.background)`, as the
++  // planner picks it; White is the control, on the same tool right after.
++  group('the paper set (dark theme M-DT-8)', () {
++    /// The document's page colour, as the planner reads it.
++    int paperArgb(Rig rig) => rig.document.components
++        .get<PageComponent>(rig.document.rootHandle)!
++        .background;
++
++    Rig blueprintRig() {
++      final rig = Rig();
++      rig.document.commands.execute(SetComponentCommand<PageComponent>(
++          rig.document.rootHandle,
++          rig.pages.value!.copyWith(background: 0xFF1F3A5F)));
++      expect(paperArgb(rig), 0xFF1F3A5F, reason: 'premise');
++      // 75 mm from E: the ghost snaps there and the marker shows.
++      rig.hover(e0 + Vector2(60, -45));
++      expect(rig.tool.ghostVisible, isTrue, reason: 'premise');
++      return rig;
++    }
++
++    test(
++        'on Blueprint the ghost (paintWorldOverlay) is 0xFFC857 and the '
++        'marker (paintOverlay) 0x5FD68F; on White the light set', () {
++      final rig = blueprintRig();
++      final paper = PaperPalette.forPaper(paperArgb(rig));
++      for (final (p, ghost, snap) in [
++        (paper, 0xFFFFC857, 0xFF5FD68F),
++        (PaperPalette.forPaper(0xFFFFFFFF), 0xFFE8A11E, 0xFF2E9E5B),
++      ]) {
++        final world = RecordingCanvas();
++        rig.tool.paintWorldOverlay(world, origin, scale, p);
++        // The Paint is the tool's own and is recoloured per frame: read it
++        // now.
++        final drawn = [
++          for (final c in world.calls)
++            if (c.memberName == #drawPath || c.memberName == #drawLine)
++              (c.positionalArguments.last as ui.Paint).color.toARGB32(),
++        ];
++        expect(drawn, [ghost, ghost, ghost],
++            reason: 'the outline and the base-point cross');
++        final screen = RecordingCanvas();
++        rig.tool
++            .paintOverlay(screen, rig.camera.value, const ui.Size(800, 600), p);
++        final marker = screen.named('drawRect').single;
++        expect(
++            (marker.positionalArguments[1] as ui.Paint).color.toARGB32(), snap,
++            reason: 'the endpoint square');
++      }
++    });
++
++    test('its marker Paint is a field: the same object on the next frame', () {
++      final rig = blueprintRig();
++      ui.Paint markerPaint(PaperPalette p) {
++        final c = RecordingCanvas();
++        rig.tool.paintOverlay(c, rig.camera.value, const ui.Size(800, 600), p);
++        return c.named('drawRect').single.positionalArguments[1] as ui.Paint;
++      }
++
++      expect(
++          identical(
++              markerPaint(PaperPalette.dark), markerPaint(PaperPalette.light)),
++          isTrue);
++    });
++  });
++
++  group('attachment through the registry (spec P3)', () {
++    /// The demo's shelves: each attaches to a test edge or corner.
++    PlanSymbol shelf([String key = 'demo.shelf.wall']) => PlanSymbol(
++        kitId: 'demo',
++        names: KitNames.empty,
++        entry:
++            SymbolLibrary.decode(encodeLibrary(Catalog(kit: 'demo', symbols: [
++          box('demo.shelf.wall', 'Wall shelf', 'Storage', ['shelf'],
++              attachTo: ['test-edge', 'test-corner'], base: (950, 410)),
++          box('demo.shelf.high', 'High shelf', 'Storage', ['high'],
++              attachTo: ['test-edge'], base: (720.25, 515.5)),
++        ]))).entries.singleWhere((e) => e.symbol.key == key));
++
++    ({Rig rig, RecordingProvider edge, PlanAttachmentRegistry registry})
++        attachRig(
++            {bool rotate = true,
++            Attachment? Function(AttachmentQuery)? answer}) {
++      final reported = <KitDiagnostic>[];
++      final registry = PlanAttachmentRegistry(report: reported.add);
++      final edge = RecordingProvider('test-edge', answer ?? (_) => null);
++      registry.add('demo', (_) => edge, _ServicesStub());
++      final rig = Rig(attachments: registry, canRotate: () => rotate);
++      addTearDown(registry.dispose);
++      return (rig: rig, edge: edge, registry: registry);
++    }
++
++    test(
++        'AT-8 an armed symbol with no attachTo never asks; with attachTo, '
++        'the query carries the footprint, the free placement, the raw '
++        'pointer and the captures in world units', () {
++      final r = attachRig();
++      r.rig.hover(pB);
++      expect(r.edge.queries, isEmpty,
++          reason: 'the armchair attaches to nothing');
++      final s = shelf();
++      r.rig.armed.value = s;
++      r.rig.hover(pA);
++      final q = r.edge.queries.last;
++      // M-AT8a: the snapped point passed as the pointer.
++      expect(q.pointer, pA);
++      expect(gridOf(pA) == pA, isFalse, reason: 'premise: the grid moves it');
++      // M-AT8b: kAttachPixels written as the snap aperture.
++      expect(q.capture, closeTo(16 / scale, 1e-9));
++      expect(q.edgeCapture, closeTo(kSnapAperturePixels / scale, 1e-9));
++      final box = boxOfEntry(s.entry)!;
++      expect([
++        q.footprint.minX,
++        q.footprint.minY,
++        q.footprint.maxX,
++        q.footprint.maxY
++      ], [
++        box.left,
++        box.front,
++        box.right,
++        box.back
++      ]);
++      expect(
++          partsOf(q.current),
++          partsOf(placementTransform(
++              at: gridOf(pA), basePoint: s.entry.definition.basePoint)));
++      expect(q.mirrored, isFalse);
++      expect(q.mayRotate, isTrue);
++      expect(q.exclude, isEmpty);
++      expect(q.keep, isNull);
++    });
++
++    test(
++        'AT-9 attached: the ghost and the release use the attachment\'s '
++        'transform verbatim, and the marker is drawn at its marker', () {
++      final turned = Transform2.translation(81000.5, -36000.25)
++          .multiply(Transform2.rotation(-1.1));
++      final marker = Vector2(80990.75, -35810.5);
++      final r = attachRig(answer: (_) => attachment(turned, marker, 'run-7'));
++      r.rig.armed.value = shelf();
++      r.rig.hover(pB);
++      expect(partsOf(r.rig.tool.ghostPlacement!), partsOf(turned));
++      final screen = RecordingCanvas();
++      r.rig.tool.paintOverlay(screen, r.rig.camera.value,
++          const ui.Size(800, 600), PaperPalette.light);
++      final s = r.rig.camera.value.worldToScreen(marker);
++      // The nearest glyph: four lines, the first along its top edge from
++      // (−h, −h) to (h, −h) around the marker (snap_marker.dart:57-60).
++      final lines = screen.named('drawLine').toList();
++      expect(lines, hasLength(4));
++      const h = kSnapMarkerPixels / 2;
++      final start = lines.first.positionalArguments[0] as ui.Offset;
++      // M-AT9b: the attached marker drawn at the snapped point.
++      expect(start.dx, closeTo(s.x - h, 1e-9));
++      expect(start.dy, closeTo(s.y - h, 1e-9));
++      r.rig.place(pA, pB);
++      // M-AT9: the release ignores the attachment (places freely).
++      expect(partsOf(r.rig.instances.single.transform), partsOf(turned));
++    });
++
++    test('AT-10 object snap off: nothing is asked (today\'s rule)', () {
++      final reported = <KitDiagnostic>[];
++      final registry = PlanAttachmentRegistry(report: reported.add);
++      addTearDown(registry.dispose);
++      final edge = RecordingProvider('test-edge', (_) => null);
++      registry.add('demo', (_) => edge, _ServicesStub());
++      final rig = Rig(attachments: registry, objectSnap: false);
++      rig.armed.value = shelf();
++      rig.hover(pA);
++      // M-AT10: the `_rawObjectSnap` test dropped.
++      expect(edge.queries, isEmpty);
++    });
++
++    test(
++        'AT-11 hysteresis: each query keeps the last answer; a re-arm '
++        'clears it', () {
++      final a = attachment(Transform2.translation(80000.5, -36000.5),
++          Vector2(80000.5, -36000.5), 'face');
++      final r = attachRig(answer: (_) => a);
++      r.rig.armed.value = shelf();
++      r.rig.hover(pA);
++      expect(r.edge.queries.last.keep, isNull);
++      r.rig.hover(pB);
++      // M-AT11a: `keep: previous` written `keep: null`.
++      expect(r.edge.queries.last.keep, same(a));
++      // A re-arm with the ghost shown asks again at once, for the new
++      // symbol, with no keep.
++      final asked = r.edge.queries.length;
++      r.rig.armed.value = shelf('demo.shelf.high');
++      expect(r.edge.queries.length, asked + 1);
++      // M-AT11b: `_onArmed` keeps the previous symbol's attachment.
++      expect(r.edge.queries.last.keep, isNull);
++    });
++
++    test(
++        'AT-12 rotate refused: mayRotate is false and the current transform '
++        'unturned whatever R stored; M mirrors in place', () {
++      var rotate = true;
++      final reported = <KitDiagnostic>[];
++      final registry = PlanAttachmentRegistry(report: reported.add);
++      addTearDown(registry.dispose);
++      final edge = RecordingProvider('test-edge', (_) => null);
++      registry.add('demo', (_) => edge, _ServicesStub());
++      final rig = Rig(attachments: registry, canRotate: () => rotate);
++      final s = shelf();
++      rig.armed.value = s;
++      rig.key(kR);
++      rig.hover(pA);
++      expect(edge.queries.last.mayRotate, isTrue);
++      expect(linear(edge.queries.last.current), [0.0, 1.0, -1.0, 0.0],
++          reason: 'one quarter turn');
++      rotate = false;
++      rig.tool.gatesChanged();
++      // M-AT12: mayRotate passed as true.
++      expect(edge.queries.last.mayRotate, isFalse);
++      expect(linear(edge.queries.last.current), [1.0, 0.0, 0.0, 1.0]);
++      rig.key(kM);
++      expect(edge.queries.last.mirrored, isTrue);
++      expect(linear(edge.queries.last.current), [-1.0, 0.0, 0.0, 1.0]);
++    });
++
++    test(
++        'AT-20 the test kit\'s edge through the registry: its hysteresis '
++        'sees the keep it made (capture 320 mm at first, its edge capture '
++        '200 mm once attached), and the release commits its answer', () {
++      // The edge 150 mm above pA: inside both reaches.
++      final y = pA.y + 150;
++      final reported = <KitDiagnostic>[];
++      final registry = PlanAttachmentRegistry(report: reported.add);
++      addTearDown(registry.dispose);
++      final edge = TestEdge(y: y);
++      registry.add('test', (_) => edge, _ServicesStub());
++      final rig = Rig(attachments: registry);
++      final s = shelf();
++      rig.armed.value = s;
++      final front = boxOfEntry(s.entry)!.front;
++      expect(front, isNot(0), reason: 'premise: the footprint off the origin');
++
++      rig.hover(pA);
++      var a = rig.tool.ghostAttachment!;
++      expect(a.token, same(edge));
++      expect(partsOf(a.transform), [1.0, 0.0, 0.0, 1.0, pA.x, y - front]);
++      expect([a.marker.x, a.marker.y], [pA.x, y]);
++      // M mirrors in place on the edge; the release commits it.
++      rig.key(kM);
++      expect(partsOf(rig.tool.ghostPlacement!),
++          [-1.0, 0.0, 0.0, 1.0, pA.x, y - front]);
++      rig.down(pA);
++      rig.up(pA);
++      expect(partsOf(rig.instances.single.transform),
++          [-1.0, 0.0, 0.0, 1.0, pA.x, y - front]);
++
++      // 250 mm off the edge: beyond the edge capture the kept answer
++      // allows. M-AT20 (the registry asks every provider without the keep,
++      // its maker too) and M-AT11a (the tool asks with no keep) leave it
++      // attached at the 320 mm capture.
++      final off = Vector2(pA.x + 37.5, y - 250);
++      rig.hover(off);
++      expect(rig.tool.ghostAttachment, isNull, reason: 'kept: 250 > 200');
++      // Asked again with no keep, the same pointer is within the capture.
++      rig.hover(off);
++      a = rig.tool.ghostAttachment!;
++      expect(partsOf(a.transform), [-1.0, 0.0, 0.0, 1.0, off.x, y - front]);
++      expect(reported, isEmpty);
++    });
++
++    test('AT-13 a throwing provider: the ghost places freely', () {
++      final reported = <KitDiagnostic>[];
++      final registry = PlanAttachmentRegistry(report: reported.add);
++      addTearDown(registry.dispose);
++      registry.add(
++          'demo', (_) => ThrowingProvider('test-edge'), _ServicesStub());
++      final rig = Rig(attachments: registry);
++      final s = shelf();
++      rig.armed.value = s;
++      rig.hover(pA);
++      expect(rig.tool.ghostAttachment, isNull);
++      expect(
++          partsOf(rig.tool.ghostPlacement!),
++          partsOf(placementTransform(
++              at: gridOf(pA), basePoint: s.entry.definition.basePoint)));
++      expect(reported.single.code, KitDiagnosticCode.hookFailed);
++    });
++  });
++}

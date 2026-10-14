@@ -1,0 +1,1917 @@
+# Review package: 2fa4cc6f..HEAD
+
+## Commits
+07128eb1 docs: the final review's fixes in the 2a results
+cfb221e0 fix(plan): the final review's should-fix minors
+62af16e5 fix(kit): contract tightening from the final review
+85ad411e fix(plan): a symbol library that reads on a retry leaves the bar
+5b227960 fix(plan): an edit the planner refuses probes the plan's kit objects
+c8aa854b fix(plan): a write on a frozen object is refused as locked
+f44899f0 feat(engine): a write on a group that is not live is a typed refusal
+
+## Files changed
+ .../notes/2026-10-14-plan-library-2a-results.md    |  40 ++++
+ .../2026-10-14-plan-library-design-mode-design.md  |   8 +
+ packages/jet_cad_2d/CHANGELOG.md                   |   5 +
+ packages/jet_cad_2d/lib/src/document/commands.dart |   4 +-
+ .../lib/src/parametric/parametric_system.dart      |  28 ++-
+ .../lib/src/parametric/regeneration.dart           |  13 +-
+ .../jet_cad_2d/test/parametric/frozen_test.dart    |   9 +-
+ .../jet_cad_2d/test/parametric/misplaced_test.dart |  16 +-
+ .../jet_cad_2d_kit/lib/src/kit/attachment.dart     |  13 +-
+ packages/jet_cad_2d_kit/lib/src/kit/plan_type.dart |   5 +-
+ .../jet_cad_2d_kit/lib/src/kit/properties.dart     |   9 +-
+ .../jet_cad_2d_kit/test/kit/attachment_test.dart   |   5 +
+ .../jet_cad_2d_kit/test/kit/properties_test.dart   |   8 +
+ .../lib/src/attach/attachment_registry.dart        |   4 +-
+ .../lib/src/controller/diagnostics_log.dart        |  18 ++
+ .../lib/src/controller/plan_controller.dart        |  40 +++-
+ .../jet_cad_2d_plan/lib/src/file/manifest.dart     |   8 +-
+ packages/jet_cad_2d_plan/lib/src/kits/guard.dart   |  23 ++-
+ packages/jet_cad_2d_plan/lib/src/kits/locks.dart   |  64 ++++++-
+ .../lib/src/panels/plan_property_panel.dart        |  21 ++-
+ .../lib/src/shortcuts/plan_shortcuts.dart          |   9 +
+ .../test/controller/diagnostics_log_test.dart      |  42 +++++
+ .../test/controller/symbols_controller_test.dart   |  30 +++
+ .../jet_cad_2d_plan/test/file/manifest_test.dart   |  24 +++
+ .../test/kits/failure_flow_test.dart               | 155 ++++++++++++++-
+ .../test/kits/frozen_write_test.dart               | 207 +++++++++++++++++++++
+ .../test/panels/property_panel_test.dart           |   7 +
+ .../test/shortcuts/plan_shortcuts_test.dart        |  24 +++
+ 28 files changed, 790 insertions(+), 49 deletions(-)
+
+## Diff
+diff --git a/docs/superpowers/notes/2026-10-14-plan-library-2a-results.md b/docs/superpowers/notes/2026-10-14-plan-library-2a-results.md
+index b358fd1e..1001092e 100644
+--- a/docs/superpowers/notes/2026-10-14-plan-library-2a-results.md
++++ b/docs/superpowers/notes/2026-10-14-plan-library-2a-results.md
+@@ -464,10 +464,50 @@ One line each, in task order; the plan's line number gives the full paragraph.
+ - Task 13: **F-1**, the ported mixed-case tag test retired (K2), `SF-Q` added; deferred for the final fix wave: a successful retry of a library source should clear that source's earlier `libraryUnreadable` diagnostics.
+ - Task 14: ghost and tool test fixtures changed, assertions unchanged (A12).
+ - Task 17: the panel guards every kit hook it calls (read, enabled, title, colour read/write) (fix round 1, `d510d4ea`).
+ - Task 18: `PlanPagePanel` wraps itself in `PlanShortcutGuard`; SE13/15/16's `'Wall'` → `'Box'`.
+ - Task 20: **RV6 split**; its retired half is **a deliberate host-API difference listed for the human's word at the finish (A14)**: `selectTool` answers true with no view mounted, today's answered false. Ported tests need not name a mutation (CLAUDE.md's bar is for new tests; a port is the oracle of the move).
+ - Planning rulings carried as deliberate changes: **tool settings belong to the controller and survive a document swap** (today's shell kept them per document; pinned by `C-svc`); **panel fields use the language's decimal separator**, the plan's separator governs what is drawn (spec P3 corrected at `c4cccac`); NS7 kept.
+ - Carried and kept: `canUndo`/`dirty` lag a synchronous edit by one asynchronous delivery; today's controller lags the same way (Task 20 report, pinned by `ED-U`).
+ 
+ The ledger's deferred minors (Tasks 1-20) are not repeated here; they are the whole-branch
+ review's input in `progress.md`.
++
++## Final review
++
++The whole-branch review (`.superpowers/sdd/2026-10-14-plan-library-2a/final-review.md`, at
++`2fa4cc6f`) found no critical issue, three important ones and a "should fix" list. All were
++fixed in one wave, `f44899f0..cfb221e0`; every mutation below ran on a committed file and was
++reverted with `git checkout --`, then `git diff --quiet` exited 0.
++
++| Finding | Fix | Commit | Tests | Mutation (red) |
++|---|---|---|---|---|
++| **I1** a write of a frozen object's own component escaped `execute` as a plain `StateError` (a kit tool's `hookFailed`, a rethrow from `plan.select`) | E2 amended: the engine's refusal is `NonLiveWriteError` (a `StateError`, naming `handle` and `typeId`); `_LockCheck` maps it to `PlanLocked` on a covered handle; spec E2 and its revision history record it | `f44899f0`, `c8aa854b` | E2-4, MP1/MP3/MP6 (`refusedAt`); FW-1, FW-2, FW-3 | M-E2i (thrown as `StateError`): E2-4, MP1, MP3, MP6; M-FW-1 (mapping dropped): FW-1, FW-2, FW-3 |
++| **I2** a `generate` the planner refuses (no hook throws) blocked its object and its neighbours, silently | the lock check sends an error that is no hook failure and no refusal to `FailureBoundary.recoverRefused` (every kit object probed, the failing ones frozen, locked, reported), retries once; a failed retry is one `hookFailed` of `plan` | `5b227960` | F-15, F-15b, F-15c, F-15d | M-F15a (`onRefusedEdit` unset): F-15, F-15b, F-15d; M-F15c (`recoverRefused` true when nothing froze): F-15c; M-F15d (`onRetryFailed` unset): F-15d |
++| **I3** the Task 13 ruling: a successful retry keeps a source's `libraryUnreadable` | `DiagnosticsLog.removeWhere`; each symbol load's library problems replace the last load's | `85ad411e` | S-19, DL-1 | M-S19: S-19; M-DL-1 (`_seen` kept): DL-1 |
++| `usedKitsIn` wrote `plan` | excludes `reservedKitIds` | `cfb221e0` | PF-3b | M-PF-3c: PF-3b |
++| `ChoiceProperty` segments with `.` or `:` | refused | `62af16e5` | PS4 | M-PS4c: PS4 |
++| `probe`'s "runs once" doc | reworded (a re-survey asks the survivors again) | `f44899f0` | doc | none |
++| `AttachmentQuery.pointer` mutable, shared across providers | a fresh copy at each read; the registry reads it once per ask | `62af16e5` | PT20 | M-PT20c: PT20 |
++| `PlanType.properties` covariance | doc names the members that throw through `PlanType<Component>` | `62af16e5` | doc | none |
++| `idleKeys` left closed | restored on dispose and on a controller swap | `cfb221e0` | KB-14 | M-KB-14a (swap): KB-14 line 338; M-KB-14b (dispose): line 343 |
++| `NumberProperty` empty undo step | the panel skips a command whose value equals the stored component | `cfb221e0` | P-1 | M-P-1d: P-1 line 89 (`Expected: <4> Actual: <5>`) |
++| damaged save set `_encodedState` before the read-back | set only after it | `cfb221e0` | F-7b | M-F7b: F-7b |
++| 115-column comment, `commands.dart` | rewrapped | `f44899f0` | none | none |
++
++Not done (the review's other minors, M1, M2, M4-M8, and the "can stay deferred" list): unchanged
++by this wave. M3's second half (failing the read-back on `component.unreadable`) was left out:
++it would refuse every damaged plan that holds a component kept raw at load.
++
++Gates on `cfb221e0` (this run, last lines):
++- `packages/jet_cad_2d`: `dart test` `00:06 +1322 -2: Some tests failed.`, the two standing
++  failures only (`generate_document_test.dart`: "the default document is the one Plan 2
++  measured, byte for byte", "both text fractions default to zero and change nothing");
++  `dart analyze` `No issues found!`; format `Formatted 184 files (0 changed)`.
++- `packages/jet_cad_2d_kit`: `00:05 +314: All tests passed!`; `No issues found! (ran in 3.0s)`;
++  `Formatted 68 files (0 changed) in 0.08 seconds.`
++- `packages/jet_cad_2d_plan`: `00:38 +735: All tests passed!`; `No issues found! (ran in 3.2s)`;
++  `Formatted 179 files (0 changed) in 0.36 seconds.`
++- `packages/jet_cad_floor_plan` (`flutter test`, unchanged package): `01:41 +2008 ~4: All tests passed!`
++- `cd tool/ci && dart test`: `00:41 +116: All tests passed!`
++- `dart run tool/ci/check_kit_deps.dart`: `kit dependencies: 1 package(s) checked, none names the plan library or another kit`
++- `dart pub publish --dry-run`, `jet_cad_2d_kit` and `jet_cad_2d_plan`: `Package has 0 warnings.` each.
+diff --git a/docs/superpowers/specs/2026-10-14-plan-library-design-mode-design.md b/docs/superpowers/specs/2026-10-14-plan-library-design-mode-design.md
+index 3b132afb..1ca57631 100644
+--- a/docs/superpowers/specs/2026-10-14-plan-library-design-mode-design.md
++++ b/docs/superpowers/specs/2026-10-14-plan-library-design-mode-design.md
+@@ -701,20 +701,24 @@ Each seam is argued here and lands with its own test.
+   layer picker's list. No public query exists today (Facts).
+ - **E2, frozen objects:** `ParametricSystem` takes a predicate
+   `isFrozen(Handle)`. A frozen object is left out of every survey, view and
+   regeneration and treated as a plain group, as an unregistered type is
+   today. No hook of its type is called for it. This is the only way to keep
+   a broken object out of its neighbours' edits, because `reach` gets no
+   handle and `generate` cannot answer "keep my children" (Facts). With it,
+   `probe(Handle)` runs one object's hooks (`reach`, `references`,
+   `generate` through the system's own view) in isolation, changes nothing,
+   and returns the first error or `null`: the controller's probe (P4).
++  Writing a frozen object's own type's component is refused with
++  `NonLiveWriteError`, a `StateError` subtype naming the handle (the
++  refusal of any write on a group that is not live), so the plan library
++  turns it into `PlanLocked` (amended in the final review).
+ - **E3, a typed partial mutation:** the "partially mutated" `StateError` of
+   `regeneration.dart:735` and `:1040` becomes `PartialMutationError`, a
+   `StateError` subtype, so the controller tells it apart without matching
+   message text.
+ - **E4, a component that cannot be read keeps its data:** when a registered
+   factory throws during load, the registry keeps the component raw, as it
+   keeps an unknown type, and adds a `Diagnostic` naming the handle to a list
+   the codec passes into `ComponentRegistry.loadJson`, instead of aborting
+   the load.
+ 
+@@ -826,20 +830,24 @@ packages/jet_cad_2d_plan/example/      PlanEditor with no kit
+   types are the real test. A field they need goes into this spec as an
+   amendment before the wave publishes 0.1.0.
+ - **The guarding adapter sits on the parametric hot path.** It must
+   allocate nothing per call in steady state. The existing query-allocation
+   invariant covers it once the adapter is in the catalog.
+ - **The size of the port.** The ported tests are the oracle (A12).
+ 
+ ## Revision history
+ 
+ - **Revision 1** (`c78e2a8`): the design approved in chat.
++- **Amended in the final review** (2a's whole-branch review, finding I1):
++  E2's refusal of a write on a frozen object is typed
++  (`NonLiveWriteError`, naming the handle), and the lock maps it to
++  `PlanLocked`.
+ - **Revision 3:** the re-review of revision 2.
+   - **N1, N2:** a broken object is frozen (new E2), found by probing after a
+     failed edit and after a load; it no longer blocks its neighbours.
+   - **N3:** the attribution moves into the adapter, and the old E2 is
+     dropped.
+   - **N4:** the damaged state rebuilds through `notifyLoaded()`, uses the
+     typed `PartialMutationError` (E3), and saves only what decodes.
+   - **N5:** a lock covers every change; history is cleared when an object
+     becomes locked mid-session.
+   - **N6:** the export request carries a copy and an optional page;
+diff --git a/packages/jet_cad_2d/CHANGELOG.md b/packages/jet_cad_2d/CHANGELOG.md
+index f210e656..a6c7f88a 100644
+--- a/packages/jet_cad_2d/CHANGELOG.md
++++ b/packages/jet_cad_2d/CHANGELOG.md
+@@ -14,20 +14,25 @@
+   `DraftDocumentCodec.decode(…, keepUnreadableComponents: true)`: a
+   component whose factory throws is kept raw, as an unknown type is, and
+   reported as a `component.unreadable` diagnostic naming its handle,
+   instead of failing the load. Off by default. A value of the type
+   attached to that handle later is the one a save writes.
+ - `ParametricSystem(document, catalog, isFrozen: …)` leaves a frozen
+   object out of every survey, view, regeneration, `drift()` and
+   `diagnostics()`, as a plain group, and calls none of its type's hooks
+   for it. `ParametricSystem.probe(handle)` runs one live object's hooks in
+   isolation, changing nothing, and returns the first error, or null.
++- `NonLiveWriteError`, a `StateError` with the same message, is what an
++  edit now throws when it writes a registered parametric type's component
++  on a handle that is not a live root-level group (a frozen object
++  included). It names the `handle` and the `typeId`. A caller catching
++  `StateError` is unaffected.
+ 
+ ## 0.7.2
+ 
+ Documentation and funding only; no code change. Plans are stored as in
+ 0.7.1.
+ 
+ - The README links the renderer (`jet_cad_2d_flutter`), the planner
+   (`jet_cad_floor_plan`) and the host guide, and says that a host adds
+   only the planner: it brings the engine and the renderer with it.
+ - Funding links (GitHub Sponsors, Buy Me a Coffee) in the pubspec.
+diff --git a/packages/jet_cad_2d/lib/src/document/commands.dart b/packages/jet_cad_2d/lib/src/document/commands.dart
+index 8219d951..7e20a51c 100644
+--- a/packages/jet_cad_2d/lib/src/document/commands.dart
++++ b/packages/jet_cad_2d/lib/src/document/commands.dart
+@@ -948,22 +948,22 @@ class RemoveRegionCommand extends DraftCommand {
+ /// children before it rolled back by applying the inverses collected so far,
+ /// in reverse, before the error propagates. `DraftCommand.apply`'s contract
+ /// says a throwing child mutated nothing, so the rollback restores exactly
+ /// the state before this compound began — **provided the rollback itself
+ /// completes.** An inverse that has just been produced by a successful
+ /// `apply` is expected to replay, and every shipped inverse does; if one
+ /// nevertheless throws, the rollback stops there, and a
+ /// [PartialMutationError] (a [StateError]) naming both failures replaces the
+ /// original error, because the target is then partially mutated with
+ /// nothing in history to describe it and the caller must know that rather
+-/// than see the child's own exception and conclude nothing happened. The dispatcher pushes no history and emits no
+-/// [DocChange] on either path.
++/// than see the child's own exception and conclude nothing happened. The
++/// dispatcher pushes no history and emits no [DocChange] on either path.
+ ///
+ /// [capabilities] is the union of the children's, so a runtime document
+ /// refuses a compound that removes geometry even when its first child is a
+ /// permitted move. [capability] summarises it as the highest-ranked member,
+ /// and is what `SpatialIndex` and `TileCache` read to skip a components-only
+ /// compound (spec D13); it is `components` only when every member is, which
+ /// is why `Capability.components` is declared first (A1, Ruling 04-19).
+ class CompoundCommand extends DraftCommand {
+   final List<DraftCommand> children;
+ 
+diff --git a/packages/jet_cad_2d/lib/src/parametric/parametric_system.dart b/packages/jet_cad_2d/lib/src/parametric/parametric_system.dart
+index 11a10116..c227d36c 100644
+--- a/packages/jet_cad_2d/lib/src/parametric/parametric_system.dart
++++ b/packages/jet_cad_2d/lib/src/parametric/parametric_system.dart
+@@ -340,20 +340,40 @@ final class Generated {
+ class GeneratedGeometryError implements Exception {
+   const GeneratedGeometryError(this.handle);
+ 
+   final Handle handle;
+ 
+   @override
+   String toString() => 'GeneratedGeometryError: ${handle.toHex()} is '
+       'generated by a parametric object and cannot be edited directly';
+ }
+ 
++/// A write of a registered parametric type's component on a handle that is
++/// not a live root-level group after the edit (spec 06 D5, as amended by
++/// fix/post-11): it would never be regenerated, so the edit is refused,
++/// undone, and nothing enters the history. A frozen object (spec 2a E2) is
++/// such a handle: writing its own type's component is this refusal.
++///
++/// Still a [StateError] with the message it always had, so a caller that
++/// catches one catches this as before; [handle] and [typeId] name the write,
++/// so a caller tells the refusal apart without matching the message (spec
++/// 2a E2, amended in the final review).
++final class NonLiveWriteError extends StateError {
++  NonLiveWriteError(this.handle, this.typeId, super.message);
++
++  /// The handle the component was written on.
++  final Handle handle;
++
++  /// The registered type whose component was written.
++  final String typeId;
++}
++
+ /// An edit that would leave a `cascade`-policy seed naming a handle that is
+ /// not a live parametric object (spec 08 D5). The edit is rolled back, the
+ /// cascade included, and nothing enters the history. Propagates like
+ /// [GeneratedGeometryError]; the UI never builds such an edit.
+ class DanglingReferenceError implements Exception {
+   const DanglingReferenceError(this.object, this.referent);
+ 
+   /// The referring object.
+   final Handle object;
+ 
+@@ -722,23 +742,25 @@ class ParametricSystem {
+   /// an edit's after-view.
+   ///
+   /// In isolation: another live object whose own `reach` or `references`
+   /// throws is left out of that survey, as it will be once frozen, so its
+   /// error is never reported as [object]'s. Finding them takes one `reach`
+   /// and one `references` call per live object before the survey's own.
+   /// Then every other live place contributor is asked for its `placeBox`
+   /// over that survey, since any view's `placedIn` runs it (a reader's
+   /// `generate`, say): one that throws is left out too, and the survey is
+   /// taken again without it, so a reader is never blamed for a
+-  /// contributor's box. The view keeps the boxes asked, so a healthy
+-  /// contributor's `placeBox` runs once. A probe is O(live objects), and is
+-  /// on neither the frame nor the edit path.
++  /// contributor's box. The view keeps the boxes asked, so within one
++  /// survey a healthy contributor's `placeBox` runs once; when a thrower is
++  /// left out, the survey and its view are made again and the survivors are
++  /// asked once more. A probe is O(live objects), and is on neither the
++  /// frame nor the edit path.
+   ///
+   /// Null, with no hook called, for a handle that is not a live object of
+   /// this system: not a root-level group named by a registered type, or
+   /// frozen.
+   Object? probe(Handle object) {
+     final registration = _naming(document, _types, object, _frozen);
+     if (registration == null) return null;
+     final was = _applying;
+     _applying = true;
+     try {
+diff --git a/packages/jet_cad_2d/lib/src/parametric/regeneration.dart b/packages/jet_cad_2d/lib/src/parametric/regeneration.dart
+index a012951e..3a4aa673 100644
+--- a/packages/jet_cad_2d/lib/src/parametric/regeneration.dart
++++ b/packages/jet_cad_2d/lib/src/parametric/regeneration.dart
+@@ -694,21 +694,22 @@ Handle? _refused(CommandTarget t, List<_Registration<Component>> types,
+ 
+ /// [r]'s component on [h] in [s], or null when [h] carried none: from the
+ /// object snapshot when [r] names [h]'s object, else from [_Survey.stray].
+ Component? _heldBefore(_Survey s, _Registration<Component> r, Handle h) =>
+     identical(s.objects[h], r) ? s.params[h] : s.stray[(h, r)];
+ 
+ /// The first touched handle, ascending, on which the edit **wrote** a
+ /// registered parametric component although the handle is not a live
+ /// root-level group after the edit (spec D5, as amended by fix/post-11,
+ /// post-11 found item (d)), with the registration it wrote; null when
+-/// there is none. `_run` then undoes `inner` and throws `StateError`.
++/// there is none. `_run` then undoes `inner` and throws
++/// [NonLiveWriteError].
+ ///
+ /// "Wrote" means: the component is non-null now and not `==` to what the
+ /// before-survey held for the same type on the same handle ([_heldBefore];
+ /// a stored value, compared exactly). So these are never refused, because
+ /// the edit left the component as it was or removed it:
+ ///
+ /// - a detach (`SetComponentCommand<T>(h, null)`) on any handle, dead or
+ ///   nested: a file's misplaced component must stay removable;
+ /// - a delete: the removal takes the object's component with its node
+ ///   (node-components spec D-4); undo and redo replay a
+@@ -972,24 +973,28 @@ CommandResult _run(ParametricEdit edit, CommandTarget t) {
+   final refused = _refused(t, types, before, r0.touched, frozen);
+   if (refused != null) {
+     _undoInner(t, edit.label, r0, GeneratedGeometryError(refused));
+     throw GeneratedGeometryError(refused);
+   }
+ 
+   // Spec D5, amended by fix/post-11: a component written off a live
+   // root-level group would never be regenerated. A client bug, like the
+   // plan's malformed-boundary refusal (`_ownBoundaryOf`), so a
+   // `StateError`: `GeneratedGeometryError` names a generated child, which
+-  // this is not. Refused like 06 D6's guard: `inner` undone, nothing
+-  // planned, nothing in history.
++  // this is not. Typed (spec 2a E2, amended in the final review): a
++  // `NonLiveWriteError` naming the handle. Refused like 06 D6's guard:
++  // `inner` undone, nothing planned, nothing in history.
+   if (_written(t, types, before, r0.touched, frozen) case (final h, final r)?) {
+-    final error = StateError('"${edit.label}": ${r.typeId} written on '
++    final error = NonLiveWriteError(
++        h,
++        r.typeId,
++        '"${edit.label}": ${r.typeId} written on '
+         '${h.toHex()}, which is not a live root-level group after the edit, '
+         'would never be regenerated (spec 06 D5); the edit is refused');
+     _undoInner(t, edit.label, r0, error);
+     throw error;
+   }
+ 
+   final r = _cascade(t, types, before, r0, edit.label);
+ 
+   // The after-survey calls every registered type's `reach` again, with
+   // whatever `inner` just wrote — a client's `reach` can throw on the new
+diff --git a/packages/jet_cad_2d/test/parametric/frozen_test.dart b/packages/jet_cad_2d/test/parametric/frozen_test.dart
+index 879458b7..10f5ceba 100644
+--- a/packages/jet_cad_2d/test/parametric/frozen_test.dart
++++ b/packages/jet_cad_2d/test/parametric/frozen_test.dart
+@@ -87,25 +87,30 @@ void main() {
+   });
+ 
+   test(
+       'E2-4 a new value of its type written on a frozen object is refused, '
+       'and nothing changes', () {
+     final s = frozenScene();
+     s.frozen.add(hF);
+     final before = encoded(s.doc);
+     final depth = s.doc.commands.undoDepth;
+     // M-E2e: the write lands, and would never be regenerated.
++    // M-E2i (final review): the refusal thrown as a plain StateError, so a
++    // caller cannot tell it apart without matching the message.
+     expect(
+         () => s.doc.commands.execute(
+             SetComponentCommand<Tile>(hF, const Tile('F', 2600, 1000))),
+-        throwsA(isA<StateError>().having((e) => e.message, 'message',
+-            contains('would never be regenerated'))));
++        throwsA(isA<NonLiveWriteError>()
++            .having((e) => e.handle, 'handle', hF)
++            .having((e) => e.typeId, 'typeId', Tile.id)
++            .having((e) => e.message, 'message',
++                contains('would never be regenerated'))));
+     expect(encoded(s.doc), before);
+     expect(s.doc.commands.undoDepth, depth);
+   });
+ 
+   test('E2-5 drift() neither lists a frozen object nor calls it', () {
+     final s = frozenScene();
+     s.frozen.add(hF);
+     // F's tick still reads N's old size: F is stale.
+     s.doc.commands
+         .execute(SetComponentCommand<Tile>(hN, const Tile('N', 450, 950)));
+diff --git a/packages/jet_cad_2d/test/parametric/misplaced_test.dart b/packages/jet_cad_2d/test/parametric/misplaced_test.dart
+index 0fb2bc4e..5bc7591a 100644
+--- a/packages/jet_cad_2d/test/parametric/misplaced_test.dart
++++ b/packages/jet_cad_2d/test/parametric/misplaced_test.dart
+@@ -96,25 +96,31 @@ DraftDocument fileWithMisplaced(Scene s) {
+ }
+ 
+ /// [canon] without `handleSeed`, which never moves backward: an undo of
+ /// an edit whose regeneration added children restores everything else.
+ String noSeed(DraftDocument d) {
+   final j = jsonDecode(canon(d)) as Map<String, Object?>;
+   j.remove('handleSeed');
+   return jsonEncode(j);
+ }
+ 
+-Matcher refusedAt(Handle h) => throwsA(isA<StateError>().having(
+-    (e) => e.message,
+-    'message',
+-    allOf(contains(Hinge.id), contains(h.toHex()),
+-        contains('not a live root-level group'))));
++/// The typed refusal (spec 2a E2, amended in the final review): a
++/// [NonLiveWriteError], still a [StateError] with its message, naming [h]
++/// and the type.
++Matcher refusedAt(Handle h) => throwsA(isA<NonLiveWriteError>()
++    .having((e) => e.handle, 'handle', h)
++    .having((e) => e.typeId, 'typeId', Hinge.id)
++    .having(
++        (e) => e.message,
++        'message',
++        allOf(contains(Hinge.id), contains(h.toHex()),
++            contains('not a live root-level group'))));
+ 
+ void main() {
+   test(
+       'MP1 a Hinge written on a deleted group, a never-allocated handle or '
+       'a nested group is refused: bytes, store and history unchanged', () {
+     final s = scene();
+     final doc = s.doc;
+     for (final h in [s.dead, s.never, s.nested]) {
+       final before = enc(doc);
+       final depth = doc.commands.undoDepth;
+diff --git a/packages/jet_cad_2d_kit/lib/src/kit/attachment.dart b/packages/jet_cad_2d_kit/lib/src/kit/attachment.dart
+index aa9c6d95..eb933359 100644
+--- a/packages/jet_cad_2d_kit/lib/src/kit/attachment.dart
++++ b/packages/jet_cad_2d_kit/lib/src/kit/attachment.dart
+@@ -12,53 +12,56 @@ abstract interface class AttachmentProvider {
+   /// A target kind (K2's kind pattern): `wall-face`.
+   String get kind;
+ 
+   /// Where the symbol in [query] attaches, or null for nowhere near. Must
+   /// not mutate the document.
+   Attachment? attach(AttachmentQuery query);
+ }
+ 
+ /// What a provider is asked: the symbol, where it is, where the pointer is.
+ ///
+-/// [pointer] and [exclude] are copied: the query never changes after it is
+-/// made.
++/// The query never changes after it is made: [pointer] is copied when it
++/// is made and again at each read (a provider that changes the vector it
++/// read changes nothing the next provider sees), and [exclude] is an
++/// unmodifiable copy.
+ @immutable
+ final class AttachmentQuery {
+   /// Throws [ArgumentError] for a capture or an edge capture that is
+   /// negative or not finite, and for a pointer that is not finite.
+   AttachmentQuery({
+     required this.footprint,
+     required this.current,
+     required Vector2 pointer,
+     required this.capture,
+     required this.edgeCapture,
+     required this.mirrored,
+     required this.mayRotate,
+     Set<Handle> exclude = const {},
+     this.keep,
+-  })  : pointer = Vector2.copy(pointer),
++  })  : _pointer = Vector2.copy(pointer),
+         exclude = Set.unmodifiable(exclude) {
+     _checkDistance(capture, 'capture');
+     _checkDistance(edgeCapture, 'edgeCapture');
+     if (!pointer.x.isFinite || !pointer.y.isFinite) {
+       throw ArgumentError.value(pointer, 'pointer', 'is not finite');
+     }
+   }
+ 
+   /// The symbol's box in its own frame.
+   final Aabb2 footprint;
+ 
+   /// The symbol's transform now (while placing: the ghost's).
+   final Transform2 current;
+ 
+-  /// The raw world point under the pointer.
+-  final Vector2 pointer;
++  /// The raw world point under the pointer: a fresh copy at each read.
++  Vector2 get pointer => Vector2.copy(_pointer);
++  final Vector2 _pointer;
+ 
+   /// World distances: how far from a target the pointer may be, and how
+   /// near an end of a target the symbol may slide.
+   final double capture;
+   final double edgeCapture;
+ 
+   /// Whether the symbol is mirrored now.
+   final bool mirrored;
+ 
+   /// False (the `rotate` permission is off): offer only targets the
+diff --git a/packages/jet_cad_2d_kit/lib/src/kit/plan_type.dart b/packages/jet_cad_2d_kit/lib/src/kit/plan_type.dart
+index cde9f671..c805ba02 100644
+--- a/packages/jet_cad_2d_kit/lib/src/kit/plan_type.dart
++++ b/packages/jet_cad_2d_kit/lib/src/kit/plan_type.dart
+@@ -51,21 +51,24 @@ final class PlanType<T extends Component> {
+   /// manifest finds the plan's kits by it.
+   final String id;
+ 
+   final ComponentFactory<T> fromJson;
+   final ParametricType<T> parametric;
+ 
+   /// Made once per document (spec 2a P1, lifetimes).
+   final ObjectGripProvider Function(PlanServices)? grips;
+ 
+   /// The panel's fields, in order. Safe to list through
+-  /// `PlanType<Component>`; use them through [fieldsOf].
++  /// `PlanType<Component>`, but a spec's members that take a `T` (`read`,
++  /// `write`, `enabled`, `apply`) throw a `TypeError` when read through it
++  /// (see [PropertySpec]): use the fields through [fieldsOf] and
++  /// [commitField], which keep `T`.
+   final List<PropertySpec<T>> properties;
+ 
+   /// False leaves the type's objects out of every export.
+   final bool exported;
+ 
+   final PropertySectionBuilder<T>? _section;
+   final String Function(T)? _title;
+   final ColourTarget<T>? _colour;
+ 
+   bool get hasColour => _colour != null;
+diff --git a/packages/jet_cad_2d_kit/lib/src/kit/properties.dart b/packages/jet_cad_2d_kit/lib/src/kit/properties.dart
+index c0fe9821..f88b0c36 100644
+--- a/packages/jet_cad_2d_kit/lib/src/kit/properties.dart
++++ b/packages/jet_cad_2d_kit/lib/src/kit/properties.dart
+@@ -152,41 +152,48 @@ final class NumberProperty<T> extends PropertySpec<T> {
+     final owner = _owner<T>(value);
+     return _BoundField<T>(this, owner, wordId, read(owner), (input) {
+       final rounded =
+           double.parse(_finite(input, id).toStringAsFixed(decimals));
+       return write(owner, _inRange(rounded, min, max, id));
+     }, onCommit);
+   }
+ }
+ 
+ /// One of [values], compared with `==`. A value's word segment is
+-/// [segmentOf] it: an enum's name, else its `toString`.
++/// [segmentOf] it: an enum's name, else its `toString`. A segment is not
++/// empty, given once, and holds no `.` or `:`, the separators of the word
++/// id `property:<owner>.<spec>.<value>`; a value whose segment would is an
++/// [ArgumentError] when the spec is made.
+ final class ChoiceProperty<T, V> extends PropertySpec<T> {
+   ChoiceProperty({
+     required String id,
+     required List<V> values,
+     required this.read,
+     required this.write,
+     bool Function(T)? enabled,
+     PlanGate? gate,
+   })  : values = List.unmodifiable(values),
+         super._(id, enabled, gate) {
+     if (this.values.isEmpty) {
+       throw ArgumentError.value(values, 'values', 'must not be empty');
+     }
+     final seen = <String>{};
+     for (final v in this.values) {
+       final segment = segmentOf(v);
+       if (segment.isEmpty || !seen.add(segment)) {
+         throw ArgumentError.value(
+             v, 'values', 'gives the word segment "$segment" twice or empty');
+       }
++      if (segment.contains('.') || segment.contains(':')) {
++        throw ArgumentError.value(v, 'values',
++            'gives the word segment "$segment", which holds "." or ":"');
++      }
+     }
+   }
+ 
+   /// The word segment of [value]: an enum's name, else `'$value'`.
+   static String segmentOf(Object? value) =>
+       value is Enum ? value.name : '$value';
+ 
+   final List<V> values;
+   final V Function(T) read;
+   final T Function(T, V) write;
+diff --git a/packages/jet_cad_2d_kit/test/kit/attachment_test.dart b/packages/jet_cad_2d_kit/test/kit/attachment_test.dart
+index 2536538d..1e27ff0f 100644
+--- a/packages/jet_cad_2d_kit/test/kit/attachment_test.dart
++++ b/packages/jet_cad_2d_kit/test/kit/attachment_test.dart
+@@ -37,20 +37,25 @@ void main() {
+     final q = query(pointer: pointer, exclude: exclude);
+     pointer.x = 0;
+     exclude.add(const Handle(5200));
+     // M-PT20a: keep the caller's vector. M-PT20b: keep the caller's set.
+     expect(q.pointer, Vector2(1610.75, -580.5));
+     expect(q.exclude, {const Handle(5100)});
+     expect(() => q.exclude.add(const Handle(5300)), throwsUnsupportedError);
+     expect(q.mirrored, isTrue);
+     expect(q.mayRotate, isFalse);
+     expect(q.keep, isNull);
++    // M-PT20c (final review): `pointer` handing out the query's own vector:
++    // a provider that moves the vector it read moves the query for the
++    // next provider.
++    q.pointer.x = -9999.5;
++    expect(q.pointer, Vector2(1610.75, -580.5));
+   });
+ 
+   test('PT21 a query refuses a capture it cannot use', () {
+     // M-PT21a: drop the capture check. M-PT21b: drop the pointer check.
+     expect(() => query(capture: -0.5), refusedOn('capture'));
+     expect(() => query(capture: double.nan), refusedOn('capture'));
+     expect(() => query(edgeCapture: double.infinity), refusedOn('edgeCapture'));
+     expect(() => query(pointer: Vector2(double.nan, 2)), refusedOn('pointer'));
+     expect(query(capture: 0, edgeCapture: 0).capture, 0);
+   });
+diff --git a/packages/jet_cad_2d_kit/test/kit/properties_test.dart b/packages/jet_cad_2d_kit/test/kit/properties_test.dart
+index 5288e64c..079355fe 100644
+--- a/packages/jet_cad_2d_kit/test/kit/properties_test.dart
++++ b/packages/jet_cad_2d_kit/test/kit/properties_test.dart
+@@ -107,20 +107,28 @@ void main() {
+               id: 'finish',
+               values: values,
+               read: (s) => s.finish,
+               write: (s, _) => s);
+       // M-PS4a: drop the empty check.
+       expect(() => choice(const []), refusedOn('values'));
+       // M-PS4b: drop the repeated-segment check. 'oiled' the string and
+       // Finish.oiled share a segment.
+       expect(() => choice(const ['oiled', Finish.oiled]), refusedOn('values'));
+       expect(() => choice(const ['a', '']), refusedOn('values'));
++      // M-PS4c (final review): drop the separator check. A segment holding
++      // "." or ":" makes the word id `property:<owner>.<spec>.<value>`
++      // ambiguous.
++      expect(() => choice(const ['oak', 'oak.dark']), refusedOn('values'));
++      expect(() => choice(const ['oak', 'tr:meşe']), refusedOn('values'));
++      expect(() => choice(const [0.5, 2]), refusedOn('values'));
++      expect(
++          choice(const ['oak', 'oak-dark', 2]).values, ['oak', 'oak-dark', 2]);
+       final values = <Object?>[Finish.raw, 'square'];
+       final c = choice(values);
+       values.add('round');
+       expect(c.values, [Finish.raw, 'square']);
+       expect(() => c.values.add('x'), throwsUnsupportedError);
+       expect(ChoiceProperty.segmentOf(Finish.waxed), 'waxed');
+       expect(ChoiceProperty.segmentOf(3), '3');
+     });
+ 
+     test('PS5 a text of maxLength below 1', () {
+diff --git a/packages/jet_cad_2d_plan/lib/src/attach/attachment_registry.dart b/packages/jet_cad_2d_plan/lib/src/attach/attachment_registry.dart
+index 5fc5c778..52aeebf6 100644
+--- a/packages/jet_cad_2d_plan/lib/src/attach/attachment_registry.dart
++++ b/packages/jet_cad_2d_plan/lib/src/attach/attachment_registry.dart
+@@ -43,34 +43,36 @@ final class PlanAttachmentRegistry implements AttachmentRegistry {
+     (_byKind[kind] ??= <_Provider>[]).add(_Provider(kitId, provider));
+   }
+ 
+   @override
+   Set<String> get kinds => Set.unmodifiable(_byKind.keys);
+ 
+   @override
+   Attachment? attach(List<String> kinds, AttachmentQuery query) {
+     final keep = query.keep;
+     final keeper = keep == null ? null : _origin[keep];
++    // One copy for the whole ask (the query copies at each read).
++    final pointer = query.pointer;
+     AttachmentQuery? bare;
+     Attachment? best;
+     var bestDistance = double.infinity;
+     for (final kind in kinds) {
+       final providers = _byKind[kind];
+       if (providers == null) continue;
+       for (final p in providers) {
+         final q = keep == null || identical(p, keeper)
+             ? query
+             : (bare ??= _withoutKeep(query));
+         final a = _ask(p, q);
+         if (a == null) continue;
+         _origin[a] = p;
+-        final d = a.marker.distanceToSquared(query.pointer);
++        final d = a.marker.distanceToSquared(pointer);
+         if (d < bestDistance) {
+           best = a;
+           bestDistance = d;
+         }
+       }
+     }
+     return best;
+   }
+ 
+   /// [p]'s answer through Task 11's guard: a throw is no attachment and
+diff --git a/packages/jet_cad_2d_plan/lib/src/controller/diagnostics_log.dart b/packages/jet_cad_2d_plan/lib/src/controller/diagnostics_log.dart
+index eeca6f82..a7dcbf43 100644
+--- a/packages/jet_cad_2d_plan/lib/src/controller/diagnostics_log.dart
++++ b/packages/jet_cad_2d_plan/lib/src/controller/diagnostics_log.dart
+@@ -73,20 +73,38 @@ final class DiagnosticsLog extends ChangeNotifier
+       SchedulerBinding.instance
+         ..addPostFrameCallback((_) {
+           final next = _pending;
+           if (next != null && !_disposed) _publish(next);
+         })
+         ..ensureVisualUpdate();
+     }
+     return true;
+   }
+ 
++  /// Drops every diagnostic [test] holds for and forgets its kit, subject
++  /// and code, so a later one of the same is reported again; tells the
++  /// listeners when one was dropped. For a problem that went away (a
++  /// symbol library read on a retry).
++  void removeWhere(bool Function(KitDiagnostic diagnostic) test) {
++    final current = _current;
++    final kept = <KitDiagnostic>[];
++    for (final d in current) {
++      if (test(d)) {
++        _seen.remove((d.kitId, d.subject, d.code));
++      } else {
++        kept.add(d);
++      }
++    }
++    if (kept.length == current.length) return;
++    _publish(kept);
++  }
++
+   /// Drops the [planScoped] diagnostics: the plan they spoke of is gone, so
+   /// the next plan may report them again.
+   void clearPlanScoped() {
+     final current = _current;
+     final kept = [
+       for (final d in current)
+         if (!planScoped.contains(d.code)) d,
+     ];
+     _seen.removeWhere((key) => planScoped.contains(key.$3));
+     if (kept.length == current.length) return;
+diff --git a/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart b/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
+index 4beef030..c07de113 100644
+--- a/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
++++ b/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
+@@ -408,46 +408,55 @@ class PlanController extends ChangeNotifier {
+ 
+   /// The plan's text: the engine's JSON with the manifest of the kits it
+   /// uses (Task 7). [markSaved] marks the state encoded here. An empty plan
+   /// read here is settled as it is.
+   ///
+   /// A damaged plan (E3) is first read back; if it does not encode or does
+   /// not decode, nothing is returned: a [PlanFormatException]
+   /// (`damagedUnsavable`), and a diagnostic.
+   String save() {
+     if (!_damaged.value) return _saveUnchecked();
+-    final String text;
++    final ({String text, int state}) encoded;
+     try {
+-      text = _saveUnchecked();
+-      unawaited(decodePlan(text,
++      encoded = _encode();
++      unawaited(decodePlan(encoded.text,
+           register: _registerComponents,
+           diagnostics: <Diagnostic>[]).dispose());
+     } catch (error) {
+       _diagnostics.add(KitDiagnostic(
+           kitId: 'plan',
+           code: KitDiagnosticCode.damagedUnsavable,
+           message: '$error',
+           error: error));
+       throw PlanFormatException(PlanFormatCode.damagedUnsavable,
+           'the damaged plan does not read back: $error');
+     }
+-    return text;
++    // Only a text that read back is one [markSaved] may mark (final
++    // review).
++    _encodedState = encoded.state;
++    return encoded.text;
+   }
+ 
+   /// Task 8's save: the state is marked encoded only once it encoded.
+   String _saveUnchecked() {
++    final encoded = _encode();
++    _encodedState = encoded.state;
++    return encoded.text;
++  }
++
++  /// The plan's text and the state it encodes, pending input settled
++  /// first; nothing is marked.
++  ({String text, int state}) _encode() {
+     settlePendingInput();
+     _unsettled = null;
+     final state = document.commands.stateId;
+-    final text = encodePlan(document, kits);
+-    _encodedState = state;
+-    return text;
++    return (text: encodePlan(document, kits), state: state);
+   }
+ 
+   /// The host stored the last [save]: that state is the save point; an
+   /// edit made since stays dirty. With no [save] yet, the current state.
+   void markSaved() {
+     settlePendingInput();
+     _savedState = _encodedState ?? document.commands.stateId;
+     _refreshFlags();
+   }
+ 
+@@ -545,21 +554,22 @@ class PlanController extends ChangeNotifier {
+ 
+   final Set<String> _disabledTools = {};
+ 
+   /// Whether [toolId]'s factory threw for the current document (spec P4):
+   /// the palette greys it, and [selectTool] leaves `plan.select` armed.
+   bool isToolDisabled(String toolId) => _disabledTools.contains(toolId);
+ 
+   /// Executes [command] on the current document: the commit path of every
+   /// widget and panel (controller ruling R-b; no widget calls
+   /// `document.commands.execute`). True when it applied; false when it was
+-  /// refused, the refusal caught here: [PlanLocked] (and [lockHint] set),
++  /// refused, the refusal caught here: [PlanLocked] (and [lockHint] set;
++  /// the engine's refusal of a write on a frozen, locked object is one),
+   /// `DanglingReferenceError` (E2's refusal of a frozen object's
+   /// referrer), `PermissionDeniedError` (the engine permissions the
+   /// editor's permissions set, e.g. [PlanPermissions.readOnly]),
+   /// `ArgumentError`, and a kit's hook failure the retry did not cure (one
+   /// diagnostic). `StateError` (`PartialMutationError` included, after the
+   /// damage is handled) goes on to the caller.
+   bool execute(DraftCommand command) {
+     try {
+       document.commands.execute(command);
+       return true;
+@@ -659,21 +669,23 @@ class PlanController extends ChangeNotifier {
+     session.boundary = FailureBoundary(
+         document: document,
+         catalog: catalog,
+         system: session.parametric,
+         frozen: session.frozen,
+         log: _diagnostics,
+         lock: lockBroken,
+         damage: _damage);
+     session.lockExpander
+       ..onHookFailure = session.boundary.recover
+-      ..onPartialMutation = session.boundary.partialMutation;
++      ..onPartialMutation = session.boundary.partialMutation
++      ..onRefusedEdit = session.boundary.recoverRefused
++      ..onRetryFailed = session.boundary.retryFailed;
+     session.runKitFactories(kits, _services, _disabledTools);
+     session.tools.addListener(_onTools);
+     session.history = document.commands.changes.listen((_) {
+       if (!_disposed) _refreshFlags();
+     });
+     _loadDiagnostics = List.unmodifiable(loadDiagnostics);
+     _readManifest();
+     _tracker.attach(document);
+     // The load's checks (spec P4), once the views, the kit products and the
+     // manifest's diagnostics are in place: E4's unreadable components, then
+@@ -1041,20 +1053,27 @@ class PlanController extends ChangeNotifier {
+     _armed.value = symbol;
+     return selectTool(PlanToolIds.symbol);
+   }
+ 
+   /// Loads the libraries again after a failure; nothing in another state.
+   Future<void> retrySymbols() async {
+     if (_symbolsState.value != PlanSymbolsState.failed) return;
+     await _loadSymbols();
+   }
+ 
++  /// The codes a symbol load reports, one load's set at a time.
++  static const Set<KitDiagnosticCode> _libraryCodes = {
++    KitDiagnosticCode.libraryUnreadable,
++    KitDiagnosticCode.libraryKitMismatch,
++    KitDiagnosticCode.symbolDuplicate,
++  };
++
+   Future<void> _loadSymbols() async {
+     final run = ++_symbolRun;
+     // A kit set without a symbol library is ready at once, empty (Task
+     // 8's C1 reads `ready` right after construction).
+     if (kits.kits.every((kit) => kit.symbols.isEmpty)) {
+       _symbolsState.value = PlanSymbolsState.ready;
+       return;
+     }
+     _symbolsState.value = PlanSymbolsState.loading;
+     PlanSymbolLoad? load;
+@@ -1065,20 +1084,23 @@ class PlanController extends ChangeNotifier {
+       error = e; // a loader the host disposed
+     }
+     if (_disposed || run != _symbolRun) return;
+     if (load == null) {
+       _symbolsState.value = PlanSymbolsState.failed;
+       debugPrint('The symbol libraries could not be loaded: $error');
+       return;
+     }
+     _symbols = load.symbols;
+     _symbolsById = {for (final s in load.symbols) s.id: s};
++    // This load's library problems replace the last one's: a source that
++    // read on a retry has none left (Task 13 ruling, final review I3).
++    _diagnostics.removeWhere((d) => _libraryCodes.contains(d.code));
+     for (final d in load.diagnostics) {
+       _diagnostics.add(d);
+     }
+     _reportUnofferedKinds();
+     _symbolsState.value = load.state;
+   }
+ 
+   /// One attachmentKindUnoffered per kit and kind (the log keeps one per
+   /// kit, subject and code) for each loaded symbol's attachTo kind that no
+   /// provider of the current document offers.
+diff --git a/packages/jet_cad_2d_plan/lib/src/file/manifest.dart b/packages/jet_cad_2d_plan/lib/src/file/manifest.dart
+index 34b82bc0..0771ce45 100644
+--- a/packages/jet_cad_2d_plan/lib/src/file/manifest.dart
++++ b/packages/jet_cad_2d_plan/lib/src/file/manifest.dart
+@@ -50,30 +50,30 @@ final class PlanManifest {
+ PlanManifest? manifestOf(DraftDocument d) {
+   if (!d.components.isRegistered<ManifestComponent>()) return null;
+   final m = d.components.get<ManifestComponent>(d.rootHandle);
+   return m == null ? null : PlanManifest(format: m.format, kits: m.kits);
+ }
+ 
+ /// The kits [d] uses, sorted (spec P4): see [usedKitsIn].
+ Set<String> usedKits(DraftDocument d) => usedKitsIn(d.components.toJson());
+ 
+ /// The kits an encoded `components` map uses: the `<kit>` of each type id
+-/// `<kit>.<...>` whose `<kit>` is a kit id other than `jetcad`, and the
+-/// kit of each `jetcad.symbol` payload's `key`. Raw components count by
+-/// their type id.
++/// `<kit>.<...>` whose `<kit>` is a kit id other than a reserved one
++/// (`jetcad`, `plan`: [reservedKitIds]), and the kit of each
++/// `jetcad.symbol` payload's `key`. Raw components count by their type id.
+ Set<String> usedKitsIn(Map<String, Object?> components) {
+   final used = SplayTreeSet<String>();
+   void add(String id) {
+     final dot = id.indexOf('.');
+     if (dot <= 0) return;
+     final kit = id.substring(0, dot);
+-    if (kit != 'jetcad' && isKitId(kit)) used.add(kit);
++    if (!reservedKitIds.contains(kit) && isKitId(kit)) used.add(kit);
+   }
+ 
+   for (final MapEntry(key: typeId, value: byHandle) in components.entries) {
+     add(typeId);
+     if (typeId == SymbolComponent.componentTypeId &&
+         byHandle is Map<String, Object?>) {
+       for (final payload in byHandle.values) {
+         if (payload is Map<String, Object?> && payload['key'] is String) {
+           add(payload['key']! as String);
+         }
+diff --git a/packages/jet_cad_2d_plan/lib/src/kits/guard.dart b/packages/jet_cad_2d_plan/lib/src/kits/guard.dart
+index 8939722c..5b001be5 100644
+--- a/packages/jet_cad_2d_plan/lib/src/kits/guard.dart
++++ b/packages/jet_cad_2d_plan/lib/src/kits/guard.dart
+@@ -627,20 +627,41 @@ final class FailureBoundary {
+       if (node is! GroupNode || node.parent != root) continue;
+       final h = node.handle;
+       if (frozen.contains(h) || catalog.typeIdOf(document, h) != typeId) {
+         continue;
+       }
+       if (system.probe(h) != null) broken.add(h);
+     }
+     return broken;
+   }
+ 
++  /// An edit failed on an error no kit hook threw (the planner refusing
++  /// what a `generate` returned; final review, finding I2): every live kit
++  /// object is probed, one by one, and the failing ones frozen and locked,
++  /// each with its type's diagnostic. True when one was: the edit is worth
++  /// one retry. False when none fails: the edit itself is refused.
++  bool recoverRefused(Object error) {
++    final broken = _probeAll();
++    if (broken.isEmpty) return false;
++    _freeze(broken);
++    return true;
++  }
++
++  /// The retry after [recoverRefused] (or [recover]) failed again on an
++  /// error no kit hook threw: the edit is refused, with one diagnostic.
++  void retryFailed(Object error) => log.add(KitDiagnostic(
++      kitId: 'plan',
++      code: KitDiagnosticCode.hookFailed,
++      message: 'an edit failed again after the objects that broke it were '
++          'locked: $error',
++      error: error));
++
+   /// After a load: one dry run of the whole plan. While it throws, the
+   /// objects to blame are frozen and locked, with their diagnostics, and it
+   /// runs again: on a kit's hook failure, that type's failing objects; when
+   /// those are none, or on an error no hook threw (the planner refusing
+   /// what a `generate` returned, an engine invariant), every live kit
+   /// object is probed, one by one (fix round 1). When no object's probe
+   /// fails, the error is reported to [FlutterError.reportError] and the
+   /// load goes on. Each round freezes at least one object or ends, so it
+   /// ends.
+   void probeLoaded() {
+@@ -664,21 +685,21 @@ final class FailureBoundary {
+                   'plan (no object\'s probe failed)')));
+           return;
+         }
+         _freeze(broken);
+       }
+     }
+   }
+ 
+   /// Every live, unfrozen root-level kit object whose probe (E2) fails,
+   /// each reported as its type's: the per-object check of a load whose dry
+-  /// run failed on no single type.
++  /// run failed on no single type, and of an edit that failed on no hook.
+   Set<Handle> _probeAll() {
+     final broken = <Handle>{};
+     final root = document.rootHandle;
+     for (final node in document.tree.nodes) {
+       if (node is! GroupNode || node.parent != root) continue;
+       final h = node.handle;
+       if (frozen.contains(h)) continue;
+       final typeId = catalog.typeIdOf(document, h);
+       if (typeId == null) continue;
+       final error = system.probe(h);
+diff --git a/packages/jet_cad_2d_plan/lib/src/kits/locks.dart b/packages/jet_cad_2d_plan/lib/src/kits/locks.dart
+index 022c4ac8..a4099402 100644
+--- a/packages/jet_cad_2d_plan/lib/src/kits/locks.dart
++++ b/packages/jet_cad_2d_plan/lib/src/kits/locks.dart
+@@ -195,32 +195,48 @@ final class LockExpander {
+       _previous?.call(command) ?? command;
+ 
+   /// Called when the applied command threw a [KitHookFailure]: true when
+   /// it froze something, so the edit is worth one retry (Task 11).
+   bool Function(KitHookFailure failure)? onHookFailure;
+ 
+   /// Called when the applied command left the target partially mutated
+   /// (E3), before the error goes on to the caller (Task 11).
+   void Function(PartialMutationError error)? onPartialMutation;
+ 
++  /// Called when the applied command threw an error no kit hook threw and
++  /// that is no refusal (the engine's planner refusing what a `generate`
++  /// returned): true when it froze something, so the edit is worth one
++  /// retry (final review, finding I2).
++  bool Function(Object error)? onRefusedEdit;
++
++  /// Called when the one retry after a recovery failed again on an error
++  /// no kit hook threw and that is no refusal, before it goes on to the
++  /// caller: the refusal's diagnostic (final review, finding I2).
++  void Function(Object error)? onRetryFailed;
++
+   DraftCommand _expand(DraftCommand command) {
+     final inner = expandInner(command);
+-    if (locks.isEmpty && onHookFailure == null && onPartialMutation == null) {
++    if (locks.isEmpty &&
++        onHookFailure == null &&
++        onPartialMutation == null &&
++        onRefusedEdit == null) {
+       return inner;
+     }
+     return _LockCheck(this, command, inner);
+   }
+ }
+ 
+ /// One edit and its lock check: [_applied] applies, then each touched
+-/// handle is tested; a hit undoes the edit and throws [PlanLocked]. Created
+-/// by [LockExpander], once per `execute`.
++/// handle is tested; a hit undoes the edit and throws [PlanLocked]. The
++/// engine's own refusal of a write on a locked (frozen) object, a
++/// [NonLiveWriteError], is a [PlanLocked] too. Created by [LockExpander],
++/// once per `execute`.
+ final class _LockCheck extends DraftCommand {
+   _LockCheck(this._expander, this.original, this._applied);
+ 
+   final LockExpander _expander;
+ 
+   /// The command the caller executed, before any expansion.
+   final DraftCommand original;
+ 
+   /// The expanded command this check applies; the retry's, after a
+   /// recovered failure (Task 11).
+@@ -233,41 +249,73 @@ final class _LockCheck extends DraftCommand {
+   Set<Capability> get capabilities => _applied.capabilities;
+ 
+   /// Read by the dispatcher after [apply]: the applied command's own.
+   @override
+   Capability get capability => _applied.capability;
+ 
+   @override
+   CommandResult apply(CommandTarget target) {
+     try {
+       return _check(target, _first(target));
++    } on NonLiveWriteError catch (error) {
++      // E2 (amended in the final review): a write of a frozen object's own
++      // type's component. The engine has undone the edit; on a locked
++      // object (a frozen one is locked too) it is the lock's refusal, never
++      // a kit's failure.
++      if (!_expander.locks.covers(target, error.handle)) rethrow;
++      throw const PlanLocked();
+     } on PartialMutationError catch (error) {
+       _expander.onPartialMutation?.call(error);
+       rethrow;
+     }
+   }
+ 
+-  /// [_applied] applied; on a kit's hook failure that the boundary
+-  /// recovers from (it froze the failing objects), [original] expanded
+-  /// afresh (a ParametricEdit applies once) and applied once more. A second
+-  /// failure goes on: the command is refused.
++  /// [_applied] applied; on a failure that the boundary recovers from (it
++  /// froze the failing objects), [original] expanded afresh (a
++  /// ParametricEdit applies once) and applied once more. The failures it
++  /// recovers from: a kit's hook failure, and an error no hook threw that
++  /// is no refusal (the planner refusing a `generate`'s output, final
++  /// review I2). A second failure goes on: the command is refused, one
++  /// diagnostic when no hook threw it.
+   CommandResult _first(CommandTarget target) {
+     try {
+       return _applied.apply(target);
+     } on KitHookFailure catch (failure) {
+       final recover = _expander.onHookFailure;
+       if (recover == null || !recover(failure)) rethrow;
+-      _applied = _expander.expandInner(original);
++    } catch (error) {
++      if (_isRefusal(error)) rethrow;
++      final recover = _expander.onRefusedEdit;
++      if (recover == null || !recover(error)) rethrow;
++    }
++    _applied = _expander.expandInner(original);
++    try {
+       return _applied.apply(target);
++    } catch (error) {
++      if (error is! KitHookFailure && !_isRefusal(error)) {
++        _expander.onRetryFailed?.call(error);
++      }
++      rethrow;
+     }
+   }
+ 
++  /// An answer of the engine or the lock about the edit itself, never a
++  /// broken object's: no probe, no retry. A [PartialMutationError] leaves
++  /// the target unknown, so it is never retried either.
++  static bool _isRefusal(Object error) =>
++      error is PlanLocked ||
++      error is PartialMutationError ||
++      error is NonLiveWriteError ||
++      error is DanglingReferenceError ||
++      error is PermissionDeniedError ||
++      error is GeneratedGeometryError;
++
+   CommandResult _check(CommandTarget target, CommandResult result) {
+     final locks = _expander.locks;
+     for (final h in result.touched) {
+       if (!locks.covers(target, h)) continue;
+       try {
+         result.inverse.apply(target);
+       } catch (rollbackError) {
+         throw PartialMutationError('"$label": it touched a locked object, '
+             'and undoing it then threw ($rollbackError); the target is '
+             'partially mutated and nothing was recorded in history');
+diff --git a/packages/jet_cad_2d_plan/lib/src/panels/plan_property_panel.dart b/packages/jet_cad_2d_plan/lib/src/panels/plan_property_panel.dart
+index e6fde53e..790ebe4f 100644
+--- a/packages/jet_cad_2d_plan/lib/src/panels/plan_property_panel.dart
++++ b/packages/jet_cad_2d_plan/lib/src/panels/plan_property_panel.dart
+@@ -466,32 +466,49 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
+       switch (t) {
+         case _SymbolTarget(:final handle):
+           final command =
+               rotateSymbolCommand(c.document, handle, input! as double);
+           if (command != null) c.execute(command);
+         case _ObjectTarget(:final handle, :final typeId):
+           final field = _fieldOf(t, id);
+           if (field == null || (input != null && input == field.value)) {
+             return;
+           }
+-          c.execute(planTypeOf(c, typeId)!
+-              .commitField(c.document, handle, field, input));
++          final command = planTypeOf(c, typeId)!
++              .commitField(c.document, handle, field, input);
++          // A value the spec rounds back to the stored one (2.31 at one
++          // decimal over 2.3) writes nothing: no empty undo step (final
++          // review).
++          if (command is SetComponentCommand &&
++              command.value == _componentOf(handle, typeId)) {
++            return;
++          }
++          c.execute(command);
+         case _ToolTarget():
+           final field = _fieldOf(t, id);
+           if (field == null || (input != null && input == field.value)) {
+             return;
+           }
+           field.commit!(input);
+       }
+     });
+   }
+ 
++  /// [handle]'s component of [typeId], read without its `T`.
++  Component? _componentOf(Handle handle, String typeId) {
++    for (final (id, component)
++        in _c.document.components.snapshotOf(handle).components) {
++      if (id == typeId) return component;
++    }
++    return null;
++  }
++
+   /// A click (a toggle, a choice, an action) acts on the target shown now.
+   void _act(_Target t, String id, Object? input) {
+     _write(t, id, input);
+     if (mounted) setState(() {});
+   }
+ 
+   // ---- the field cycle (selection_panel.dart:760-1008) ----
+ 
+   _Field _fieldFor(_Scope scope, String id) =>
+       _fields.putIfAbsent((scope, id), () {
+diff --git a/packages/jet_cad_2d_plan/lib/src/shortcuts/plan_shortcuts.dart b/packages/jet_cad_2d_plan/lib/src/shortcuts/plan_shortcuts.dart
+index dd959e4d..d04b0647 100644
+--- a/packages/jet_cad_2d_plan/lib/src/shortcuts/plan_shortcuts.dart
++++ b/packages/jet_cad_2d_plan/lib/src/shortcuts/plan_shortcuts.dart
+@@ -71,32 +71,41 @@ class _PlanShortcutsState extends State<PlanShortcuts> {
+   void didChangeDependencies() {
+     super.didChangeDependencies();
+     PlanLocaleScope.push(context, widget.controller);
+   }
+ 
+   @override
+   void didUpdateWidget(PlanShortcuts oldWidget) {
+     super.didUpdateWidget(oldWidget);
+     if (!identical(oldWidget.controller, widget.controller)) {
+       oldWidget.controller.removeListener(_applyIdleKeys);
++      _restoreIdleKeys(oldWidget.controller);
+       widget.controller.addListener(_applyIdleKeys);
+       PlanLocaleScope.push(context, widget.controller);
+     }
+     _applyIdleKeys();
+   }
+ 
+   @override
+   void dispose() {
+     widget.controller.removeListener(_applyIdleKeys);
++    _restoreIdleKeys(widget.controller);
+     super.dispose();
+   }
+ 
++  /// [c]'s select tool gets its idle keys back once these shortcuts no
++  /// longer speak for it (final review): a removed `shortcuts: false`
++  /// leaves Delete and Escape working in the canvas.
++  static void _restoreIdleKeys(PlanController c) {
++    if (!c.isDisposed) c.selectGates.idleKeys = true;
++  }
++
+   /// The select tool's idle keys are the shortcuts (S-16). The gates are
+   /// per document, so this runs again after a swap (the controller
+   /// notifies).
+   void _applyIdleKeys() =>
+       widget.controller.selectGates.idleKeys = widget.shortcuts;
+ 
+   /// Runs a file command when it can act: no shape part-way (spec 12a D6),
+   /// and a page for Print (spec 13 D9); for Export a page or an exporter
+   /// that needs none (spec 13 D8, P2: with only the built-in exporters,
+   /// the page).
+diff --git a/packages/jet_cad_2d_plan/test/controller/diagnostics_log_test.dart b/packages/jet_cad_2d_plan/test/controller/diagnostics_log_test.dart
+new file mode 100644
+index 00000000..d35b256d
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/controller/diagnostics_log_test.dart
+@@ -0,0 +1,42 @@
++// The controller's DiagnosticsLog (spec P4 "Diagnostics"): removeWhere, the
++// way a problem that went away leaves the bar (final review I3).
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:jet_cad_2d_plan/src/controller/diagnostics_log.dart';
++
++KitDiagnostic unreadable(String kit, String source) => KitDiagnostic(
++    kitId: kit,
++    subject: source,
++    code: KitDiagnosticCode.libraryUnreadable,
++    message: 'the library "$source" could not be read');
++
++void main() {
++  test(
++      'DL-1 removeWhere drops the matching diagnostics, tells the listeners '
++      'once, and forgets them: the same problem is reported again later', () {
++    final log = DiagnosticsLog();
++    addTearDown(log.dispose);
++    final hook = KitDiagnostic(
++        kitId: 'cafe',
++        subject: 'cafe.table',
++        code: KitDiagnosticCode.hookFailed,
++        message: 'generate: boom');
++    log
++      ..add(unreadable('cafe', 'tables'))
++      ..add(hook)
++      ..add(unreadable('deco', 'lamps'));
++    var told = 0;
++    log.addListener(() => told++);
++    log.removeWhere((d) => d.code == KitDiagnosticCode.libraryUnreadable);
++    expect(log.value, [hook]);
++    expect(told, 1);
++    // Nothing matches: nothing changes, nobody is told.
++    log.removeWhere((d) => d.code == KitDiagnosticCode.symbolDuplicate);
++    expect(told, 1);
++    // M-DL-1: removeWhere keeping the `_seen` keys: the log refuses the
++    // same source's next failure as a repeat.
++    expect(log.add(unreadable('cafe', 'tables')), isTrue);
++    expect(log.value, [hook, unreadable('cafe', 'tables')]);
++    expect(log.add(hook), isFalse, reason: 'a kept one still dedupes');
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/controller/symbols_controller_test.dart b/packages/jet_cad_2d_plan/test/controller/symbols_controller_test.dart
+index e6b32ca8..feb3c274 100644
+--- a/packages/jet_cad_2d_plan/test/controller/symbols_controller_test.dart
++++ b/packages/jet_cad_2d_plan/test/controller/symbols_controller_test.dart
+@@ -164,20 +164,50 @@ void main() {
+     final symbols = c.symbols;
+     final again = c.retrySymbols();
+     // M-S12: retrySymbols acts in every state (it goes back to loading;
+     // the loader's cache keeps the read count at 2 either way).
+     expect(c.symbolsState.value, PlanSymbolsState.ready);
+     await again;
+     expect(read.reads, 2);
+     expect(c.symbols, same(symbols), reason: 'nothing was loaded again');
+   });
+ 
++  test(
++      'S-19 (final review I3) a retry clears the library diagnostics of each '
++      'source that now reads; a source still failing keeps its own', () async {
++    var alphaFails = true;
++    final alpha = CountingSource('alpha', () async {
++      if (alphaFails) throw StateError('alpha offline');
++      return itemsBytes('alpha', ['one', 'two']);
++    });
++    final beta =
++        CountingSource('beta', () async => throw StateError('beta offline'));
++    final c = make([
++      symbolKit('alpha', [alpha.source]),
++      symbolKit('beta', [beta.source]),
++    ]);
++    await settle();
++    expect(c.symbolsState.value, PlanSymbolsState.failed);
++    expect(problemsOf(c), [
++      ('alpha', 'alpha', KitDiagnosticCode.libraryUnreadable),
++      ('beta', 'beta', KitDiagnosticCode.libraryUnreadable),
++    ]);
++    alphaFails = false;
++    await c.retrySymbols();
++    expect(c.symbolsState.value, PlanSymbolsState.ready);
++    expect(idsOf(c.symbols), ['alpha.item.one@1', 'alpha.item.two@1']);
++    // M-S19: `_loadSymbols` without its `removeWhere`: alpha's fixed
++    // failure stays on the bar.
++    expect(
++        problemsOf(c), [('beta', 'beta', KitDiagnosticCode.libraryUnreadable)]);
++  });
++
+   test('S-13 a controller disposed mid-load ignores the late result', () async {
+     // The controller is made inside the zone, so the load's continuation
+     // runs there too and any error it throws lands in [errors].
+     final errors = <Object>[];
+     await runZonedGuarded(() async {
+       final pending = Completer<Uint8List>();
+       final c = PlanController(kits: [
+         demoKit(
+             source:
+                 SymbolLibrarySource(label: 'demo', read: () => pending.future)),
+diff --git a/packages/jet_cad_2d_plan/test/file/manifest_test.dart b/packages/jet_cad_2d_plan/test/file/manifest_test.dart
+index 5146d140..0c04c999 100644
+--- a/packages/jet_cad_2d_plan/test/file/manifest_test.dart
++++ b/packages/jet_cad_2d_plan/test/file/manifest_test.dart
+@@ -1,16 +1,17 @@
+ // Spec 2a P4 "The plan file": which kits a plan uses, the manifest a save
+ // writes, and what a load reports against the loaded kits.
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:jet_cad_2d_plan/src/file/manifest.dart' show usedKitsIn;
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import '../support/harness.dart';
+ import '../support/test_kit.dart';
+ 
+ void main() {
+   test('PF-3 used kits: component type ids and symbol keys under a kit id', () {
+     final kits = [testKit(), discKit()];
+     final d = planDocument(kits);
+     installSystem(d, kits);
+@@ -35,20 +36,43 @@ void main() {
+               category: 'Tables',
+               tags: const ['table'])),
+     ], label: 'Add a symbol'));
+     // Premise: the page and the objects' layers are there, and are no kit.
+     expect(d.components.get<PageComponent>(d.rootHandle), isNotNull);
+     // M-PF-3a: symbol keys not read. M-PF-3b: 'jetcad' not excluded.
+     expect(usedKits(d), {'cafe', 'disc', 'test'});
+     expect(usedKits(d).toList(), ['cafe', 'disc', 'test'], reason: 'sorted');
+   });
+ 
++  test(
++      'PF-3b (final review) a reserved kit id is no used kit: neither a '
++      '`plan.*` nor a `jetcad.*` type id, nor a symbol key under them', () {
++    final used = usedKitsIn({
++      'plan.note': {
++        '4101': {'text': 'a note'}
++      },
++      'jetcad.manifest': {
++        '1': {'format': 1, 'kits': <String, Object?>{}}
++      },
++      'jetcad.symbol': {
++        '4102': {'key': 'plan.mark.cross'},
++        '4103': {'key': 'cafe.table.round'},
++      },
++      'deco.lamp': {
++        '4104': {'radius': 150.5}
++      },
++    });
++    // M-PF-3c: `usedKitsIn` excluding `jetcad` alone: `plan` is written
++    // into the manifest, and the next load reports it missing.
++    expect(used, {'cafe', 'deco'});
++  });
++
+   test('PF-4 a missing kit keeps the entry read; a loaded used kit is written',
+       () {
+     final loaded = validateKitSet([testKit(), discKit()]);
+     final written = manifestToWrite(
+         const PlanManifest(
+             kits: {'gone': '2.0.0', 'test': '0.9.0', 'old': '1.0.0'}),
+         {'test', 'gone'},
+         loaded);
+     // M-PF-4: a kit that is not loaded drops its entry.
+     expect(
+diff --git a/packages/jet_cad_2d_plan/test/kits/failure_flow_test.dart b/packages/jet_cad_2d_plan/test/kits/failure_flow_test.dart
+index a3a5a4ae..66b180d9 100644
+--- a/packages/jet_cad_2d_plan/test/kits/failure_flow_test.dart
++++ b/packages/jet_cad_2d_plan/test/kits/failure_flow_test.dart
+@@ -1,17 +1,19 @@
+ // Spec P4 "The failure boundary", through the controller: a hook that
+ // fails during an edit is caught at the expander, that type's objects are
+ // probed (E2), the failing ones frozen and locked, the history cleared,
+ // and the edit run once more; a second failure refuses it with one
+ // diagnostic. A load probes once. A component its factory cannot read is
+ // kept raw, locked and frozen (E4). A rollback that throws damages the
+-// plan (E3), and saving a damaged plan first reads it back.
++// plan (E3), and saving a damaged plan first reads it back. An edit the
++// planner refuses on no hook probes every kit object instead (final
++// review, I2).
+ import 'package:flutter/foundation.dart';
+ import 'package:flutter/services.dart';
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+ import 'package:jet_cad_2d_plan/src/kits/guard.dart' show GuardedTool;
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+@@ -287,20 +289,59 @@ void main() {
+         reason: 'premise: the partial mutation left a value no JSON holds');
+     // M-F7: `save` without its damaged check (Task 8's body alone) throws
+     // the encoder's JsonUnsupportedObjectError instead.
+     expect(
+         c.save,
+         throwsA(isA<PlanFormatException>()
+             .having((e) => e.code, 'code', PlanFormatCode.damagedUnsavable)));
+     expect(diagnosticsOf(c, KitDiagnosticCode.damagedUnsavable), hasLength(1));
+   });
+ 
++  test(
++      'F-7b (final review) a damaged save that does not read back marks '
++      'nothing: markSaved after it keeps the last good save as the save '
++      'point, so the plan stays dirty', () async {
++    final sw = Switches();
++    final c = PlanController(kits: [boxKit(sw)]);
++    addTearDown(c.dispose);
++    final d = c.document;
++    final s = addObject(d, atSquare, const SquareParams(side: 1200));
++    c.save();
++    c.markSaved();
++    expect(
++        c.execute(SetComponentCommand<SquareParams>(
++            s, const SquareParams(side: 1250.5))),
++        isTrue);
++    sw.failing.add('reach');
++    // The edit writes a layer on a handle no file can hold, and a square
++    // whose reach throws; undoing it throws: E3, the plan damaged with
++    // both kept. It encodes, but the handle does not read back.
++    expect(
++        () => c.execute(_Sabotage(CompoundCommand([
++              SetComponentCommand<ObjectLayer>(const Handle(-7),
++                  const ObjectLayer(ReservedHandles.layerZero)),
++              SetComponentCommand<SquareParams>(
++                  s, const SquareParams(side: 1300.5, poisoned: true)),
++            ], label: 'Both'))),
++        throwsA(isA<PartialMutationError>()));
++    expect(c.damaged.value, isTrue, reason: 'premise');
++    expect(
++        c.save,
++        throwsA(isA<PlanFormatException>()
++            .having((e) => e.code, 'code', PlanFormatCode.damagedUnsavable)));
++    c.markSaved();
++    await Future<void>.delayed(Duration.zero);
++    // M-F7b: `save` marking the state encoded before its read-back: the
++    // unsaved damaged plan reads as saved.
++    expect(c.dirty.value, isTrue);
++  });
++
+   test(
+       'F-8 a tool whose factory throws is disabled: one diagnostic, and '
+       'selecting it leaves plan.select armed', () {
+     final sw = Switches()..failing.add('create');
+     // M-F8: the controller calling `PlanTool.create` bare: the constructor
+     // throws HookBoom.
+     final c = PlanController(kits: [boxKit(sw)]);
+     addTearDown(c.dispose);
+     expect(c.isToolDisabled('box.stamp'), isTrue);
+     expect(c.isToolDisabled('plan.select'), isFalse);
+@@ -487,20 +528,115 @@ void main() {
+     c.undo();
+     expect(d.commands.canRedo, isTrue, reason: 'premise');
+     expect(c.damaged.value, isFalse, reason: 'premise');
+     // M-F14b: redo without its `on PartialMutationError` clause.
+     expect(c.redo, returnsNormally);
+     expect(d.entities.slotOf(line), isNotNull, reason: 'the redo applied');
+     expect(c.damaged.value, isTrue);
+     expect(d.commands.canRedo, isFalse);
+     expect(diagnosticsOf(c, KitDiagnosticCode.rollbackFailed), hasLength(1));
+   });
++
++  test(
++      'F-15 (final review I2) a square whose generate the planner refuses '
++      '(no hook throws): its own edit is refused once, with the square '
++      'frozen, locked and one diagnostic; its neighbour then edits', () {
++    final s = refusedScene();
++    final c = s.c;
++    final d = c.document;
++    final drawn = coordsOf(d, s.broken);
++    // M-F15a: the controller not setting `LockExpander.onRefusedEdit`: the
++    // edit is refused by the planner, nothing is locked or reported, and
++    // the neighbour's edit below is refused as well.
++    expect(
++        c.execute(TransformNodeCommand(s.broken, nearSquare(100.5, 50.25, 0))),
++        isFalse);
++    expect(c.lockHint.value, isTrue, reason: 'the retry met the lock');
++    expect(c.locked.value, {s.broken});
++    expect(c.frozen, {s.broken});
++    final failures = diagnosticsOf(c, KitDiagnosticCode.hookFailed);
++    expect([for (final f in failures) (f.kitId, f.subject)],
++        [('box', SquareParams.id)]);
++    final before = coordsOf(d, s.neighbour);
++    expect(
++        c.execute(SetComponentCommand<SquareParams>(
++            s.neighbour, const SquareParams(side: 1010.5))),
++        isTrue);
++    expect(coordsOf(d, s.neighbour), isNot(before), reason: 'regenerated');
++    expect(coordsOf(d, s.broken), drawn,
++        reason: 'the broken one keeps its geometry');
++    expect(diagnosticsOf(c, KitDiagnosticCode.hookFailed), hasLength(1));
++  });
++
++  test(
++      'F-15b (final review I2) the neighbour edits first: the edit is not '
++      'refused; the refused square is frozen and locked on the way', () {
++    final s = refusedScene();
++    final c = s.c;
++    final d = c.document;
++    final before = coordsOf(d, s.neighbour);
++    // M-F15a again: the neighbour's edit is refused, nothing locked.
++    expect(
++        c.execute(SetComponentCommand<SquareParams>(
++            s.neighbour, const SquareParams(side: 1010.5))),
++        isTrue);
++    expect(coordsOf(d, s.neighbour), isNot(before));
++    expect(c.locked.value, {s.broken});
++    expect(c.lockHint.value, isFalse);
++    expect(diagnosticsOf(c, KitDiagnosticCode.hookFailed), hasLength(1));
++  });
++
++  test(
++      'F-15c (final review I2) the planner refuses the edit\'s own new '
++      'value, and no stored object fails its probe: refused, nothing '
++      'locked, no diagnostic, the document unchanged', () {
++    final s = refusedScene(poisoned: false);
++    final c = s.c;
++    final d = c.document;
++    final before = canon(d);
++    final depth = d.commands.undoDepth;
++    // M-F15c: `recoverRefused` answering true when nothing froze: the
++    // retry fails again and reports a diagnostic for a plain refusal.
++    expect(
++        c.execute(SetComponentCommand<SquareParams>(
++            s.neighbour, const SquareParams(side: 950.5, poisoned: true))),
++        isFalse);
++    expect(canon(d), before);
++    expect(d.commands.undoDepth, depth);
++    expect(c.locked.value, isEmpty);
++    expect(c.diagnostics.value, isEmpty);
++  });
++
++  test(
++      'F-15d (final review I2) a stored square the planner refuses, and an '
++      'edit whose own new value it refuses too: the stored one is frozen and '
++      'locked, the retry fails, and the edit is refused with a diagnostic', () {
++    final s = refusedScene();
++    final c = s.c;
++    final d = c.document;
++    final drawn = coordsOf(d, s.neighbour);
++    // M-F15d: the controller not setting `LockExpander.onRetryFailed`:
++    // the second refusal reports nothing.
++    expect(
++        c.execute(SetComponentCommand<SquareParams>(
++            s.neighbour, const SquareParams(side: 950.5, poisoned: true))),
++        isFalse);
++    expect(c.locked.value, {s.broken});
++    expect(coordsOf(d, s.neighbour), drawn);
++    expect([
++      for (final f in diagnosticsOf(c, KitDiagnosticCode.hookFailed))
++        (f.kitId, f.subject)
++    ], [
++      ('box', SquareParams.id),
++      ('plan', null),
++    ]);
++  });
+ }
+ 
+ /// Applies [inner]; its undo works, and the redo after it applies and then
+ /// throws E3's error.
+ final class _HalfRedone extends DraftCommand {
+   _HalfRedone(this.inner);
+   final DraftCommand inner;
+   @override
+   Capability get capability => inner.capability;
+   @override
+@@ -575,10 +711,27 @@ const KeyDownEvent deleteKey = KeyDownEvent(
+ final class _Refusing extends DraftCommand {
+   _Refusing(this.error);
+   final Object error;
+   @override
+   Capability get capability => Capability.components;
+   @override
+   String get label => 'Refusing';
+   @override
+   CommandResult apply(CommandTarget target) => throw error;
+ }
++
++/// The final review's I2 scene: a square ([poisoned]: its `generate` adds
++/// an open region the planner refuses, and no hook throws) and a healthy
++/// square overlapping it, both off the origin and turned.
++({PlanController c, Handle broken, Handle neighbour}) refusedScene(
++    {bool poisoned = true}) {
++  final sw = Switches();
++  final c = PlanController(kits: [boxKit(sw)]);
++  addTearDown(c.dispose);
++  final d = c.document;
++  final broken =
++      addObject(d, atSquare, SquareParams(side: 1200, poisoned: poisoned));
++  final neighbour = addObject(
++      d, nearSquare(300.5, 200.25, 0.2), const SquareParams(side: 900));
++  sw.failing.add('openRegion');
++  return (c: c, broken: broken, neighbour: neighbour);
++}
+diff --git a/packages/jet_cad_2d_plan/test/kits/frozen_write_test.dart b/packages/jet_cad_2d_plan/test/kits/frozen_write_test.dart
+new file mode 100644
+index 00000000..51401a90
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/kits/frozen_write_test.dart
+@@ -0,0 +1,207 @@
++// Spec P4 "Locks" with E2 as amended in the final review (finding I1): a
++// broken object is frozen and locked, and a write of its own type's
++// component, which the engine refuses with a NonLiveWriteError before any
++// lock check could run, is the lock's refusal (PlanLocked) on every path
++// that commits: the host's execute, a kit tool, a kit grip drag through
++// plan.select. Never a thrown StateError, never a kit's hookFailed.
++import 'package:flutter/material.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/box_kit.dart';
++import '../support/tool_events.dart';
++
++/// A kit tool that, on release, executes [command] through the dispatcher,
++/// as a kit tool commits.
++final class _WriteTool extends Tool {
++  _WriteTool(this.command);
++  final DraftCommand Function() command;
++  @override
++  String get name => 'write';
++  @override
++  ToolPhase get phase => ToolPhase.idle;
++  @override
++  void onPointerDown(ToolPointerEvent e, ToolContext ctx) {}
++  @override
++  void onPointerMove(ToolPointerEvent e, ToolContext ctx) {}
++  @override
++  void onPointerUp(ToolPointerEvent e, ToolContext ctx) =>
++      ctx.document.commands.execute(command());
++  @override
++  void onPointerExit(ToolContext ctx) {}
++  @override
++  KeyEventResult onKey(KeyEvent event, ToolContext ctx) =>
++      KeyEventResult.ignored;
++  @override
++  void cancel(ToolContext ctx) {}
++  @override
++  void paintOverlay(Canvas canvas, ViewportTransform camera, Size viewport,
++      PaperPalette paper) {}
++}
++
++/// One grip at each square's origin; its drag writes a new square onto
++/// [target] (a neighbour's parameters, as a wall-endpoint grip will).
++final class _NeighbourGrips implements ObjectGripProvider {
++  _NeighbourGrips(this.target);
++  final Handle Function() target;
++
++  @override
++  List<Grip> gripsOf(DraftDocument d, Handle group) {
++    final o =
++        (d.tree[group]! as GroupNode).transform.transformPoint(Vector2.zero());
++    return [Grip(GripRole.stretch, 0, o.x, o.y)];
++  }
++
++  @override
++  DraftCommand? drag(DraftDocument d, Handle group, Grip grip, Vector2 world) =>
++      SetComponentCommand<SquareParams>(
++          target(), const SquareParams(side: 1350.5, poisoned: true));
++
++  @override
++  List<(EntityKind, GeometryPayload)> preview(
++          DraftDocument d, Handle group, Grip grip, Vector2 world) =>
++      const [];
++
++  @override
++  bool movable(DraftDocument d, Handle group) => true;
++}
++
++/// The `box` kit with [grips] on its square, and the `poke` kit, whose
++/// tool writes [write].
++List<PlanKit> kits(Switches sw,
++        {ObjectGripProvider Function(PlanServices)? grips,
++        DraftCommand Function()? write}) =>
++    [
++      PlanKit(
++        id: 'box',
++        version: '1.4.0',
++        types: [
++          PlanType<SquareParams>(
++              id: SquareParams.id,
++              fromJson: SquareParams.fromJson,
++              parametric: SquareType(sw),
++              grips: grips),
++        ],
++        names: const KitNames({
++          'en': {'type:box.square': 'Square'},
++        }),
++      ),
++      PlanKit(
++        id: 'poke',
++        version: '0.3.0',
++        tools: [
++          PlanTool(
++              id: 'poke.write',
++              icon: Icons.edit,
++              create: (services) => _WriteTool(write ?? () => throw 'unset')),
++        ],
++        names: const KitNames({
++          'en': {'tool:poke.write': 'Write'},
++        }),
++      ),
++    ];
++
++/// A broken square (its reach throws) frozen and locked by one refused
++/// move, beside a healthy one; the hint cleared.
++({PlanController c, Handle broken, Handle healthy, String before}) frozenScene(
++    Switches sw, PlanController c) {
++  final d = c.document;
++  final broken =
++      addObject(d, atSquare, const SquareParams(side: 1200, poisoned: true));
++  final healthy =
++      addObject(d, nearSquare(4000, -500, 0.25), const SquareParams(side: 500));
++  sw.failing.add('reach');
++  expect(c.execute(TransformNodeCommand(broken, nearSquare(100.5, 50.25, 0))),
++      isFalse);
++  // Fixture: the square is frozen and locked, one diagnostic.
++  expect(c.frozen, {broken});
++  expect(c.locked.value, {broken});
++  expect(hookFailures(c), [('box', SquareParams.id)]);
++  c.lockHint.value = false;
++  return (c: c, broken: broken, healthy: healthy, before: canon(d));
++}
++
++List<(String, String?)> hookFailures(PlanController c) => [
++      for (final d in c.diagnostics.value)
++        if (d.code == KitDiagnosticCode.hookFailed) (d.kitId, d.subject),
++    ];
++
++const SquareParams rewritten = SquareParams(side: 1350.5, poisoned: true);
++
++void main() {
++  TestWidgetsFlutterBinding.ensureInitialized();
++
++  test(
++      'FW-1 the host executes a write of a frozen square\'s own component: '
++      'false, the lock hint, nothing changed, no new diagnostic', () {
++    final sw = Switches();
++    final c = PlanController(kits: kits(sw));
++    addTearDown(c.dispose);
++    final s = frozenScene(sw, c);
++    // M-FW-1: `_LockCheck.apply` without its `on NonLiveWriteError`
++    // mapping: execute throws the engine's StateError.
++    expect(c.execute(SetComponentCommand<SquareParams>(s.broken, rewritten)),
++        isFalse);
++    expect(c.lockHint.value, isTrue);
++    expect(canon(c.document), s.before);
++    expect(hookFailures(c), [('box', SquareParams.id)]);
++    // Positive control: the healthy square's own write lands.
++    expect(
++        c.execute(SetComponentCommand<SquareParams>(
++            s.healthy, const SquareParams(side: 640.5))),
++        isTrue);
++  });
++
++  test(
++      'FW-2 a kit tool commits the same write: refused as locked, the hint, '
++      'no hookFailed of the tool, and the tool stays armed', () {
++    final sw = Switches();
++    late Handle target;
++    final c = PlanController(
++        kits: kits(sw,
++            write: () => SetComponentCommand<SquareParams>(target, rewritten)));
++    addTearDown(c.dispose);
++    final s = frozenScene(sw, c);
++    target = s.broken;
++    useTestCamera(c);
++    expect(c.selectTool('poke.write'), isTrue);
++    final tools = c.toolController;
++    // M-FW-1 again: the StateError is the tool's own failure, a hookFailed
++    // of poke.write, and plan.select is armed.
++    expect(
++        () => tools.active
++            .onPointerUp(eventAt(c, Vector2(6050.5, 2880.25)), tools.context),
++        returnsNormally);
++    expect(c.lockHint.value, isTrue);
++    expect(hookFailures(c), [('box', SquareParams.id)]);
++    expect(c.activeTool.value, 'poke.write');
++    expect(canon(c.document), s.before);
++  });
++
++  test(
++      'FW-3 a kit grip drag through plan.select writes onto a frozen '
++      'neighbour: refused as locked, the hint, no exception', () {
++    final sw = Switches();
++    late Handle target;
++    final c = PlanController(
++        kits: kits(sw, grips: (services) => _NeighbourGrips(() => target)));
++    addTearDown(c.dispose);
++    final s = frozenScene(sw, c);
++    target = s.broken;
++    useTestCamera(c);
++    expect(c.activeTool.value, 'plan.select');
++    c.selection.replace([SelectionKey.root(s.healthy)]);
++    final grip = nearSquare(4000, -500, 0.25).transformPoint(Vector2.zero());
++    // M-FW-1 again: plan.select, a generic tool, rethrows the engine's
++    // StateError from the release.
++    expect(() => dragFrom(c, grip, grip + Vector2(310.5, -220.25)),
++        returnsNormally);
++    expect(c.lockHint.value, isTrue);
++    expect(canon(c.document), s.before);
++    expect(hookFailures(c), [('box', SquareParams.id)]);
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/panels/property_panel_test.dart b/packages/jet_cad_2d_plan/test/panels/property_panel_test.dart
+index c5fb3f2a..318f2cb6 100644
+--- a/packages/jet_cad_2d_plan/test/panels/property_panel_test.dart
++++ b/packages/jet_cad_2d_plan/test/panels/property_panel_test.dart
+@@ -74,20 +74,27 @@ void main() {
+     expect(textOf(tester, 'property-label'), 'Shelf');
+     expect(tester.widget<Text>(byKey('property-area')).data, '0.0084 m²');
+ 
+     await enterAndSubmit(tester, 'property-turn', '45');
+     // M-P-1a: degrees stored as typed.
+     expect(p().turn, 45 * math.pi / 180);
+     await tapKey(tester, 'property-solid');
+     expect(p().solid, isTrue);
+     await enterAndSubmit(tester, 'property-count', '2.26');
+     expect(p().count, 2.3, reason: 'one decimal (Task 3 rounds)');
++    // M-P-1d (final review): `_write` executing a value the spec rounds
++    // back to the stored one: an empty undo step.
++    final rounded = c.document.commands.undoDepth;
++    await enterAndSubmit(tester, 'property-count', '2.31');
++    expect(p().count, 2.3);
++    expect(c.document.commands.undoDepth, rounded);
++    expect(textOf(tester, 'property-count'), '2.3');
+     await enterAndSubmit(tester, 'property-label', 'Desk');
+     expect(p().label, 'Desk');
+     await tapKey(tester, 'property-finish');
+     await tapKey(tester, 'property-finish-gloss');
+     expect(p().finish, BoxFinish.gloss);
+     expect(
+         find.descendant(
+             of: byKey('property-finish'), matching: find.text('Gloss')),
+         findsOneWidget);
+     await tapKey(tester, 'property-swap');
+diff --git a/packages/jet_cad_2d_plan/test/shortcuts/plan_shortcuts_test.dart b/packages/jet_cad_2d_plan/test/shortcuts/plan_shortcuts_test.dart
+index 31bc319e..aa08bfc6 100644
+--- a/packages/jet_cad_2d_plan/test/shortcuts/plan_shortcuts_test.dart
++++ b/packages/jet_cad_2d_plan/test/shortcuts/plan_shortcuts_test.dart
+@@ -311,11 +311,35 @@ void main() {
+     expect(c.snap.objectSnap, osnap, reason: 'the hidden setting kept');
+ 
+     // The control: snapping allowed again, the plan takes F3.
+     d.snapping.value = true;
+     await tester.pump();
+     await tester.pump();
+     await sendActivator(tester, kHostKeys['f3']!);
+     expect(c.snap.objectSnap, isNot(osnap));
+     expect(d.reached['f3'], 1, reason: 'the host heard nothing more');
+   });
++
++  testWidgets(
++      'KB-14 (final review) shortcuts: false closes the select tool\'s idle '
++      'keys only while it speaks for the controller: a swapped-out '
++      'controller and a removed PlanShortcuts get them back', (tester) async {
++    final one = PlanController(kits: const []);
++    addTearDown(one.dispose);
++    final two = PlanController(kits: const []);
++    addTearDown(two.dispose);
++    Widget keys(PlanController c) => MaterialApp(
++        home: PlanShortcuts(
++            controller: c, shortcuts: false, child: const SizedBox()));
++    await tester.pumpWidget(keys(one));
++    expect(one.selectGates.idleKeys, isFalse, reason: 'premise');
++    await tester.pumpWidget(keys(two));
++    // M-KB-14a: didUpdateWidget not giving the old controller its keys
++    // back.
++    expect(one.selectGates.idleKeys, isTrue);
++    expect(two.selectGates.idleKeys, isFalse);
++    await tester.pumpWidget(const SizedBox());
++    // M-KB-14b: dispose not giving them back: Delete and Escape stay dead
++    // in the canvas.
++    expect(two.selectGates.idleKeys, isTrue);
++  });
+ }
