@@ -6,7 +6,11 @@
 // R-4's Page panel alone, V-5's generic parts), editor_tools_test.dart
 // (T4-e, T4-j's readOnly half, T4-f's first part, snapping false keeps
 // the user's setting, T4-g's first part, K3's design half) and
-// editor_tools_review_test.dart (RV8, RV9, O23, R-2's tool part-way). A
+// editor_tools_review_test.dart (RV6's first half, RV8, RV9, O23, R-2's
+// tool part-way). RV6's second half ("selectTool(wall) is false" once the
+// view is unmounted) is retired by the controller's ruling: the controller
+// owns the tools and works without a canvas (spec P2), a deliberate host
+// API difference for sub-project 4's parity table. A
 // widget flag of today's capabilities is the editor's option here, the
 // host rebuilding its editor; an editing flag is `c.permissions`. The
 // floor planner's tools and tables are the generic tools and the marks of
@@ -638,6 +642,19 @@ void main() {
           tester, h, PlanPermissions.full.copyWith(editLayers: false));
       expect(byKey('chrome-left'), findsOneWidget);
       expect(canvasOrigin(tester), full);
+    });
+
+    testWidgets(
+        'RV6 the view unmounted with Line active: activeTool select (the '
+        'second half, selectTool false, retired)', (tester) async {
+      final h = await mountOptions(tester);
+      final c = h.c;
+      await press(tester, LogicalKeyboardKey.keyL);
+      expect(c.activeTool.value, PlanToolIds.line);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
+      // M-RV6: PlanCanvas.dispose withdraws no tool.
+      expect(c.activeTool.value, PlanToolIds.select);
     });
 
     testWidgets('RV8 tools {select, symbol} with gallery false: no left column',

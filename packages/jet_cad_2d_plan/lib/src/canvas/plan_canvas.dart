@@ -20,6 +20,7 @@ import '../controller/plan_controller.dart';
 import '../l10n/locale_scope.dart';
 import '../l10n/strings.dart';
 import '../theme/plan_theme.dart' show PlanTheme, planPaperPaletteFor;
+import '../tools/generic_tools.dart' show PlanToolIds;
 import 'plan_canvas_view.dart';
 
 /// How long the canvas shows the lock hint before it clears it.
@@ -31,7 +32,9 @@ const Duration kLockHintDuration = Duration(seconds: 2);
 /// - The plan is fitted to the drawing area on its first frame, and again
 ///   on the first frame of each plan `load`, `newPlan` or `import` swaps in.
 /// - A controller is shown in one PlanCanvas at a time: a second one
-///   asserts in debug, after the frame.
+///   asserts in debug, after the frame. When the last canvas showing it
+///   goes, any shape in progress is cancelled and plan.select armed, after
+///   that frame; the controller's tools stay usable with no canvas.
 /// - [rulers] and [grid] are the drafting aids; [snapping] lets object snap
 ///   act (the user's F3 setting is kept either way); [autofocus] lets the
 ///   canvas take the focus when it is mounted.
@@ -65,6 +68,32 @@ final class _Shown {
 
 /// Each controller's [_Shown], for the one-canvas rule (debug only).
 final Expando<_Shown> _canvasesOf = Expando<_Shown>('PlanCanvas');
+
+/// How many canvases show each controller now (every build mode): a
+/// canvas that goes leaves its controller's tool alone while another
+/// shows it.
+final Expando<int> _mountedOf = Expando<int>('PlanCanvas.mounted');
+
+/// [c] is shown by no canvas any more (RV6, today's tool withdrawal,
+/// floor_plan_controller.dart:731-737): any shape in progress is cancelled
+/// and plan.select armed. After the frame, as today's `toolChanged`: the
+/// canvas goes while the tree is locked, where a host's listener of
+/// `activeTool` may not rebuild. Nothing when a canvas shows [c] again by
+/// then, or [c] is disposed.
+void _withdrawTool(PlanController c) {
+  SchedulerBinding.instance
+    ..addPostFrameCallback((_) {
+      if (c.isDisposed || (_mountedOf[c] ?? 0) > 0) return;
+      final tools = c.toolController;
+      if (c.activeTool.value == PlanToolIds.select) {
+        // A drag or a band of the select tool is its shape in progress.
+        tools.active.cancel(tools.context);
+      } else {
+        c.selectTool(PlanToolIds.select);
+      }
+    })
+    ..ensureVisualUpdate();
+}
 
 class _PlanCanvasState extends State<PlanCanvas> {
   PlanController get _c => widget.controller;
@@ -148,6 +177,8 @@ class _PlanCanvasState extends State<PlanCanvas> {
   @override
   void dispose() {
     _leave(_c);
+    // RV6: the controller's tool does not stay part-way with no canvas.
+    _withdrawTool(_c);
     _c.removeListener(_onController);
     _c.lockHint.removeListener(_onHint);
     _page?.removeListener(_onPage);
@@ -159,6 +190,7 @@ class _PlanCanvasState extends State<PlanCanvas> {
   /// after the frame, when a replaced canvas has been disposed (a keyed
   /// swap inflates the new canvas before it deactivates the old one).
   void _enter(PlanController c) {
+    _mountedOf[c] = (_mountedOf[c] ?? 0) + 1;
     assert(() {
       final shown = _canvasesOf[c] ??= _Shown();
       shown.canvases.add(this);
@@ -179,6 +211,8 @@ class _PlanCanvasState extends State<PlanCanvas> {
   }
 
   void _leave(PlanController c) {
+    final left = (_mountedOf[c] ?? 1) - 1;
+    _mountedOf[c] = left == 0 ? null : left;
     assert(() {
       _canvasesOf[c]?.canvases.remove(this);
       return true;
