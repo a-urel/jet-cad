@@ -59,6 +59,7 @@ void main() {
     expect(made.commands.canRedo, isFalse);
     expect(c.canUndo.value, isFalse);
     expect(c.dirty.value, isFalse);
+    // M-NS5: the settle bumps serviceChanges.
     expect(layoutFired, 0);
     await tester.pump();
     expect(c.canUndo.value, isFalse);

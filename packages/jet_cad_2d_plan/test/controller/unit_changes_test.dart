@@ -577,11 +577,11 @@ void main() {
 
     c.setMode(PlanMode.design);
     await tester.pump();
-    // M-DC15: the baseline taken from the active (the copy's) units.
     expect(seen, isEmpty, reason: 'a mode switch is no design change');
     expect(detailOf(c, one), b1, reason: 'premise: the design never moved');
     expect(c.setUnitData('2', hostData()), isTrue);
     await tester.pump();
+    // M-DC15: the baseline taken from the active (the copy's) units.
     expect(seen, [PlanUnitChanged(b2, copyOf(b2, data: hostData()))],
         reason: 'the service move of 1 is no design change');
   });

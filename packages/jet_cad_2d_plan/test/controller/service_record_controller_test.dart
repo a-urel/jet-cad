@@ -698,6 +698,32 @@ void main() {
   });
 
   testWidgets(
+      'SR-edited-after-load a load or a new plan in service rebuilds the copy '
+      'and takes the groups held then: the groups changed since entering '
+      'read as an edit before, as none after (spec S3 serviceEdited)',
+      (tester) async {
+    final c = controllerFor(kits: [testKit()], json: servicePlanText());
+    c.setUnitGroups({
+      'g': UnitGroup(members: {'1', '2'})
+    });
+    c.setMode(PlanMode.service);
+    c.setUnitGroups({
+      'g': UnitGroup(members: {'1', '3'})
+    });
+    expect(c.serviceEdited, isTrue, reason: 'premise: groups changed');
+    c.load(servicePlanText());
+    // M-SR24: a load or a new plan keeps the groups held on entering.
+    expect(c.serviceEdited, isFalse, reason: 'a load: a fresh copy');
+    c.setUnitGroups({
+      'g': UnitGroup(members: {'2'})
+    });
+    expect(c.serviceEdited, isTrue, reason: 'premise: groups changed');
+    c.newPlan();
+    expect(c.serviceEdited, isFalse, reason: 'a new plan: a fresh copy');
+    await tester.pump();
+  });
+
+  testWidgets(
       'SR-reset resetService rebuilds the copy and clears the groups in '
       'service; in design it is a silent no-op', (tester) async {
     final c = controllerFor(kits: [testKit()], json: servicePlanText());
