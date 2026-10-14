@@ -23,6 +23,8 @@ import '../kits/locks.dart';
 import '../l10n/document_separator.dart';
 import '../l10n/strings.dart';
 import '../export/registries.dart';
+import '../symbols/plan_symbol.dart';
+import '../symbols/plan_symbol_loader.dart';
 import '../symbols/plan_symbols_state.dart';
 import '../tools/generic_tools.dart';
 import '../tools/plan_select_gates.dart';
@@ -86,9 +88,15 @@ class PlanController extends ChangeNotifier {
   /// widget reports ([reportLocale]): until then the engine's point, and
   /// then as if made so -- no undo step, not [dirty] -- unless [save] read
   /// it or an edit touched it first (today's Q0 N1, N2).
+  ///
+  /// [symbols] and [thumbnails] may be shared by several controllers (a
+  /// host's own); a controller never disposes one it was given, and makes
+  /// and disposes its own otherwise. The symbol libraries start loading
+  /// here and never block an edit ([symbolsState]).
   factory PlanController({
     required List<PlanKit> kits,
     String? json,
+    PlanSymbolLoader? symbols,
     SymbolThumbnails? thumbnails,
     List<PlanExporter> exporters = const [],
     List<PlanImporter> importers = const [],
@@ -126,6 +134,7 @@ class PlanController extends ChangeNotifier {
     return PlanController._(set, catalog, document, measurer,
         unsettled: json == null,
         loadDiagnostics: diagnostics,
+        symbols: symbols,
         thumbnails: thumbnails,
         exporters: exporters,
         importers: importers,
@@ -138,6 +147,7 @@ class PlanController extends ChangeNotifier {
       FlutterTextMeasurer measurer,
       {required bool unsettled,
       required List<Diagnostic> loadDiagnostics,
+      required PlanSymbolLoader? symbols,
       required SymbolThumbnails? thumbnails,
       required List<PlanExporter> exporters,
       required List<PlanImporter> importers,
@@ -149,6 +159,8 @@ class PlanController extends ChangeNotifier {
         importers = List.unmodifiable(importers),
         _minScale = minScale,
         _maxScale = maxScale,
+        _symbolLoader = symbols ?? PlanSymbolLoader(),
+        _ownsSymbolLoader = symbols == null,
         _ownsThumbnails = thumbnails == null,
         thumbnails =
             thumbnails ?? SymbolThumbnails(maxEntries: kPlanThumbnailCapacity),
@@ -168,6 +180,8 @@ class PlanController extends ChangeNotifier {
     if (unsettled) _unsettled = (document: document, at: _savedState);
     _placeNominally();
     _refreshFlags();
+    // Last: a constructor that threw leaves no load running.
+    unawaited(_loadSymbols());
   }
 
   /// The page, the contract's four components and the kits' types: what a
@@ -200,6 +214,15 @@ class PlanController extends ChangeNotifier {
   /// controller's own.
   final SymbolThumbnails thumbnails;
   final bool _ownsThumbnails;
+
+  /// The symbol libraries' loader: the given one, never disposed here, or
+  /// the controller's own.
+  final PlanSymbolLoader _symbolLoader;
+  final bool _ownsSymbolLoader;
+  final ValueNotifier<PlanSymbol?> _armed = ValueNotifier<PlanSymbol?>(null);
+  List<PlanSymbol> _symbols = const [];
+  Map<String, PlanSymbol> _symbolsById = const {};
+  int _symbolRun = 0;
 
   /// The host's exporters and importers, in order (spec P5); Task 19 adds
   /// the built-in ones and the flows.
@@ -429,9 +452,11 @@ class PlanController extends ChangeNotifier {
   /// `document.commands.execute`). True when it applied; false when it was
   /// refused, the refusal caught here: [PlanLocked] (and [lockHint] set),
   /// `DanglingReferenceError` (E2's refusal of a frozen object's
-  /// referrer), `ArgumentError`, and a kit's hook failure the retry did not
-  /// cure (one diagnostic). `StateError` (`PartialMutationError` included,
-  /// after the damage is handled) goes on to the caller.
+  /// referrer), `PermissionDeniedError` (the engine permissions the
+  /// editor's permissions set, e.g. [PlanPermissions.readOnly]),
+  /// `ArgumentError`, and a kit's hook failure the retry did not cure (one
+  /// diagnostic). `StateError` (`PartialMutationError` included, after the
+  /// damage is handled) goes on to the caller.
   bool execute(DraftCommand command) {
     try {
       document.commands.execute(command);
@@ -440,6 +465,8 @@ class PlanController extends ChangeNotifier {
       lockHint.value = true;
       return false;
     } on DanglingReferenceError {
+      return false;
+    } on PermissionDeniedError {
       return false;
     } on ArgumentError {
       return false;
@@ -867,8 +894,62 @@ class PlanController extends ChangeNotifier {
 
   ValueListenable<List<KitDiagnostic>> get diagnostics => _diagnostics;
 
-  /// Task 13 drives it; `ready` until then.
+  /// The symbol libraries' state (spec P2): loading until every source has
+  /// settled; failed when every source failed; else ready.
   ValueListenable<PlanSymbolsState> get symbolsState => _symbolsState;
+
+  /// The loaded symbols in load order, retired ones included (a placed
+  /// retired symbol still resolves; the gallery hides them).
+  List<PlanSymbol> get symbols => _symbols;
+
+  PlanSymbol? symbolById(String id) => _symbolsById[id];
+
+  /// The symbol plan.symbol places.
+  ValueListenable<PlanSymbol?> get armedSymbol => _armed;
+
+  /// Arms [symbol] and activates plan.symbol (a gallery cell, or the
+  /// host). Answers whether plan.symbol is now active; the symbol stays
+  /// armed either way (today's _armSymbol, planner_shell.dart:940-943).
+  bool armSymbol(PlanSymbol symbol) {
+    _armed.value = symbol;
+    return selectTool(PlanToolIds.symbol);
+  }
+
+  /// Loads the libraries again after a failure; nothing in another state.
+  Future<void> retrySymbols() async {
+    if (_symbolsState.value != PlanSymbolsState.failed) return;
+    await _loadSymbols();
+  }
+
+  Future<void> _loadSymbols() async {
+    final run = ++_symbolRun;
+    // A kit set without a symbol library is ready at once, empty (Task
+    // 8's C1 reads `ready` right after construction).
+    if (kits.kits.every((kit) => kit.symbols.isEmpty)) {
+      _symbolsState.value = PlanSymbolsState.ready;
+      return;
+    }
+    _symbolsState.value = PlanSymbolsState.loading;
+    PlanSymbolLoad? load;
+    Object? error;
+    try {
+      load = await _symbolLoader.load(kits);
+    } catch (e) {
+      error = e; // a loader the host disposed
+    }
+    if (_disposed || run != _symbolRun) return;
+    if (load == null) {
+      _symbolsState.value = PlanSymbolsState.failed;
+      debugPrint('The symbol libraries could not be loaded: $error');
+      return;
+    }
+    _symbols = load.symbols;
+    _symbolsById = {for (final s in load.symbols) s.id: s};
+    for (final d in load.diagnostics) {
+      _diagnostics.add(d);
+    }
+    _symbolsState.value = load.state;
+  }
 
   /// The plan's changes (spec P2 "Events"), a broadcast stream delivered
   /// asynchronously, one report per synchronous step. Closed by [dispose]:
@@ -1061,6 +1142,8 @@ class PlanController extends ChangeNotifier {
       ..detach()
       ..dispose();
     if (_ownsThumbnails) thumbnails.dispose();
+    if (_ownsSymbolLoader) _symbolLoader.dispose();
+    _armed.dispose();
     toolSettings.dispose();
     _diagnostics.dispose();
     _locale.dispose();

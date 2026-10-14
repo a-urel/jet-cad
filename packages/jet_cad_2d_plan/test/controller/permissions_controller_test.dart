@@ -210,4 +210,24 @@ void main() {
     expect(c.document.commands.canUndo, isFalse, reason: 'no undo step');
     expect(c.document.commands.permissions, same(DraftPermissions.readOnly));
   });
+
+  test(
+      'S-PD a widget-side commit under readOnly answers false and changes '
+      'nothing (execute: every refusal is false)', () {
+    final c = make();
+    final line = drawLine(c, a, b);
+    c.permissions = PlanPermissions.readOnly;
+    expect(c.document.commands.permissions, same(DraftPermissions.readOnly),
+        reason: 'premise: the engine refuses structure');
+    final state = c.document.commands.stateId;
+    final depth = c.document.commands.undoDepth;
+    final text = DraftDocumentCodec.encodeToString(c.document);
+    // M-SPD: execute's `on PermissionDeniedError` catch dropped (the
+    // refusal escapes to the widget).
+    expect(c.execute(RemoveEntityCommand(line)), isFalse);
+    expect(linesOf(c.document), contains(line));
+    expect(c.document.commands.stateId, state);
+    expect(c.document.commands.undoDepth, depth);
+    expect(DraftDocumentCodec.encodeToString(c.document), text);
+  });
 }

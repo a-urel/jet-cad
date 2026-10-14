@@ -34,5 +34,8 @@ export 'src/l10n/strings.dart';
 export 'src/l10n/strings_de.dart';
 export 'src/l10n/strings_en.dart';
 export 'src/l10n/strings_tr.dart';
+export 'src/panels/plan_symbol_gallery.dart';
+export 'src/symbols/plan_symbol.dart';
+export 'src/symbols/plan_symbol_loader.dart';
 export 'src/symbols/plan_symbols_state.dart';
 export 'src/theme/plan_theme.dart' show PlanTheme;
