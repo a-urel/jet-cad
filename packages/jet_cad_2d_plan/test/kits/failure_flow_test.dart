@@ -5,6 +5,7 @@
 // diagnostic. A load probes once. A component its factory cannot read is
 // kept raw, locked and frozen (E4). A rollback that throws damages the
 // plan (E3), and saving a damaged plan first reads it back.
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
@@ -381,6 +382,187 @@ void main() {
     expect(canon(d), before);
     expect(d.tree[outer], isNotNull);
   });
+
+  test(
+      'F-13 (fix round 1) the load\'s dry run fails on no kit hook (an open '
+      'region the planner refuses): each kit object is probed, the failing '
+      'one frozen and locked with a diagnostic', () {
+    final sw = Switches();
+    final a = PlanController(kits: [boxKit(sw)]);
+    final broken = addObject(
+        a.document, atSquare, const SquareParams(side: 1200, poisoned: true));
+    final other = addObject(a.document, nearSquare(4000, -500, 0.25),
+        const SquareParams(side: 500));
+    final json = a.save();
+    a.dispose();
+    sw.failing.add('openRegion');
+
+    final c = PlanController(kits: [boxKit(sw)], json: json);
+    addTearDown(c.dispose);
+    // M-F13a: probeLoaded's non-kit catch back to `return`.
+    expect(c.locked.value, {broken});
+    expect(c.frozen, {broken});
+    final failures = diagnosticsOf(c, KitDiagnosticCode.hookFailed);
+    expect([for (final f in failures) (f.kitId, f.subject)],
+        [('box', SquareParams.id)]);
+    expect(
+        c.execute(SetComponentCommand<SquareParams>(
+            other, const SquareParams(side: 640.5))),
+        isTrue);
+  });
+
+  test(
+      'F-13b (fix round 1) a dry run that throws while no object\'s probe '
+      'fails: the load goes on, nothing is locked, and the error reaches '
+      'FlutterError.onError', () {
+    final sw = Switches();
+    final a = PlanController(kits: [boxKit(sw)]);
+    addObject(
+        a.document, atSquare, const SquareParams(side: 1200, poisoned: true));
+    final json = a.save();
+    a.dispose();
+    // Only the dry run sees the open region: the probe after it does not.
+    sw.once.add('openRegion');
+    final reported = <FlutterErrorDetails>[];
+    final previous = FlutterError.onError;
+    FlutterError.onError = reported.add;
+    addTearDown(() => FlutterError.onError = previous);
+
+    final c = PlanController(kits: [boxKit(sw)], json: json);
+    addTearDown(c.dispose);
+    expect(c.locked.value, isEmpty);
+    // M-F13b: the FlutterError.reportError call dropped.
+    expect(reported, hasLength(1));
+    expect(reported.single.exception, isArgumentError);
+    expect(reported.single.library, 'jet_cad_2d_plan');
+  });
+
+  test(
+      'F-14 (fix round 1) a partial mutation while undoing: undo returns, '
+      'the plan is damaged and rebuilt (history cleared, index rebuilt), '
+      'one rollbackFailed diagnostic', () {
+    final c = PlanController(kits: [boxKit(Switches())]);
+    addTearDown(c.dispose);
+    final d = c.document;
+    final line = d.handleSeed.next();
+    expect(
+        c.execute(_HalfUndone(AddEntityCommand(
+            record: draftRecord(line, d.rootHandle, EntityKind.line,
+                layer: ReservedHandles.layerZero),
+            payload: linePayload(
+                Vector2(-3100.5, 4200.25), Vector2(-1700.75, 5100.5))))),
+        isTrue);
+    final box = Aabb2.fromPoints([Vector2(-3200, 4100), Vector2(-1600, 5200)]);
+    int indexed() {
+      var n = 0;
+      c.index.forEachInRect(box, const QueryFilter.all(), (_) => n++);
+      return n;
+    }
+
+    expect(indexed(), 1, reason: 'premise');
+    // M-F14: undo without its `on PartialMutationError` clause: it escapes.
+    expect(c.undo, returnsNormally);
+    expect(d.entities.slotOf(line), isNull, reason: 'the undo half-applied');
+    expect(c.damaged.value, isTrue);
+    expect(d.commands.canUndo, isFalse);
+    expect(d.commands.canRedo, isFalse);
+    expect(indexed(), 0, reason: 'rebuilt from what the plan holds');
+    expect(diagnosticsOf(c, KitDiagnosticCode.rollbackFailed), hasLength(1));
+  });
+
+  test(
+      'F-14b (fix round 1) a partial mutation while redoing: redo returns, '
+      'the plan is damaged and the history cleared', () {
+    final c = PlanController(kits: [boxKit(Switches())]);
+    addTearDown(c.dispose);
+    final d = c.document;
+    final line = d.handleSeed.next();
+    expect(
+        c.execute(_HalfRedone(AddEntityCommand(
+            record: draftRecord(line, d.rootHandle, EntityKind.line,
+                layer: ReservedHandles.layerZero),
+            payload: linePayload(
+                Vector2(-3100.5, 4200.25), Vector2(-1700.75, 5100.5))))),
+        isTrue);
+    c.undo();
+    expect(d.commands.canRedo, isTrue, reason: 'premise');
+    expect(c.damaged.value, isFalse, reason: 'premise');
+    // M-F14b: redo without its `on PartialMutationError` clause.
+    expect(c.redo, returnsNormally);
+    expect(d.entities.slotOf(line), isNotNull, reason: 'the redo applied');
+    expect(c.damaged.value, isTrue);
+    expect(d.commands.canRedo, isFalse);
+    expect(diagnosticsOf(c, KitDiagnosticCode.rollbackFailed), hasLength(1));
+  });
+}
+
+/// Applies [inner]; its undo works, and the redo after it applies and then
+/// throws E3's error.
+final class _HalfRedone extends DraftCommand {
+  _HalfRedone(this.inner);
+  final DraftCommand inner;
+  @override
+  Capability get capability => inner.capability;
+  @override
+  Set<Capability> get capabilities => inner.capabilities;
+  @override
+  String get label => 'Half redone';
+  @override
+  CommandResult apply(CommandTarget target) {
+    final r = inner.apply(target);
+    return CommandResult(inverse: _UndoThen(r.inverse), touched: r.touched);
+  }
+}
+
+/// [inner] applied; its own inverse (the redo) throws after applying.
+final class _UndoThen extends DraftCommand {
+  _UndoThen(this.inner);
+  final DraftCommand inner;
+  @override
+  Capability get capability => inner.capability;
+  @override
+  Set<Capability> get capabilities => inner.capabilities;
+  @override
+  String get label => 'Undo then';
+  @override
+  CommandResult apply(CommandTarget target) {
+    final r = inner.apply(target);
+    return CommandResult(inverse: _ThenThrow(r.inverse), touched: r.touched);
+  }
+}
+
+/// Applies [inner]; its undo applies [inner]'s inverse and then throws
+/// E3's error: an undo that leaves the target partially mutated.
+final class _HalfUndone extends DraftCommand {
+  _HalfUndone(this.inner);
+  final DraftCommand inner;
+  @override
+  Capability get capability => inner.capability;
+  @override
+  Set<Capability> get capabilities => inner.capabilities;
+  @override
+  String get label => 'Half undone';
+  @override
+  CommandResult apply(CommandTarget target) {
+    final r = inner.apply(target);
+    return CommandResult(inverse: _ThenThrow(r.inverse), touched: r.touched);
+  }
+}
+
+final class _ThenThrow extends DraftCommand {
+  _ThenThrow(this.inner);
+  final DraftCommand inner;
+  @override
+  Capability get capability => inner.capability;
+  @override
+  Set<Capability> get capabilities => inner.capabilities;
+  @override
+  String get label => 'Then throw';
+  @override
+  CommandResult apply(CommandTarget target) {
+    inner.apply(target);
+    throw PartialMutationError('forced: the undo applied, then failed');
+  }
 }
 
 const KeyDownEvent deleteKey = KeyDownEvent(

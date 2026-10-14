@@ -25,9 +25,19 @@ final class HookBoom implements Exception {
 /// `diagnose`, `dissolves`, `placeBox`, `placeInput`, `readBox` (per object,
 /// for a poisoned one); `editCapability`, `referencePolicy`, `pageKey`,
 /// `contributesPlace`, `readsPlaces`, `create` (type level); `fromJson` (a
-/// poisoned component's factory).
+/// poisoned component's factory). Not a throw: `openRegion` makes a
+/// poisoned square's `generate` add an open region, which the engine's
+/// planner refuses outside any hook (an `ArgumentError`, no
+/// KitHookFailure).
 final class Switches {
   final Set<String> failing = {};
+
+  /// Switches that act once, then turn themselves off (`openRegion`).
+  final Set<String> once = {};
+
+  /// Whether [name] is on for a poisoned object; a [once] switch is spent.
+  bool takes(String name, bool poisoned) =>
+      poisoned && (failing.contains(name) || once.remove(name));
 
   void check(String hook, [bool poisoned = true]) {
     if (poisoned && failing.contains(hook)) throw HookBoom(hook);
@@ -149,6 +159,8 @@ final class SquareType extends ParametricType<SquareParams> {
     return [
       for (var i = 0; i < 4; i++)
         Generated(EntityKind.line, linePayload(c[i], c[(i + 1) % 4])),
+      if (sw.takes('openRegion', p.poisoned))
+        Generated.region(polylinePayload(c)),
     ];
   }
 

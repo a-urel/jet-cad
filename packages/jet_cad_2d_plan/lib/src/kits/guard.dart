@@ -634,24 +634,68 @@ final class FailureBoundary {
     return broken;
   }
 
-  /// After a load: one dry run of the whole plan; while it fails on a kit's
-  /// hook, that type's failing objects are frozen and locked and it runs
-  /// again. Ends when it passes, when nothing more can be frozen, or on an
-  /// error that is no kit's (the engine's own reports cover that).
+  /// After a load: one dry run of the whole plan. While it throws, the
+  /// objects to blame are frozen and locked, with their diagnostics, and it
+  /// runs again: on a kit's hook failure, that type's failing objects; when
+  /// those are none, or on an error no hook threw (the planner refusing
+  /// what a `generate` returned, an engine invariant), every live kit
+  /// object is probed, one by one (fix round 1). When no object's probe
+  /// fails, the error is reported to [FlutterError.reportError] and the
+  /// load goes on. Each round freezes at least one object or ends, so it
+  /// ends.
   void probeLoaded() {
     while (true) {
       try {
         system.drift();
         return;
-      } on KitHookFailure catch (failure) {
-        _report(failure);
-        final broken = probeType(failure.typeId);
-        if (broken.isEmpty) return;
+      } catch (error, stack) {
+        var broken = const <Handle>{};
+        if (error is KitHookFailure) {
+          _report(error);
+          broken = probeType(error.typeId);
+        }
+        if (broken.isEmpty) broken = _probeAll();
+        if (broken.isEmpty) {
+          FlutterError.reportError(FlutterErrorDetails(
+              exception: error,
+              stack: stack,
+              library: 'jet_cad_2d_plan',
+              context: ErrorDescription("during the load's dry run of the "
+                  'plan (no object\'s probe failed)')));
+          return;
+        }
         _freeze(broken);
-      } catch (_) {
-        return;
       }
     }
+  }
+
+  /// Every live, unfrozen root-level kit object whose probe (E2) fails,
+  /// each reported as its type's: the per-object check of a load whose dry
+  /// run failed on no single type.
+  Set<Handle> _probeAll() {
+    final broken = <Handle>{};
+    final root = document.rootHandle;
+    for (final node in document.tree.nodes) {
+      if (node is! GroupNode || node.parent != root) continue;
+      final h = node.handle;
+      if (frozen.contains(h)) continue;
+      final typeId = catalog.typeIdOf(document, h);
+      if (typeId == null) continue;
+      final error = system.probe(h);
+      if (error == null) continue;
+      broken.add(h);
+      if (error is KitHookFailure) {
+        _report(error);
+      } else {
+        log.add(KitDiagnostic(
+            kitId: kitOfKey(typeId),
+            subject: typeId,
+            code: KitDiagnosticCode.hookFailed,
+            message: '$error',
+            error: error));
+      }
+    }
+    return broken;
   }
 
   /// E4: each `component.unreadable` diagnostic of the load is reported as

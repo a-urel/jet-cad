@@ -585,12 +585,19 @@ class PlanController extends ChangeNotifier {
   bool get _midShape => _session.tools.active.isMidShape;
 
   /// Undoes the last step, after settling pending input; nothing while the
-  /// active tool is part-way through a shape (today's S-4).
+  /// active tool is part-way through a shape (today's S-4). A replay that
+  /// leaves the plan partially mutated (E3) does not escape: the plan is
+  /// rebuilt from what it holds and marked [damaged], as in [execute].
   void undo() {
     if (_midShape) return;
     settlePendingInput();
     final commands = document.commands;
-    if (commands.canUndo) commands.undo();
+    if (!commands.canUndo) return;
+    try {
+      commands.undo();
+    } on PartialMutationError catch (error) {
+      _session.boundary.partialMutation(error);
+    }
   }
 
   /// Redoes the next step, as [undo].
@@ -598,7 +605,12 @@ class PlanController extends ChangeNotifier {
     if (_midShape) return;
     settlePendingInput();
     final commands = document.commands;
-    if (commands.canRedo) commands.redo();
+    if (!commands.canRedo) return;
+    try {
+      commands.redo();
+    } on PartialMutationError catch (error) {
+      _session.boundary.partialMutation(error);
+    }
   }
 
   // ---------------------------------------------------------------------
