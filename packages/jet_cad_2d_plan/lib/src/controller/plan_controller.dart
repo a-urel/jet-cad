@@ -1051,6 +1051,13 @@ class PlanController extends ChangeNotifier {
     await _loadSymbols();
   }
 
+  /// The codes a symbol load reports, one load's set at a time.
+  static const Set<KitDiagnosticCode> _libraryCodes = {
+    KitDiagnosticCode.libraryUnreadable,
+    KitDiagnosticCode.libraryKitMismatch,
+    KitDiagnosticCode.symbolDuplicate,
+  };
+
   Future<void> _loadSymbols() async {
     final run = ++_symbolRun;
     // A kit set without a symbol library is ready at once, empty (Task
@@ -1075,6 +1082,9 @@ class PlanController extends ChangeNotifier {
     }
     _symbols = load.symbols;
     _symbolsById = {for (final s in load.symbols) s.id: s};
+    // This load's library problems replace the last one's: a source that
+    // read on a retry has none left (Task 13 ruling, final review I3).
+    _diagnostics.removeWhere((d) => _libraryCodes.contains(d.code));
     for (final d in load.diagnostics) {
       _diagnostics.add(d);
     }

@@ -80,6 +80,24 @@ final class DiagnosticsLog extends ChangeNotifier
     return true;
   }
 
+  /// Drops every diagnostic [test] holds for and forgets its kit, subject
+  /// and code, so a later one of the same is reported again; tells the
+  /// listeners when one was dropped. For a problem that went away (a
+  /// symbol library read on a retry).
+  void removeWhere(bool Function(KitDiagnostic diagnostic) test) {
+    final current = _current;
+    final kept = <KitDiagnostic>[];
+    for (final d in current) {
+      if (test(d)) {
+        _seen.remove((d.kitId, d.subject, d.code));
+      } else {
+        kept.add(d);
+      }
+    }
+    if (kept.length == current.length) return;
+    _publish(kept);
+  }
+
   /// Drops the [planScoped] diagnostics: the plan they spoke of is gone, so
   /// the next plan may report them again.
   void clearPlanScoped() {

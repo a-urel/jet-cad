@@ -171,6 +171,36 @@ void main() {
     expect(c.symbols, same(symbols), reason: 'nothing was loaded again');
   });
 
+  test(
+      'S-19 (final review I3) a retry clears the library diagnostics of each '
+      'source that now reads; a source still failing keeps its own', () async {
+    var alphaFails = true;
+    final alpha = CountingSource('alpha', () async {
+      if (alphaFails) throw StateError('alpha offline');
+      return itemsBytes('alpha', ['one', 'two']);
+    });
+    final beta =
+        CountingSource('beta', () async => throw StateError('beta offline'));
+    final c = make([
+      symbolKit('alpha', [alpha.source]),
+      symbolKit('beta', [beta.source]),
+    ]);
+    await settle();
+    expect(c.symbolsState.value, PlanSymbolsState.failed);
+    expect(problemsOf(c), [
+      ('alpha', 'alpha', KitDiagnosticCode.libraryUnreadable),
+      ('beta', 'beta', KitDiagnosticCode.libraryUnreadable),
+    ]);
+    alphaFails = false;
+    await c.retrySymbols();
+    expect(c.symbolsState.value, PlanSymbolsState.ready);
+    expect(idsOf(c.symbols), ['alpha.item.one@1', 'alpha.item.two@1']);
+    // M-S19: `_loadSymbols` without its `removeWhere`: alpha's fixed
+    // failure stays on the bar.
+    expect(
+        problemsOf(c), [('beta', 'beta', KitDiagnosticCode.libraryUnreadable)]);
+  });
+
   test('S-13 a controller disposed mid-load ignores the late result', () async {
     // The controller is made inside the zone, so the load's continuation
     // runs there too and any error it throws lands in [errors].
