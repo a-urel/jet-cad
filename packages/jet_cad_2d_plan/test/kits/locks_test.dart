@@ -394,8 +394,12 @@ void main() {
     addTearDown(b.dispose);
     final d = b.document;
     final before = canon(d);
-    // M-L11a: `on PlanLocked` dropped: the refusal escapes.
-    expect(b.execute(TransformNodeCommand(plan.square, atSquare)), isFalse);
+    // M-L11a: `on PlanLocked` dropped: the refusal escapes. A real move
+    // (not the square's own placement), so the rollback is observable.
+    expect(
+        b.execute(
+            TransformNodeCommand(plan.square, nearSquare(310.5, -120.25, 0.2))),
+        isFalse);
     expect(canon(d), before);
     // M-L11b: `on ArgumentError` dropped.
     expect(b.execute(_Throws(ArgumentError.value(3, 'side'))), isFalse);
