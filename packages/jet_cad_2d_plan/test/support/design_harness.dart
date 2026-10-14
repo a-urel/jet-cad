@@ -19,12 +19,17 @@ import 'canvas_fixture.dart';
 /// What the host saw: the keys that reached its bindings, by name, and its
 /// file callbacks' calls.
 final class Design {
-  Design(this.c, bool shortcuts) : shortcuts = ValueNotifier(shortcuts);
+  Design(this.c, bool shortcuts, bool snapping)
+      : shortcuts = ValueNotifier(shortcuts),
+        snapping = ValueNotifier(snapping);
 
   final PlanController c;
 
   /// `PlanShortcuts.shortcuts`, changeable at runtime.
   final ValueNotifier<bool> shortcuts;
+
+  /// `PlanCanvas.snapping`, changeable at runtime.
+  final ValueNotifier<bool> snapping;
   final Map<String, int> reached = {};
   int news = 0, opens = 0, saves = 0, saveAses = 0, exports = 0, prints = 0;
 }
@@ -33,19 +38,29 @@ final class Design {
 /// above the plan (by name); [hostField] puts a host text field, guarded
 /// as a host guards its own fields, beside the status line; [right] is the
 /// right column (Task 17's property panel); [host] wraps the plan in a
-/// host's own `Shortcuts`/`Actions`/`Focus`.
+/// host's own `Shortcuts`/`Actions`/`Focus`; [snapping] is the canvas's
+/// option.
 Future<Design> pumpDesign(WidgetTester tester, PlanController c,
     {bool shortcuts = true,
+    bool snapping = true,
     Map<String, SingleActivator> hostKeys = const {},
     bool hostField = false,
     Widget? right,
     Widget Function(Widget plan)? host}) async {
-  final d = Design(c, shortcuts);
+  final d = Design(c, shortcuts, snapping);
   addTearDown(d.shortcuts.dispose);
+  addTearDown(d.snapping.dispose);
   for (final name in hostKeys.keys) {
     d.reached[name] = 0;
   }
-  Widget frame(Widget canvas) {
+  // pumpDraw's canvas has the default options: this one follows
+  // [Design.snapping].
+  Widget frame(Widget _) {
+    final canvas = ValueListenableBuilder<bool>(
+      valueListenable: d.snapping,
+      builder: (_, snapping, __) =>
+          PlanCanvas(controller: c, snapping: snapping),
+    );
     final plan = ValueListenableBuilder<bool>(
       valueListenable: d.shortcuts,
       builder: (_, keys, __) => PlanShortcuts(

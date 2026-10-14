@@ -22,8 +22,9 @@ class PosIntent extends Intent {
   final String name;
 }
 
-/// The host's keys: a point of sale's Delete and Backspace, a letter the
-/// planner binds (W) and one it does not (K), a digit, Space and Ctrl+Z.
+/// The host's keys: a point of sale's Delete and Backspace, W (the
+/// planner's wall letter, no plan letter here: KB-2 and A8 cover a plan
+/// letter in a field) and K, a digit, Space and Enter.
 final Map<String, (SingleActivator, LogicalKeyboardKey)> kPosKeys = {
   'delete': (
     const SingleActivator(LogicalKeyboardKey.delete),

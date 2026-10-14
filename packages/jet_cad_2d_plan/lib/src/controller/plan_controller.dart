@@ -183,11 +183,11 @@ class PlanController extends ChangeNotifier {
     if (unsettled) _unsettled = (document: document, at: _savedState);
     _placeNominally();
     _refreshFlags();
-    // Last: a constructor that threw leaves no load running.
-    unawaited(_loadSymbols());
     // The tool letters are the kit set's (Task 16): a letterTaken
     // diagnostic is in the log before any widget is built.
     planToolEntries(this);
+    // Last: a constructor that threw leaves no load running.
+    unawaited(_loadSymbols());
   }
 
   /// The page, the contract's four components and the kits' types: what a
@@ -256,9 +256,38 @@ class PlanController extends ChangeNotifier {
   late final EffectiveSnap _snap =
       EffectiveSnap(_userSnap, () => snappingAllowed);
 
+  bool _snappingAllowed = true;
+  bool _snappingNoticeOwed = false;
+  final ValueNotifier<bool> _snapping = ValueNotifier<bool>(true);
+
   /// The canvas's `snapping` option (Task 15): object snap only while true.
+  /// The tools read it at once ([EffectiveSnap]); [snapping] tells the
+  /// keyboard (F3, Task 16) after the current frame.
   @internal
-  bool snappingAllowed = true;
+  bool get snappingAllowed => _snappingAllowed;
+
+  /// Written by the canvas in `initState` and `didUpdateWidget`, inside a
+  /// build, where an ancestor (PlanShortcuts) may not be marked dirty: the
+  /// value changes now, and [snapping] follows it after the frame (as
+  /// `PlanLocaleScope.push` reports the locale).
+  @internal
+  set snappingAllowed(bool value) {
+    if (value == _snappingAllowed) return;
+    _snappingAllowed = value;
+    if (_snappingNoticeOwed) return;
+    _snappingNoticeOwed = true;
+    SchedulerBinding.instance
+      ..addPostFrameCallback((_) {
+        _snappingNoticeOwed = false;
+        if (!_disposed) _snapping.value = _snappingAllowed;
+      })
+      ..ensureVisualUpdate();
+  }
+
+  /// [snappingAllowed] as of the last frame: PlanShortcuts rebinds F3 when
+  /// it changes (S-14: F3 only while snapping is allowed).
+  @internal
+  ValueListenable<bool> get snapping => _snapping;
 
   final ValueNotifier<Locale> _locale = ValueNotifier(const Locale('en'));
   final DiagnosticsLog _diagnostics = DiagnosticsLog();
@@ -1221,6 +1250,7 @@ class PlanController extends ChangeNotifier {
     _canvasRect.dispose();
     _fits.dispose();
     _snap.dispose();
+    _snapping.dispose();
     _userSnap.dispose();
     camera.dispose();
     _settles.clear();

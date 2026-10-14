@@ -296,4 +296,26 @@ void main() {
     await tester.pump();
     expect(c.locale.value, const Locale('tr'));
   });
+
+  testWidgets(
+      'KB-13 under PlanCanvas(snapping: false) F3 reaches the host and the '
+      'user\'s snap setting is kept; snapping: true at runtime binds F3 '
+      'again (S-14) (M-KB-13a, M-KB-13b, M-KB-13c)', (tester) async {
+    final c = drawController().c;
+    final d = await pumpDesign(tester, c, snapping: false, hostKeys: kHostKeys);
+    await focusCanvas(tester);
+    final osnap = c.snap.objectSnap;
+    expect(c.snappingAllowed, isFalse, reason: 'premise: the canvas wrote it');
+    await sendActivator(tester, kHostKeys['f3']!);
+    expect(d.reached['f3'], 1);
+    expect(c.snap.objectSnap, osnap, reason: 'the hidden setting kept');
+
+    // The control: snapping allowed again, the plan takes F3.
+    d.snapping.value = true;
+    await tester.pump();
+    await tester.pump();
+    await sendActivator(tester, kHostKeys['f3']!);
+    expect(c.snap.objectSnap, isNot(osnap));
+    expect(d.reached['f3'], 1, reason: 'the host heard nothing more');
+  });
 }

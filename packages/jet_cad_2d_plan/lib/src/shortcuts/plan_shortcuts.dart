@@ -132,13 +132,18 @@ class _PlanShortcutsState extends State<PlanShortcuts> {
       }
     }
     // Spec 03 D10: one toggle per press, never per key repeat; only while
-    // snapping is allowed (S-14).
+    // snapping is allowed (S-14). The canvas writes the flag below this
+    // widget, inside a build: c.snapping tells this builder after the frame.
     if (c.snappingAllowed) {
       m[const SingleActivator(LogicalKeyboardKey.f3, includeRepeats: false)] =
           c.snap.toggleObjectSnap;
     }
     // Spec 05 D5: the letters, then Fill, then Escape. Only the allowed
-    // letters are bound; a refused one bubbles (C-5).
+    // letters are bound; a refused one bubbles (C-5). A letter the
+    // permissions allow stays bound when selectTool would still refuse its
+    // tool (a factory that threw, needs the engine denies): the key is
+    // consumed and nothing arms, as the shell's under `runtime` (A12),
+    // while the palette greys that row.
     for (final e in planToolEntries(c)) {
       final key = e.key;
       if (key != null && p.allowsTool(e.id)) {
@@ -168,8 +173,9 @@ class _PlanShortcutsState extends State<PlanShortcuts> {
     final c = widget.controller;
     return PlanTextKeys(
       child: ListenableBuilder(
-        // A permissions change or a document swap rebinds.
-        listenable: c,
+        // A permissions change, a document swap or the canvas's snapping
+        // option rebinds.
+        listenable: Listenable.merge([c, c.snapping]),
         builder: (context, child) =>
             CallbackShortcuts(bindings: _bindings(c), child: child!),
         child: widget.child,
