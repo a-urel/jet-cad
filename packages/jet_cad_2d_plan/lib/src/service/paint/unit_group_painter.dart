@@ -200,10 +200,11 @@ final class _Group {
 /// of the four corners of each such member's definition box through its
 /// world transform (the [UnitPicker.candidatesOf] candidates of [units]
 /// and their cached `box`: a member on a hidden layer, with a singular
-/// transform or an empty box is skipped, as the picker skips it), offset by [kGroupFrameMarginMm] with round joins,
-/// stroked [kGroupFrameStrokePixels] screen pixels wide in the paper set's
+/// transform or an empty box is skipped, as the picker skips it), offset
+/// by [kGroupFrameMarginMm] with round joins, stroked
+/// [kGroupFrameStrokePixels] screen pixels wide in the paper set's
 /// `gripMove`, never filled; and a chip outside the frame, centred on the
-/// frame bounds' centre x with its bottom edge on their top line (unit
+/// frame bounds' centre x with its bottom edge on their top line (table
 /// groups fixes X3: it then covers no member of its own group at any
 /// zoom), filled `gripMove`, with [groupLabel] in the status caption's size
 /// and the ink [foregroundFor] picks on `gripMove`. A chip is skipped when

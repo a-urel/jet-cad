@@ -530,6 +530,9 @@ void main() {
     expect(spy.fillOf(spec('H')), isNull, reason: 'hidden');
     expect(spy.fillOf(spec('M')), isNull, reason: 'unknown name');
     expect(spy.fillOf(spec('N')), isNull, reason: 'no colour');
+    // The source's `hasLength(6), reason: 'A, B, C, U, K and R'`: R went
+    // with the room (R-16); the count stays pinned (controller ruling).
+    expect(spy.fills, hasLength(5), reason: 'A, B, C, U and K');
     final shot = await render(tester, painter);
     for (final k in ['H', 'M', 'N']) {
       expectPixel(shot, painterPixel(insideTop(spec(k))), whitePaper, k);

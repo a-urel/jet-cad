@@ -36,7 +36,7 @@ final class _Fill {
   final Paint paint;
   final ui.Paragraph? caption;
 
-  /// The label label's anchor and half its height, in definition space:
+  /// The unit label's anchor and half its height, in definition space:
   /// the caption goes below the label (S7, review F-5).
   final double lx, ly, half;
 
@@ -47,7 +47,7 @@ final class _Fill {
 /// The caption's height in logical pixels (S7).
 const double kStatusCaptionSize = 11;
 
-/// The gap between the label label's bottom and the caption, in logical
+/// The gap between the unit label's bottom and the caption, in logical
 /// pixels.
 const double kStatusCaptionGap = 2;
 
@@ -149,7 +149,7 @@ class UnitStatusPainter extends CustomPainter {
   final ValueListenable<ViewportTransform> camera;
   final ValueListenable<Map<String, UnitStatus>> statuses;
 
-  /// The host's groups and their statuses, as `FloorPlanController`'s
+  /// The host's groups and their statuses, as `PlanController`'s
   /// `unitGroups` and `groupStatuses` hold them (ids trimmed).
   final ValueListenable<Map<String, UnitGroup>> unitGroups;
   final ValueListenable<Map<String, UnitStatus>> groupStatuses;
@@ -311,7 +311,7 @@ class UnitStatusPainter extends CustomPainter {
     _captions.removeWhere((_, p) => !captions.contains(p));
   }
 
-  /// The anchor and half height of the label label [label], in the
+  /// The anchor and half height of the unit label [label], in the
   /// instance's space; null when there is none.
   ({double x, double y, double half})? _labelOf(Handle? label) {
     if (label == null) return null;

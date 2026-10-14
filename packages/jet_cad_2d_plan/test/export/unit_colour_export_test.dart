@@ -132,6 +132,9 @@ final List<Spec> filled = [
 
 void main() {
   test('the fixture premises: the tables the underlay fills', () {
+    // The source's key list without R (sub-project 3, R-16).
+    expect([for (final s in specs) s.key],
+        ['A', 'B', 'C', 'N', 'U', 'K', 'H', 'M']);
     expect(spec('H').layer, 'Hidden');
     expect(spec('K').layer, 'Locked');
     expect(spec('M').color, 'magenta');

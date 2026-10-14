@@ -36,13 +36,14 @@ class Spy implements ui.Canvas {
   final List<ui.Path> paths = [];
   final List<Color> colours = [];
   final List<ui.Paragraph> paragraphs = [];
+  final List<ui.Offset> translations = [];
 
   @override
   void save() {}
   @override
   void restore() {}
   @override
-  void translate(double dx, double dy) {}
+  void translate(double dx, double dy) => translations.add(ui.Offset(dx, dy));
   @override
   void transform(Float64List m) => matrices.add(Float64List.fromList(m));
   @override
@@ -124,7 +125,7 @@ void main() {
   test(
       'SP-group-mixed a group of the table and two seats with a group '
       'status: three fills in its colour, one caption, under the lead; a '
-      'frame round all three, and one chip (M-SP-frame)', () {
+      'frame round all three, and one chip (M-SP-frame, M-SP-lead)', () {
     final f = serviceFixture();
     final s = service(f.json);
     final table = s.c.unitIndex[f.table]!.text!;
@@ -138,6 +139,30 @@ void main() {
     final fills = frame(s.layers.statuses);
     expect(fills.colours, [blue, blue, blue]);
     expect(fills.paragraphs, hasLength(1), reason: 'one caption');
+    // The caption is centred under the lead's label: the table's anchor,
+    // its definition-space point through the table's world transform and
+    // the camera, computed here.
+    final doc = s.c.serviceSession!.document;
+    (double, double) anchorOf(Handle label, Transform2 toWorld) {
+      final slot = doc.entities.slotOf(label)!;
+      final p = doc.geometry.read(doc.entities.geomIndexAt(slot)).coords;
+      final w = toWorld.transformPoint(Vector2(p[0], p[1]));
+      return (
+        cam.a * w.x + cam.c * w.y + cam.e,
+        cam.b * w.x + cam.d * w.y + cam.f
+      );
+    }
+
+    final (lx, ly) =
+        anchorOf(f.tableLabel, (doc.tree[f.table]! as InstanceNode).transform);
+    final a2 = s.c.unitIndex.withLabel('A2').single;
+    final (ox, _) = anchorOf(a2.label!, a2.toWorld);
+    expect((ox - lx).abs(), greaterThan(50),
+        reason: 'premise: another member\'s anchor is elsewhere');
+    final t = fills.translations.single;
+    expect(t.dx + fills.paragraphs.single.width / 2, closeTo(lx, 1e-6),
+        reason: 'centred under the table\'s label');
+    expect(t.dy, greaterThan(ly), reason: 'below the table\'s label');
     final frames = frame(s.layers.frames);
     expect(frames.paths, hasLength(1), reason: 'one frame');
     expect(s.layers.chips.debugChipTexts, isEmpty,

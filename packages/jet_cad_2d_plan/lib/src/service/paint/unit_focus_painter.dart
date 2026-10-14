@@ -51,10 +51,9 @@ Color focusVeilColour(int paper, PlanTheme? theme) {
 /// [kUnitFocusVeilAlpha], or as [theme] sets it ([focusVeilColour]).
 ///
 /// Rebuilt only when [units] gives a new index (a state, layer or lock
-/// change), or the focus is replaced; a paper or a theme change only recolours the
-/// [Paint]. Each
-/// frame then draws the one prebuilt path with one reused [Paint] under one
-/// reused matrix: nothing per unit (Z16).
+/// change), or the focus is replaced; a paper or a theme change only
+/// recolours the [Paint]. Each frame then draws the one prebuilt path with
+/// one reused [Paint] under one reused matrix: nothing per unit (Z16).
 class UnitFocusPainter extends CustomPainter {
   UnitFocusPainter({
     required this.document,
