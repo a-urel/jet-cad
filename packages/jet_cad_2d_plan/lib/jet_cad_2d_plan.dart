@@ -2,4 +2,15 @@
 /// composable widgets of design mode, over the kits a host loads.
 library;
 
+export 'src/file/manifest.dart'
+    show
+        ManifestCheck,
+        PlanManifest,
+        checkManifest,
+        kPlanFormat,
+        manifestOf,
+        manifestToWrite,
+        usedKits;
+export 'src/file/plan_file.dart';
+export 'src/file/plan_format_exception.dart';
 export 'src/kits/kit_set.dart';

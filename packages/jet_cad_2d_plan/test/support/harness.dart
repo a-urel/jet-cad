@@ -10,6 +10,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 /// Every kit's types registered, in load order, without a guard.
@@ -101,4 +102,19 @@ Future<void> pumpApp(WidgetTester tester, Widget child,
   addTearDown(() => tester.binding.setSurfaceSize(null));
   await tester.pumpWidget(MaterialApp(home: Scaffold(body: child)));
   await tester.pump();
+}
+
+/// A saved plan over [kits]: [planDocument] with the kits' system
+/// installed, [build] run on it, then [encodePlan] (a manifest of the
+/// loaded kits the plan uses).
+String planText(List<PlanKit> kits, void Function(DraftDocument d) build,
+    {DecimalSeparator separator = DecimalSeparator.point}) {
+  final d = planDocument(kits, separator: separator);
+  final system = ParametricSystem(d, catalogOf(kits))..install();
+  try {
+    build(d);
+  } finally {
+    system.dispose();
+  }
+  return encodePlan(d, validateKitSet(kits));
 }
