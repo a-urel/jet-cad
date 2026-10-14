@@ -55,8 +55,12 @@ final class Scene {
     registry = PlanAttachmentRegistry(report: reported.add);
     edge = RecordingProvider('test-edge', (q) => answer?.call(q));
     registry.add('demo', (_) => edge, _ServicesStub());
-    resolver =
-        PlanMoveResolver(attachments: () => registry, canRotate: () => rotate);
+    resolver = PlanMoveResolver(
+        attachments: () {
+          asked++;
+          return registry;
+        },
+        canRotate: () => rotate);
     addTearDown(() {
       registry.dispose();
       snap.dispose();
@@ -79,6 +83,9 @@ final class Scene {
   final List<KitDiagnostic> reported = [];
   Attachment? Function(AttachmentQuery q)? answer;
   bool rotate = true;
+
+  /// How many times the resolver read the registry to ask it.
+  int asked = 0;
 
   Transform2 get transform => (doc.tree[instance]! as InstanceNode).transform;
 }
@@ -123,6 +130,7 @@ void main() {
     // M-MV2a: the attachTo test dropped.
     expect(free.resolver.resolveMove(free.ctx, free.instance, delta), isNull);
     expect(free.edge.queries, isEmpty);
+    expect(free.asked, 0, reason: 'no attachTo: the registry is not asked');
 
     final off = Scene(objectSnap: false);
     off.answer = (_) => attachment(Transform2.identity(), Vector2(1, 1), 't');
