@@ -168,6 +168,29 @@ void main() {
   });
 
   test(
+      'OT-range-live (spec 3a C1.1) the range is read at each commit from '
+      'the host as it is then, through a field read once before: A '
+      'lengthened, a position past its old L commits; A shortened, one '
+      'inside its old L is refused and its new L itself commits', () {
+    final doc = planDoc();
+    final p = doc.components.get<WallParams>(hA)!;
+    final field = fieldOf(doc, hD, 'position');
+    OpeningParams commit(double v) =>
+        (openingPlanType.commitField(doc, hD, field, v, words)
+                as SetComponentCommand<OpeningParams>)
+            .value!;
+    expect(() => commit(4500), throwsArgumentError,
+        reason: 'premise: past L = 4,000');
+    doc.commands.execute(SetComponentCommand<WallParams>(
+        hA, p.copyWith(end: p.start + (p.end - p.start) * 1.2)));
+    expect(commit(4500).position, 4500, reason: 'L = 4,800 now');
+    doc.commands.execute(SetComponentCommand<WallParams>(
+        hA, p.copyWith(end: p.start + (p.end - p.start) * 0.75)));
+    expect(() => commit(3900), throwsArgumentError, reason: 'L = 3,000 now');
+    expect(commit(3000).position, 3000, reason: 'the new L itself');
+  });
+
+  test(
       'OT-flip (spec 3a C1.7, 08 D16) the flips are a door\'s: shown for a '
       'door, hidden for a window and a gap; each turns its own field only', () {
     final doc = planDoc();
