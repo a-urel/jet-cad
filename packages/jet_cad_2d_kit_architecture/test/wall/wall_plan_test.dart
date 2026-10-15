@@ -35,6 +35,18 @@ ToolPointerEvent pressEvent(Vector2 world) => ToolPointerEvent(
     alt: false,
     pickRadiusWorld: 1);
 
+/// A hover at [world], no button down.
+ToolPointerEvent hoverEvent(Vector2 world) => ToolPointerEvent(
+    screen: Offset.zero,
+    world: world,
+    pointer: 1,
+    buttons: 0,
+    shift: false,
+    control: false,
+    meta: false,
+    alt: false,
+    pickRadiusWorld: 1);
+
 /// [doc]'s tool context: a unit camera, object snap on, no page.
 ToolContext contextOf(DraftDocument doc) {
   final index = SpatialIndex(doc);
@@ -233,5 +245,42 @@ void main() {
         [ArchitectureTools.box, ArchitectureTools.wall]);
     expect(identical(architectureKit.tools[1], wallPlanTool), isTrue);
     expect(architectureKit.validate(), isEmpty);
+  });
+
+  test(
+      "WT-frozen-hover the Wall tool made over a plan's services: a wall "
+      'frozen with no document change no longer joins the rubber band at the '
+      'next hover, nor the next click (spec 3a C1.5)', () async {
+    final doc = wallDoc();
+    final frozen = <Handle>{};
+    final services = FakePlanServices(
+        document: doc,
+        catalog: testCatalog(),
+        frozen: frozen,
+        settings: {ArchitectureTools.wall: const WallSettings()});
+    addTearDown(services.dispose);
+    final tool = wallPlanTool.create(services) as WallTool;
+    addTearDown(tool.dispose);
+    final ctx = contextOf(doc);
+    tool.onPointerDown(pressEvent(plan(0, 0)), ctx);
+    tool.onPointerDown(pressEvent(plan(3000, 400)), ctx);
+    tool.cancel(ctx);
+    await pumpEventQueue();
+    final a = walls(doc).single;
+    final wa = worldWallOf(doc, a);
+    // A new chain away from A; a hover in A's band, 70 mm off its
+    // centreline, joins it (the control).
+    tool.onPointerDown(pressEvent(plan(1500, 1800)), ctx);
+    final p = plan(1500, 270);
+    tool.onPointerMove(hoverEvent(p), ctx);
+    expect(distToLine(tool.debugBandEnd, wa.s, wa.e), lessThan(1e-6));
+    // A frozen, as the plan freezes it: no document change.
+    frozen.add(a);
+    tool.onPointerMove(hoverEvent(p), ctx);
+    expect((tool.debugBandEnd - p).length, lessThan(1e-6),
+        reason: 'the rubber band ends where the pointer is: not joined');
+    tool.onPointerDown(pressEvent(p), ctx);
+    final end = doc.components.get<WallParams>(walls(doc).last)!.end;
+    expect((end - p).length, lessThan(1e-6), reason: 'the click is not joined');
   });
 }

@@ -136,4 +136,49 @@ void main() {
     await pumpEventQueue();
     expect(bands.generation, g1, reason: 'disposed with its services');
   });
+
+  test(
+      'WL4 a wall frozen with no document change loses its band at the next '
+      "read, whichever reader comes first: the services' frozen set grows, "
+      'no change is reported, and joinInto, hostAt and liveWalls each see '
+      'it gone at once; the live walls keep theirs (spec 3a C1.5)', () {
+    final doc = liveDoc();
+    final frozen = <Handle>{};
+    final services =
+        FakePlanServices(document: doc, catalog: testCatalog(), frozen: frozen);
+    addTearDown(services.dispose);
+    final bands = wallBandsOf(services);
+    // Read once with every wall live: the cache holds A, B and F.
+    expect(bands.liveWalls(doc), [a, b, f]);
+    for (final h in [a, b, f]) {
+      final p = inBand(doc, h);
+      expect(bands.hostAt(doc, p.x, p.y), h, reason: h.toHex());
+    }
+    final state = doc.commands.stateId;
+
+    // F frozen; the first reader is joinInto, at F's band: no join, and
+    // [out] is left alone.
+    frozen.add(f);
+    final pf = inBand(doc, f);
+    final out = Vector2(7, 7);
+    expect(bands.joinInto(doc, pf.x, pf.y, out), isFalse);
+    expect([out.x, out.y], [7, 7]);
+    expect(bands.liveWalls(doc), [a, b]);
+    final pa = inBand(doc, a);
+    expect(bands.joinInto(doc, pa.x, pa.y, out), isTrue,
+        reason: 'A keeps its band');
+
+    // B frozen; the first reader is hostAt, at B's band.
+    frozen.add(b);
+    final pb = inBand(doc, b);
+    expect(bands.hostAt(doc, pb.x, pb.y), isNull);
+    expect(bands.hostAt(doc, pa.x, pa.y), a);
+
+    // A frozen; the first reader is liveWalls.
+    final g = bands.generation;
+    frozen.add(a);
+    expect(bands.liveWalls(doc), isEmpty);
+    expect(bands.generation, greaterThan(g), reason: 'the cache went stale');
+    expect(doc.commands.stateId, state, reason: 'no document change');
+  });
 }
