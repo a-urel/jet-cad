@@ -16,8 +16,8 @@
 // over a FakePlanServices of the kit tests' catalog, its RoomInputs the
 // services' one (`roomInputsOf`, spec 3a C2); everything else is today's.
 // ST1's shell half (S, the palette, Escape) is the integration package's
-// (test/separator/separator_shell_test.dart); ST4 needs a room and is
-// Task 18's.
+// (test/separator/separator_shell_test.dart); ST4, which needs a room,
+// arrived with the room (Task 18).
 import 'package:flutter/gestures.dart' show kPrimaryButton;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
@@ -26,7 +26,7 @@ import 'package:jet_cad_2d_kit/testing.dart';
 import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
 import 'package:jet_cad_2d_kit_architecture/src/room/room_inputs.dart';
 import 'package:jet_cad_2d_kit_architecture/src/room/room_trace.dart'
-    show distToSegment, pointInRing;
+    show Traced, distToSegment, pointInRing;
 import 'package:jet_cad_2d_kit_architecture/src/separator/separator_plan.dart';
 import 'package:jet_cad_2d_kit_architecture/src/separator/separator_tool.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
@@ -89,6 +89,10 @@ void pressAt(Rig rig, Vector2 world) =>
 /// Every live separator, ascending.
 List<Handle> separators(DraftDocument doc) =>
     testCatalog().objectsOf<SeparatorParams>(doc);
+
+/// Every live room, ascending.
+List<Handle> rooms(DraftDocument doc) =>
+    testCatalog().objectsOf<RoomParams>(doc);
 
 /// The distance from [p] to the line through [a] and [b], relative to [a].
 double distToLine(Vector2 p, Vector2 a, Vector2 b) {
@@ -310,6 +314,37 @@ void main() {
       expect(rig.tool.isPending, isTrue, reason: '$what: the start stays');
       expect(trimSeparator(a, b, rig.inputs, objectSnap: snap), isNull,
           reason: what);
+    }
+  });
+
+  test('ST4 a new separator splits its room: one side keeps the room', () {
+    for (final place in [origin, corpusGroups]) {
+      for (final snap in [true, false]) {
+        final why = '$place, F3 ${snap ? 'on' : 'off'}';
+        final plan = buildPlan(boxWalls, place: place);
+        final doc = plan.doc;
+        attachPage(doc, PageComponent());
+        final room = addRoom(doc, plan.at(1500.25, 2000.5), 'Room 1');
+        // Inner faces 100 in: 7,800 × 3,800 = 29,640,000, 29.64 m² (0.005
+        // from a tie).
+        expect(labelStrings(doc, room), ['Room 1', '29.64 m²'], reason: why);
+        final rig = separatorRig(doc, objectSnap: snap);
+        final depth = doc.commands.undoDepth;
+        draw(rig, plan.at(3000.5, 0.25), plan.at(3000.5, 3999.75));
+        expect(doc.commands.undoDepth, depth + 1, reason: why);
+        // Left of x = 3,000.5: 2,900.5 × 3,800 = 11,021,900, 11.02 m²
+        // (0.0031 from a tie).
+        final left = faceAt(doc, plan.at(1500.25, 2000.5)) as Traced;
+        expect(left.area, closeTo(11021900, 1e-2), reason: why);
+        expect(labelStrings(doc, room), ['Room 1', '11.02 m²'], reason: why);
+        // Right: 4,899.5 × 3,800 = 18,618,100, and no room's seed in it.
+        final right = faceAt(doc, plan.at(6000.5, 2000.25)) as Traced;
+        expect(right.area, closeTo(18618100, 1e-2), reason: why);
+        expect(rooms(doc), [room], reason: '$why: the other side has none');
+        expect(driftOf(doc), isEmpty);
+        doc.commands.undo();
+        expect(labelStrings(doc, room), ['Room 1', '29.64 m²'], reason: why);
+      }
     }
   });
 

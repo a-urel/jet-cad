@@ -11,6 +11,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 
 import 'box/box.dart';
 import 'opening/opening.dart';
+import 'room/room.dart';
 import 'separator/separator.dart';
 import 'wall/wall.dart';
 
@@ -23,7 +24,9 @@ final ParametricCatalog _naming = ParametricCatalog()
   ..register<OpeningParams>(OpeningParams.componentTypeId,
       OpeningParams.fromJson, const OpeningType())
   ..register<SeparatorParams>(SeparatorParams.componentTypeId,
-      SeparatorParams.fromJson, const SeparatorType());
+      SeparatorParams.fromJson, const SeparatorType())
+  ..register<RoomParams>(
+      RoomParams.componentTypeId, RoomParams.fromJson, const RoomType());
 
 /// The type id that names [group]'s object in [target] by the engine's own
 /// rule over the kit's types (a root-level group, named by the last

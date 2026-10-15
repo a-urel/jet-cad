@@ -14,6 +14,7 @@
 // Ported from jet_cad_floor_plan/test/room_tie_test.dart (3a Task 16);
 // assertions unchanged.
 import 'package:jet_cad_2d_kit_architecture/src/room/room_inputs.dart';
+import 'package:jet_cad_2d_kit_architecture/src/room/room_label.dart';
 import 'package:jet_cad_2d_kit_architecture/src/room/room_trace.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
@@ -431,6 +432,188 @@ void main() {
           reason: '$what: ${r.area}');
       expect((r.outerArea - 606816000).abs(), lessThanOrEqualTo(1e-2),
           reason: what);
+    }
+  });
+
+  test(
+      'DE2 a room with a tied island keeps its fill: step 1, its area, no '
+      'room.tint, its label clear of the island, at six placements', () {
+    for (final place in placements) {
+      // The review's reproduction: one tie. 29,480,000 (29.48, 0.005 from
+      // 29.475 and 29.485).
+      var what = 'one tie at $place';
+      var plan = tied(place, const [tie]);
+      var room = addRoom(plan.doc, plan.at(seedXY.$1, seedXY.$2), 'Room 1');
+      expect(
+          kindsOf(plan.doc, room),
+          [
+            EntityKind.fill,
+            EntityKind.polyline,
+            EntityKind.text,
+            EntityKind.text,
+          ],
+          reason: '$what: a region, then the labels');
+      expect(labelStrings(plan.doc, room), ['Room 1', '29.48 m²'],
+          reason: what);
+      expect(codedAs(diagnosticsOf(plan.doc), 'room.'), isEmpty, reason: what);
+      expect(driftOf(plan.doc), isEmpty, reason: what);
+      // Step 1: the keyholed ring, the box's four corners and the
+      // column's, and the slit's two points, 0.5 mm off a corner each.
+      var tint = worldTintOf(plan.doc, room);
+      var corners = [
+        for (final (x, y) in [...box, ...columnCorners]) plan.at(x, y),
+      ];
+      expect(tint, hasLength(corners.length + 2), reason: what);
+      for (final c in corners) {
+        expect(nearest(c, tint), lessThan(1e-5), reason: '$what: corner $c');
+      }
+      expect([
+        for (final q in tint)
+          if (nearest(q, corners) > 1e-5) nearest(q, corners),
+      ], [
+        closeTo(kSlit, 1e-6),
+        closeTo(kSlit, 1e-6)
+      ], reason: '$what: the slit');
+      // The label clear of the column: the pole of the box less the column
+      // is 1,900 from the boundary (the half-height, 3,800 / 2), within its
+      // 10 mm precision, so at least 1,890 from the column's faces.
+      final anchor = anchorOf(plan.doc, room);
+      final face = faceAt(plan.doc, plan.at(seedXY.$1, seedXY.$2)) as Traced;
+      expect(poleOfInaccessibility(face.ring, face.holes).distance,
+          closeTo(1900, 10),
+          reason: what);
+      expect(toRect(plan, anchor, columnCorners), greaterThan(1890),
+          reason: '$what: the label at $anchor');
+      expect(pointInRing(anchor, face.ring), isTrue, reason: what);
+
+      // Two islands tied to each other and to the wall: step 1, two
+      // keyholes. 29,320,000 (29.32, 0.005 from the ties).
+      what = 'two islands tied at $place';
+      plan = tied(place, const [tie, (5400.0, 2000.5, 6500.0, 2000.5)],
+          more: const [column, column2]);
+      room = addRoom(plan.doc, plan.at(seedXY.$1, seedXY.$2), 'Room 1');
+      expect(kindsOf(plan.doc, room).first, EntityKind.fill, reason: what);
+      expect(labelStrings(plan.doc, room), ['Room 1', '29.32 m²'],
+          reason: what);
+      expect(codedAs(diagnosticsOf(plan.doc), 'room.'), isEmpty, reason: what);
+      expect(driftOf(plan.doc), isEmpty, reason: what);
+      tint = worldTintOf(plan.doc, room);
+      corners = [
+        for (final (x, y) in [...box, ...columnCorners, ...column2Corners])
+          plan.at(x, y),
+      ];
+      expect(tint, hasLength(corners.length + 4), reason: what);
+      for (final c in corners) {
+        expect(nearest(c, tint), lessThan(1e-5), reason: '$what: corner $c');
+      }
+
+      // What remains: a tied island pinched at a vertex is one pinched
+      // hole, and the keyholed ring through it does not triangulate. The
+      // outer ring alone does: step 2, reported, the area exact. As a free
+      // pinched island would be; no longer step 3.
+      what = 'a pinched island tied at $place';
+      plan = tied(place, const [tie], more: const [column, cornerColumn]);
+      room = addRoom(plan.doc, plan.at(seedXY.$1, seedXY.$2), 'Room 1');
+      expect(
+          kindsOf(plan.doc, room),
+          [
+            EntityKind.fill,
+            EntityKind.polyline,
+            EntityKind.text,
+            EntityKind.text,
+          ],
+          reason: what);
+      expect(labelStrings(plan.doc, room), ['Room 1', '29.32 m²'],
+          reason: what);
+      tint = worldTintOf(plan.doc, room);
+      expect(tint, hasLength(4), reason: '$what: the outer ring alone');
+      expect(
+          codedAs(diagnosticsOf(plan.doc), 'room.'),
+          [
+            Diagnostic(
+              severity: DiagnosticSeverity.warning,
+              code: 'room.tint',
+              message: 'room ${room.toHex()} ("Room 1"): its tint covers its '
+                  'holes: the keyholed ring does not triangulate',
+              handles: [room],
+            ),
+          ],
+          reason: what);
+      expect(driftOf(plan.doc), isEmpty, reason: what);
+    }
+  });
+
+  test(
+      'DE3 the Separator tool\'s transient: wall → column keeps the fill, '
+      'column → wall splits the room; same handles; undone step by step', () {
+    for (final place in const [origin, corpus, corpusGroups]) {
+      final plan = tied(place, const []);
+      final doc = plan.doc;
+      final seed = plan.at(seedXY.$1, seedXY.$2);
+      final room = addRoom(doc, seed, 'Room 1');
+      final children = kids(doc, room);
+      final start = stateOf(doc);
+      // The column stands free: a hole. 29.48 m², as DE2.
+      expect(labelStrings(doc, room), ['Room 1', '29.48 m²'], reason: '$place');
+      expect(kindsOf(doc, room).first, EntityKind.fill, reason: '$place');
+
+      // Each separator in its own turned, translated group in own groups
+      // (not buildPlan's sequence).
+      Transform2? group(int k) => place.groups
+          ? place.m
+              .multiply(Transform2.translation(-217.75 * k, 131.5 * k))
+              .multiply(Transform2.rotation(0.45 + 0.8 * k))
+          : null;
+
+      // The first click pair: wall → column. The fill stays, with its
+      // handles; the area too; one hole.
+      addSeparator(doc, plan.at(tie.$1, tie.$2), plan.at(tie.$3, tie.$4),
+          at: group(1));
+      var what = 'wall → column at $place';
+      expect(kids(doc, room), children, reason: '$what: same handles');
+      expect(kindsOf(doc, room).first, EntityKind.fill, reason: what);
+      expect(labelStrings(doc, room), ['Room 1', '29.48 m²'], reason: what);
+      expect(codedAs(diagnosticsOf(doc), 'room.'), isEmpty, reason: what);
+      expect(driftOf(doc), isEmpty, reason: what);
+      expect((faceAt(doc, seed) as Traced).holes, hasLength(1), reason: what);
+      expect(worldTintOf(doc, room), hasLength(10), reason: what);
+      final tied1 = stateOf(doc);
+
+      // The second: column → wall. The box splits; the room keeps the
+      // west side, walking round the column's west half: 19,301,700 (DE1;
+      // 19.30, 0.0033 from 19.295 and 19.305). No hole; the fill stays.
+      addSeparator(doc, plan.at(tieNorth.$1, tieNorth.$2),
+          plan.at(tieNorth.$3, tieNorth.$4),
+          at: group(2));
+      what = 'column → wall at $place';
+      expect(kids(doc, room), children, reason: '$what: same handles');
+      expect(kindsOf(doc, room).first, EntityKind.fill, reason: what);
+      expect(labelStrings(doc, room), ['Room 1', '19.30 m²'], reason: what);
+      expect(codedAs(diagnosticsOf(doc), 'room.'), isEmpty, reason: what);
+      expect(driftOf(doc), isEmpty, reason: what);
+      expect((faceAt(doc, seed) as Traced).holes, isEmpty, reason: what);
+      final tint = worldTintOf(doc, room);
+      expect(tint, hasLength(8), reason: what);
+      for (final (x, y) in const [
+        (100.0, 100.0),
+        (5200.5, 100.0),
+        (5200.5, 1800.0),
+        (5000.0, 1800.0),
+        (5000.0, 2200.0),
+        (5200.5, 2200.0),
+        (5200.5, 3900.0),
+        (100.0, 3900.0),
+      ]) {
+        expect(nearest(plan.at(x, y), tint), lessThan(1e-5),
+            reason: '$what: corner ($x, $y)');
+      }
+
+      doc.commands.undo();
+      expect(stateOf(doc), tied1, reason: 'undo 1 at $place');
+      expect(labelStrings(doc, room), ['Room 1', '29.48 m²'], reason: '$place');
+      doc.commands.undo();
+      expect(stateOf(doc), start, reason: 'undo 2 at $place');
+      expect(driftOf(doc), isEmpty, reason: '$place');
     }
   });
 }

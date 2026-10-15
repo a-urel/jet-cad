@@ -12,3 +12,4 @@ export 'src/wall/wall.dart' show Justification, WallParams;
 export 'src/opening/opening.dart'
     show HingeEnd, OpeningKind, OpeningParams, SwingSide;
 export 'src/separator/separator.dart' show SeparatorParams;
+export 'src/room/room.dart' show RoomParams;

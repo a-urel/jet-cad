@@ -8,13 +8,12 @@
 // Ported from jet_cad_floor_plan/test/support/room_fixture.dart (spec 3a
 // C7): the floor planner's catalog becomes the kit's test catalog
 // (wall_fixture.dart's testCatalog), and a RoomInputs reads the live rule
-// [liveOf] gives (wall_fixture.dart's, R-P17). The room helpers that need
-// RoomParams (addRoom, addSampleRooms, renameRoom) arrive with the room
-// (Task 18).
+// [liveOf] gives (wall_fixture.dart's, R-P17).
 import 'dart:convert' show jsonDecode;
 import 'dart:math' as math;
 
 import 'package:jet_cad_2d_kit_architecture/src/opening/opening.dart';
+import 'package:jet_cad_2d_kit_architecture/src/room/room.dart';
 import 'package:jet_cad_2d_kit_architecture/src/room/room_inputs.dart';
 import 'package:jet_cad_2d_kit_architecture/src/room/room_trace.dart';
 import 'package:jet_cad_2d_kit_architecture/src/separator/separator.dart';
@@ -576,6 +575,26 @@ void attachPage(DraftDocument doc, PageComponent page) {
       .execute(SetComponentCommand<PageComponent>(doc.rootHandle, page));
 }
 
+/// A room at world [seed], named [name], with label offset [label]: the
+/// commit the Room tool will make, a root-level group at the identity and
+/// its `RoomParams`, one compound. Returns the room's handle.
+///
+/// With [at], the group has that transform instead (only a file makes one,
+/// D21) and the stored seed is [seed] taken back through it.
+Handle addRoom(DraftDocument doc, Vector2 seed, String name,
+    {(double, double)? label, Transform2? at}) {
+  final h = doc.handleSeed.next();
+  final g = at ?? Transform2.identity();
+  final s = at == null ? seed : g.invert().transformPoint(seed);
+  doc.commands.execute(CompoundCommand([
+    AddNodeCommand(GroupNode(
+        handle: h, parent: doc.rootHandle, transform: g, children: const [])),
+    SetComponentCommand<RoomParams>(
+        h, RoomParams(s.x, s.y, name, label: label)),
+  ], label: 'Add room'));
+  return h;
+}
+
 /// [room]'s TEXT children, ascending: its name label, then its area label.
 List<Handle> labelsOf(DraftDocument doc, Handle room) => [
       for (final k in kids(doc, room))
@@ -664,6 +683,16 @@ DraftCommand deleteObject(DraftDocument doc, Handle g) => CompoundCommand([
       RemoveNodeCommand(g),
     ], label: 'Delete');
 
+/// D23's plan at [place] with the app's opening page and its seven rooms,
+/// added in the table's order: the rooms by name.
+Map<String, Handle> addSampleRooms(Plan plan) {
+  attachPage(plan.doc, PageComponent());
+  return {
+    for (final MapEntry(key: name, value: (x, y)) in sampleSeeds.entries)
+      name: addRoom(plan.doc, plan.at(x, y), name),
+  };
+}
+
 /// [doc] saved with what [add] adds to a copy of it that has no parametric
 /// system: the commands land as given and nothing is generated, as a file
 /// written by another program may hold a room or a separator with no child.
@@ -678,6 +707,11 @@ String staleFile(DraftDocument doc, void Function(DraftDocument bare) add) {
   add(bare);
   return enc(bare);
 }
+
+/// [room]'s name to [name], one command, its other parameters kept.
+DraftCommand renameRoom(DraftDocument doc, Handle room, String name) =>
+    SetComponentCommand<RoomParams>(
+        room, doc.components.get<RoomParams>(room)!.copyWith(name: name));
 
 /// [room]'s name and area strings.
 List<String> labelStrings(DraftDocument doc, Handle room) =>
