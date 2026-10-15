@@ -5,5 +5,6 @@
 /// type ids let a host build a plan in code.
 library;
 
+export 'src/box/box.dart' show BoxParams;
 export 'src/ids.dart' show ArchitectureTools, ArchitectureTypes;
 export 'src/kit.dart' show architectureKit;

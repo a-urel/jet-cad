@@ -6,3 +6,6 @@ The architecture kit of jet_cad_2d plans (sub-project 3a).
   tool ids (`ArchitectureTypes`, `ArchitectureTools`), its words in
   English, German and Turkish, and its `prepare`, which gives a plan the
   plan library makes the separators' DASHED linetype.
+- The box (`architecture.box`, `BoxParams`): a rectangle whose outline
+  loses what lies inside an overlapping box; its width and height in the
+  property panel; the Box tool (B).
