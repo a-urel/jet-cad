@@ -9,3 +9,5 @@ export 'src/box/box.dart' show BoxParams;
 export 'src/ids.dart' show ArchitectureTools, ArchitectureTypes;
 export 'src/kit.dart' show architectureKit;
 export 'src/wall/wall.dart' show Justification, WallParams;
+export 'src/opening/opening.dart'
+    show HingeEnd, OpeningKind, OpeningParams, SwingSide;
