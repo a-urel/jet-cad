@@ -1,12 +1,15 @@
 // Ported from jet_cad_floor_plan/test/wall_grips_test.dart (3a Task 12,
-// R-P1): the provider-direct tails of EG1, EG3, EG4 and EG6, whose
-// WallGrips is a kit internal, assertions unchanged, each over its case's
-// fixture as the shell case leaves it there (the shell part ends undone or
+// R-P1): the provider-direct tails of EG1, EG3, EG4 and EG6, and of EG8
+// (Task 17, R-P8), whose WallGrips is a kit internal, assertions
+// unchanged, each over its case's fixture as the shell case leaves it
+// there (the shell part ends undone or
 // refused, so the document is the fixture's). The shell parts run in
 // jet_cad_2d_integration. Every wall sits at the far origin in its own
 // rotated group (`groupAt`, or a spoke's group at its hub).
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
+import 'package:jet_cad_2d_kit_architecture/src/opening/opening.dart';
+import 'package:jet_cad_2d_kit_architecture/src/separator/separator.dart';
 import 'package:jet_cad_2d_kit_architecture/src/wall/wall.dart';
 import 'package:jet_cad_2d_kit_architecture/src/wall/wall_grips.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
@@ -58,6 +61,71 @@ void addL(DraftDocument doc, {bool withC = true}) {
         150, Justification.right));
   }
 }
+
+const Handle shadow = Handle(5500), sep = Handle(5600);
+
+/// fix/live-object-rule: the L, and two root-level groups carrying two
+/// registered types each, as only a file brings them in. Each is made as
+/// the app makes an object, regenerated through the dispatcher, then given
+/// a second component straight through the store:
+/// - [shadow], a door on C (so the engine regenerated it as an opening),
+///   then `WallParams` 400 thick from the L's corner (on the joint, in
+///   world) to [shadowTip], a point of the door's own children. Opening is
+///   registered after Wall, so the engine names it an **opening**. With
+///   [dangling], its `OpeningParams` is then rewritten to name a host that
+///   does not exist (the q12 review's PR2d); otherwise its host is C (PR2).
+/// - [sep], a separator (regenerated as one), then `OpeningParams` hosted
+///   on B. Separator is registered after Opening, so it is a **separator**.
+/// Both groups translated and rotated; neither handle the lowest.
+DraftDocument shadowDoc({required bool dangling}) {
+  final doc = gripDoc((doc) {
+    addL(doc);
+    doc.commands.execute(CompoundCommand([
+      AddNodeCommand(GroupNode(
+          handle: shadow,
+          parent: doc.rootHandle,
+          transform: Transform2.translation(ox + 100.5, oy + 50.25)
+              .multiply(Transform2.rotation(-0.4)),
+          children: const [])),
+      SetComponentCommand<OpeningParams>(
+          shadow, const OpeningParams(wc, 700, 800, OpeningKind.door)),
+    ], label: 'Add door'));
+    final at = Transform2.translation(ox - 610.75, oy + 1720.5)
+        .multiply(Transform2.rotation(0.9));
+    final toSep = at.invert();
+    final s = toSep.transformPoint(plan(600, 1800));
+    final e = toSep.transformPoint(plan(2200, 1800));
+    doc.commands.execute(CompoundCommand([
+      AddNodeCommand(GroupNode(
+          handle: sep,
+          parent: doc.rootHandle,
+          transform: at,
+          children: const [])),
+      SetComponentCommand<SeparatorParams>(
+          sep, SeparatorParams(s.x, s.y, e.x, e.y)),
+    ], label: 'Add separator'));
+  });
+  final toShadow = doc.tree.accumulatedTransform(shadow).invert();
+  final s = toShadow.transformPoint(lCorner);
+  final tip = shadowTip(doc);
+  doc.components
+    ..attach<WallParams>(
+        shadow, WallParams(s.x, s.y, tip.x, tip.y, 400, Justification.left))
+    ..attach<OpeningParams>(
+        sep, const OpeningParams(wb, 900, 700, OpeningKind.window));
+  if (dangling) {
+    doc.components.attach<OpeningParams>(shadow,
+        const OpeningParams(Handle(0x7777), 700, 800, OpeningKind.door));
+  }
+  return doc;
+}
+
+/// The first point of [shadow]'s first generated line, group-local: a
+/// point of the door's own children.
+Vector2 shadowTip(DraftDocument doc) => [
+      for (final k in kids(doc, shadow))
+        if (kindOf(doc, k) == EntityKind.line) pointsOf(payloadOf(doc, k))[0],
+    ].first;
 
 void main() {
   test(
@@ -239,6 +307,34 @@ void main() {
       wa,
       wb
     ]);
+    final pieces = grips.preview(doc, wa, g, q);
+    expect(pieces.map((p) => p.$1), [EntityKind.line, EntityKind.line]);
+    final [a0, a1] = pointsOf(pieces[0].$2);
+    final [b0, b1] = pointsOf(pieces[1].$2);
+    expect((a0 - lStart).length, lessThan(1e-6));
+    for (final p in [a1, b0]) {
+      expect((p - q).length, lessThan(1e-6));
+    }
+    expect((b1 - lEnd).length, lessThan(1e-6));
+  });
+
+  test(
+      "EG8-k the corner drag's command and preview, the provider directly: the real walls only (a file's opening carrying WallParams on the joint, a separator carrying OpeningParams on B)",
+      () {
+    // Today's :616-623 less the four components it reads for the shell
+    // part's after-drag checks (EG8, the integration package's): unused here.
+    final doc = shadowDoc(dangling: false);
+    final corner = endOf(doc, wa, 1);
+    expect((endOf(doc, shadow, 0) - corner).length, lessThan(wallJoin.linear),
+        reason: 'only the rule separates the shadow from the joint');
+    final q = gridOf(plan(3500, -400));
+
+    final grips = WallGrips(live: liveOf(doc));
+    final g = grips.gripsOf(doc, wa)[1];
+    final c = grips.drag(doc, wa, g, q)! as CompoundCommand;
+    // ignore: avoid_dynamic_calls
+    expect([for (final m in c.children) (m as dynamic).handle as Handle],
+        [wa, wb]);
     final pieces = grips.preview(doc, wa, g, q);
     expect(pieces.map((p) => p.$1), [EntityKind.line, EntityKind.line]);
     final [a0, a1] = pointsOf(pieces[0].$2);

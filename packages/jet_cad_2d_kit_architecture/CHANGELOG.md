@@ -13,3 +13,6 @@ The architecture kit of jet_cad_2d plans (sub-project 3a).
   joints, Ts and nodes; its two end grips, which move joined ends too; its
   thickness and justification in the property panel; the Wall tool (W),
   whose settings the panel edits while it is active.
+- The room separator (`architecture.separator`, `SeparatorParams`): drawn
+  DASHED, an input to rooms, left out of PDF and PNG exports; its two end
+  grips and the Separator tool (S) trim an end to the wall face it enters.

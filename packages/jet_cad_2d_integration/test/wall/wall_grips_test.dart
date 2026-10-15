@@ -1,9 +1,10 @@
 // Ported from jet_cad_floor_plan/test/wall_grips_test.dart (3a Task 12):
-// EG1-EG6, over a PlanController of the architecture kit in PlanEditor,
-// assertions unchanged; the provider-direct tails of EG1, EG3, EG4 and EG6
-// use the kit's WallGrips and run in the kit as EG1-k, EG3-k, EG4-k and
-// EG6-k (R-P1, R12-3); the shown grips are the controller's grip cache
-// (R-P9). EG7, EG8 move to Task 17 and EG9, EG10 to Task 21 (R-P8).
+// EG1-EG6, and EG7, EG8 (3a Task 17, R-P8: their door and separator), over
+// a PlanController of the architecture kit in PlanEditor, assertions
+// unchanged; the provider-direct tails of EG1, EG3, EG4, EG6 and EG8 use
+// the kit's WallGrips and run in the kit as EG1-k, EG3-k, EG4-k, EG6-k and
+// EG8-k (R-P1, R12-3); the shown grips are the controller's grip cache
+// (R-P9). EG9, EG10 move to Task 21 (R-P8).
 // WG-refuse-short is new (Review Focus 3's kit half, R-P15).
 // ignore_for_file: invalid_use_of_internal_member
 import 'package:flutter/gestures.dart' show PointerDeviceKind, kPrimaryButton;
@@ -51,6 +52,72 @@ void addL(DraftDocument doc, {bool withC = true}) {
         150, Justification.right));
   }
 }
+
+const Handle shadow = Handle(5500), sep = Handle(5600);
+
+/// fix/live-object-rule: the L, and two root-level groups carrying two
+/// registered types each, as only a file brings them in. Each is made as
+/// the app makes an object, regenerated through the dispatcher, then given
+/// a second component straight through the store:
+/// - [shadow], a door on C (so the engine regenerated it as an opening),
+///   then `WallParams` 400 thick from the L's corner (on the joint, in
+///   world) to [shadowTip], a point of the door's own children. Opening is
+///   registered after Wall, so the engine names it an **opening**. With
+///   [dangling], its `OpeningParams` is then rewritten to name a host that
+///   does not exist (the q12 review's PR2d); otherwise its host is C (PR2).
+/// - [sep], a separator (regenerated as one), then `OpeningParams` hosted
+///   on B. Separator is registered after Opening, so it is a **separator**.
+/// Both groups translated and rotated; neither handle the lowest.
+PlanController shadowController({required bool dangling}) {
+  final ctrl = wallController(gripPlan((doc) {
+    addL(doc);
+    doc.commands.execute(CompoundCommand([
+      AddNodeCommand(GroupNode(
+          handle: shadow,
+          parent: doc.rootHandle,
+          transform: Transform2.translation(ox + 100.5, oy + 50.25)
+              .multiply(Transform2.rotation(-0.4)),
+          children: const [])),
+      SetComponentCommand<OpeningParams>(
+          shadow, const OpeningParams(wc, 700, 800, OpeningKind.door)),
+    ], label: 'Add door'));
+    final at = Transform2.translation(ox - 610.75, oy + 1720.5)
+        .multiply(Transform2.rotation(0.9));
+    final toSep = at.invert();
+    final s = toSep.transformPoint(plan(600, 1800));
+    final e = toSep.transformPoint(plan(2200, 1800));
+    doc.commands.execute(CompoundCommand([
+      AddNodeCommand(GroupNode(
+          handle: sep,
+          parent: doc.rootHandle,
+          transform: at,
+          children: const [])),
+      SetComponentCommand<SeparatorParams>(
+          sep, SeparatorParams(s.x, s.y, e.x, e.y)),
+    ], label: 'Add separator'));
+  }));
+  final doc = ctrl.document;
+  final toShadow = doc.tree.accumulatedTransform(shadow).invert();
+  final s = toShadow.transformPoint(lCorner);
+  final tip = shadowTip(doc);
+  doc.components
+    ..attach<WallParams>(
+        shadow, WallParams(s.x, s.y, tip.x, tip.y, 400, Justification.left))
+    ..attach<OpeningParams>(
+        sep, const OpeningParams(wb, 900, 700, OpeningKind.window));
+  if (dangling) {
+    doc.components.attach<OpeningParams>(shadow,
+        const OpeningParams(Handle(0x7777), 700, 800, OpeningKind.door));
+  }
+  return ctrl;
+}
+
+/// The first point of [shadow]'s first generated line, group-local: a
+/// point of the door's own children.
+Vector2 shadowTip(DraftDocument doc) => [
+      for (final k in kids(doc, shadow))
+        if (kindOf(doc, k) == EntityKind.line) pointsOf(payloadOf(doc, k))[0],
+    ].first;
 
 void main() {
   testWidgets(
@@ -392,6 +459,68 @@ void main() {
     expect((endOf(doc, wa, 1) - r).length, lessThan(1e-6));
     expect(ctrl.diagnostics.value, hasLength(reports));
     await undoKey(tester);
+    await undoKey(tester);
+    expect(canon(doc), before);
+  });
+
+  testWidgets(
+      'EG7 (fix/live-object-rule, the q12 review\'s PR2d) a file\'s group '
+      'carrying WallParams on the joint and OpeningParams naming no host is '
+      'an opening, not a wall: the corner drag of A lands one undo step, '
+      'throws nothing and leaves the group as loaded', (tester) async {
+    final ctrl = shadowController(dangling: true);
+    final doc = ctrl.document;
+    final wallP = doc.components.get<WallParams>(shadow)!;
+    final openingP = doc.components.get<OpeningParams>(shadow)!;
+    expect(openingP.host, const Handle(0x7777), reason: 'dangling');
+    final corner = endOf(doc, wa, 1);
+    expect((endOf(doc, shadow, 0) - corner).length, lessThan(wallJoin.linear),
+        reason: 'the shadow\'s WallParams is on the joint in world');
+    await pumpEditor(tester, ctrl, centre: lCorner, scale: 0.15);
+    final before = canon(doc);
+    await selectWall(tester, ctrl, wa);
+    final q = gridOf(doc, plan(3500, -400));
+    await dragWorld(tester, ctrl, corner, q);
+    expect(tester.takeException(), isNull);
+    expect(doc.commands.undoDepth, 1, reason: 'the commit succeeds');
+    for (final (h, k) in [(wa, 1), (wb, 0)]) {
+      expect((endOf(doc, h, k) - q).length, lessThan(1e-6),
+          reason: '${h.toHex()} follows');
+    }
+    expect(doc.components.get<WallParams>(shadow), wallP);
+    expect(doc.components.get<OpeningParams>(shadow), openingP);
+    await undoKey(tester);
+    expect(canon(doc), before);
+  });
+
+  testWidgets(
+      'EG8 (fix/live-object-rule, PR2) the corner drag\'s command and '
+      'preview name the real walls only: a file\'s opening carrying '
+      'WallParams on the joint does not follow, and a separator carrying '
+      'OpeningParams on B is not kept put', (tester) async {
+    final ctrl = shadowController(dangling: false);
+    final doc = ctrl.document;
+    final wallP = doc.components.get<WallParams>(shadow)!;
+    final openingP = doc.components.get<OpeningParams>(shadow)!;
+    final sepS = doc.components.get<SeparatorParams>(sep)!;
+    final sepO = doc.components.get<OpeningParams>(sep)!;
+    final corner = endOf(doc, wa, 1);
+    expect((endOf(doc, shadow, 0) - corner).length, lessThan(wallJoin.linear),
+        reason: 'only the rule separates the shadow from the joint');
+    final q = gridOf(doc, plan(3500, -400));
+
+    // The provider directly: EG8-k (the kit).
+
+    await pumpEditor(tester, ctrl, centre: lCorner, scale: 0.15);
+    final before = canon(doc);
+    await selectWall(tester, ctrl, wa);
+    await dragWorld(tester, ctrl, corner, q);
+    expect(tester.takeException(), isNull);
+    expect(doc.commands.undoDepth, 1, reason: 'the commit succeeds');
+    expect(doc.components.get<WallParams>(shadow), wallP);
+    expect(doc.components.get<OpeningParams>(shadow), openingP);
+    expect(doc.components.get<SeparatorParams>(sep), sepS);
+    expect(doc.components.get<OpeningParams>(sep), sepO);
     await undoKey(tester);
     expect(canon(doc), before);
   });
