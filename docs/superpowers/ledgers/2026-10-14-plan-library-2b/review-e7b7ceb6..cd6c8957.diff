@@ -1,0 +1,1104 @@
+# Review package: e7b7ceb6..HEAD
+
+## Commits
+cd6c8957 docs: 2b's final fix wave of record; STATUS points at the merge
+ed27e2ca docs: the 2b CHANGELOGs complete
+bb5b7c05 test(plan): port view_palette_test's mode views (M-DT-10, M-DT-11)
+93e92a74 test(plan): pin restore's notifications, the seat drag's spend, unitAt on a seat
+318d2844 fix(plan): the design is read-only while a service copy exists
+
+## Files changed
+ STATUS.md                                          |  26 ++-
+ .../notes/2026-10-14-plan-library-2b-results.md    |  97 +++++++++-
+ packages/jet_cad_2d/CHANGELOG.md                   |   1 -
+ packages/jet_cad_2d_kit/CHANGELOG.md               |   3 +-
+ packages/jet_cad_2d_plan/CHANGELOG.md              |  22 +++
+ .../lib/src/controller/plan_controller.dart        |  21 ++-
+ .../test/canvas/canvas_service_mode_test.dart      |  99 ++++++++++
+ .../test/canvas/view_palette_test.dart             | 205 +++++++++++++++++++++
+ .../controller/service_record_controller_test.dart |  26 +++
+ .../controller/unit_groups_controller_test.dart    |   2 +
+ .../test/invariants/band_allocation_test.dart      |  11 ++
+ .../test/service/service_tool_units_test.dart      |  23 +++
+ .../test/service/view/plan_service_view_test.dart  |  42 +++++
+ .../jet_cad_2d_plan/test/units/unit_api_test.dart  |  35 +++-
+ 14 files changed, 587 insertions(+), 26 deletions(-)
+
+## Diff
+diff --git a/STATUS.md b/STATUS.md
+index 7525a040..9b900556 100644
+--- a/STATUS.md
++++ b/STATUS.md
+@@ -418,34 +418,37 @@ with 0.7.0 (below).
+   side in `jet_cad_2d_kit`, engine seams E1-E4): spec
+   [2026-10-14-plan-library-design-mode-design.md](docs/superpowers/specs/2026-10-14-plan-library-design-mode-design.md)
+   (rev 3, two Opus reviews), plan
+   [2026-10-14-plan-library-2a.md](docs/superpowers/plans/2026-10-14-plan-library-2a.md)
+   (21 tasks), results
+   [2026-10-14-plan-library-2a-results.md](docs/superpowers/notes/2026-10-14-plan-library-2a-results.md),
+   ledger [docs/superpowers/ledgers/2026-10-14-plan-library-2a/](docs/superpowers/ledgers/2026-10-14-plan-library-2a/).
+   Every task reviewed, whole-branch Opus review with one fix wave, re-review
+   clean; **merged into `main` at `4130ebc`** on the human's *"1"* (local merge;
+   on the merged tree `jet_cad_2d_plan` +735, `jet_cad_2d_kit` +314, analyze
+-  clean); not pushed. One
+-  host-API difference awaits the human's word (A14): `selectTool` works with
+-  no view mounted (today it answers false). **2b, the plan library in service
++  clean); not pushed. Its one
++  host-API difference (A14: `selectTool` works with no view mounted; today it
++  answers false) is settled by 2b spec decision 9 (true kept). **2b, the plan library in service
+   mode** (`jet_cad_2d_plan` 0.8.0 still unreleased, the contract's 2b
+   additions, engine seam E5): spec
+   [2026-10-14-plan-library-service-mode-design.md](docs/superpowers/specs/2026-10-14-plan-library-service-mode-design.md)
+   (rev 4, approved), plan
+   [2026-10-14-plan-library-2b.md](docs/superpowers/plans/2026-10-14-plan-library-2b.md)
+   (17 tasks), results
+   [2026-10-14-plan-library-2b-results.md](docs/superpowers/notes/2026-10-14-plan-library-2b-results.md),
+   on `feat/plan-library-2b` (worktree `.claude/worktrees/plan-library-2b`).
+   Every task done and reviewed, the exit gate passed at `2ca9c84f`; the
+-  whole-branch review, its fix wave and the ledger's archive are next. Not
+-  merged, not pushed. The human asked to be told when
++  whole-branch Opus review (no Critical, four Important) and its fix wave
++  are done (the results note's "Final fix wave": the design read-only in
++  service, view_palette's tests ported, restore's notifications and the
++  seat drag's spend pinned). **2b is complete on its branch**; not merged,
++  not pushed. The human asked to be told when
+   `apps/architecture_demo` runs on the new packages (the end of
+   sub-project 3) and to have everything tested after sub-project 4.
+ 
+ - **The packages' READMEs, screenshots and funding links** (the human,
+   2026-10-13), on `feat/package-readmes`, cut by hand from `main` at
+   `51125b6`; **merged into `main` at `5c244b1`** on the human's *"merge
+   to main"* (2026-10-13), after the whole-branch review and its fixes;
+   not yet pushed. Spec
+   [2026-10-13-package-readmes-design.md](docs/superpowers/specs/2026-10-13-package-readmes-design.md)
+   (rev 1, amendments A1-A4), plan
+@@ -565,25 +568,28 @@ with 0.7.0 (below).
+ 
+ On Linux, compared exactly by CI: the engine's two `generate_document_test`
+ fingerprints and the render package's seven text-ladder goldens (macOS
+ values), and the render package's paint micro-benchmark rig (skipped,
+ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
+ 
+ ## Resume here
+ 
+ **In flight: the kit architecture. Sub-project 1 (`jet_cad_2d_kit`) is
+ merged (PR #11 `bc705be`, PR #12 `27244bf`). Sub-project 2a (the plan library
+-in design mode) is merged at `4130ebc`, not pushed. 2b (the service mode)
+-passed its exit gate on `feat/plan-library-2b` at `2ca9c84f`; next: the
+-whole-branch Opus review and its fix wave, then the ledger archived and the
+-merge on the human's word.** (In flight). A14's `selectTool` difference was
+-settled by the human (2b spec decision 9: true kept).
++in design mode) is merged at `4130ebc`, not pushed. 2b (the service mode) is
++complete on `feat/plan-library-2b` after the whole-branch Opus review and its
++fix wave; not merged, not pushed. Next: the human's word on the merge.** (In
++flight). Open for the human: F-1 of `chrome_change_test.dart` (design-only, a
++2a port gap). Where 2b stands, its gaps and rulings: the results note's
++[Spec gaps](docs/superpowers/notes/2026-10-14-plan-library-2b-results.md#spec-gaps-and-interface-problems-found-while-executing)
++section and its "Final fix wave". A14's `selectTool` difference was settled
++by the human (2b spec decision 9: true kept).
+ 
+ **Done 2026-10-13: 0.7.2 of the three packages**, published by the human in
+ order (spec D11): `jet_cad_2d`, `jet_cad_2d_flutter`, `jet_cad_floor_plan`,
+ all from `5c244b1`; tags `<package>-v0.7.2` → `5c244b1` pushed. pana 160/160
+ for the renderer and the planner copies before upload (lower bounds 20/20);
+ dry runs 0 warnings; D7's pub-only probe green from pub.dev alone (all three
+ hosted 0.7.2; `check_host_lock`: 39 packages, none of the GPU set;
+ `flutter analyze` no issues; `flutter build web` built). The checklist that
+ steps 0-4 followed is in the results note
+ [2026-10-13-package-readmes-results.md](docs/superpowers/notes/2026-10-13-package-readmes-results.md)
+diff --git a/docs/superpowers/notes/2026-10-14-plan-library-2b-results.md b/docs/superpowers/notes/2026-10-14-plan-library-2b-results.md
+index 30585c70..519595a0 100644
+--- a/docs/superpowers/notes/2026-10-14-plan-library-2b-results.md
++++ b/docs/superpowers/notes/2026-10-14-plan-library-2b-results.md
+@@ -353,26 +353,27 @@ its ruling:
+ - `host/chrome_change_test.dart` F-1: design-only; unported, reported to the human as a 2a port
+   gap (ruling, Task 16b).
+ - `host/editor_capabilities_test.dart`, `host/editor_tools_test.dart`,
+   `host/editor_tools_review_test.dart`, `host/editor_fixture.dart`, `host/embedding_fixture.dart`,
+   `host/new_plan_separator_test.dart`, `host/page_flows_test.dart`, `host/theme_canvas_test.dart`,
+   `host/host_text_keys_test.dart`, `invariants/theme_colours_test.dart`: 2a's ports (2a results
+   note; their headers in `permissions_test.dart`, `editor_options_test.dart`, `editor_host.dart`,
+   `unit_editor_fixture.dart`, `locale_separator_test.dart`, `page_flows_test.dart`,
+   `theme_canvas_test.dart`, `host_text_keys_test.dart`, `theme_colours_test.dart`), with 2b's
+   halves listed above.
+-- **Finding (this run): `host/view_palette_test.dart`** has neither a destination nor a ruling.
+-  It holds service-mode tests (`M-DT-11 (${viewMode.name} mode)` two views side by side, and
+-  three `ServiceView` tests including `M-DT-10, ServiceView: no page …`). No 2a or 2b plan,
+-  report, ledger line or port comment names it (`grep -rn view_palette` over
+-  `docs/superpowers/plans/2026-10-14-*`, the 2a results note, the 2a ledger and
+-  `packages/jet_cad_2d_plan/test` finds nothing). Open, for the coordinator.
++- **Finding (Task 17's run): `host/view_palette_test.dart`** had neither a destination nor a
++  ruling (no 2a or 2b plan, report, ledger line or port comment named it). Ruled after Task 17
++  and **ported in the final fix wave** to `test/canvas/view_palette_test.dart`, assertions
++  unchanged, 7 tests: `M-DT-11 (design mode)` and `M-DT-11 (service mode)` (two views side by
++  side), the three `ServiceView, <theme>, <paper>` crossings, `M-DT-10, ServiceView: no page …`
++  and `ServiceView, a theme switch with no camera move …` (PlanCanvas in design,
++  PlanServiceView in service). See "Final fix wave".
+ 
+ ## Mutations of Tasks 1-16
+ 
+ As the task reports record, each ran on a committed file and was reverted with
+ `git checkout --`, then `git diff --quiet` (exit 0, report). Where a report records the id and
+ the red test but not the edit, the edit is the plan's mutation of that id (the task's brief);
+ the row says "brief".
+ 
+ ### Task 1 (engine, `regeneration.dart` and `parametric_system.dart`)
+ 
+@@ -762,42 +763,48 @@ Found while executing (from the ledger and the reports):
+   `resetService` and `restoreService`, contradicting decision 4 and S3's own rules (restore
+   replaces, reset clears). The spec now says statuses, group statuses and focus are kept;
+   groups follow decision 4. Pinned by `SR-state-kept`, `SR-reset`, `SR-groups-replaced`.
+ - **A plan gap: 21 tests 2a deferred to 2b were missing from the 2b plan** (+1 unclear;
+   `audit-2a-deferrals.md`, 50 deferred, 28 placed). Assigned by ruling
+   (`carry-2a-deferrals.md`) and ported in Tasks 10 (fix round), 11, 13, 14, 15 and 16b, with
+   DC15 and NS5 moved to Task 13 and DC7 to Task 14 (ruling). Not ported by ruling: DS4's last
+   two lines (premise impossible under 2a P2). **F-1 of `chrome_change_test.dart`** (design-only,
+   placed by neither 2a nor 2b) stays unported, a 2a gap to raise with the human. F-2 and F-3,
+   also unplaced, were ported in Task 16b (16 tests) because F-3 is M-SV-R2's real killer.
+-- **This run's finding:** `host/view_palette_test.dart` (service-mode `ServiceView` palette
+-  tests) has no destination and no ruling (Ported tests, above). Open.
++- **Task 17's finding:** `host/view_palette_test.dart` (service-mode `ServiceView` palette
++  tests) had no destination and no ruling (Ported tests, above). Ported in the final fix wave
++  (7 tests, `test/canvas/view_palette_test.dart`).
+ - Spec silent on a lock's report: `lockBroken` and `_lockFromCopy` neither report nor bump
+   `revision` (Task 11 ruling, documented).
+ - Equivalent or masked mutants in the plan: M-UL-number masked by the label system (Task 7:
+   a bare-plan assertion added); M-14l unreachable in the oracle too (Task 14: re-worded to the
+   drag branch); M-PA-hall survived the plan's watch (Task 14: PA4/PA5 watch `Transform2` over a
+   no-pick baseline); M-SV-R2 left T2-f green (Task 16b: F-3 ported); M-PB9c unreachable (Task 4:
+   defensive code kept).
+ - Brief tests that could not go red as written: ST-locked-seat (Task 14: a tap on A5 added);
+   UL-place-number (Task 7); SM-execute-false's order (Task 11, the command built first).
+ - Task 10: today's `_turnableAt` ported so SW9's premise holds (a placed unit's rotation needs
+   `transform` and `geometry`).
+ - Task 16b: a lib change outside the brief, `PlanCanvas` resets `snappingAllowed` on a swap
+   (2a's parked final-review item), pinned by `CV-6b`.
+ - Carried to sub-project 3: R-16's room and tint lines (TF1, TF7, EX2, EX3, EX5, the export
+   premises' `R`; TF3's count returns to 6 when rooms land).
+ - Carried to sub-project 4: the host-API differences above; `userCamera` on the design canvas.
+ - Deferred minors the ledger marks "FINAL REVIEW SHOULD TRIAGE" (spec-named behaviour
+   unpinned): `restoreService`'s `_revision.value++` and `notifyListeners()` (and
+   `resetService`'s `notifyListeners`); a restored group member naming only a hidden or locked
+-  unit kept; `service_tool.dart`'s `roots.isEmpty ||` spend (M-ST-empty survives).
++  unit kept; `service_tool.dart`'s `roots.isEmpty ||` spend (M-ST-empty survives). The final
++  review ruled the first and the last fix-before-merge (I-3, I-4): both are pinned in the final
++  fix wave (`SR-restore-revision`, `SV-restore`, `ST-seat-drag`).
++- **Final review I-1:** S3's "the design is not edited in service" held for the controller's
++  members only; a `PlanCanvas` kept mounted in service still edited the design through its
++  tools. Fixed in the final fix wave (the design read-only while a copy exists).
+ 
+ ### Execution rulings that changed a test's premise or a ported assertion
+ 
+ One line each, with its reason, from the ledger's `Ruling:` lines:
+ - R-4, CS11 (engine): `drift(doc) isEmpty` → `[hP1]`, its adds made as a loaded file's (spec S1:
+   an InstanceNode under a live object is a generated instance).
+ - Task 2, E5G-refuse (new test): the positive control compares by `==`, not identity (a refused
+   move's rollback rebuilds an equal node).
+ - Task 3, K2B-ref (new test): the fixture is an `AddDefinitionCommand` (the engine refuses an
+   empty compound).
+@@ -837,10 +844,82 @@ One line each, with its reason, from the ledger's `Ruling:` lines:
+ - Task 16b, F-2 and F-3: ported (16 tests, assertions unchanged); F-1 left unported (2a gap).
+ - R-11a: VR1-VR3 not ported (sessions own the systems).
+ 
+ Other execution rulings (no ported assertion changed): E5-move added (Task 1); PB-def-top-poly
+ added (Task 4); `heldTypeOf` and `LockSet._unknownKit` share one helper (Task 6); UL-turn-row
+ added (Task 7); M-DS2 pinned by three tests, DS-layer added (Task 8); `UnitIndex.debugBuilds`
+ (Task 10); `ServiceSession` builds its cache last and the picker, tool and tool controller
+ after it (Tasks 11, 14); `lockBroken` neither reports nor bumps (Task 11); M-14l re-worded
+ (Task 14); `_requestOf` inside the `try` (Task 15); every Task 16 carry item to 16b; the
+ `snappingAllowed` reset on a swap (Task 16b).
++
++## Final fix wave
++
++The whole-branch Opus review (`final-review.md` in the ledger) found no Critical issue and four
++Important ones; the controller ruled them and five cheap Minor folds into one wave
++(`final-fix-findings.md`). Commits on top of `e7b7ceb6`: `318d2844` (I-1), `93e92a74` (I-3,
++I-4, M-2, M-3, T12, T14), `bb5b7c05` (I-2's port), `ed27e2ca` (the CHANGELOGs), and the commit
++that adds this section (this note and STATUS). Evidence below is **this run** (the fix wave's).
++
++What changed:
++- **I-1** (`plan_controller.dart`): the design document's engine permissions are
++  `DraftPermissions.readOnly` exactly while a service copy exists: set on entering service and
++  by `_open` while a copy exists (a load or a new plan in service), the profile's `draft` again
++  on leaving. The `permissions` setter writes the same rule, so a profile change in service
++  does not re-open the design; leaving applies it. Tests (new,
++  `test/canvas/canvas_service_mode_test.dart`): `SM-design-readonly` (a mouse drag on a line in
++  a `PlanCanvas` mounted in service leaves `save()` bytes, `dirty` and the design's undo alone,
++  before and after a profile change in service; back in design the same drag edits) and
++  `SM-design-readonly-load` (load, new plan, reset in service; the profile restored on leaving,
++  `readOnly` when that is the profile).
++- **I-2**: `view_palette_test.dart` ported (above); this section; STATUS (A14 settled by spec
++  decision 9; the resume pointer); the engine CHANGELOG's stray blank line.
++- **I-3**: `SR-restore-revision` (a restore moves `revision` once and notifies once; a reset
++  notifies once) and `SV-restore` (after `restoreService` the view's canvas shows the new
++  `activeDocument` and a tap at the restored table's place reaches `onUnitTap`; its premises: the
++  reset put the table back, and a tap there before the restore finds the floor).
++- **I-4**: `ST-seat-drag` (the table selected, a drag from the unselected seat A3 is spent: the
++  selection stays the table, nothing moves, no step, neither `onLayoutChanged` nor
++  `onUnitsMoved`).
++- **M-2** `UA-unitAt-seat`; **M-3** `UA-locked-label` (the kit missing, the placed table under
++  the lock set: `setUnitLabel` false, no step, `lockHint` false); **T12** `SS-relabel` gains
++  `statusOf(table) == bill` before the relabel; **T14** `RB16-hall` gains "the band covers a
++  seat"; **M-7** the CHANGELOGs (the plan library's 2b public additions, the kit's label
++  constants).
++
++Mutations (each on a committed file, reverted with `git checkout --`, `git diff --quiet` exit 0):
++
++| Id | Edit | Red test | Failing line (quoted) |
++|---|---|---|---|
++| M-SM-ro-enter | `setMode(service)` without its `design.document.commands.permissions = _designDraft` | `SM-design-readonly` | `Expected: same instance as <Instance of 'DraftPermissions'>`; with that identity check also removed, the drag: `Expected: ... coords":[7137.3,3161 ...` / `Actual: ... coords":[7257.3,3221 ...` |
++| M-SM-ro-setter | the setter writes `value.draft` | `SM-design-readonly` | as above, the identity check after the setter; without it, the same moved coords |
++| M-SM-ro-leave | `setMode(design)` without the restore | both SM tests | `Expected: same instance as <Instance of 'DraftPermissions'>` |
++| M-SM-ro-open | `_open` writes `_permissions.draft` | `SM-design-readonly-load` | `Expected: same instance as <Instance of 'DraftPermissions'>` |
++| M-SR-restore-rev | `restoreService` without `_revision.value++` | `SR-restore-revision` | line 182 `expect(c.revision.value - r, 1);`: `Expected: <1>` / `Actual: <0>` |
++| M-SR-restore-notify | `restoreService` without `notifyListeners()` | `SR-restore-revision`, `SV-restore` | line 183 `expect(notified, 1);` (`Actual: <0>`); `plan_service_view_test.dart` line 311 `expect(identical(canvas.document, c.activeDocument), isTrue);` (`Actual: <false>`) |
++| M-SR-reset-notify | `resetService` without `notifyListeners()` | `SR-restore-revision` | line 187 `expect(notified, 1);`: `Actual: <0>` |
++| M-ST-empty | `if (roots.isEmpty \|\|` dropped in `_startDrag` | `ST-seat-drag` | line 266 `expect(r.keys, {r.key(t)}, …)`: `Expected: Set:[SelectionKey:SelectionKey( 18)]` / `Actual: Set:[SelectionKey:SelectionKey( 22)]` |
++| M-UA-at-seat | the controller's `unitAt` picker built `placedOnly: true` | `UA-unitAt-seat` | line 181 `expect(c.unitAt(at('A3')), 'A3');`: `Actual: <null>` |
++| M-UA-lock-label | `setUnitsLabel` without `\|\| _session.locks.covers(...)` | `UA-locked-label` | line 164 `expect(c.lockHint.value, isFalse, …)`: `Actual: <true>` |
++| T8 (`old.selectUnitsOnly != value.selectUnitsOnly \|\|` dropped) | the setter's stale test | `units_only_select_test.dart` R-1's body drag and R-1's rotation-grip turn | line 346 and line 399 `expect(encoded(c), before);` (`Which: is different.`); no pin needed |
++| M-VP-paper | `PlanServiceView` hands `paper: PaperPalette.light` | M-DT-11 (service), the three crossings, M-DT-10, the theme switch (6) | `Blueprint view: selection 0x1e55a4, want 0x7fb2ff` |
++| M-VP-chrome | `PlanServiceView` hands `chrome: ChromePalette.light` | the two dark crossings, the theme switch (3) | `Expected: '0x8a8a8a'` (the sheet edge) |
++| M-VP-surface | `PlanServiceView`'s `_surfaceArgb = 0xFFFFFFFF` | M-DT-10 | `Expected: <4294967295>` / `Actual: <4278190080>` |
++| M-VP-design-paper | `PlanCanvas` hands `paper: PaperPalette.light` | M-DT-11 (design) | `Blueprint view: selection 0x1e55a4, want 0x7fb2ff` |
++
++Premise checks (test-only edits, reverted): `SS-relabel` without its `setUnitStatus` goes red at
++the new premise (`Actual: <null>`); `RB16-hall` with the band shrunk to its press point goes red
++at the new premise (`Expected: non-empty` / `Actual: []`).
++
++Gates (this run, on the fix wave's code):
++- `jet_cad_2d_plan`: `flutter test --enable-vmservice` exit 0, `01:57 +1512: All tests passed!`
++  (1498 + 14 new); `flutter analyze` `No issues found! (ran in 4.6s)`; format
++  `Formatted 286 files (0 changed) in 0.81 seconds.`, exit 0.
++- `jet_cad_2d_kit` (CHANGELOG only): `flutter test` `00:03 +340: All tests passed!`;
++  `flutter analyze` `No issues found! (ran in 3.5s)`; format
++  `Formatted 74 files (0 changed) in 0.09 seconds.`, exit 0;
++  `dart run tool/ci/check_kit_deps.dart`:
++  `kit dependencies: 1 package(s) checked, none names the plan library or another kit`, exit 0.
++- `jet_cad_2d` (CHANGELOG only): `dart analyze` `No issues found!`; format
++  `Formatted 187 files (0 changed) in 0.43 seconds.`, exit 0.
++- `dart pub publish --dry-run`, exit 0 and `Package has 0 warnings.` each: `jet_cad_2d`,
++  `jet_cad_2d_kit`, `jet_cad_2d_plan` (`CHANGELOG.md (4 KB)`).
+diff --git a/packages/jet_cad_2d/CHANGELOG.md b/packages/jet_cad_2d/CHANGELOG.md
+index 484d1a70..b982c717 100644
+--- a/packages/jet_cad_2d/CHANGELOG.md
++++ b/packages/jet_cad_2d/CHANGELOG.md
+@@ -19,21 +19,20 @@
+ - `ParametricSystem(document, catalog, isFrozen: …)` leaves a frozen
+   object out of every survey, view, regeneration, `drift()` and
+   `diagnostics()`, as a plain group, and calls none of its type's hooks
+   for it. `ParametricSystem.probe(handle)` runs one live object's hooks in
+   isolation, changing nothing, and returns the first error, or null.
+ - `NonLiveWriteError`, a `StateError` with the same message, is what an
+   edit now throws when it writes a registered parametric type's component
+   on a handle that is not a live root-level group (a frozen object
+   included). It names the `handle` and the `typeId`. A caller catching
+   `StateError` is unaffected.
+-
+ - `ParametricType.instances(view, self)` (default: none) lets a type
+   generate symbol instances beside its entities. Each
+   `GeneratedInstance(definition, transform, attributes: […])` becomes an
+   `InstanceNode` child of the object's group, on the object's layer, and
+   each `GeneratedAttrib(tag, text, payload)` an ATTRIB the instance owns,
+   on layer 0, BYBLOCK. The planner matches instances by position and
+   ATTRIBs by tag, so a regeneration keeps a seat's handle and everything
+   on it, and an unchanged output plans nothing. An output naming no live
+   definition throws `GeneratedDefinitionError` while planning: the edit is
+   refused, `probe` returns it and `drift()` throws it. Every
+diff --git a/packages/jet_cad_2d_kit/CHANGELOG.md b/packages/jet_cad_2d_kit/CHANGELOG.md
+index 537b44a4..bfb7134b 100644
+--- a/packages/jet_cad_2d_kit/CHANGELOG.md
++++ b/packages/jet_cad_2d_kit/CHANGELOG.md
+@@ -21,15 +21,16 @@
+   kit set; `isCodeId`. The contract depends on `jet_cad_2d_flutter`.
+ - `retired` on `jetcad.symbol` and `CatalogSymbol`, written only when true;
+   `conformance` takes `typeIds`, `toolIds` and `propertyIds`; rule 11
+   refuses a unit outline by its width, 2·area/perimeter, not by its area.
+ - `PlanSwatch`, the plan's eight-colour palette, and `planSwatchNamed`:
+   kits name a swatch without depending on the plan library.
+ - Sub-project 2b: `PlanServices.symbolDefinition` (`SymbolDefinitionRef`)
+   and `symbolsState`; `SymbolsState`, moved from the plan library; a unit's
+   label (`kUnitLabelTag`, `unitLabelHeight`, `unitLabelStamp`,
+   `unitLabelPayload`, `unitLabelAttrib`, which builds a generated unit's
+-  label as an E5 `GeneratedAttrib`); `PlanGate.relabel`; the `unit:` word
++  label as an E5 `GeneratedAttrib`, and the label's constants
++  `kUnitLabelMaxHeight`, `kUnitLabelTopShare` and `kUnitLabelTextAttrs`); `PlanGate.relabel`; the `unit:` word
+   namespace and `validateHostWords`; `KitProblemCode.unitKindWord`, which
+   conformance reports for a unit kind the contract does not name without
+   an English word. `UnitLabelling.assigned`: the label comes from a kit's
+   type, the property panel or the host.
+diff --git a/packages/jet_cad_2d_plan/CHANGELOG.md b/packages/jet_cad_2d_plan/CHANGELOG.md
+index 8f2f3ab1..b12bf893 100644
+--- a/packages/jet_cad_2d_plan/CHANGELOG.md
++++ b/packages/jet_cad_2d_plan/CHANGELOG.md
+@@ -43,10 +43,32 @@ The service mode (sub-project 2b).
+   `onLayoutChanged`), unit overlays (`PlanUnitOverlay`,
+   `PlanOverlayLayout`); `PlanEditor` shows it in service and keeps the
+   plan in place across a switch.
+ - `PlanPermissions`: `relabel`, `selectUnitsOnly`, `serviceMove`,
+   `serviceMerge`, the `unitsOnly` profile. `PlanTheme`: the service and
+   colour fields. Words for units and the service mode in English, German
+   and Turkish; a host's own words (`PlanController(words:)`).
+ - In design, a generated unit stands for its object: a click on a seat
+   selects its row. A window band over a row of seats alone selects
+   nothing (a known limit).
++- Unit types: `PlanUnit`, `PlanUnitDetail`, the `PlanUnitChange` events
++  (`PlanUnitAdded`, `PlanUnitChanged`, `PlanUnitRemoved`,
++  `PlanUnitsReplaced`), `UnitLabelProblem`, and the label warnings
++  (`UnitLabelWarning`, `UnitProblem`, `Unlabelled`, `DuplicateLabel`,
++  `BadLabel`); `UnitStatus`, `UnitGroup` and `ServiceRestore`;
++  `PlanServiceAction`, `PlanLongPress`, `PlanFloorDrag`, `PlanOverlaySize`
++  and `PlanUnitOverlayBuilder`.
++- The camera for a host: `cameraValue` (a `PlanCamera` per pan, zoom and
++  fit), `worldToGlobal` and `globalToWorld`.
++- The unit colours in output: `export` and `print` take
++  `unitColourOpacity` (default `kUnitColourOpacity`, 0.35), and
++  `PlanExportRequest.unitColourOpacity` carries it to every exporter.
++- The unit section in `PlanPropertyPanel` (the label, its duplicate
++  warning, the capacity, a quarter turn either way);
++  `PlanEditor(unitInspectorBuilder:)` builds a host's inspector under the
++  panel for one selected placed unit.
++- `isUnitSymbol`, the gallery filter for the `unitsOnly` profile.
++- `PlanController.symbolsState` is now typed `SymbolsState`, moved to
++  `jet_cad_2d_kit` and re-exported here; 2a's `PlanSymbolsState` is removed.
++- While the plan is in service the design document is read-only: a
++  `PlanCanvas` or a kit tool still mounted cannot edit it. Leaving service
++  gives it the permissions' engine permissions again.
+diff --git a/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart b/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
+index 876a4784..0053ae95 100644
+--- a/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
++++ b/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
+@@ -1477,22 +1477,23 @@ class PlanController extends ChangeNotifier {
+ 
+   // ---------------------------------------------------------------------
+   // Opening and replacing documents.
+ 
+   void _open(DraftDocument document, FlutterTextMeasurer measurer,
+       List<Diagnostic> loadDiagnostics) {
+     _pendingDefinitions.clear();
+     _damaged.value = false;
+     _disabledTools.clear();
+     // The engine's permissions follow the profile, before any system is
+-    // installed over the document (spec P2).
+-    document.commands.permissions = _permissions.draft;
++    // installed over the document (spec P2); read-only while a service
++    // copy exists (a load in service, spec 2b S3).
++    document.commands.permissions = _designDraft;
+     for (final t in genericTools) {
+       _toolNeeds[t.id] = t.needs;
+     }
+     for (final kit in kits.kits) {
+       for (final planTool in kit.tools) {
+         _toolNeeds[planTool.id] = planTool.needs;
+       }
+     }
+     final session = DocumentSession(
+         document: document,
+@@ -1656,38 +1657,49 @@ class PlanController extends ChangeNotifier {
+     _refreshSelected();
+     final labels = _selectedUnits.value;
+     if (next == PlanMode.service) {
+       final design = _session;
+       // `_onTools` moves `activeTool` back to plan.select.
+       design.tools.activate(design.toolById(planSelectToolId)!);
+       final copy = _buildService();
+       _attachService(copy);
+       _service = copy;
+       _groupsAtEnter = _groups.value;
++      // The design is not edited in service (S3): its own tools, a mounted
++      // PlanCanvas's included, write through its dispatcher.
++      design.document.commands.permissions = _designDraft;
+     } else {
+       final old = _service!;
+       _service = null;
+       _dropService(old);
++      document.commands.permissions = _designDraft;
+     }
+     _reframe(_mode.value, next);
+     // The new mode's canvas, where an editor last showed it.
+     final shownIn = _canvasIn[next];
+     if (_canvasRect.value != null && shownIn != null) {
+       _canvasRect.value = shownIn;
+     }
+     _mode.value = next;
+     _select(labels);
+     _refreshFlags();
+     _revision.value++;
+     notifyListeners();
+   }
+ 
++  /// The design document's engine permissions: [DraftPermissions.readOnly]
++  /// exactly while a service copy exists (S3: the design is not edited in
++  /// service, whatever widget its tools run in), else the profile's
++  /// [PlanPermissions.draft].
++  DraftPermissions get _designDraft =>
++      _service != null ? DraftPermissions.readOnly : _permissions.draft;
++
+   /// A copy of the design, its systems installed, nothing listening yet.
+   ServiceSession _buildService() {
+     final design = _session;
+     final measurer = FlutterTextMeasurer();
+     final DraftDocument copy;
+     try {
+       copy = serviceCopyOf(design.document,
+           register: _registerComponents, measurer: measurer);
+     } catch (_) {
+       measurer.clear();
+@@ -2001,29 +2013,30 @@ class PlanController extends ChangeNotifier {
+   @internal
+   Set<Capability>? needsOf(String id) => _toolNeeds[id];
+ 
+   /// plan.symbol's needs (Task 14), which is built outside the generic set.
+   @internal
+   void registerToolNeeds(String id, Set<Capability> needs) =>
+       _toolNeeds[id] = needs;
+ 
+   /// The editor's permissions. Settable at runtime: the widgets rebuild
+   /// (this notifies), the document's engine permissions follow
+-  /// ([PlanPermissions.draft]), a drag whose gate closes is cancelled now,
++  /// ([PlanPermissions.draft]; in service the design stays read-only and
++  /// takes them on leaving), a drag whose gate closes is cancelled now,
+   /// and an active tool no longer allowed is cancelled and plan.select
+   /// armed.
+   PlanPermissions get permissions => _permissions;
+   set permissions(PlanPermissions value) {
+     if (value == _permissions) return;
+     final old = _permissions;
+     _permissions = value;
+-    document.commands.permissions = value.draft;
++    document.commands.permissions = _designDraft;
+     final select = _session.select;
+     final stale = old.selectUnitsOnly != value.selectUnitsOnly ||
+         switch (select.dragKind) {
+           DragKind.move => old.move && !value.move,
+           DragKind.rotate => old.rotate && !value.rotate,
+           DragKind.reshape => old.reshape && !value.reshape,
+           DragKind.band || null => false,
+         };
+     if (stale) select.cancel(toolController.context);
+     // Today's S-9 g (planner_shell.dart:1085-1095): a change to units only
+diff --git a/packages/jet_cad_2d_plan/test/canvas/canvas_service_mode_test.dart b/packages/jet_cad_2d_plan/test/canvas/canvas_service_mode_test.dart
+new file mode 100644
+index 00000000..516a6316
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/canvas/canvas_service_mode_test.dart
+@@ -0,0 +1,99 @@
++// Spec 2b S3 ("the design is not edited in service ... dirty never moves in
++// service"), final review I-1: the design's tools write through their own
++// dispatcher, so a host that keeps a PlanCanvas mounted while the plan is
++// in service must find the design read-only there. The design document's
++// engine permissions are DraftPermissions.readOnly exactly while a service
++// copy exists, and the profile's again on leaving it.
++//
++// The fixture is canvas_draw_test's: a line on a 1:20 page under a zoomed,
++// rotated, non-reflecting camera, dragged by the mouse on the canvas.
++import 'package:flutter/gestures.dart' show PointerDeviceKind;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++
++import '../support/canvas_fixture.dart';
++
++void main() {
++  testWidgets(
++      'SM-design-readonly: a PlanCanvas mounted in service does not edit the '
++      'design (a drag leaves the bytes and dirty alone, a profile change in '
++      'service does not re-open it); back in design the same drag edits '
++      '(M-SM-ro-enter, M-SM-ro-setter)', (tester) async {
++    final f = drawController();
++    final c = f.c;
++    await pumpDraw(tester, c);
++    // The line's middle, and a drop 120 mm right and 60 mm up of it.
++    const mid = (x: 7219.1, y: 3175.9);
++    Future<void> drag() async {
++      c.selection.replace([SelectionKey.root(f.line)]);
++      await tester.pump();
++      final at = globalOf(tester, c, mid.x, mid.y);
++      final to = globalOf(tester, c, mid.x + 120, mid.y + 60);
++      final gesture =
++          await tester.startGesture(at, kind: PointerDeviceKind.mouse);
++      await tester.pump();
++      for (var i = 1; i <= 4; i++) {
++        await gesture.moveTo(Offset.lerp(at, to, i / 4)!);
++        await tester.pump();
++      }
++      await gesture.up();
++      await tester.pump();
++    }
++
++    final designed = bytes(c);
++    c.setMode(PlanMode.service);
++    await tester.pump();
++    expect(find.byType(PlanCanvas), findsOneWidget,
++        reason: 'premise: the canvas stays mounted in service');
++    expect(c.document.commands.permissions, same(DraftPermissions.readOnly));
++
++    await drag();
++    expect(tester.takeException(), isNull);
++    expect(bytes(c), designed, reason: 'the drag did not move the line');
++    expect(c.dirty.value, isFalse);
++    expect(c.document.commands.canUndo, isFalse);
++
++    // The profile changes in service: still read-only until leaving.
++    c.permissions = PlanPermissions.full.copyWith(rotate: false);
++    expect(c.permissions.draft, same(DraftPermissions.all),
++        reason: 'premise: the new profile edits');
++    expect(c.document.commands.permissions, same(DraftPermissions.readOnly));
++    await drag();
++    expect(bytes(c), designed, reason: 'the setter did not re-open it');
++    expect(c.dirty.value, isFalse);
++
++    c.setMode(PlanMode.design);
++    await tester.pump();
++    expect(c.document.commands.permissions, same(DraftPermissions.all));
++    await drag();
++    expect(bytes(c), isNot(designed),
++        reason: 'positive control: the same drag edits in design');
++    expect(c.dirty.value, isTrue);
++  });
++
++  testWidgets(
++      'SM-design-readonly-load: a load and a new plan in service keep the '
++      'new design read-only while the copy exists, and give it the profile '
++      'on leaving', (tester) async {
++    final c = drawController().c;
++    c.setMode(PlanMode.service);
++    c.load(bytes(c));
++    expect(c.mode.value, PlanMode.service);
++    expect(c.document.commands.permissions, same(DraftPermissions.readOnly));
++    c.newPlan();
++    expect(c.document.commands.permissions, same(DraftPermissions.readOnly));
++    c.resetService();
++    expect(c.document.commands.permissions, same(DraftPermissions.readOnly));
++    c.setMode(PlanMode.design);
++    expect(c.document.commands.permissions, same(DraftPermissions.all));
++    c.permissions = PlanPermissions.readOnly;
++    expect(c.document.commands.permissions, same(DraftPermissions.readOnly));
++    c.setMode(PlanMode.service);
++    c.setMode(PlanMode.design);
++    expect(c.document.commands.permissions, same(DraftPermissions.readOnly),
++        reason: "leaving restores the profile's, not DraftPermissions.all");
++    await tester.pump();
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/canvas/view_palette_test.dart b/packages/jet_cad_2d_plan/test/canvas/view_palette_test.dart
+new file mode 100644
+index 00000000..20650d7a
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/canvas/view_palette_test.dart
+@@ -0,0 +1,205 @@
++// Ported from jet_cad_floor_plan/test/host/view_palette_test.dart; assertions
++// unchanged (2b final fix wave, ruled after Task 17). Today's FloorPlanView
++// is the mode's view here: PlanCanvas in design, PlanServiceView in service
++// (FloorPlanMode.selection is PlanMode.service); PlannerView is
++// PlanCanvasView; the controller's cameraController is its camera.
++// Mutations: M-VP-paper (PlanServiceView's paper set fixed to the light
++// one), M-VP-chrome (its chrome fixed to the light one), M-VP-surface (its
++// resolver's surface fixed to white), M-VP-design-paper (PlanCanvas's paper
++// set fixed to the light one).
++//
++// Dark theme spec D1, D4, D5, F-10 (plan Task 4): the host's views. Each
++// view derives its own palettes from its own page and the theme (invariant
++// 4), so two views in one frame show their own papers' sets (M-DT-11); the
++// selection mode's `ServiceView` follows the theme and the paper as the
++// shell does, a document without a page included (M-DT-10).
++//
++// Read back in pixels under the floor planner's seed (support/
++// canvas_fixture.dart). `restaurant_demo` mounts one view at a time
++// (F-10), so the two-view harness is this file's own.
++//
++// Dark canvas decision note K1 (2026-10-05): a dark theme shows a light
++// page dark, so under it every view takes the dark set. The two-view test
++// therefore runs under the light theme, where White and Blueprint still
++// take opposite sets.
++import 'package:flutter/material.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:jet_cad_2d_plan/src/canvas/plan_canvas_view.dart';
++
++import '../support/canvas_fixture.dart';
++
++/// A controller over the fixture's document on [paper] (null: no page),
++/// and the selected line's handle (a decode keeps handles).
++({PlanController c, Handle selected, Handle ink}) controllerOn(int? paper) =>
++    paletteController(paper: paper);
++
++/// The view of [c]'s mode: today's FloorPlanView.
++Widget viewOf(PlanController c) => c.mode.value == PlanMode.service
++    ? PlanServiceView(controller: c)
++    : PlanCanvas(controller: c);
++
++/// The host's views, side by side in one frame.
++Widget views(List<PlanController> cs) => Scaffold(
++        body: Row(children: [
++      for (final c in cs) Expanded(child: viewOf(c)),
++    ]));
++
++/// Pumps [cs] side by side in [mode] (each [width] wide), puts each in
++/// [viewMode], sets the fixture's camera and selects each one's line.
++Future<void> pumpViews(WidgetTester tester,
++    List<({PlanController c, Handle selected, Handle ink})> cs, ThemeMode mode,
++    {PlanMode viewMode = PlanMode.design, double width = 1440}) async {
++  windowAt(tester, Size(width * cs.length, 900));
++  for (final v in cs) {
++    v.c.setMode(viewMode);
++  }
++  await pumpThemed(tester, views([for (final v in cs) v.c]), mode);
++  await tester.pump();
++  await tester.pump();
++  for (final v in cs) {
++    v.c.camera.value = paletteCamera;
++    v.c.activeSelection.replace([SelectionKey.root(v.selected)]);
++  }
++  await tester.pump();
++}
++
++DraftCanvasState canvasOf(WidgetTester tester, int view) =>
++    tester.state<DraftCanvasState>(find.byType(DraftCanvas).at(view));
++
++void main() {
++  for (final viewMode in PlanMode.values) {
++    testWidgets(
++        'M-DT-11 (${viewMode.name} mode): two views side by side in one frame, '
++        'White and Blueprint, each with a line selected, show the light and '
++        'the dark selection colour and their own ink (light theme)',
++        (tester) async {
++      final onWhite = controllerOn(white);
++      final onBlueprint = controllerOn(blueprint);
++      await pumpViews(tester, [onWhite, onBlueprint], ThemeMode.light,
++          viewMode: viewMode);
++      expect(find.byType(PlanCanvasView), findsNWidgets(2));
++      expect(find.byType(PlanServiceView),
++          findsNWidgets(viewMode == PlanMode.service ? 2 : 0));
++
++      final shot = await shoot(tester);
++      final left = look(tester, shot, view: 0);
++      final right = look(tester, shot, view: 1);
++      expectSelection(left, PaperPalette.light, 'White view');
++      expectSelection(right, PaperPalette.dark, 'Blueprint view');
++      expectDarkInk(left, 'White view');
++      expectLightInk(right, 'Blueprint view');
++      // One theme, so one chrome for both.
++      expectEdge(left, ChromePalette.light, 'White view');
++      expectEdge(right, ChromePalette.light, 'Blueprint view');
++      expectPainters(tester, ChromePalette.light, PaperPalette.light, 'White',
++          view: 0, withRulers: viewMode == PlanMode.design);
++      expectPainters(
++          tester, ChromePalette.light, PaperPalette.dark, 'Blueprint',
++          view: 1, withRulers: viewMode == PlanMode.design);
++    });
++  }
++
++  // ServiceView's own crossings: its chrome is the sheet edge alone (no
++  // rulers in the selection mode).
++  for (final (mode, paper, name) in [
++    (ThemeMode.light, blueprint, 'light theme, Blueprint paper'),
++    (ThemeMode.dark, white, 'dark theme, White paper'),
++    (ThemeMode.dark, blueprint, 'dark theme, Blueprint paper'),
++  ]) {
++    testWidgets(
++        'ServiceView, $name: the selection takes the paper\'s set and the '
++        'sheet edge the theme\'s chrome', (tester) async {
++      final v = controllerOn(paper);
++      await pumpViews(tester, [v], mode, viewMode: PlanMode.service);
++      expect(find.byType(PlanServiceView), findsOneWidget);
++      final chrome =
++          mode == ThemeMode.dark ? ChromePalette.dark : ChromePalette.light;
++      // K1: a dark theme shows White dark.
++      final darkPaper = paper == blueprint || mode == ThemeMode.dark;
++      final set = darkPaper ? PaperPalette.dark : PaperPalette.light;
++      final seen = look(tester, await shoot(tester));
++      expect(seen.rulerBar, isNull, reason: 'no rulers in the selection mode');
++      expectSelection(seen, set, name);
++      expectEdge(seen, chrome, name);
++      darkPaper ? expectLightInk(seen, name) : expectDarkInk(seen, name);
++      final view = tester.widget<PlanCanvasView>(find.byType(PlanCanvasView));
++      expect(view.chrome, chrome);
++      expect(view.paper, set);
++      expectPainters(tester, chrome, set, name, withRulers: false);
++    });
++  }
++
++  testWidgets(
++      'M-DT-10, ServiceView: no page, light then dark theme: the ink and the '
++      'selection follow the surface, re-derived on the switch, and back',
++      (tester) async {
++    final v = controllerOn(null);
++    expect(
++        v.c.activeDocument.components
++            .get<PageComponent>(v.c.activeDocument.rootHandle),
++        isNull);
++    await pumpViews(tester, [v], ThemeMode.light, viewMode: PlanMode.service);
++    var seen = look(tester, await shoot(tester));
++    expectDarkInk(seen, 'no page, light');
++    expectSelection(seen, PaperPalette.light, 'no page, light');
++
++    await pumpThemed(tester, views([v.c]), ThemeMode.dark);
++    await tester.pump();
++    final ink = v.c.activeDocument.entities.slotOf(v.ink)!;
++    expect(
++        canvasOf(tester, 0)
++            .painter
++            .resolver
++            .styleFor(ink, StyleContext.documentRoot)
++            .argb,
++        0xFFFFFFFF);
++    seen = look(tester, await shoot(tester));
++    expectLightInk(seen, 'no page, after the switch to dark');
++    expectSelection(seen, PaperPalette.dark, 'no page, after the switch');
++
++    await pumpThemed(tester, views([v.c]), ThemeMode.light);
++    await tester.pump();
++    seen = look(tester, await shoot(tester));
++    expectDarkInk(seen, 'no page, back to light');
++    expectSelection(seen, PaperPalette.light, 'no page, back to light');
++  });
++
++  testWidgets(
++      'ServiceView, a theme switch with no camera move repaints the sheet '
++      'edge in the dark chrome and, White shown dark (K1), the selection; '
++      'back in the light theme, White to Blueprint repaints the selection',
++      (tester) async {
++    final v = controllerOn(white);
++    await pumpViews(tester, [v], ThemeMode.light, viewMode: PlanMode.service);
++    final camera = v.c.camera.value;
++    var seen = look(tester, await shoot(tester));
++    expectEdge(seen, ChromePalette.light, 'light');
++
++    await pumpThemed(tester, views([v.c]), ThemeMode.dark);
++    await tester.pump();
++    expect(identical(v.c.camera.value, camera), isTrue);
++    seen = look(tester, await shoot(tester));
++    expectEdge(seen, ChromePalette.dark, 'after the switch to dark');
++    expectSelection(seen, PaperPalette.dark, 'White shown dark (K1)');
++    expectLightInk(seen, 'White shown dark (K1)');
++
++    await pumpThemed(tester, views([v.c]), ThemeMode.light);
++    await tester.pump();
++    seen = look(tester, await shoot(tester));
++    expectSelection(seen, PaperPalette.light, 'back to light');
++
++    final doc = v.c.activeDocument;
++    doc.commands.execute(SetComponentCommand<PageComponent>(
++        doc.rootHandle,
++        doc.components
++            .get<PageComponent>(doc.rootHandle)!
++            .copyWith(background: blueprint)));
++    await tester.pump();
++    seen = look(tester, await shoot(tester));
++    expectSelection(seen, PaperPalette.dark, 'Blueprint');
++    expectLightInk(seen, 'Blueprint');
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/controller/service_record_controller_test.dart b/packages/jet_cad_2d_plan/test/controller/service_record_controller_test.dart
+index 3ff13978..88c1b5d4 100644
+--- a/packages/jet_cad_2d_plan/test/controller/service_record_controller_test.dart
++++ b/packages/jet_cad_2d_plan/test/controller/service_record_controller_test.dart
+@@ -156,20 +156,46 @@ void main() {
+     expect(moved(), 1);
+     c.resetService();
+     expect(moved(), 1);
+     c.load(servicePlanText());
+     expect(moved(), 1);
+     c.select({'1'});
+     await tester.pump();
+     expect(moved(), 0, reason: 'a selection is not a change of the plan');
+   });
+ 
++  testWidgets(
++      'SR-restore-revision a restore moves revision once and notifies the '
++      'listeners once; a reset notifies them once (spec S3; final review '
++      'I-3, M-SR-restore-rev, M-SR-restore-notify, M-SR-reset-notify)',
++      (tester) async {
++    final c = controllerFor(kits: [testKit()], json: servicePlanText());
++    c.setMode(PlanMode.service);
++    move(c, '1', 750.25, -250.5);
++    final json = c.serviceJson()!;
++    await tester.pump();
++    var notified = 0;
++    void count() => notified++;
++    c.addListener(count);
++    final r = c.revision.value;
++
++    c.restoreService(json);
++    expect(c.revision.value - r, 1);
++    expect(notified, 1);
++
++    notified = 0;
++    c.resetService();
++    expect(notified, 1);
++    c.removeListener(count);
++    await tester.pump();
++  });
++
+   testWidgets(
+       'SR-C16 the service record: null in design; a restore puts the moves '
+       'back as the copy\'s floor, re-selects by label, and no Undo removes '
+       'it (spec 14d S1-S3, M-14d-m, M-14d-t)', (tester) async {
+     final c = controllerFor(kits: [testKit()], json: servicePlanText());
+     expect(c.serviceJson(), isNull);
+     c.setMode(PlanMode.service);
+     // Ruling R13-a: today's ['tables'].
+     expect((jsonDecode(c.serviceJson()!) as Map)['moves'], isEmpty);
+     move(c, '1', 750.25, -250.5);
+diff --git a/packages/jet_cad_2d_plan/test/controller/unit_groups_controller_test.dart b/packages/jet_cad_2d_plan/test/controller/unit_groups_controller_test.dart
+index 5641b867..8b18dd03 100644
+--- a/packages/jet_cad_2d_plan/test/controller/unit_groups_controller_test.dart
++++ b/packages/jet_cad_2d_plan/test/controller/unit_groups_controller_test.dart
+@@ -559,20 +559,22 @@ void main() {
+     final c = controllerFor(kits: [unitKit()], json: h.json);
+     final d = c.document;
+     final table = labelOf(d, h.table)!;
+     final a1 = labelOf(d, h.seats[0][0])!;
+     c.setUnitGroups({
+       'g': UnitGroup(members: {table, a1})
+     });
+     c.setUnitStatus({table: bill});
+     c.setUnitFocus({table});
+     expect(c.selectableMembers('g'), {table, a1}, reason: 'premise');
++    expect(c.statusOf(c.unitIndex[h.table]!), bill,
++        reason: 'premise: the status holds before the relabel');
+ 
+     expect(c.setUnitLabel(table, '99'), isTrue);
+     expect(labelOf(d, h.table), '99', reason: 'premise: relabelled');
+     expect(c.unitGroups.value['g']!.members, {table, a1});
+     // M-SS2: the lookup's cache ignores the unit index.
+     expect(c.selectableMembers('g'), {a1});
+     expect(c.unitStatuses.value.keys, [table]);
+     expect(c.statusOf(c.unitIndex[h.table]!), isNull);
+     expect(c.unitFocus.value, {table});
+     await tester.pump();
+diff --git a/packages/jet_cad_2d_plan/test/invariants/band_allocation_test.dart b/packages/jet_cad_2d_plan/test/invariants/band_allocation_test.dart
+index 0e04809d..a298c2cd 100644
+--- a/packages/jet_cad_2d_plan/test/invariants/band_allocation_test.dart
++++ b/packages/jet_cad_2d_plan/test/invariants/band_allocation_test.dart
+@@ -227,20 +227,31 @@ void main() {
+           meta: false,
+           alt: false,
+           pickRadiusWorld: 6 / camera.value.scale,
+           kind: PointerDeviceKind.mouse,
+         );
+     const press = ui.Offset(900, 120);
+     expect(s.picker.pick(ev(press).world), isNull,
+         reason: 'premise: the press is on the floor');
+     expect(s.picker.candidates.where((c) => c.unit.generated), hasLength(500),
+         reason: 'premise: the hall');
++    // Premise (Review Focus 5): the band covers seats, so a per-frame pick
++    // would have units to find.
++    final band = ui.Rect.fromPoints(press, const ui.Offset(1100, 300));
++    final covered = [
++      for (final d in hall.unitDetails)
++        if (d.unit.generatedBy != null && d.center != null)
++          if (camera.value.worldToScreen(Vector2(d.center!.dx, d.center!.dy))
++              case final p when band.contains(ui.Offset(p.x, p.y)))
++            d.unit.label,
++    ];
++    expect(covered, isNotEmpty, reason: 'premise: the band covers a seat');
+     s.tool.onPointerDown(ev(press), ctx);
+     s.tool.onPointerMove(ev(const ui.Offset(1100, 300)), ctx);
+     expect(s.tool.phase, ToolPhase.dragging, reason: 'premise: a live band');
+     // The controller refreshes its selected labels and group on every
+     // selection change (O(units)); a band changes it at its up only.
+     var notified = 0;
+     void count() => notified++;
+     s.selection.addListener(count);
+     addTearDown(() => s.selection.removeListener(count));
+     await bandFrames(m, s.tool, ctx, camera, press, ev);
+diff --git a/packages/jet_cad_2d_plan/test/service/service_tool_units_test.dart b/packages/jet_cad_2d_plan/test/service/service_tool_units_test.dart
+index e28b820f..717d1f21 100644
+--- a/packages/jet_cad_2d_plan/test/service/service_tool_units_test.dart
++++ b/packages/jet_cad_2d_plan/test/service/service_tool_units_test.dart
+@@ -240,11 +240,34 @@ void main() {
+     r.drag(r.inside(t), Vector2(600, -300));
+     expect(parts(r.node(t).transform), table0);
+     expect(r.layouts, 0);
+     expect(parts(r.c.camera.value.worldToScreenMatrix), isNot(camera0),
+         reason: 'the drag panned');
+ 
+     r.c.permissions = r.c.permissions.copyWith(serviceMove: true);
+     r.drag(r.inside(t), Vector2(600, -300));
+     expect(r.layouts, 1, reason: 'read again at the next press');
+   });
++
++  testWidgets(
++      'ST-seat-drag with the table selected, a drag from an unselected seat '
++      '(no group) is spent: the selection stays the table, nothing moves, no '
++      'step, neither callback fires (M-ST-empty)', (tester) async {
++    final f = serviceFixture();
++    final r = rig(f.json);
++    final t = f.table, a3 = f.seatsA[2];
++    expect(r.c.unitIndex[a3]!.generated, isTrue, reason: 'premise: a seat');
++    r.tap(r.inside(t));
++    expect(r.keys, {r.key(t)}, reason: 'premise: the table alone');
++    final table0 = parts(r.node(t).transform);
++    final seat0 = parts(r.node(a3).transform);
++    final depth = r.c.activeDocument.commands.undoDepth;
++
++    r.drag(r.inside(a3), Vector2(600, -300));
++    expect(r.keys, {r.key(t)}, reason: 'the seat did not replace it');
++    expect(parts(r.node(t).transform), table0);
++    expect(parts(r.node(a3).transform), seat0);
++    expect(r.c.activeDocument.commands.undoDepth, depth, reason: 'no step');
++    expect(r.layouts, 0);
++    expect(r.moved, isEmpty);
++  });
+ }
+diff --git a/packages/jet_cad_2d_plan/test/service/view/plan_service_view_test.dart b/packages/jet_cad_2d_plan/test/service/view/plan_service_view_test.dart
+index 5d54d669..8badc1e4 100644
+--- a/packages/jet_cad_2d_plan/test/service/view/plan_service_view_test.dart
++++ b/packages/jet_cad_2d_plan/test/service/view/plan_service_view_test.dart
+@@ -4,20 +4,21 @@
+ // overlays" (generated units get theirs); S3 (the copy's tool reports to
+ // the view). Over the embedding plan (tables turned, mirrored, scaled 40 m
+ // off the origin) and Task 5's two rows (one turned, one curved).
+ import 'package:flutter/gestures.dart' show PointerDeviceKind;
+ import 'package:flutter/material.dart';
+ import 'package:flutter/services.dart' show LogicalKeyboardKey;
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
+     show InteractionLayer;
++import 'package:jet_cad_2d_plan/src/canvas/plan_canvas_view.dart';
+ import 'package:jet_cad_2d_plan/src/controller/permissions.dart';
+ import 'package:jet_cad_2d_plan/src/controller/plan_controller.dart';
+ import 'package:jet_cad_2d_plan/src/export/export_dialog.dart'
+     show PlanExportDialog;
+ import 'package:jet_cad_2d_plan/src/export/registries.dart';
+ import 'package:jet_cad_2d_plan/src/service/service_session.dart' show PlanMode;
+ import 'package:jet_cad_2d_plan/src/service/view/plan_service_view.dart';
+ import 'package:jet_cad_2d_plan/src/service/view/unit_overlays.dart';
+ import 'package:jet_cad_2d_plan/src/theme/plan_theme.dart';
+ 
+@@ -265,11 +266,52 @@ void main() {
+     // M-SV-7: the canvas never sets the session's host.
+     expect(taps, [seat, table]);
+     c.resetService();
+     await tester.pump();
+     await tester.pump();
+     await tester.tapAt(globalOfWorld(tester, c, unitCentre(c, seat)),
+         kind: PointerDeviceKind.mouse);
+     await tester.pump(const Duration(milliseconds: 400));
+     expect(taps, [seat, table, seat]);
+   });
++
++  testWidgets(
++      'SV-restore after restoreService the view is on the new copy: its '
++      'canvas shows the new activeDocument, and a tap at the restored '
++      'table\'s place reaches onUnitTap (final review I-3, '
++      'M-SR-restore-notify)', (tester) async {
++    final c = rowsController();
++    final taps = <String>[];
++    await pumpService(
++        tester, c, PlanServiceView(controller: c, onUnitTap: taps.add));
++    c.fitToView();
++    await tester.pump();
++    await tester.pump();
++    final table =
++        c.unitDetails.firstWhere((d) => d.unit.generatedBy == null).unit.label!;
++    final designed = unitCentre(c, table);
++    // Down and left of the plan, onto the floor: under the rows' seats
++    // nothing is there.
++    move(c, table, -1500, -1500);
++    final restored = unitCentre(c, table);
++    final json = c.serviceJson()!;
++    c.resetService();
++    await tester.pump();
++    await tester.pump();
++    expect(unitCentre(c, table).x, closeTo(designed.x, 1e-6),
++        reason: 'premise: the reset put the table back');
++    await tester.tapAt(globalOfWorld(tester, c, restored),
++        kind: PointerDeviceKind.mouse);
++    await tester.pump(const Duration(milliseconds: 400));
++    expect(taps, isEmpty, reason: 'premise: the floor before the restore');
++
++    c.restoreService(json);
++    await tester.pump();
++    await tester.pump();
++    final canvas = tester.widget<PlanCanvasView>(find.byType(PlanCanvasView));
++    expect(identical(canvas.document, c.activeDocument), isTrue);
++    await tester.tapAt(globalOfWorld(tester, c, restored),
++        kind: PointerDeviceKind.mouse);
++    await tester.pump(const Duration(milliseconds: 400));
++    expect(taps, [table]);
++  });
+ }
+diff --git a/packages/jet_cad_2d_plan/test/units/unit_api_test.dart b/packages/jet_cad_2d_plan/test/units/unit_api_test.dart
+index d170226e..e4b9bc65 100644
+--- a/packages/jet_cad_2d_plan/test/units/unit_api_test.dart
++++ b/packages/jet_cad_2d_plan/test/units/unit_api_test.dart
+@@ -1,17 +1,17 @@
+ // 2b Task 9, spec S3 "The unit API" and S2 "Per-unit data": the units of
+ // the design, placed and generated, their details and data, the design
+ // writes and their refusals, select and fitToUnits in design, and
+ // unitChanges for a row edit. Over Task 5's service fixture (a turned,
+ // mirrored table off the origin; two seats-only rows, one turned, one
+ // curved) and Task 8's editor fixture (the units 1 and 2 placed).
+-import 'package:flutter/painting.dart' show Size;
++import 'package:flutter/painting.dart' show Offset, Size;
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+ import 'package:jet_cad_2d_plan/src/units/unit_index.dart';
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import '../support/harness.dart';
+ import '../support/service_fixture.dart' show serviceFixture;
+@@ -144,20 +144,53 @@ void main() {
+     final depth = c.document.commands.undoDepth;
+     // M-UA3: the lock-set check removed (execute refuses, the hint shows).
+     expect(c.setUnitData('A1', const {'id': 'x'}), isFalse);
+     expect(c.setUnitColour('A1', PlanSwatch.red), isFalse);
+     expect(c.lockHint.value, isFalse);
+     expect(c.document.commands.undoDepth, depth);
+     // The placed table is not under the frozen row: it takes data.
+     expect(c.setUnitData(tableLabel(c), const {'id': 't'}), isTrue);
+   });
+ 
++  test(
++      'UA-locked-label the kit missing, the placed table is held by the lock '
++      'set: setUnitLabel is false, no step, no lock hint (final review M-3, '
++      'M-UA-lock-label)', () {
++    final c = controllerFor(kits: const [], json: serviceFixture().json);
++    final table = c.unitIndex.units.singleWhere((u) => !u.generated);
++    expect(table.locked, isTrue, reason: 'premise: under the lock set');
++    final label = table.text!;
++    final depth = c.document.commands.undoDepth;
++    expect(c.setUnitLabel(label, '77'), isFalse);
++    expect(c.lockHint.value, isFalse, reason: 'a host call raises no hint');
++    expect(c.document.commands.undoDepth, depth);
++    expect(c.unitIndex.withLabel(label), hasLength(1));
++  });
++
++  test(
++      'UA-unitAt-seat unitAt finds a seat at its centre, in design and in '
++      'service (final review M-2, M-UA-at-seat)', () {
++    final c = design();
++    Offset at(String label) {
++      final centre = detailOf(c, label).center!;
++      final p = c.camera.value.worldToScreen(Vector2(centre.dx, centre.dy));
++      return Offset(p.x, p.y);
++    }
++
++    expect(c.unitIndex.withLabel('A3').single.generated, isTrue,
++        reason: 'premise: a seat');
++    expect(c.unitAt(at('A3')), 'A3');
++    c.setMode(PlanMode.service);
++    expect(c.unitAt(at('B2')), 'B2');
++    expect(c.unitAt(at('A3')), 'A3');
++  });
++
+   test(
+       'UA-label-used a label another unit holds is refused, a seat\'s '
+       'included; a free one is one Label step', () {
+     final c = design();
+     final table = tableLabel(c);
+     final depth = c.document.commands.undoDepth;
+     // M-UA4: the check against the other units' labels removed.
+     expect(c.setUnitLabel(table, 'A1'), isFalse);
+     expect(c.document.commands.undoDepth, depth);
+     expect(c.setUnitLabel(table, ' 77 '), isTrue);

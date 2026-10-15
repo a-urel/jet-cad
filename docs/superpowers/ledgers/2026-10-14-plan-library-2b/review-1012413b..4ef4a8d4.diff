@@ -1,0 +1,104 @@
+# Review package: 1012413b..HEAD
+
+## Commits
+4ef4a8d4 test(engine): E5-move, a matched seat's definition and transform change
+
+## Files changed
+ .../jet_cad_2d/test/parametric/instances_test.dart | 41 ++++++++++++++++++++++
+ .../test/parametric/support/row_clients.dart       |  6 ++--
+ 2 files changed, 45 insertions(+), 2 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d/test/parametric/instances_test.dart b/packages/jet_cad_2d/test/parametric/instances_test.dart
+index 74faac70..00d78ba5 100644
+--- a/packages/jet_cad_2d/test/parametric/instances_test.dart
++++ b/packages/jet_cad_2d/test/parametric/instances_test.dart
+@@ -436,11 +436,52 @@ void main() {
+     expectOn(balcony);
+     expect(doc.commands.undoDepth, depth + 1);
+     final moved = canon(doc);
+     doc.commands.undo();
+     expect(canon(doc), placed);
+     expectOn(stalls);
+     doc.commands.redo();
+     expect(canon(doc), moved);
+     expect(drift(doc), isEmpty);
+   });
++
++  test(
++      'E5-move a regenerated row with a new seat definition and a new bend '
++      'keeps its seats (handles, components), points them at the new '
++      'definition and re-places them; one undo restores the bytes '
++      '(M-E5-def-set, M-E5-transform-set)', () {
++    final doc = hall();
++    final before = seats(doc, hRow2);
++    expect(before, hasLength(5));
++    doc.commands.execute(CompoundCommand([
++      for (var i = 0; i < before.length; i++)
++        SetComponentCommand<SeatNote>(before[i].handle, SeatNote('m${i + 1}')),
++    ], label: 'Notes'));
++    final noted = canon(doc);
++    final depth = doc.commands.undoDepth;
++    final next = row2.copyWith(seat: hStool, bend: 0.3125, spacing: 640.75);
++    // Premise: the new placements differ from the old ones.
++    for (var i = 1; i < before.length; i++) {
++      expect(seatAt(next, i).equals(seatAt(row2, i), exact), isFalse);
++    }
++
++    doc.commands.execute(SetComponentCommand<Row>(hRow2, next));
++    final after = seats(doc, hRow2);
++    expect(
++        [for (final s in after) s.handle], [for (final s in before) s.handle]);
++    for (var i = 0; i < after.length; i++) {
++      final why = 'seat ${i + 1}';
++      expect(after[i].definition, hStool, reason: why);
++      expect(after[i].transform.equals(seatAt(next, i), exact), isTrue,
++          reason: why);
++      expect(
++          doc.components.get<SeatNote>(after[i].handle), SeatNote('m${i + 1}'),
++          reason: why);
++    }
++    expect(doc.commands.undoDepth, depth + 1);
++    expect(drift(doc), isEmpty);
++
++    doc.commands.undo();
++    expect(canon(doc), noted);
++    expect(drift(doc), isEmpty);
++  });
+ }
+diff --git a/packages/jet_cad_2d/test/parametric/support/row_clients.dart b/packages/jet_cad_2d/test/parametric/support/row_clients.dart
+index 77f55ba4..cb42645d 100644
+--- a/packages/jet_cad_2d/test/parametric/support/row_clients.dart
++++ b/packages/jet_cad_2d/test/parametric/support/row_clients.dart
+@@ -62,27 +62,29 @@ final class Row implements Component {
+   final String note;
+ 
+   /// Read by `dissolves` only (Task 2's E5G-dissolve).
+   final bool dissolve;
+ 
+   /// [extraTag] is kept as it is: a test that drops it builds a [Row].
+   Row copyWith(
+           {Handle? seat,
+           int? count,
+           String? prefix,
++          double? spacing,
++          double? bend,
+           double? labelHeight,
+           String? note,
+           bool? dissolve}) =>
+       Row(seat ?? this.seat, count ?? this.count,
+           prefix: prefix ?? this.prefix,
+-          spacing: spacing,
+-          bend: bend,
++          spacing: spacing ?? this.spacing,
++          bend: bend ?? this.bend,
+           labelHeight: labelHeight ?? this.labelHeight,
+           extraTag: extraTag,
+           note: note ?? this.note,
+           dissolve: dissolve ?? this.dissolve);
+ 
+   @override
+   String get typeId => id;
+ 
+   @override
+   Map<String, Object?> toJson() => {

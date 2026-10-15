@@ -9,6 +9,10 @@
 import 'package:jet_cad_2d/jet_cad_2d.dart' show LayerNameProblem;
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show PlanSwatch;
 import 'package:jet_cad_2d_plan/src/l10n/strings.dart';
+import 'package:jet_cad_2d_plan/src/units/unit_label.dart'
+    show UnitLabelProblem;
+import 'package:jet_cad_2d_plan/src/units/unit_problems.dart'
+    show UnitLabelWarning;
 
 class RecordingPlanStrings implements PlanStrings {
   RecordingPlanStrings(this.inner);
@@ -279,4 +283,32 @@ class RecordingPlanStrings implements PlanStrings {
 
   @override
   String get planDamaged => record(inner.planDamaged);
+
+  @override
+  String get merge => record(inner.merge);
+  @override
+  String get split => record(inner.split);
+  @override
+  String get number => record(inner.number);
+  @override
+  String get label => record(inner.label);
+  @override
+  String get capacity => record(inner.capacity);
+  @override
+  String get rotateLeft => record(inner.rotateLeft);
+  @override
+  String get rotateRight => record(inner.rotateRight);
+  @override
+  String labelProblem(UnitLabelProblem problem) =>
+      record(inner.labelProblem(problem));
+  @override
+  String labelUsed(String label) => record(inner.labelUsed(label));
+  @override
+  String labelWarning(UnitLabelWarning warning) =>
+      record(inner.labelWarning(warning));
+  @override
+  String? unitKind(String kind) => switch (inner.unitKind(kind)) {
+        null => null,
+        final w => record(w),
+      };
 }

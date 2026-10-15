@@ -2,6 +2,7 @@
 // plan with no kit; and the README's code is the example's.
 import 'dart:io';
 
+import 'package:flutter/material.dart' show Key;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 
@@ -23,6 +24,25 @@ void main() {
     expect(state.controller.missingKits, isEmpty);
     expect(find.byType(PlanSymbolGallery), findsNothing,
         reason: 'no kit, no symbols');
+  });
+
+  testWidgets(
+      'ED-8b the example switches modes: the editor bar\'s button shows the '
+      'service view, the service bar\'s brings the editor back',
+      (tester) async {
+    await tester.pumpWidget(const PlanExampleApp());
+    await tester.pump();
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('example-service')));
+    await tester.pump();
+    await tester.pump();
+    // M-ED-8b: both buttons switch to design.
+    expect(find.byType(PlanServiceView), findsOneWidget);
+    expect(find.byType(PlanCanvas), findsNothing);
+    await tester.tap(find.byKey(const Key('example-design')));
+    await tester.pump();
+    await tester.pump();
+    expect(find.byType(PlanCanvas), findsOneWidget);
   });
 
   test('ED-README the README\'s Dart block is the example, whole', () {

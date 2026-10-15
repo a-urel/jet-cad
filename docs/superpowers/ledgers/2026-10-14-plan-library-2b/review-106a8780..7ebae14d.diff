@@ -1,0 +1,583 @@
+# Review package: 106a8780..HEAD
+
+## Commits
+7ebae14d test(plan): unit colour-target exclusions and 2a's deferred unit cases (2b Task 10 fix 1)
+
+## Files changed
+ .../test/editor/editor_options_test.dart           |  96 ++++++++++-
+ .../test/panels/colour_row_test.dart               |  45 ++++++
+ .../test/panels/symbol_section_test.dart           |  17 +-
+ .../test/shortcuts/plan_shortcuts_test.dart        | 180 ++++++++++++++++++++-
+ 4 files changed, 331 insertions(+), 7 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_plan/test/editor/editor_options_test.dart b/packages/jet_cad_2d_plan/test/editor/editor_options_test.dart
+index ae61cb64..a4aa6ef5 100644
+--- a/packages/jet_cad_2d_plan/test/editor/editor_options_test.dart
++++ b/packages/jet_cad_2d_plan/test/editor/editor_options_test.dart
+@@ -1,16 +1,17 @@
+ // 2a spec P2: PlanEditor's options (which panels show, the gallery, the
+ // canvas's rulers, grid and snapping) and `controller.permissions` read at
+ // each build (Task 12 sent the widget-level capability cases here).
+ // Ported, assertions unchanged, from jet_cad_floor_plan/test/host/
+ // editor_panels_test.dart (T5-g, the focus order, R-2, R-3's editLayers,
+-// R-4's Page panel alone, V-5's generic parts), editor_tools_test.dart
++// R-4's Page panel alone, V-5's generic parts; V-5's table parts, 2b Task
++// 10 fix round, over the unit editor fixture), editor_tools_test.dart
+ // (T4-e, T4-j's readOnly half, T4-f's first part, snapping false keeps
+ // the user's setting, T4-g's first part, K3's design half) and
+ // editor_tools_review_test.dart (RV6's first half, RV8, RV9, O23, R-2's
+ // tool part-way). RV6's second half ("selectTool(wall) is false" once the
+ // view is unmounted) is retired by the controller's ruling: the controller
+ // owns the tools and works without a canvas (spec P2), a deliberate host
+ // API difference for sub-project 4's parity table. A
+ // widget flag of today's capabilities is the editor's option here, the
+ // host rebuilding its editor; an editing flag is `c.permissions`. The
+ // floor planner's tools and tables are the generic tools and the marks of
+@@ -32,20 +33,22 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
+         ViewportTransform,
+         kRulerThickness;
+ import 'package:jet_cad_2d_plan/src/controller/permissions.dart';
+ import 'package:jet_cad_2d_plan/src/controller/plan_controller.dart';
+ import 'package:jet_cad_2d_plan/src/editor/plan_editor.dart';
+ import 'package:jet_cad_2d_plan/src/panels/plan_property_panel.dart';
+ import 'package:jet_cad_2d_plan/src/tools/generic_tools.dart';
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import '../support/editor_host.dart';
++import '../support/unit_editor_fixture.dart' as u;
++import 'units_only_select_test.dart' as s;
+ import '../support/mark_kit.dart';
+ 
+ /// The editor's options a host rebuilds it with (today's widget flags).
+ final class Options {
+   const Options({
+     this.propertyPanel = true,
+     this.layerPanel = true,
+     this.pagePanel = true,
+     this.rulers = true,
+     this.grid = true,
+@@ -371,20 +374,111 @@ void main() {
+         LogicalKeyboardKey.keyL,
+         LogicalKeyboardKey.keyF,
+       ]) {
+         await press(tester, k);
+       }
+       await ctrl(tester, LogicalKeyboardKey.keyZ);
+       expect(c.activeTool.value, PlanToolIds.select);
+       expect(encoded(c), before);
+       expect(c.canUndo.value, isFalse);
+     });
++    testWidgets(
++        'a table is selectable by a click, its section read-only: no ±90, '
++        'Mirror or layer picker', (tester) async {
++      final c = await u.mountUnitEditor(tester,
++          permissions: PlanPermissions.readOnly);
++      await click(tester, u.screenOf(tester, c, s.edgeOf(c, '1')));
++      expect(byKey('unit-section'), findsOneWidget);
++      expect(fieldOf(tester, 'unit-label').readOnly, isTrue);
++      expect(fieldOf(tester, 'symbol-rotation').readOnly, isTrue);
++      for (final k in [
++        'unit-rotate-left',
++        'unit-rotate-right',
++        'symbol-mirror',
++        'layer-picker'
++      ]) {
++        expect(byKey(k), findsNothing, reason: k);
++      }
++    });
++
++    testWidgets(
++        'no command reaches the document from a pointer path or a key on a '
++        'table: a body drag, the rotation grip\'s place, Delete and '
++        'Backspace, the free line\'s and the column\'s grips, the letters '
++        'and Ctrl+Z leave the design byte-identical', (tester) async {
++      final c = await u.mountUnitEditor(tester,
++          permissions: PlanPermissions.readOnly);
++      final before = encoded(c);
++      Offset at(Vector2 w) => u.screenOf(tester, c, w);
++      // 1: clicked, dragged, its rotation grip's place dragged, deleted.
++      await click(tester, at(s.edgeOf(c, '1')));
++      expect(s.selected(c), {s.keyOf(c, '1')});
++      await s.drag(tester, at(s.edgeOf(c, '1')),
++          at(s.edgeOf(c, '1')) + const Offset(90, 45));
++      await click(tester, at(s.edgeOf(c, '1')));
++      final grip = s.rotationGripOf(tester, c, '1');
++      await s.drag(tester, grip, grip + const Offset(120, 60));
++      await click(tester, at(s.edgeOf(c, '1')));
++      await press(tester, LogicalKeyboardKey.delete);
++      await press(tester, LogicalKeyboardKey.backspace);
++      // The free line: its body and both ends.
++      final (a, b) = u.editorFreeLine;
++      await click(tester, at((a + b) / 2));
++      expect(s.selected(c), hasLength(1));
++      for (final end in [a, b, (a + b) / 2]) {
++        await s.drag(tester, at(end), at(end) + const Offset(50, -30));
++      }
++      await press(tester, LogicalKeyboardKey.delete);
++      // The column's end grip.
++      final column = Vector2(23500, 14000);
++      await click(tester, at(column));
++      expect(s.selected(c), hasLength(1));
++      await s.drag(tester, at(column), at(column) + const Offset(-60, 0));
++      await press(tester, LogicalKeyboardKey.backspace);
++      // The letters and the history's chords.
++      for (final k in [
++        LogicalKeyboardKey.keyP,
++        LogicalKeyboardKey.keyL,
++        LogicalKeyboardKey.keyF,
++      ]) {
++        await press(tester, k);
++      }
++      await ctrl(tester, LogicalKeyboardKey.keyZ);
++      expect(c.activeTool.value, PlanToolIds.select);
++      expect(encoded(c), before);
++      expect(c.canUndo.value, isFalse);
++    });
++
++    testWidgets(
++        'the host\'s own calls still work under readOnly: setUnitData, '
++        'undo() and load', (tester) async {
++      final c = await u.mountUnitEditor(tester,
++          permissions: PlanPermissions.readOnly);
++      final before = encoded(c);
++      expect(c.setUnitData('2', const {'pos': 'b2'}), isTrue);
++      expect(encoded(c), isNot(before));
++      expect(c.canUndo.value, isTrue);
++      c.undo();
++      await tester.pump();
++      expect(encoded(c), before);
++      // A load replaces the plan, under readOnly too: 2's data, set again,
++      // is gone with the plan it was set on.
++      expect(c.setUnitData('2', const {'pos': 'b2'}), isTrue);
++      Map<String, String> dataOf2() =>
++          c.unitDetails.where((x) => x.unit.label == '2').single.data;
++      expect(dataOf2(), const {'pos': 'b2'});
++      c.load(u.unitEditorPlanJson());
++      await tester.pump();
++      await tester.pump();
++      expect(dataOf2(), isEmpty);
++      expect(c.canUndo.value, isFalse);
++    });
+   });
+ 
+   group('the Layer and Page panels, the right column (S-9 e, S-11)', () {
+     testWidgets(
+         'T5-g layerPanel false: no Layers section; pagePanel false: no page '
+         'controls; propertyPanel false: no property panel; all three '
+         'false: no right column. The Layers section\'s open state is kept '
+         'across hide and show', (tester) async {
+       final h = await mountOptions(tester);
+       final c = h.c;
+diff --git a/packages/jet_cad_2d_plan/test/panels/colour_row_test.dart b/packages/jet_cad_2d_plan/test/panels/colour_row_test.dart
+index cd5618d9..33e23c1c 100644
+--- a/packages/jet_cad_2d_plan/test/panels/colour_row_test.dart
++++ b/packages/jet_cad_2d_plan/test/panels/colour_row_test.dart
+@@ -22,20 +22,22 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
+     show SelectionKey, darkCanvasTone, kDarkCanvasPaper;
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show PlanSwatch;
+ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+ import 'package:jet_cad_2d_plan/src/panels/colour_row.dart';
+ import 'package:jet_cad_2d_plan/src/units/unit_components.dart' show UnitColour;
+ import 'package:jet_cad_2d_plan/src/units/unit_index.dart' show UnitIndex;
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import '../support/panel_kits.dart';
++import '../support/service_fixture.dart' show serviceFixture;
++import '../support/test_kit.dart' show unitKit;
+ import '../support/unit_fixtures.dart'
+     show addUnitLabel, fxKit, placeAt, tableSymbol;
+ 
+ Finder swatch(String name) => find.byKey(Key('color-swatch-$name'));
+ Finder get picker => find.byKey(const Key('color-picker'));
+ 
+ /// The Semantics node of swatch [name] (the nearest above its InkWell that
+ /// carries the label).
+ Semantics semanticsOf(WidgetTester tester, String name) =>
+     tester.widget<Semantics>(find
+@@ -709,11 +711,54 @@ void main() {
+     // And they agree with the index: the placed-unit check is its rule.
+     expect(pickedColours(c, keys), hasLength(3));
+     bool isTable(Handle h) => c.unitIndex[h]?.generated == false;
+     for (final h in [r.one, r.two, r.seven]) {
+       expect(isTable(h), isTrue, reason: h.toHex());
+     }
+     expect(isTable(r.a), isFalse);
+     expect(isTable(r.doc.rootHandle), isFalse);
+     expect(isTable(const Handle(0x7FFFFFF)), isFalse, reason: 'no node');
+   });
++
++  testWidgets(
++      'CP13 a locked unit (its kit missing) is no colour target: selected, '
++      'no picker shows and recolourCommand is null; with its kit loaded the '
++      'same unit is one (M-UW14)', (tester) async {
++    final f = serviceFixture();
++    final locked = PlanController(kits: const [], json: f.json);
++    addTearDown(locked.dispose);
++    final open = PlanController(kits: [unitKit()], json: f.json);
++    addTearDown(open.dispose);
++    expect(open.isLocked(f.table), isFalse, reason: 'premise');
++    expect(unitColourTargets(open, [k(f.table)]), [f.table],
++        reason: 'premise: the control');
++    expect(locked.isLocked(f.table), isTrue, reason: 'premise');
++    expect(locked.unitIndex[f.table]?.generated, isFalse, reason: 'premise');
++    await tester.binding.setSurfaceSize(const Size(1440, 900));
++    addTearDown(() => tester.binding.setSurfaceSize(null));
++    await tester.pumpWidget(MaterialApp(
++        home: Scaffold(
++            body: SingleChildScrollView(
++                child: PlanPropertyPanel(controller: locked)))));
++    locked.selection.replace([k(f.table)]);
++    await tester.pump();
++    // M-UW14: `!c.isLocked(h)` deleted from unitColourTargets.
++    expect(unitColourTargets(locked, [k(f.table)]), isEmpty);
++    expect(picker, findsNothing);
++    expect(recolourCommand(locked, [k(f.table)], PlanSwatch.teal), isNull);
++  });
++
++  test(
++      'CP14 a generated seat is no colour target through unitColourTargets, '
++      'its placed table beside it is (M-UW15)', () {
++    final f = serviceFixture();
++    final c = PlanController(kits: [unitKit()], json: f.json);
++    addTearDown(c.dispose);
++    final seat = f.seatsA.first;
++    expect(c.unitIndex[seat]?.generated, isTrue, reason: 'premise');
++    expect(c.isLocked(seat), isFalse, reason: 'premise: not the lock');
++    // M-UW15: `index[h]?.generated == false` reduced to `index[h] != null`.
++    expect(unitColourTargets(c, [k(seat)]), isEmpty);
++    expect(unitColourTargets(c, [k(seat), k(f.table)]), [f.table]);
++    expect(recolourCommand(c, [k(seat)], PlanSwatch.teal), isNull);
++  });
+ }
+diff --git a/packages/jet_cad_2d_plan/test/panels/symbol_section_test.dart b/packages/jet_cad_2d_plan/test/panels/symbol_section_test.dart
+index 4266ccb3..32fe3e37 100644
+--- a/packages/jet_cad_2d_plan/test/panels/symbol_section_test.dart
++++ b/packages/jet_cad_2d_plan/test/panels/symbol_section_test.dart
+@@ -454,30 +454,37 @@ void main() {
+             .onChanged !=
+         null;
+ 
+     testWidgets(
+         'SW1 one symbol shows name, size and rotation; two hide it; a table '
+         'shows the Symbol and the Table sections', (tester) async {
+       final c = await pumpPanel(tester);
+       final doc = c.document;
+       final bed = place(doc, 'test.bed.1600', far);
+       final other = place(doc, 'test.bed.1400', far + Vector2(4000, 0));
++      final table = place(doc, 'test.table.a', far + Vector2(0, 4000));
+       await select(tester, c, [bed]);
+       expect(byKey('symbol-section'), findsOneWidget);
+       expect(
+           tester.widget<Text>(byKey('symbol-name')).data, 'Test test.bed.1600');
+       expect(tester.widget<Text>(byKey('symbol-size')).data, '1600 × 2000');
+       expect(
+           tester.widget<TextField>(byKey('symbol-rotation')).controller!.text,
+           '30');
+       await select(tester, c, [bed, other]);
+       expect(byKey('symbol-section'), findsNothing);
++      await select(tester, c, [table]);
++      expect(byKey('symbol-section'), findsOneWidget);
++      expect(byKey('unit-section'), findsOneWidget);
++      expect(tester.getTopLeft(byKey('symbol-section')).dy,
++          lessThan(tester.getTopLeft(byKey('unit-section')).dy),
++          reason: 'the Symbol section above the Table section (R5-2)');
+     });
+ 
+     testWidgets(
+         'SW2 a typed rotation is one step; a word reverts; Mirror is one step',
+         (tester) async {
+       final c = await pumpPanel(tester);
+       final doc = c.document;
+       final bed = place(doc, 'test.bed.1600', far);
+       await select(tester, c, [bed]);
+       final depth = doc.commands.undoDepth;
+@@ -522,35 +529,35 @@ void main() {
+       expect(tester.widget<Text>(byKey('symbol-size')).data, '1800 × 2000');
+     });
+ 
+     testWidgets(
+         'SW4 under runtime a symbol turns and mirrors, its size does not; a '
+         'table does neither; geometry alone denied disables the size '
+         '(M-09c-be, M-09c-bg)', (tester) async {
+       final c = await pumpPanel(tester);
+       final doc = c.document;
+       final bed = place(doc, 'test.bed.1600', far);
++      final table = place(doc, 'test.table.a', far + Vector2(0, 4000));
+       doc.commands.permissions = DraftPermissions.runtime;
+       await select(tester, c, [bed]);
+       expect(editable(tester), isTrue);
+       expect(mirrorEnabled(tester), isTrue);
+       expect(menuEnabled(tester), isFalse);
+-      // The table half goes with 2b ("a table turns in the design mode
+-      // only"); an empty selection stands for its table selections, so
+-      // each permissions change below is read by a rebuild.
+-      await select(tester, c, []);
++      await select(tester, c, [table]);
++      expect(editable(tester), isFalse, reason: 'a table: the design mode');
++      expect(mirrorEnabled(tester), isFalse);
+       doc.commands.permissions = const DraftPermissions(
+           transform: true, components: true, geometry: false, structure: true);
+       await select(tester, c, [bed]);
+       expect(menuEnabled(tester), isFalse);
+       doc.commands.permissions = DraftPermissions.all;
+-      await select(tester, c, []);
++      await select(tester, c, [table]);
+       await select(tester, c, [bed]);
+       expect(menuEnabled(tester), isTrue);
+     });
+ 
+     testWidgets(
+         'SW5 a table has no Size menu, its family all tables or all beds '
+         '(R5-3; K2 rule 9 leaves the loaded library\'s tables without a '
+         'family, so M-09c-bf is pinned by SS12)', (tester) async {
+       final c = await pumpPanel(tester);
+       final doc = c.document;
+diff --git a/packages/jet_cad_2d_plan/test/shortcuts/plan_shortcuts_test.dart b/packages/jet_cad_2d_plan/test/shortcuts/plan_shortcuts_test.dart
+index aa08bfc6..6bd7a2de 100644
+--- a/packages/jet_cad_2d_plan/test/shortcuts/plan_shortcuts_test.dart
++++ b/packages/jet_cad_2d_plan/test/shortcuts/plan_shortcuts_test.dart
+@@ -2,30 +2,35 @@
+ // order, F reserved, a taken letter a diagnostic (A3); the guard built
+ // from the letters in use; shortcuts: false; Escape; Undo and Redo under
+ // the permissions; the host's file callbacks; autofocus. Over the drawing
+ // fixture (a 1:20 page at (7000, 3000), one line, a rotated, zoomed camera)
+ // with the stamp kits (stamp_kit.dart).
+ import 'package:flutter/material.dart';
+ import 'package:flutter/services.dart' show LogicalKeyboardKey;
+ import 'package:flutter_localizations/flutter_localizations.dart';
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+-import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
++    show InteractionLayer, SelectionKey;
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+ import 'package:jet_cad_2d_plan/src/shortcuts/plan_shortcut_guard.dart';
+ import 'package:jet_cad_2d_plan/src/shortcuts/tool_letters.dart';
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import '../support/canvas_fixture.dart';
++import '../support/fake_page_printer.dart';
+ import '../support/design_harness.dart';
+ import '../support/stamp_kit.dart';
++import '../support/unit_editor_fixture.dart'
++    show editorCamera, kEditorSurface, unitEditorPlanJson;
++import '../support/unit_fixtures.dart' show entryOf, fxKit, tableSymbol;
+ 
+ /// The host's keys, by name.
+ const Map<String, SingleActivator> kHostKeys = {
+   'l': SingleActivator(LogicalKeyboardKey.keyL),
+   'b': SingleActivator(LogicalKeyboardKey.keyB),
+   'f': SingleActivator(LogicalKeyboardKey.keyF),
+   'f3': SingleActivator(LogicalKeyboardKey.f3),
+   'escape': SingleActivator(LogicalKeyboardKey.escape),
+   'delete': SingleActivator(LogicalKeyboardKey.delete),
+   'ctrl+z': SingleActivator(LogicalKeyboardKey.keyZ, control: true),
+@@ -36,20 +41,113 @@ const Map<String, SingleActivator> kHostKeys = {
+   'ctrl+p': SingleActivator(LogicalKeyboardKey.keyP, control: true),
+ };
+ 
+ /// One more line on [c]'s plan, off the fixture's, one undo step.
+ void drawALine(PlanController c) => c.document.commands.execute(addDrafted(
+     c.document,
+     EntityKind.line,
+     linePayload(Vector2(7020.5, 3030.25), Vector2(7080.5, 3061.75)),
+     layer: ReservedHandles.layerZero));
+ 
++// ---- the units-only key cases (2b Task 10 fix round) ----
++//
++// Ported from jet_cad_floor_plan/test/host/keyboard_focus_test.dart: T6-c
++// (:467-493), RP1's tablesOnly variant (:854-885) and RP12 (:886-909),
++// `tablesOnly` being `PlanPermissions.unitsOnly` and the view `PlanEditor`
++// over the unit editor fixture.
++
++/// An intent the host's own `Shortcuts` maps a key to, by name.
++class HostIntent extends Intent {
++  const HostIntent(this.name);
++  final String name;
++}
++
++/// Every letter the shell binds, F3, Escape, Delete, Backspace and the
++/// chords (Task 6 review RP1).
++final Map<String, SingleActivator> kIntentKeys = {
++  for (final l in 'VLPRBWDNGMSICATF'.split(''))
++    l: SingleActivator(LogicalKeyboardKey(
++        LogicalKeyboardKey.keyA.keyId + l.codeUnitAt(0) - 'A'.codeUnitAt(0))),
++  'f3': const SingleActivator(LogicalKeyboardKey.f3),
++  'escape': const SingleActivator(LogicalKeyboardKey.escape),
++  'delete': const SingleActivator(LogicalKeyboardKey.delete),
++  'backspace': const SingleActivator(LogicalKeyboardKey.backspace),
++  'ctrl+z': const SingleActivator(LogicalKeyboardKey.keyZ, control: true),
++  'cmd+z': const SingleActivator(LogicalKeyboardKey.keyZ, meta: true),
++  'ctrl+shift+z': const SingleActivator(LogicalKeyboardKey.keyZ,
++      control: true, shift: true),
++  'ctrl+y': const SingleActivator(LogicalKeyboardKey.keyY, control: true),
++  'ctrl+e': const SingleActivator(LogicalKeyboardKey.keyE, control: true),
++  'cmd+e': const SingleActivator(LogicalKeyboardKey.keyE, meta: true),
++  'ctrl+p': const SingleActivator(LogicalKeyboardKey.keyP, control: true),
++  'cmd+p': const SingleActivator(LogicalKeyboardKey.keyP, meta: true),
++};
++
++/// The editor over the unit fixture under [permissions], inside a host
++/// that counts every [kIntentKeys] key reaching it, through intents
++/// ([intents]) or `CallbackShortcuts`; `shortcuts` changeable at runtime.
++Future<(PlanController, Map<String, int>, ValueNotifier<bool>)> mountUnitKeys(
++    WidgetTester tester,
++    {required PlanPermissions permissions,
++    bool intents = true,
++    bool shortcuts = false}) async {
++  final c = PlanController(kits: [fxKit()], json: unitEditorPlanJson());
++  addTearDown(c.dispose);
++  c.permissions = permissions;
++  final keys = ValueNotifier(shortcuts);
++  addTearDown(keys.dispose);
++  final reached = <String, int>{for (final n in kIntentKeys.keys) n: 0};
++  void count(String name) => reached[name] = reached[name]! + 1;
++  await tester.binding.setSurfaceSize(kEditorSurface);
++  addTearDown(() => tester.binding.setSurfaceSize(null));
++  final editor = ValueListenableBuilder<bool>(
++      valueListenable: keys,
++      builder: (_, s, __) => PlanEditor(
++          controller: c,
++          onExport: (_) {},
++          onExportDialog: (_, __, ___) async => null,
++          printer: FakePagePrinter(),
++          shortcuts: s));
++  await tester.pumpWidget(MaterialApp(
++      home: Scaffold(
++          body: intents
++              ? Shortcuts(
++                  shortcuts: {
++                      for (final e in kIntentKeys.entries)
++                        e.value: HostIntent(e.key),
++                    },
++                  child: Actions(actions: {
++                    HostIntent: CallbackAction<HostIntent>(onInvoke: (x) {
++                      count(x.name);
++                      return null;
++                    }),
++                  }, child: Focus(child: editor)))
++              : CallbackShortcuts(bindings: {
++                  for (final e in kIntentKeys.entries)
++                    e.value: () => count(e.key),
++                }, child: editor))));
++  await tester.pump();
++  await tester.pump();
++  c.camera.value = editorCamera();
++  await tester.pump();
++  return (c, reached, keys);
++}
++
++bool canvasFocused() {
++  final context = FocusManager.instance.primaryFocus?.context;
++  return context != null &&
++      context.findAncestorWidgetOfExactType<InteractionLayer>() != null;
++}
++
++String encodedPlan(PlanController c) =>
++    DraftDocumentCodec.encodeToString(c.document);
++
+ void main() {
+   testWidgets(
+       'KB-1 the generic letters, then the kits\' in load order; a taken '
+       'letter, F and a later kit\'s B go to no tool, each a letterTaken '
+       'diagnostic at construction (M-KB-1a, M-KB-1b, M-KB-1c)', (tester) async {
+     final c = PlanController(kits: [stampKit, lateKit]);
+     addTearDown(c.dispose);
+     // Before any widget is built.
+     expect({
+       for (final d in c.diagnostics.value)
+@@ -335,11 +433,91 @@ void main() {
+     await tester.pumpWidget(keys(two));
+     // M-KB-14a: didUpdateWidget not giving the old controller its keys
+     // back.
+     expect(one.selectGates.idleKeys, isTrue);
+     expect(two.selectGates.idleKeys, isFalse);
+     await tester.pumpWidget(const SizedBox());
+     // M-KB-14b: dispose not giving them back: Delete and Escape stay dead
+     // in the canvas.
+     expect(two.selectGates.idleKeys, isTrue);
+   });
++
++  testWidgets(
++      'T6-c unitsOnly, 1 selected: Delete and Backspace remove nothing '
++      "and reach the host's bindings; with shortcuts: Delete removes 1",
++      (tester) async {
++    final (c, reached, keys) = await mountUnitKeys(tester,
++        permissions: PlanPermissions.unitsOnly, intents: false);
++    await focusCanvas(tester);
++    c.select({'1'});
++    await tester.pump();
++    final before = encodedPlan(c);
++    await press(tester, LogicalKeyboardKey.delete);
++    await press(tester, LogicalKeyboardKey.backspace);
++    expect(encodedPlan(c), before);
++    expect(reached['delete'], 1);
++    expect(reached['backspace'], 1);
++    keys.value = true;
++    await tester.pump();
++    await press(tester, LogicalKeyboardKey.delete);
++    expect(c.unitIndex.withLabel('1'), isEmpty);
++    expect(reached['delete'], 1);
++  });
++
++  testWidgets(
++      'RP1 design, unitsOnly, shortcuts: false: every letter, F3, Escape, '
++      'Delete, Backspace and every chord reach an intent-based host; '
++      'nothing in the plan changes. With shortcuts the plan takes the file '
++      'chords', (tester) async {
++    final (c, reached, keys) =
++        await mountUnitKeys(tester, permissions: PlanPermissions.unitsOnly);
++    await focusCanvas(tester);
++    c.select({'1'});
++    await tester.pump();
++    final before = encodedPlan(c);
++    for (final e in kIntentKeys.entries) {
++      await sendActivator(tester, e.value);
++      await tester.pump();
++      expect(reached[e.key], 1, reason: e.key);
++      expect(canvasFocused(), isTrue, reason: '${e.key}: focus kept');
++    }
++    await tester.pump(const Duration(seconds: 1));
++    expect(encodedPlan(c), before);
++    expect(c.activeTool.value, 'plan.select');
++    expect(c.editorSelectedUnits.value, {'1'});
++    // The control: with the shortcuts the plan takes the chords.
++    keys.value = true;
++    await tester.pump();
++    await sendActivator(tester, kIntentKeys['ctrl+e']!);
++    await sendActivator(tester, kIntentKeys['ctrl+p']!);
++    expect(reached['ctrl+e'], 1, reason: 'the editor took Ctrl+E');
++    expect(reached['ctrl+p'], 1, reason: 'the editor took Ctrl+P');
++  });
++
++  testWidgets(
++      "RP12 shortcuts: false, unitsOnly, a table armed: R is the symbol "
++      "tool's, M (mirror refused) bubbles; W and Escape reach the host; "
++      'the tool stays symbol', (tester) async {
++    final (c, reached, _) =
++        await mountUnitKeys(tester, permissions: PlanPermissions.unitsOnly);
++    await focusCanvas(tester);
++    expect(
++        c.armSymbol(PlanSymbol(
++            kitId: 'fx',
++            names: const KitNames({}),
++            entry: entryOf(tableSymbol()))),
++        isTrue);
++    await tester.pump();
++    expect(c.activeTool.value, 'plan.symbol');
++    await focusCanvas(tester);
++    expect(canvasFocused(), isTrue, reason: 'premise: the canvas focused');
++    await sendActivator(tester, kIntentKeys['R']!);
++    await sendActivator(tester, kIntentKeys['M']!);
++    expect(reached['R'], 0, reason: "R is the armed tool's");
++    expect(reached['M'], 1, reason: 'unitsOnly refuses mirror: M bubbles');
++    await sendActivator(tester, kIntentKeys['W']!);
++    await sendActivator(tester, kIntentKeys['escape']!);
++    expect(reached['W'], 1);
++    expect(reached['escape'], 1);
++    expect(c.activeTool.value, 'plan.symbol');
++  });
+ }

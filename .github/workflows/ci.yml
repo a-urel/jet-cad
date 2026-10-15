@@ -44,6 +44,9 @@ jobs:
             tool: flutter
           - package: packages/jet_cad_2d_plan
             tool: flutter
+            # The pick's and the band's allocation tests (2b Task 14) read
+            # the VM's allocation profiler, as the planner's do.
+            test_flags: --enable-vmservice
           - package: packages/jet_cad_floor_plan
             tool: flutter
             # The pick's allocation test reads the VM's allocation profiler,

@@ -7,6 +7,9 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
 
+import '../symbols/plan_symbol.dart';
+import '../symbols/symbol_box.dart' show servedTopOfEntry;
+import '../symbols/symbol_placer.dart' show definitionForEntry;
 import 'session.dart';
 import 'tool_settings_store.dart';
 
@@ -16,6 +19,16 @@ abstract interface class ServicesHost {
   CameraController get camera;
   SnapSettings get snap;
   ToolSettingsStore get toolSettings;
+
+  /// The loaded symbol `key@version`, or null.
+  PlanSymbol? symbolById(String id);
+
+  /// The controller's symbol libraries' state.
+  ValueListenable<SymbolsState> get symbolsState;
+
+  /// The refs whose `add` has not executed yet, by key: one map per
+  /// controller, shared by every kit's services (spec 2b S2).
+  Map<String, SymbolDefinitionRef> get pendingDefinitions;
 }
 
 final class KitServices implements PlanServices {
@@ -62,6 +75,37 @@ final class KitServices implements PlanServices {
   @override
   T shared<T extends Object>(T Function(PlanServices) create) =>
       _host.session.shared.get<T>(kit.id, this, create);
+
+  /// Spec 2b S2. A pending ref is handed out again until the document holds
+  /// its definition (its `add` executed, by whatever path), the controller
+  /// executes a command, or the document is replaced; a ref whose
+  /// definition the document holds is made afresh, with no `add`.
+  @override
+  SymbolDefinitionRef? symbolDefinition(String key) {
+    final pending = _host.pendingDefinitions;
+    final document = this.document;
+    final kept = pending[key];
+    if (kept != null) {
+      if (document.tree.definition(kept.handle) == null) return kept;
+      pending.remove(key);
+    }
+    final entry = _host.symbolById(key)?.entry;
+    if (entry == null) return null;
+    final made = definitionForEntry(document, entry);
+    final ref = SymbolDefinitionRef(
+      handle: made.definition,
+      add: made.commands.isEmpty
+          ? null
+          : CompoundCommand(made.commands, label: 'Add ${entry.symbol.name}'),
+      basePoint: entry.definition.basePoint.clone(),
+      top: servedTopOfEntry(entry),
+    );
+    if (ref.add != null) pending[key] = ref;
+    return ref;
+  }
+
+  @override
+  ValueListenable<SymbolsState> get symbolsState => _host.symbolsState;
 }
 
 /// The attachment registry until Task 14: no kind, no attachment.

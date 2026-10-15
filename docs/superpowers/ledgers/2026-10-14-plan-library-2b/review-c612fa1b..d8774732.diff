@@ -1,0 +1,4478 @@
+# Review package: c612fa1b..HEAD
+
+## Commits
+d8774732 feat(plan): the unit API, design side (2b S3)
+
+## Files changed
+ packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart  |  13 +
+ .../lib/src/controller/plan_camera.dart            |  73 +++
+ .../lib/src/controller/plan_controller.dart        | 560 ++++++++++++++++++-
+ .../jet_cad_2d_plan/lib/src/units/unit_detail.dart | 320 +++++++++++
+ .../jet_cad_2d_plan/lib/src/units/unit_fit.dart    |  64 +++
+ .../jet_cad_2d_plan/lib/src/units/unit_writes.dart |  27 +
+ packages/jet_cad_2d_plan/test/barrel_test.dart     |   4 +
+ .../test/controller/non_finite_unit_test.dart      |  66 +++
+ .../test/controller/unit_camera_test.dart          | 271 +++++++++
+ .../test/controller/unit_changes_test.dart         | 620 +++++++++++++++++++++
+ .../test/controller/unit_colour_test.dart          | 453 +++++++++++++++
+ .../test/controller/unit_data_test.dart            | 493 ++++++++++++++++
+ .../test/controller/unit_detail_test.dart          | 496 +++++++++++++++++
+ .../test/editor/units_only_select_test.dart        |  60 ++
+ .../test/l10n/value_words_test.dart                |  32 +-
+ .../test/support/unit_embedding_fixture.dart       | 122 ++++
+ .../jet_cad_2d_plan/test/units/unit_api_test.dart  | 248 +++++++++
+ .../jet_cad_2d_plan/test/units/unit_fit_test.dart  |  91 +++
+ 18 files changed, 3995 insertions(+), 18 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart b/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart
+index 98cd02c8..9c39c657 100644
+--- a/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart
++++ b/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart
+@@ -3,20 +3,21 @@
+ library;
+ 
+ export 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
+     show SymbolThumbnails;
+ 
+ export 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show SymbolsState;
+ 
+ export 'src/canvas/plan_canvas.dart' show PlanCanvas, kLockHintDuration;
+ export 'src/controller/camera_bounds.dart' show kPlanMaxScale, kPlanMinScale;
+ export 'src/controller/permissions.dart' show PlanPermissions, isUnitSymbol;
++export 'src/controller/plan_camera.dart' show PlanCamera;
+ export 'src/controller/plan_change.dart'
+     show
+         PlanChange,
+         PlanObjectAdded,
+         PlanObjectChanged,
+         PlanObjectRemoved,
+         PlanReplaced;
+ export 'src/controller/plan_controller.dart'
+     show PlanController, kPlanThumbnailCapacity;
+ export 'src/editor/plan_editor.dart' show PlanEditor, PlanFileCallback;
+@@ -62,10 +63,22 @@ export 'src/l10n/strings_tr.dart' show PlanStringsTr;
+ export 'src/panels/plan_layer_panel.dart' show PlanLayerPanel;
+ export 'src/panels/plan_page_panel.dart' show PlanPagePanel;
+ export 'src/panels/plan_property_panel.dart' show PlanPropertyPanel;
+ export 'src/panels/plan_symbol_gallery.dart' show PlanSymbolGallery;
+ export 'src/shortcuts/plan_shortcut_guard.dart' show PlanShortcutGuard;
+ export 'src/shortcuts/plan_shortcuts.dart' show PlanShortcuts;
+ export 'src/symbols/plan_symbol.dart' show PlanSymbol;
+ export 'src/symbols/plan_symbol_loader.dart'
+     show PlanSymbolLoad, PlanSymbolLoader;
+ export 'src/theme/plan_theme.dart' show PlanTheme;
++export 'src/units/unit_detail.dart'
++    show
++        PlanUnit,
++        PlanUnitAdded,
++        PlanUnitChange,
++        PlanUnitChanged,
++        PlanUnitDetail,
++        PlanUnitRemoved,
++        PlanUnitsReplaced;
++export 'src/units/unit_label.dart' show UnitLabelProblem;
++export 'src/units/unit_problems.dart'
++    show BadLabel, DuplicateLabel, Unlabelled, UnitLabelWarning;
+diff --git a/packages/jet_cad_2d_plan/lib/src/controller/plan_camera.dart b/packages/jet_cad_2d_plan/lib/src/controller/plan_camera.dart
+new file mode 100644
+index 00000000..226c7d17
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/controller/plan_camera.dart
+@@ -0,0 +1,73 @@
++// The camera, public (host embedding API spec G-2; 2b S3, ported from
++// jet_cad_floor_plan host/floor_plan_camera.dart): an immutable value over
++// the view's world-to-canvas transform, so a host maps its own widgets onto
++// the plan without the engine's types.
++import 'package:flutter/foundation.dart';
++import 'package:flutter/widgets.dart' show Offset, Rect, Size;
++import 'package:jet_cad_2d/jet_cad_2d.dart' show Transform2;
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
++    show ViewportTransform;
++
++/// Where the plan is on the screen (spec G-2), as
++/// `PlanController.cameraValue` holds it: one value per camera position,
++/// replaced (never changed) by every pan, zoom and fit.
++///
++/// The **world** is the plan's millimetres, y up. The **canvas** is the
++/// view's drawing area in logical pixels, origin at its top left, y down:
++/// below the service bar in the service mode, inside the rulers in the
++/// design mode. `PlanController.canvasRect` says where the canvas is
++/// on the screen.
++///
++/// Two cameras are equal when their transforms are, coefficient for
++/// coefficient, exactly.
++@immutable
++final class PlanCamera {
++  /// The camera over [transform]. For the controller: a host reads a camera
++  /// from `PlanController.cameraValue`.
++  @internal
++  PlanCamera(ViewportTransform transform)
++      : _m = transform.worldToScreenMatrix,
++        _inverse = transform.worldToScreenMatrix.invert(),
++        _transform = transform;
++
++  final Transform2 _m;
++  final Transform2 _inverse;
++  final ViewportTransform _transform;
++
++  /// The camera's scale: logical pixels per world millimetre.
++  double get scale => _m.scaleMagnitude;
++
++  /// The canvas point that shows [world] (world millimetres, y up).
++  Offset worldToCanvas(Offset world) => Offset(
++      _m.a * world.dx + _m.c * world.dy + _m.e,
++      _m.b * world.dx + _m.d * world.dy + _m.f);
++
++  /// The world point (millimetres, y up) shown at [canvas].
++  Offset canvasToWorld(Offset canvas) => Offset(
++      _inverse.a * canvas.dx + _inverse.c * canvas.dy + _inverse.e,
++      _inverse.b * canvas.dx + _inverse.d * canvas.dy + _inverse.f);
++
++  /// The world a canvas of [canvas] shows: the bound of its four corners,
++  /// in millimetres, y up (so [Rect.top] is the least y).
++  Rect visibleWorld(Size canvas) {
++    final box = _transform.visibleWorld(canvas);
++    return Rect.fromLTRB(box.minX, box.minY, box.maxX, box.maxY);
++  }
++
++  @override
++  bool operator ==(Object other) =>
++      other is PlanCamera &&
++      other._m.a == _m.a &&
++      other._m.b == _m.b &&
++      other._m.c == _m.c &&
++      other._m.d == _m.d &&
++      other._m.e == _m.e &&
++      other._m.f == _m.f;
++
++  @override
++  int get hashCode => Object.hash(_m.a, _m.b, _m.c, _m.d, _m.e, _m.f);
++
++  @override
++  String toString() => 'PlanCamera(scale: $scale, '
++      'matrix: [${_m.a}, ${_m.b}, ${_m.c}, ${_m.d}, ${_m.e}, ${_m.f}])';
++}
+diff --git a/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart b/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
+index 8aec9a05..73bc806a 100644
+--- a/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
++++ b/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
+@@ -1,75 +1,136 @@
+ // The plan controller (spec 2a P1 services and lifetimes, P2 controller):
+ // the validated kit set, one design document and every system and view
+ // over it, the kit-facing services, the camera, the save point and the
+ // history flags, the changes. Ported from jet_cad_floor_plan's
+ // FloorPlanController, design half (see Task 8's Ports), and PlannerShell's
+ // construction of the views (planner_shell.dart:277-671).
+ import 'dart:async';
+-import 'dart:ui' show Locale, Offset, Rect, Size;
++import 'dart:ui' show Locale, Offset, PointerDeviceKind, Rect, Size;
+ 
+ import 'package:flutter/foundation.dart';
+ import 'package:flutter/scheduler.dart';
+ import 'package:flutter/widgets.dart' show FocusManager;
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import '../file/manifest.dart';
+ import '../file/plan_file.dart';
+ import '../file/plan_format_exception.dart';
+ import '../kits/guard.dart';
+ import '../kits/kit_set.dart';
+ import '../kits/locks.dart';
+ import '../l10n/document_separator.dart';
+ import '../l10n/strings.dart';
+ import '../export/page_flows.dart';
+ import '../export/page_printer.dart';
+ import '../export/registries.dart';
++import '../service/unit_picker.dart';
+ import '../shortcuts/tool_letters.dart';
+ import '../symbols/plan_symbol.dart';
+ import '../symbols/plan_symbol_loader.dart';
+ import '../tools/generic_tools.dart';
+ import '../tools/move_resolver.dart';
+ import '../tools/plan_select_gates.dart';
+ import '../tools/plan_symbol_tool.dart';
+ import '../units/unit_components.dart';
++import '../units/unit_detail.dart';
++import '../units/unit_fit.dart';
+ import '../units/unit_index.dart';
++import '../units/unit_label.dart' show unitLabelProblem;
++import '../units/unit_problems.dart' show UnitLabelWarning;
++import '../units/unit_writes.dart';
+ import 'camera_bounds.dart';
+ import 'new_plan.dart';
+ import 'permissions.dart';
++import 'plan_camera.dart';
+ import 'plan_change.dart';
+ import 'services.dart';
+ import 'session.dart';
+ import 'tool_settings_store.dart';
+ 
+ /// The thumbnail capacity of a controller's own cache (today's
+ /// `kFloorPlanThumbnailCapacity`).
+ const int kPlanThumbnailCapacity = 128;
+ 
+ /// A bump-only notifier: each [bump] is one request.
+ final class _Requests extends ChangeNotifier {
+   void bump() => notifyListeners();
+ }
+ 
++/// What a requested fit frames: a centring or some units.
++sealed class _FitTarget {
++  const _FitTarget();
++}
++
+ /// A queued centring (today's `_Centre`): [world] at the canvas's centre.
+-final class _Centre {
++final class _Centre extends _FitTarget {
+   const _Centre(this.world, this.scale, {required this.pageScale});
+ 
+   final Offset world;
+   final double? scale;
+ 
+   /// Asked with no [scale] before the plan's first fit: the page fit's
+   /// scale at the canvas's size.
+   final bool pageScale;
+ }
+ 
++/// A queued framing of the units carrying [labels] (today's `_Tables`,
++/// floor_plan_controller.dart:112-115), found again when it is performed.
++final class _Units extends _FitTarget {
++  const _Units(this.labels);
++  final Set<String> labels;
++}
++
++/// The public camera (today's `_CameraValue`, floor_plan_controller.dart:
++/// 128-155): one [PlanCamera] per camera value, made at the first read
++/// after a change. Listening is the camera controller's own.
++final class _PlanCameraValue implements ValueListenable<PlanCamera> {
++  _PlanCameraValue(this._camera);
++
++  final CameraController _camera;
++  ViewportTransform? _for;
++  PlanCamera? _value;
++
++  @override
++  PlanCamera get value {
++    final now = _camera.value;
++    if (!identical(now, _for)) {
++      _for = now;
++      _value = PlanCamera(now);
++    }
++    return _value!;
++  }
++
++  @override
++  void addListener(VoidCallback listener) => _camera.addListener(listener);
++
++  @override
++  void removeListener(VoidCallback listener) =>
++      _camera.removeListener(listener);
++}
++
++/// The design's units as last reported for `unitChanges` (today's
++/// `_DesignBaseline`, floor_plan_controller.dart:2180-2196): at the design
++/// while its index is the identical object.
++final class _UnitBaseline {
++  const _UnitBaseline(this.index, this.instances, this.details);
++
++  final UnitIndex index;
++  final List<Handle> instances;
++  final List<PlanUnitDetail> details;
++
++  bool isAt(UnitIndex now) => identical(index, now);
++}
++
+ final class _Host implements ServicesHost {
+   _Host(this._c);
+ 
+   final PlanController _c;
+ 
+   @override
+   DocumentSession get session => _c._session;
+ 
+   @override
+   CameraController get camera => _c.camera;
+@@ -561,25 +622,20 @@ class PlanController extends ChangeNotifier {
+ 
+   /// The locked objects: a missing kit's, an unknown type's, a broken
+   /// one's. Never the root.
+   ValueListenable<Set<Handle>> get locked => _locked;
+ 
+   /// Whether [handle] is locked: a locked object, inside one, or inside a
+   /// locked symbol's definition. The property panel shows no section for
+   /// it; the pickers refuse it.
+   bool isLocked(Handle handle) => _session.locks.covers(document, handle);
+ 
+-  /// The design document's units (spec 2b S2). Task 11 re-points it at the
+-  /// active document.
+-  @internal
+-  UnitIndex get unitIndex => _session.units.current;
+-
+   /// Locks [objects] in the middle of a session (spec P4: a type's code
+   /// failed, Task 11): adds them to the lock set, clears the undo history
+   /// so no earlier edit can be undone onto them, and tells the listeners.
+   @internal
+   void lockBroken(Set<Handle> objects) {
+     if (objects.isEmpty) return;
+     _session.locks.addBroken(document, objects);
+     document.commands.clearHistory();
+     _locked.value = _session.locks.objects;
+     // clearHistory emits no change: refresh the undo listenables here.
+@@ -667,20 +723,463 @@ class PlanController extends ChangeNotifier {
+         if (!_disposed) selectTool(planSelectToolId);
+       });
+ 
+   /// The type of [object] (E1), or null for anything that is not a live
+   /// object of a loaded kit's type.
+   PlanType<Component>? typeOf(Handle object) {
+     final typeId = catalog.typeIdOf(document, object);
+     return typeId == null ? null : kits.typeOf(typeId);
+   }
+ 
++  // ---------------------------------------------------------------------
++  // The unit API (spec 2b S3), design side (Task 9). Task 11 re-points the
++  // seams below to the service copy in service; every member that switches
++  // on the mode reads them.
++
++  /// The active document's units (Task 11: the copy's in service).
++  UnitIndexCache get _activeUnits => _session.units;
++
++  /// The active document (Task 11: the copy in service).
++  DraftDocument get _activeDocument => _session.document;
++
++  /// The active selection (Task 11: the copy's in service).
++  SelectionController get _activeSelection => _session.selection;
++
++  /// Whether the design is the active document (Task 11: the mode).
++  bool get _inDesign => true;
++
++  /// Throws a [StateError] naming [who] in service (Task 11): a design
++  /// write is refused there (spec S3). Nothing in design.
++  void _requireDesign(String who) {}
++
++  /// [labels], each label of a group replaced by its members in service
++  /// (Task 12). The labels as given in design.
++  Set<String> _expandLabels(Set<String> labels) => labels;
++
++  /// The active document's unit index (`@internal`): the panels, the
++  /// inspector and the tests read it.
++  @internal
++  UnitIndex get unitIndex => _activeUnits.current;
++
++  final ValueNotifier<int> _revision = ValueNotifier(0);
++
++  /// Moves whenever the active plan changes: an edit, an undo or a redo of
++  /// it, [load], [newPlan] (Task 11 adds the mode switch, Task 13 the reset
++  /// and the restore). A host re-reads [units] and [labelWarnings] on it.
++  ValueListenable<int> get revision => _revision;
++
++  late final _PlanCameraValue _cameraValue = _PlanCameraValue(camera);
++
++  /// Where the plan is on the canvas: a new [PlanCamera] at every pan, zoom
++  /// and fit; two reads with no camera change in between are identical.
++  ValueListenable<PlanCamera> get cameraValue => _cameraValue;
++
++  /// The global point that shows [world], or null with no canvas mounted.
++  Offset? worldToGlobal(Offset world) {
++    final rect = _canvasRect.value;
++    if (rect == null) return null;
++    return cameraValue.value.worldToCanvas(world) + rect.topLeft;
++  }
++
++  /// The world point shown at the global point [global], or null with no
++  /// canvas mounted.
++  Offset? globalToWorld(Offset global) {
++    final rect = _canvasRect.value;
++    if (rect == null) return null;
++    return cameraValue.value.canvasToWorld(global - rect.topLeft);
++  }
++
++  /// The active plan's units, ascending by instance, placed and generated
++  /// (a unit on a hidden layer is listed, [PlanUnit.visible] false).
++  List<PlanUnit> get units => [
++        for (final u in _activeUnits.current.units) _unitOf(u),
++      ];
++
++  static PlanUnit _unitOf(UnitInfo u) => PlanUnit(
++      label: u.text,
++      kind: u.kind,
++      capacity: u.capacity,
++      symbolKey: u.symbolKey,
++      visible: u.visible,
++      generatedBy: u.ownerType);
++
++  List<PlanUnitDetail>? _details;
++  List<Handle> _detailInstances = const [];
++  UnitIndex? _detailsIndex;
++
++  /// The active plan's units with their geometry (today's `tableDetails`,
++  /// floor_plan_controller.dart:1495-1514), ascending by instance like
++  /// [units], one per unit. Cached per unit index (a state, a layer or a
++  /// lock change makes a new one): two reads with nothing changed return
++  /// the identical, unmodifiable list.
++  List<PlanUnitDetail> get unitDetails {
++    final index = _activeUnits.current;
++    if (_details == null || !identical(index, _detailsIndex)) {
++      final instances = <Handle>[];
++      _details = _detailsOf(_activeDocument, index, instances);
++      _detailInstances = List.unmodifiable(instances);
++      _detailsIndex = index;
++    }
++    return _details!;
++  }
++
++  /// The instance of each entry of [unitDetails], index for index (the
++  /// inspector and the overlays key by it). Never a host's.
++  @internal
++  List<Handle> get unitDetailInstances {
++    unitDetails;
++    return _detailInstances;
++  }
++
++  /// [index]'s units of [d] joined to the picker's candidates by instance
++  /// (today's `_detailsOf`, :1527-1555), each instance added to
++  /// [instances] in the same order. O(nodes + entities), at document-change
++  /// rate.
++  List<PlanUnitDetail> _detailsOf(
++      DraftDocument d, UnitIndex index, List<Handle> instances) {
++    final candidates = {
++      for (final c in UnitPicker.candidatesOf(d, index,
++          boxes: <Handle, Aabb2>{}, leaves: d.leavesByOwner))
++        c.unit.instance: c,
++    };
++    final layers = d.tables.layers;
++    final details = <PlanUnitDetail>[];
++    for (final u in index.units) {
++      final node = d.tree[u.instance];
++      if (node is! InstanceNode) continue;
++      instances.add(u.instance);
++      final unit = _unitOf(u);
++      final layer = layers[node.layer]?.name ?? '';
++      final data = d.components.get<UnitData>(u.instance)?.data ??
++          const <String, String>{};
++      final colour = d.components.get<UnitColour>(u.instance)?.swatch;
++      final c = candidates[u.instance];
++      details.add(c == null
++          ? unitDetailWithoutGeometry(
++              unit: unit,
++              layer: layer,
++              locked: u.locked,
++              data: data,
++              colour: colour)
++          : unitDetailOf(
++              unit: unit,
++              transform: c.transform,
++              box: c.box,
++              corners: c.corners,
++              layer: layer,
++              locked: u.locked,
++              data: data,
++              colour: colour));
++    }
++    return List.unmodifiable(details);
++  }
++
++  /// The active plan's labelling problems (today's `numberingWarnings`):
++  /// duplicates by first appearance, then the unlabelled units, then the
++  /// bad labels (Task 6's order).
++  List<UnitLabelWarning> get labelWarnings => _activeUnits.current.warnings();
++
++  UnitPicker? _atPicker;
++  UnitIndex? _atIndex;
++
++  /// The label of the unit at [canvasPoint] (today's `tableAt`, :1792-
++  /// 1818): a point on its top, else in its symbol's box, the one drawn on
++  /// top among several; for a touch, failing both, the unit whose box is
++  /// nearest within a finger's reach (24 px). A unit on a hidden layer is
++  /// never found; a locked one is; an unlabelled one answers null.
++  String? unitAt(Offset canvasPoint,
++      {PointerDeviceKind kind = PointerDeviceKind.mouse}) {
++    final units = _activeUnits;
++    final index = units.current;
++    var picker = _atPicker;
++    if (picker == null ||
++        !identical(picker.units, units) ||
++        !identical(_atIndex, index)) {
++      picker = _atPicker = UnitPicker(_activeDocument, units);
++      _atIndex = index;
++    }
++    final cam = camera.value;
++    final world = cam.screenToWorld(Vector2(canvasPoint.dx, canvasPoint.dy));
++    final reach = kind == PointerDeviceKind.touch
++        ? kTouchPickRadiusPixels / cam.scale
++        : 0.0;
++    return picker.pick(world, reach: reach)?.text;
++  }
++
++  /// Selects every unit carrying one of [labels] that the selection can
++  /// hold -- visible, not locked -- replacing the selection (today's
++  /// `select`, :1834-1870). A label two units share selects both; an
++  /// unknown one is ignored. In design, placed units only (the design's
++  /// selection holds root objects).
++  void select(Set<String> labels) {
++    settlePendingInput();
++    _select(labels);
++  }
++
++  void _select(Set<String> labels) {
++    final index = _activeUnits.current;
++    final placedOnly = _inDesign;
++    final keys = <SelectionKey>[];
++    for (final l in _expandLabels(labels)) {
++      for (final u in index.withLabel(l)) {
++        if (placedOnly && u.generated) continue;
++        if (!u.visible || u.locked) continue;
++        keys.add(SelectionKey.root(u.instance));
++      }
++    }
++    _activeSelection.replace(keys);
++    _refreshSelected();
++  }
++
++  final ValueNotifier<Set<String>> _selectedUnits =
++      ValueNotifier(const <String>{});
++  final ValueNotifier<Set<String>> _editorSelected =
++      ValueNotifier(const <String>{});
++
++  /// The labels of the units selected in the design's editor (today's
++  /// `editorSelectedTables`, :796-800): the active selection's in design,
++  /// empty in service. Unmodifiable; it notifies only when the set changes.
++  ValueListenable<Set<String>> get editorSelectedUnits => _editorSelected;
++
++  /// The labels of the active selection's units (today's
++  /// `_refreshSelected`, :1921-1940).
++  void _refreshSelected() {
++    final index = _activeUnits.current;
++    final labels = <String>{
++      for (final k in _activeSelection.keys)
++        if (k.chain.isEmpty)
++          if (index[k.target]?.text case final t?) t,
++    };
++    if (!setEquals(labels, _selectedUnits.value)) {
++      _selectedUnits.value = Set.unmodifiable(labels);
++    }
++    final editor = _inDesign ? _selectedUnits.value : const <String>{};
++    if (!setEquals(editor, _editorSelected.value)) {
++      _editorSelected.value = editor;
++    }
++  }
++
++  /// Frames the units of the active plan carrying one of [labels] (today's
++  /// `fitToTables`, :2068-2093): labels trimmed, blanks dropped; a label
++  /// two units share frames both; a unit on a hidden layer is not framed,
++  /// a locked one is; an unlabelled unit never matches. The world framed is
++  /// the bound of each unit's box at its place, grown by [kUnitFitMarginMm]
++  /// per side and to at least [kUnitFitMinSpanMm] per axis. Returns whether
++  /// one such unit exists now; when none does, nothing changes. Not
++  /// document state.
++  bool fitToUnits(Set<String> labels) {
++    final wanted = Set<String>.unmodifiable({
++      for (final l in labels)
++        if (l.trim() case final t when t.isNotEmpty) t,
++    });
++    if (_unitsBounds(wanted) == null) return false;
++    _fitTarget = _Units(wanted);
++    _request();
++    return true;
++  }
++
++  Aabb2? _unitsBounds(Set<String> labels) {
++    final d = _activeDocument;
++    var box = Aabb2.empty();
++    for (final c in UnitPicker.candidatesOf(d, _activeUnits.current,
++        boxes: <Handle, Aabb2>{}, leaves: d.leavesByOwner)) {
++      if (labels.contains(c.unit.text)) box = box.union(c.worldBounds);
++    }
++    return box.isEmpty ? null : box;
++  }
++
++  /// Stores the host's [data] on the unit labelled [label] (today's
++  /// `setTableData`, :1593): one design edit, labelled "Unit data",
++  /// undoable, saved with the plan, read back as [PlanUnitDetail.data]. An
++  /// empty map removes the data. True when the unit's data is now [data];
++  /// false, changing nothing, when the trimmed [label] names no unit or
++  /// several, or a unit under a locked object (spec S3). A unit on a hidden
++  /// or locked layer takes data. Not gated by [permissions] (a host call).
++  /// A [StateError] in service; an [ArgumentError] outside the limits.
++  bool setUnitData(String label, Map<String, String> data) =>
++      setUnitsData({label: data});
++
++  /// [setUnitData] for several units, all or nothing, one undo step.
++  bool setUnitsData(Map<String, Map<String, String>> byLabel) {
++    _requireDesign('setUnitData');
++    final wanted = <String, UnitData?>{};
++    for (final MapEntry(key: label, value: data) in byLabel.entries) {
++      if (unitDataProblem(data) case final problem?) {
++        throw ArgumentError.value(data, 'data', problem);
++      }
++      wanted[label] = data.isEmpty ? null : UnitData(data);
++    }
++    return _setUnitComponents<UnitData>(wanted, 'Unit data');
++  }
++
++  /// Gives the unit labelled [label] the swatch [colour] (null removes it),
++  /// one "Unit colour" step (today's `setTableColor`, :1631), under
++  /// [setUnitData]'s rules.
++  bool setUnitColour(String label, PlanSwatch? colour) =>
++      setUnitsColour({label: colour});
++
++  /// [setUnitColour] for several units, all or nothing, one undo step.
++  bool setUnitsColour(Map<String, PlanSwatch?> byLabel) {
++    _requireDesign('setUnitColour');
++    return _setUnitComponents<UnitColour>({
++      for (final MapEntry(key: l, value: c) in byLabel.entries)
++        l: c == null ? null : UnitColour(c),
++    }, 'Unit colour');
++  }
++
++  /// The one path of the data and colour writes (today's
++  /// `_setTableComponents`, :1650-1673).
++  bool _setUnitComponents<T extends Component>(
++      Map<String, T?> wanted, String label) {
++    settlePendingInput();
++    final index = _session.units.current;
++    final doc = document;
++    final labels = <String>{};
++    final edits = <DraftCommand>[];
++    for (final MapEntry(key: raw, value: next) in wanted.entries) {
++      if (!labels.add(raw.trim())) return false;
++      final found = index.withLabel(raw);
++      if (found.length != 1) return false;
++      final instance = found.single.instance;
++      if (_session.locks.covers(doc, instance)) return false;
++      if (doc.components.get<T>(instance) == next) continue;
++      edits.add(SetComponentCommand<T>(instance, next));
++    }
++    return _runHostEdit(edits, label);
++  }
++
++  /// Executes [edits] as one step labelled [label], the engine's
++  /// permissions lifted (a host call is not gated, 2a P2); true with
++  /// nothing to do.
++  bool _runHostEdit(List<DraftCommand> edits, String label) {
++    if (edits.isEmpty) return true;
++    var applied = false;
++    _unrestricted(
++        () => applied = execute(CompoundCommand(edits, label: label)));
++    _refreshFlags();
++    return applied;
++  }
++
++  /// Makes [next] the label of the placed unit labelled [label] (spec S3):
++  /// one "Label" step. An [ArgumentError] when [next] breaks the text rule
++  /// (one to eight UTF-16 units, no control character, trimmed); false,
++  /// changing nothing, when [label] names no unit or several, a generated
++  /// unit (its type gives its label), a unit under a locked object, or when
++  /// another unit already holds [next]. A [StateError] in service.
++  bool setUnitLabel(String label, String next) => setUnitsLabel({label: next});
++
++  /// [setUnitLabel] for several units, all or nothing, one step: a [next]
++  /// is free when no unit outside the call holds it and no other entry
++  /// names it, so two units may swap their labels.
++  bool setUnitsLabel(Map<String, String> byLabel) {
++    _requireDesign('setUnitLabel');
++    for (final next in byLabel.values) {
++      if (unitLabelProblem(next) case final problem?) {
++        throw ArgumentError.value(next, 'next', 'not a label: $problem');
++      }
++    }
++    settlePendingInput();
++    final index = _session.units.current;
++    final doc = document;
++    final keys = <String>{};
++    final renamed = <Handle, String>{};
++    for (final MapEntry(key: raw, value: next) in byLabel.entries) {
++      if (!keys.add(raw.trim())) return false;
++      final found = index.withLabel(raw);
++      if (found.length != 1) return false;
++      final u = found.single;
++      if (u.generated || _session.locks.covers(doc, u.instance)) return false;
++      renamed[u.instance] = next.trim();
++    }
++    final taken = <String>{};
++    for (final MapEntry(key: h, value: next) in renamed.entries) {
++      if (!taken.add(next)) return false;
++      for (final other in index.withLabel(next)) {
++        if (other.instance != h && !renamed.containsKey(other.instance)) {
++          return false;
++        }
++      }
++    }
++    return _runHostEdit([
++      for (final MapEntry(key: h, value: next) in renamed.entries)
++        if (unitLabelCommand(doc, index[h]!, next) case final command?) command,
++    ], 'Label');
++  }
++
++  // ---- unitChanges (today's designChanges, :1680-1776) ----
++
++  late final StreamController<PlanUnitChange> _unitOut =
++      StreamController<PlanUnitChange>.broadcast(
++          onListen: _watchUnits, onCancel: _unwatchUnits);
++  late final Stream<PlanUnitChange> _unitStream =
++      _unitOut.stream.where((_) => !_disposed);
++  _UnitBaseline? _unitBaseline;
++  int _unitScans = 0;
++
++  /// How many times the design's units were read for [unitChanges].
++  @visibleForTesting
++  int get debugUnitScans => _unitScans;
++
++  /// The design's unit changes (spec S3), a broadcast stream: after every
++  /// design edit, undo or redo, the units added, removed and changed since
++  /// the last report, ascending by instance; matched by instance, so a
++  /// relabel is one [PlanUnitChanged] and a row edit one change per seat it
++  /// changed, an add or a remove per seat it grew or shrank. [load] and
++  /// [newPlan] report what is still owed, then [PlanUnitsReplaced] alone.
++  /// Nothing done in service is reported. Delivered asynchronously; nothing
++  /// is sent on listen; nothing is read while no one listens; closed by
++  /// [dispose].
++  Stream<PlanUnitChange> get unitChanges => _unitStream;
++
++  void _watchUnits() {
++    if (_disposed) return;
++    _unitBaseline = _unitsNow();
++  }
++
++  void _unwatchUnits() => _unitBaseline = null;
++
++  /// The design's units now: the cached [unitDetails] while the design is
++  /// active, else read from the design's own index.
++  _UnitBaseline _unitsNow() {
++    _unitScans++;
++    final cache = _session.units;
++    final index = cache.current;
++    if (identical(cache, _activeUnits)) {
++      return _UnitBaseline(index, unitDetailInstances, unitDetails);
++    }
++    final found = <Handle>[];
++    final details = _detailsOf(_session.document, index, found);
++    return _UnitBaseline(index, List.unmodifiable(found), details);
++  }
++
++  /// Reports what changed in the design since the baseline, and moves it.
++  void _reportUnits() {
++    final before = _unitBaseline;
++    if (before == null || _disposed || before.isAt(_session.units.current)) {
++      return;
++    }
++    final after = _unitBaseline = _unitsNow();
++    for (final change in diffUnitDetails(
++        before.instances, before.details, after.instances, after.details)) {
++      _unitOut.add(change);
++    }
++  }
++
++  /// A design change (its `commands.changes`): the flags, the revision
++  /// while the design is active, the selected labels, the unit changes.
++  void _onDesignChange() {
++    _refreshFlags();
++    if (_inDesign) _revision.value++;
++    _refreshSelected();
++    _reportUnits();
++  }
++
+   // ---------------------------------------------------------------------
+   // Opening and replacing documents.
+ 
+   void _open(DraftDocument document, FlutterTextMeasurer measurer,
+       List<Diagnostic> loadDiagnostics) {
+     _pendingDefinitions.clear();
+     _damaged.value = false;
+     _disabledTools.clear();
+     // The engine's permissions follow the profile, before any system is
+     // installed over the document (spec P2).
+@@ -727,22 +1226,23 @@ class PlanController extends ChangeNotifier {
+         lock: lockBroken,
+         damage: _damage);
+     session.lockExpander
+       ..onHookFailure = session.boundary.recover
+       ..onPartialMutation = session.boundary.partialMutation
+       ..onRefusedEdit = session.boundary.recoverRefused
+       ..onRetryFailed = session.boundary.retryFailed;
+     session.runKitFactories(kits, _services, _disabledTools);
+     session.tools.addListener(_onTools);
+     session.history = document.commands.changes.listen((_) {
+-      if (!_disposed) _refreshFlags();
++      if (!_disposed) _onDesignChange();
+     });
++    session.selection.addListener(_refreshSelected);
+     _loadDiagnostics = List.unmodifiable(loadDiagnostics);
+     _readManifest();
+     _tracker.attach(document);
+     // The load's checks (spec P4), once the views, the kit products and the
+     // manifest's diagnostics are in place: E4's unreadable components, then
+     // one dry run of the plan.
+     session.boundary.reportUnreadable(_loadDiagnostics);
+     session.boundary.probeLoaded();
+     _reportUnofferedKinds();
+   }
+@@ -764,24 +1264,33 @@ class PlanController extends ChangeNotifier {
+   /// [document] becomes the plan (spec P1 lifetimes): 1. the active tool
+   /// cancelled and select armed; the old plan's owed changes reported;
+   /// 2. the old document's kit products disposed; 3. the factories run
+   /// over the new document. The old views go after the next frame.
+   void _replace(DraftDocument document, FlutterTextMeasurer measurer,
+       {required bool unsettled, List<Diagnostic> loadDiagnostics = const []}) {
+     final old = _session;
+     old.tools.activate(old.toolById(planSelectToolId)!);
+     old.tools.removeListener(_onTools);
+     _tracker.detach();
++    _reportUnits();
++    old.selection.removeListener(_refreshSelected);
+     old.disposeKitProducts();
+     old.detach();
+     _open(document, measurer, loadDiagnostics);
+     _tracker.replaced();
++    if (_unitBaseline != null) {
++      _unitOut.add(const PlanUnitsReplaced());
++      _unitBaseline = _unitsNow();
++    }
++    _atPicker = null;
++    _refreshSelected();
++    _revision.value++;
+     _activeTool.value = planSelectToolId;
+     _savedState = document.commands.stateId;
+     _unsettled =
+         unsettled ? (document: document, at: document.commands.stateId) : null;
+     _encodedState = null;
+     _fitOnStart = true;
+     _fitTarget = null;
+     _placeNominally();
+     _refreshFlags();
+     _drop(old);
+@@ -1258,47 +1767,58 @@ class PlanController extends ChangeNotifier {
+   @internal
+   int get cameraEpoch => _cameraEpoch;
+ 
+   final _Requests _fits = _Requests();
+ 
+   @internal
+   Listenable get fitRequests => _fits;
+ 
+   bool _fitOnStart = true;
+   bool _fitPending = false;
+-  _Centre? _fitTarget;
++  _FitTarget? _fitTarget;
+ 
+   @internal
+   bool takeFitOnStart() {
+     final fit = _fitOnStart || _fitPending;
+     _fitOnStart = false;
+     return fit;
+   }
+ 
+   @internal
+   bool get owesFirstFit => _fitOnStart;
+ 
+   @internal
+   void fitted() => _fitPending = false;
+ 
+   /// The camera a fit sets in a canvas of [viewport]: null for the page,
+   /// else the queued centring. Not finite: none.
+   @internal
+   ViewportTransform? framingFor(Size viewport) {
+-    final target = _fitTarget;
+-    if (target == null) return null;
+-    final framing = _centred(
+-        target.world,
+-        target.pageScale
+-            ? _pageFit(document, viewport).worldToScreenMatrix.scaleMagnitude
+-            : target.scale,
+-        viewport);
++    final ViewportTransform framing;
++    switch (_fitTarget) {
++      case null:
++        return null;
++      case _Units(:final labels):
++        final box = _unitsBounds(labels);
++        if (box == null) return null;
++        framing =
++            frameUnits(box, viewport, minScale: _minScale, maxScale: _maxScale);
++      case _Centre(:final world, :final scale, :final pageScale):
++        framing = _centred(
++            world,
++            pageScale
++                ? _pageFit(_activeDocument, viewport)
++                    .worldToScreenMatrix
++                    .scaleMagnitude
++                : scale,
++            viewport);
++    }
+     final m = framing.worldToScreenMatrix;
+     return [m.a, m.b, m.c, m.d, m.e, m.f].every((v) => v.isFinite)
+         ? framing
+         : null;
+   }
+ 
+   ViewportTransform _centred(Offset world, double? scale, Size viewport) {
+     final m = camera.value.worldToScreenMatrix;
+     final k = scale == null ? 1.0 : scale / m.scaleMagnitude;
+     final a = m.a * k, b = m.b * k, c = m.c * k, d = m.d * k;
+@@ -1374,20 +1894,21 @@ class PlanController extends ChangeNotifier {
+   @override
+   void dispose() {
+     _disposed = true;
+     _tracker.detach();
+     for (final s in _dropped) {
+       s.dispose();
+     }
+     _dropped.clear();
+     final session = _session;
+     session.tools.removeListener(_onTools);
++    session.selection.removeListener(_refreshSelected);
+     session
+       ..disposeKitProducts()
+       ..detach()
+       ..dispose();
+     if (_ownsThumbnails) thumbnails.dispose();
+     if (_ownsSymbolLoader) _symbolLoader.dispose();
+     _armed.dispose();
+     toolSettings.dispose();
+     _diagnostics.dispose();
+     _locale.dispose();
+@@ -1395,20 +1916,25 @@ class PlanController extends ChangeNotifier {
+     _dirty.dispose();
+     _canUndo.dispose();
+     _canRedo.dispose();
+     _activeTool.dispose();
+     _fill.dispose();
+     _locked.dispose();
+     lockHint.dispose();
+     _damaged.dispose();
+     _canvasRect.dispose();
+     _fits.dispose();
++    _revision.dispose();
++    _selectedUnits.dispose();
++    _editorSelected.dispose();
++    _unitBaseline = null;
+     _snap.dispose();
+     _snapping.dispose();
+     _userSnap.dispose();
+     camera.dispose();
+     _settles.clear();
+     pageFlows.dispose();
+     unawaited(_out.close());
++    unawaited(_unitOut.close());
+     super.dispose();
+   }
+ }
+diff --git a/packages/jet_cad_2d_plan/lib/src/units/unit_detail.dart b/packages/jet_cad_2d_plan/lib/src/units/unit_detail.dart
+new file mode 100644
+index 00000000..19bed6c9
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/units/unit_detail.dart
+@@ -0,0 +1,320 @@
++// A unit for an embedding host (spec 2b S3 "The unit API"): what the
++// controller lists (PlanUnit), with its geometry, layer, lock and the
++// host's data and colour (PlanUnitDetail), and the design's unit changes
++// (PlanUnitChange). Ported from jet_cad_floor_plan's FloorPlanTable
++// (host/floor_plan_types.dart:17-58), FloorPlanTableDetail and its builders
++// (host/table_detail.dart) and the design changes (host/design_changes.dart).
++// Never a handle (umbrella D18).
++import 'dart:math' as math;
++
++import 'package:flutter/foundation.dart';
++import 'package:flutter/widgets.dart' show Offset, Size;
++import 'package:jet_cad_2d/jet_cad_2d.dart' show Aabb2, Handle, Transform2;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show PlanSwatch;
++
++/// One unit of the active plan, as a host sees it: never a handle.
++@immutable
++final class PlanUnit {
++  const PlanUnit(
++      {required this.label,
++      required this.kind,
++      required this.capacity,
++      required this.symbolKey,
++      this.visible = true,
++      this.generatedBy});
++
++  /// The unit's label, trimmed, or null while it has none.
++  final String? label;
++
++  /// Its kind (`table`, `seat`, a kit's own): its definition's.
++  final String kind;
++
++  /// How many it serves: its definition's.
++  final int capacity;
++
++  /// The library key of its symbol, or null for a hand-made one.
++  final String? symbolKey;
++
++  /// Whether its layer is shown: false for a unit on a hidden layer, which
++  /// the view neither shows nor lets anyone pick.
++  final bool visible;
++
++  /// The type id of the object that generates it (a seat's row), or null
++  /// for a placed unit.
++  final String? generatedBy;
++
++  @override
++  bool operator ==(Object other) =>
++      other is PlanUnit &&
++      other.label == label &&
++      other.kind == kind &&
++      other.capacity == capacity &&
++      other.symbolKey == symbolKey &&
++      other.visible == visible &&
++      other.generatedBy == generatedBy;
++
++  @override
++  int get hashCode =>
++      Object.hash(label, kind, capacity, symbolKey, visible, generatedBy);
++
++  @override
++  String toString() => 'PlanUnit($label, $kind, $capacity, $symbolKey, '
++      'visible: $visible${generatedBy == null ? '' : ', generatedBy: $generatedBy'})';
++}
++
++/// One unit of the active plan with its geometry (today's
++/// `FloorPlanTableDetail`, table_detail.dart:14-124), as
++/// `PlanController.unitDetails` lists it. World coordinates are
++/// millimetres with y up. A unit's placement (its world transform: group ×
++/// instance for a generated one) is read as `R(rotation) · diag(sx, sy)`
++/// with `sx > 0`: [mirrored] means `sy < 0`. A unit the planner neither
++/// shows nor picks -- on a hidden layer, or a placement that is singular or
++/// has a corner that is not finite -- reports no geometry: [center] and
++/// [size] null, [corners] empty, [rotation] 0 and [mirrored] false.
++@immutable
++final class PlanUnitDetail {
++  const PlanUnitDetail({
++    required this.unit,
++    required this.center,
++    required this.size,
++    required this.rotation,
++    required this.mirrored,
++    required this.corners,
++    required this.layer,
++    required this.locked,
++    this.data = const <String, String>{},
++    this.colour,
++  });
++
++  final PlanUnit unit;
++
++  /// The centre of the symbol's bounding box in the world.
++  final Offset? center;
++
++  /// The symbol box's width and height in world millimetres.
++  final Size? size;
++
++  /// The unit's turn, radians, counter-clockwise (y up), in `(-π, π]`.
++  final double rotation;
++
++  /// Whether the placement mirrors (its determinant is negative).
++  final bool mirrored;
++
++  /// The symbol box's four corners in the world, counter-clockwise (y up)
++  /// whatever the mirror, starting at the image of the box's (min x, min
++  /// y) corner. Unmodifiable as the controller lists it.
++  final List<Offset> corners;
++
++  /// The name of the instance's layer (a generated unit's is its object's);
++  /// empty when the layer is missing from the plan's layers.
++  final String layer;
++
++  /// Whether the unit is locked (`isLockedUnit`: a locked layer, or a
++  /// frozen or a missing kit's object or symbol): tapped and reported,
++  /// never selected or moved.
++  final bool locked;
++
++  /// The host's data on the unit, keys ascending, unmodifiable. Empty for
++  /// a unit with none, and for one whose stored data is outside the limits
++  /// (kept as read, never refused).
++  final Map<String, String> data;
++
++  /// The unit's colour, or null for none and for a stored name this
++  /// release cannot read (kept as read).
++  final PlanSwatch? colour;
++
++  @override
++  bool operator ==(Object other) =>
++      other is PlanUnitDetail &&
++      other.unit == unit &&
++      other.center == center &&
++      other.size == size &&
++      other.rotation == rotation &&
++      other.mirrored == mirrored &&
++      listEquals(other.corners, corners) &&
++      other.layer == layer &&
++      other.locked == locked &&
++      mapEquals(other.data, data) &&
++      other.colour == colour;
++
++  @override
++  int get hashCode => Object.hash(
++      unit,
++      center,
++      size,
++      rotation,
++      mirrored,
++      Object.hashAll(corners),
++      layer,
++      locked,
++      Object.hashAllUnordered(
++          [for (final e in data.entries) Object.hash(e.key, e.value)]),
++      colour);
++
++  @override
++  String toString() => 'PlanUnitDetail($unit, center: $center, '
++      'size: $size, rotation: $rotation, mirrored: $mirrored, '
++      'corners: $corners, layer: $layer, locked: $locked, data: $data'
++      '${colour == null ? '' : ', colour: $colour'})';
++}
++
++/// The detail of [unit], placed by [transform] over the symbol box [box],
++/// whose world corners are [corners] (`x0, y0, ..., x3, y3`, as
++/// `UnitCandidate` carries them). table_detail.dart:132-167.
++PlanUnitDetail unitDetailOf(
++    {required PlanUnit unit,
++    required Transform2 transform,
++    required Aabb2 box,
++    required Float64List corners,
++    required String layer,
++    required bool locked,
++    Map<String, String> data = const <String, String>{},
++    PlanSwatch? colour}) {
++  final m = transform;
++  var rotation = math.atan2(m.b, m.a);
++  if (rotation <= -math.pi) rotation += 2 * math.pi;
++  if (rotation == 0) rotation = 0.0;
++  final mirrored = m.determinant < 0;
++  final cx = (box.minX + box.maxX) / 2, cy = (box.minY + box.maxY) / 2;
++  Offset at(int i) => Offset(corners[2 * i], corners[2 * i + 1]);
++  return PlanUnitDetail(
++    unit: unit,
++    center: Offset(m.a * cx + m.c * cy + m.e, m.b * cx + m.d * cy + m.f),
++    size: Size((box.maxX - box.minX) * math.sqrt(m.a * m.a + m.b * m.b),
++        (box.maxY - box.minY) * math.sqrt(m.c * m.c + m.d * m.d)),
++    rotation: rotation,
++    mirrored: mirrored,
++    corners: List.unmodifiable(
++        mirrored ? [at(0), at(3), at(2), at(1)] : [at(0), at(1), at(2), at(3)]),
++    layer: layer,
++    locked: locked,
++    data: data,
++    colour: colour,
++  );
++}
++
++/// The detail of a unit that reports no geometry (table_detail.dart:
++/// 169-188).
++PlanUnitDetail unitDetailWithoutGeometry(
++        {required PlanUnit unit,
++        required String layer,
++        required bool locked,
++        Map<String, String> data = const <String, String>{},
++        PlanSwatch? colour}) =>
++    PlanUnitDetail(
++        unit: unit,
++        center: null,
++        size: null,
++        rotation: 0,
++        mirrored: false,
++        corners: const <Offset>[],
++        layer: layer,
++        locked: locked,
++        data: data,
++        colour: colour);
++
++/// One change of the design's units (today's `FloorPlanDesignChange`), as
++/// `PlanController.unitChanges` reports it.
++@immutable
++sealed class PlanUnitChange {
++  const PlanUnitChange();
++}
++
++/// A unit now in the design that was not: placed, generated by a grown
++/// row, or a delete undone (then [unit] equals the [PlanUnitRemoved.unit]
++/// the delete reported, its data included).
++final class PlanUnitAdded extends PlanUnitChange {
++  const PlanUnitAdded(this.unit);
++  final PlanUnitDetail unit;
++
++  @override
++  bool operator ==(Object other) =>
++      other is PlanUnitAdded && other.unit == unit;
++
++  @override
++  int get hashCode => Object.hash(PlanUnitAdded, unit);
++
++  @override
++  String toString() => 'PlanUnitAdded($unit)';
++}
++
++/// A unit no longer in the design: deleted, dropped by a shrunk row, or
++/// its placement undone.
++final class PlanUnitRemoved extends PlanUnitChange {
++  const PlanUnitRemoved(this.unit);
++  final PlanUnitDetail unit;
++
++  @override
++  bool operator ==(Object other) =>
++      other is PlanUnitRemoved && other.unit == unit;
++
++  @override
++  int get hashCode => Object.hash(PlanUnitRemoved, unit);
++
++  @override
++  String toString() => 'PlanUnitRemoved($unit)';
++}
++
++/// One unit whose detail changed: its label, kind, capacity, symbol,
++/// geometry, layer, lock, visibility, data or colour. [before] and [after]
++/// are the same unit (the same instance), whatever its label reads.
++final class PlanUnitChanged extends PlanUnitChange {
++  const PlanUnitChanged(this.before, this.after);
++  final PlanUnitDetail before;
++  final PlanUnitDetail after;
++
++  @override
++  bool operator ==(Object other) =>
++      other is PlanUnitChanged &&
++      other.before == before &&
++      other.after == after;
++
++  @override
++  int get hashCode => Object.hash(PlanUnitChanged, before, after);
++
++  @override
++  String toString() => 'PlanUnitChanged($before, $after)';
++}
++
++/// The design was replaced whole (`load`, `newPlan`): a host reads
++/// `unitDetails` again.
++final class PlanUnitsReplaced extends PlanUnitChange {
++  const PlanUnitsReplaced();
++
++  @override
++  bool operator ==(Object other) => other is PlanUnitsReplaced;
++
++  @override
++  int get hashCode => (PlanUnitsReplaced).hashCode;
++
++  @override
++  String toString() => 'PlanUnitsReplaced()';
++}
++
++/// The changes from [before] to [after] (design_changes.dart:101-129), each
++/// list ascending by instance with [beforeInstances] and [afterInstances]
++/// naming each entry's instance index for index. O(before + after).
++List<PlanUnitChange> diffUnitDetails(
++    List<Handle> beforeInstances,
++    List<PlanUnitDetail> before,
++    List<Handle> afterInstances,
++    List<PlanUnitDetail> after) {
++  final out = <PlanUnitChange>[];
++  var i = 0, j = 0;
++  while (i < before.length || j < after.length) {
++    final a = i < before.length ? beforeInstances[i].value : null;
++    final b = j < after.length ? afterInstances[j].value : null;
++    if (b == null || (a != null && a < b)) {
++      out.add(PlanUnitRemoved(before[i++]));
++    } else if (a == null || b < a) {
++      out.add(PlanUnitAdded(after[j++]));
++    } else {
++      if (before[i] != after[j]) {
++        out.add(PlanUnitChanged(before[i], after[j]));
++      }
++      i++;
++      j++;
++    }
++  }
++  return out;
++}
+diff --git a/packages/jet_cad_2d_plan/lib/src/units/unit_fit.dart b/packages/jet_cad_2d_plan/lib/src/units/unit_fit.dart
+new file mode 100644
+index 00000000..796ecfee
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/units/unit_fit.dart
+@@ -0,0 +1,64 @@
++// Framing units (zone spec Z3; 2b S3, ported from jet_cad_floor_plan
++// host/table_fit.dart): the camera a framing sets, from the bound of the
++// units' boxes and the drawing area's size. Pure: no document, no
++// controller.
++import 'dart:ui' show Size;
++
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
++    show ViewportTransform;
++
++import '../controller/camera_bounds.dart' show kPlanMaxScale, kPlanMinScale;
++
++/// The floor a framing shows round its units, per side, in millimetres:
++/// an aisle, and the group frame (150 mm) at any zoom (zone spec Z3).
++const double kUnitFitMarginMm = 500;
++
++/// The least span a framing shows on each axis, in millimetres: 3 m of
++/// floor round one unit, never a poster of it (zone spec Z3).
++const double kUnitFitMinSpanMm = 3000;
++
++/// The camera that frames [box], a non-empty world bound of units, in a
++/// drawing area of [viewport] (zone spec Z3): [box] grown by
++/// [kUnitFitMarginMm] per side, then about its centre to at least
++/// [kUnitFitMinSpanMm] per axis, fitted as [ViewportTransform.fit] fits
++/// (5 % margin, y flipped), its scale clamped to `[minScale, maxScale]`
++/// (by default the planner's own, `[kPlanMinScale, kPlanMaxScale]`; a
++/// controller passes its bounds, host embedding API spec G-3) about the
++/// same centre.
++///
++/// The centre is taken as `min / 2 + max / 2`, which cannot overflow where
++/// `(min + max) / 2` would (Task 1 review R-1: a unit near the double
++/// range); halving is exact, so elsewhere the two are the same number.
++ViewportTransform frameUnits(Aabb2 box, Size viewport,
++    {double minScale = kPlanMinScale, double maxScale = kPlanMaxScale}) {
++  assert(!box.isEmpty, 'frameUnits needs a non-empty box');
++  var minX = box.minX - kUnitFitMarginMm, maxX = box.maxX + kUnitFitMarginMm;
++  var minY = box.minY - kUnitFitMarginMm, maxY = box.maxY + kUnitFitMarginMm;
++  final cx = minX / 2 + maxX / 2, cy = minY / 2 + maxY / 2;
++  if (maxX - minX < kUnitFitMinSpanMm) {
++    minX = cx - kUnitFitMinSpanMm / 2;
++    maxX = cx + kUnitFitMinSpanMm / 2;
++  }
++  if (maxY - minY < kUnitFitMinSpanMm) {
++    minY = cy - kUnitFitMinSpanMm / 2;
++    maxY = cy + kUnitFitMinSpanMm / 2;
++  }
++  // The fit's scale; its translation is built here, about the safe
++  // centre, since `ViewportTransform.fit` takes `(min + max) / 2`.
++  final s = ViewportTransform.fit(Aabb2.raw(minX, minY, maxX, maxY), viewport)
++      .worldToScreenMatrix
++      .a;
++  // The clamp is dead in practice (a 316,000 px view, a 950 m box), and
++  // harmless: the same centre at the bound's scale.
++  final clamped = s.clamp(minScale, maxScale);
++  final mx = minX / 2 + maxX / 2, my = minY / 2 + maxY / 2;
++  return ViewportTransform(
++      worldToScreenMatrix: Transform2(
++          clamped,
++          0,
++          0,
++          -clamped,
++          viewport.width / 2 - clamped * mx,
++          viewport.height / 2 + clamped * my));
++}
+diff --git a/packages/jet_cad_2d_plan/lib/src/units/unit_writes.dart b/packages/jet_cad_2d_plan/lib/src/units/unit_writes.dart
+new file mode 100644
+index 00000000..2fdaff88
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/units/unit_writes.dart
+@@ -0,0 +1,27 @@
++// The one command that gives a placed unit a label (spec 2b S2 "The
++// label", S3 setUnitLabel; Task 10's unit section): the label ATTRIB's
++// text when the unit has one, its own tag passed back (a blank tag would
++// lose it), else a new UNIT ATTRIB stamped as the placer stamps a numbered
++// unit's (today's _writeNumber and addTableLabelCommand,
++// selection_panel.dart:663-683, tables/table_label.dart:105-153).
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show kUnitLabelTag;
++
++import 'unit_index.dart';
++import 'unit_label.dart' show addUnitLabelCommand;
++
++/// The command that makes [text] the label of the placed unit [unit] of
++/// [doc], or null when [text] already is its label (compared trimmed, as
++/// the label reads). Allocates one handle for a new label. The caller has
++/// checked the text rule and that no other unit holds [text].
++DraftCommand? unitLabelCommand(DraftDocument doc, UnitInfo unit, String text) {
++  if ((unit.text ?? '') == text.trim()) return null;
++  final label = unit.label;
++  if (label != null) return SetEntityTextCommand(label, text, kUnitLabelTag);
++  final node = doc.tree[unit.instance]! as InstanceNode;
++  return addUnitLabelCommand(doc,
++      instance: unit.instance,
++      definition: node.definition,
++      placement: node.transform,
++      text: text);
++}
+diff --git a/packages/jet_cad_2d_plan/test/barrel_test.dart b/packages/jet_cad_2d_plan/test/barrel_test.dart
+index 6cbd1938..cdf55c22 100644
+--- a/packages/jet_cad_2d_plan/test/barrel_test.dart
++++ b/packages/jet_cad_2d_plan/test/barrel_test.dart
+@@ -54,20 +54,24 @@ void main() {
+       'PlanPropertyPanel', 'PlanLayerPanel', 'PlanPagePanel',
+       // Task 19
+       'PlanExport', 'PlanExportAnswer', 'PlanExportChoice', 'PlanExportDpi',
+       'PlanExportFonts', 'PlanExportRequest', 'PlanExporter', 'PlanImporter',
+       'PlanPageExporter', 'PlanExportDialog', 'PagePrinter',
+       'PrintingPagePrinter',
+       // Task 20
+       'PlanEditor', 'PlanEditorBar', 'PlanEditorAction', 'PlanFileCallback',
+       // 2b Task 8
+       'isUnitSymbol',
++      // 2b Task 9
++      'BadLabel', 'DuplicateLabel', 'PlanCamera', 'PlanUnit', 'PlanUnitAdded',
++      'PlanUnitChange', 'PlanUnitChanged', 'PlanUnitDetail', 'PlanUnitRemoved',
++      'PlanUnitsReplaced', 'Unlabelled', 'UnitLabelProblem', 'UnitLabelWarning',
+     });
+   });
+ 
+   testWidgets('ED-9b the editor\'s names, through the barrel alone',
+       (tester) async {
+     final c = PlanController(kits: const []);
+     addTearDown(c.dispose);
+     PlanExport? last;
+     const PagePrinter printer = PrintingPagePrinter();
+     await tester.pumpWidget(MaterialApp(
+diff --git a/packages/jet_cad_2d_plan/test/controller/non_finite_unit_test.dart b/packages/jet_cad_2d_plan/test/controller/non_finite_unit_test.dart
+new file mode 100644
+index 00000000..b6133be3
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/controller/non_finite_unit_test.dart
+@@ -0,0 +1,66 @@
++// Ported from jet_cad_floor_plan test/host/non_finite_table_test.dart (2b
++// Task 9): the embedding fixture's unit `9`, scaled (1e306, 1e-306), has no
++// finite corner. Today's header follows.
++//
++// O-11 (host embedding API spec, Open items): the embedding fixture's table
++// `9`, scaled (1e306, 1e-306), has no finite corner. Selecting it in the
++// design view used to trip `Canvas.drawLine`'s NaN assertion in the
++// selection overlay's rotation grip; a PDF of a plan holding it (Export →
++// PDF and Print both write `exportPdfBytes`) tripped the pdf package's
++// `!value.isNaN` through its label's residual. The render package skips
++// what is not finite (`non_finite_selection_test.dart`, the PDF sink's
++// O-11 tests); these run the whole planner on the whole fixture.
++import 'dart:io';
++
++import 'package:flutter/material.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_flutter/export_testing.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++
++import '../support/unit_embedding_fixture.dart';
++import '../support/unit_fixtures.dart' show fxKit;
++
++/// The content stream of the PDF the built-in exporter writes for [json]'s
++/// plan.
++Future<List<String>> pdfOperators(String json) async {
++  final c = PlanController(kits: [fxKit()], json: json);
++  addTearDown(c.dispose);
++  final export = await c.export('plan.pdf', PlanExportChoice.initial);
++  final content = PdfContent.parse(export!.bytes, inflate: zlib.decode);
++  return [for (final o in content.operators) o.toString()];
++}
++
++void main() {
++  testWidgets(
++      'NT1 table 9 selected in the design view, alone and beside table 1, '
++      'paints without an assertion', (tester) async {
++    final c = PlanController(kits: [fxKit()], json: embeddingPlanJson());
++    addTearDown(c.dispose);
++    await tester.binding.setSurfaceSize(const Size(1440, 900));
++    addTearDown(() => tester.binding.setSurfaceSize(null));
++    await tester.pumpWidget(
++        MaterialApp(home: Scaffold(body: PlanEditor(controller: c))));
++    await tester.pump();
++    await tester.pump();
++
++    c.select({'9'});
++    await tester.pump();
++    expect(c.editorSelectedUnits.value, {'9'});
++
++    c.select({'9', '1'});
++    await tester.pump();
++    expect(c.editorSelectedUnits.value, {'9', '1'});
++  });
++
++  testWidgets(
++      'NT2 the PDF of the whole fixture is the PDF of the fixture without '
++      'table 9, operator for operator', (tester) async {
++    final whole =
++        (await tester.runAsync(() => pdfOperators(embeddingPlanJson())))!;
++    final finite = (await tester.runAsync(() => pdfOperators(
++        embeddingPlanJson(tables: embeddingTables.where((t) => t.finite)))))!;
++    expect(finite.where((o) => o.endsWith(' TJ')), isNotEmpty,
++        reason: 'premise: the other tables\' labels are written');
++    expect(whole, finite);
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/controller/unit_camera_test.dart b/packages/jet_cad_2d_plan/test/controller/unit_camera_test.dart
+new file mode 100644
+index 00000000..454e49da
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/controller/unit_camera_test.dart
+@@ -0,0 +1,271 @@
++// Ported from jet_cad_floor_plan test/host/camera_test.dart (2b Task 9,
++// spec S3 "The unit API": cameraValue, worldToGlobal, globalToWorld,
++// fitToUnits): CM1, CM2, CM3, CM7 and CR2. CM4-CM6 and CM15 are 2a's
++// (camera_test.dart); the others have no unit premise. Today's header
++// follows.
++//
++// Host embedding API spec, Slice 1, G-2 and G-3: the public camera
++// (`PlanCamera`, `PlanController.camera`), the canvas's place on
++// the screen (`canvasRect`, `worldToGlobal`, `globalToWorld`), the zoom
++// bounds and the fits clamped to them, the camera epoch, the commands
++// (`panBy`, `zoomBy`, `centerOn`) and `FloorPlanView.userCamera`, over the
++// shared non-degenerate fixture (embedding_fixture): tables 40 m off the
++// origin, a panned camera at 0.37 px/mm. Expectations are computed here by
++// the forward transform, never read back from the code under test.
++import 'dart:math' as math;
++
++import 'package:flutter/material.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++
++import '../support/unit_embedding_fixture.dart';
++import '../support/unit_fixtures.dart' show fxKit;
++
++/// A controller over the fixture (today's defaulted to the selection mode;
++/// the service mode is Task 11's: the design here).
++PlanController controller({double? minScale, double? maxScale}) {
++  final c = PlanController(
++      kits: [fxKit()],
++      json: embeddingPlanJson(),
++      minScale: minScale ?? 0.001,
++      maxScale: maxScale ?? 100);
++  addTearDown(c.dispose);
++  return c;
++}
++
++/// The host's canvas of [c], 1440 x 856 logical pixels at the top left of
++/// a 1440 x 900 window, no rulers (today's selection-mode canvas size).
++Widget hostOf(PlanController c) => MaterialApp(
++    home: Scaffold(
++        body: Align(
++            alignment: Alignment.topLeft,
++            child: SizedBox(
++                width: 1440,
++                height: 856,
++                child: PlanCanvas(controller: c, rulers: false)))));
++
++Future<void> mount(WidgetTester tester, PlanController c) async {
++  await tester.binding.setSurfaceSize(const Size(1440, 900));
++  addTearDown(() => tester.binding.setSurfaceSize(null));
++  await tester.pumpWidget(hostOf(c));
++  await tester.pump();
++  await tester.pump();
++}
++
++List<double> parts(ViewportTransform t) {
++  final m = t.worldToScreenMatrix;
++  return [m.a, m.b, m.c, m.d, m.e, m.f];
++}
++
++/// [t] panned by [d], by hand.
++List<double> panned(ViewportTransform t, Offset d) {
++  final m = t.worldToScreenMatrix;
++  return [m.a, m.b, m.c, m.d, m.e + d.dx, m.f + d.dy];
++}
++
++/// World [x], [y] through [t].
++Offset world(Transform2 t, double x, double y) =>
++    Offset(t.a * x + t.c * y + t.e, t.b * x + t.d * y + t.f);
++
++/// [table]'s box centre in the world, from the fixture.
++Offset centreOfTable(EmbeddingTable table) => world(
++    table.transform,
++    (embeddingBox.minX + embeddingBox.maxX) / 2,
++    (embeddingBox.minY + embeddingBox.maxY) / 2);
++
++/// The first table numbered [number]'s box centre in the world.
++Offset centreOf(String number) =>
++    centreOfTable(embeddingTables.firstWhere((t) => t.number == number));
++
++/// The page's centre in the world: the fixture's page, A4 landscape at
++/// 1:50 from (37,000, -36,200).
++const Offset pageCentre = Offset(37000 + 14850 / 2, -36200 + 10500 / 2);
++
++Rect canvasOnScreen(WidgetTester tester) =>
++    tester.getRect(find.byType(InteractionLayer));
++
++/// Within 1e-6 px of [want] (screen).
++void expectPixel(Offset got, Offset want, String reason) {
++  expect(got.dx, closeTo(want.dx, 1e-6), reason: '$reason: x');
++  expect(got.dy, closeTo(want.dy, 1e-6), reason: '$reason: y');
++}
++
++/// Within a relative 1e-12 of [want] (geometry).
++Matcher near(double want) => closeTo(want, 1e-12 * math.max(want.abs(), 1.0));
++
++Offset canvasOfCamera(ViewportTransform t, Offset w) {
++  final p = canvasOf(t, w.dx, w.dy);
++  return Offset(p.x, p.y);
++}
++
++void main() {
++  test(
++      'CM1 PlanCamera maps world to canvas and back by the transform, '
++      'y flipped, and reads its scale and visible world (M-H5)', () {
++    final t = embeddingCamera();
++    final camera = PlanCamera(t);
++    expect(camera.scale, closeTo(0.37, 1e-15));
++    for (final table in embeddingTables.where((t) => t.finite)) {
++      final w = centreOfTable(table);
++      final want = canvasOfCamera(t, w);
++      expectPixel(camera.worldToCanvas(w), want, 'table ${table.number}');
++      final back = camera.canvasToWorld(want);
++      expect(back.dx, near(w.dx), reason: 'table ${table.number}: x back');
++      expect(back.dy, near(w.dy), reason: 'table ${table.number}: y back');
++    }
++    // The canvas's corners by the inverse, by hand: x = (px - e) / 0.37,
++    // y = (py - f) / -0.37.
++    const size = Size(1440, 856);
++    final visible = camera.visibleWorld(size);
++    expect(visible.left, near((0 + 14612.25) / 0.37));
++    expect(visible.right, near((1440 + 14612.25) / 0.37));
++    expect(visible.top, near((856 + 9431.5) / -0.37), reason: 'least y');
++    expect(visible.bottom, near((0 + 9431.5) / -0.37));
++  });
++
++  test('CM2 two cameras are equal by their matrices, exactly', () {
++    final a = PlanCamera(embeddingCamera());
++    final b = PlanCamera(embeddingCamera());
++    final moved = PlanCamera(ViewportTransform(
++        worldToScreenMatrix:
++            const Transform2(0.37, 0, 0, -0.37, -14612.25, -9431.25)));
++    expect(identical(a, b), isFalse);
++    expect(a, b);
++    expect(a.hashCode, b.hashCode);
++    expect(a == moved, isFalse);
++    expect(
++        a.toString(),
++        'PlanCamera(scale: ${a.scale}, matrix: [0.37, 0.0, 0.0, -0.37, '
++        '-14612.25, -9431.5])');
++  });
++
++  testWidgets(
++      'CM3 controller.camera: one value per camera position, identical '
++      'between reads, new and heard on a change', (tester) async {
++    final c = controller();
++    c.camera.value = embeddingCamera();
++    final first = c.cameraValue.value;
++    expect(identical(c.cameraValue.value, first), isTrue);
++    expect(first, PlanCamera(embeddingCamera()));
++    var heard = 0;
++    void listener() => heard++;
++    c.cameraValue.addListener(listener);
++    c.camera.panBy(const Offset(12.5, -3.25));
++    expect(heard, 1);
++    final second = c.cameraValue.value;
++    expect(identical(second, first), isFalse);
++    expect(identical(c.cameraValue.value, second), isTrue);
++    expectPixel(
++        second.worldToCanvas(centreOf('1')),
++        canvasOfCamera(embeddingCamera(), centreOf('1')) +
++            const Offset(12.5, -3.25),
++        'panned');
++    c.cameraValue.removeListener(listener);
++    c.camera.panBy(const Offset(1, 1));
++    expect(heard, 1);
++  });
++
++  testWidgets(
++      'CM7 every fit is clamped to the bounds about the canvas centre: the '
++      'nominal placement, the start fit, fitToView, fitToUnits (M-H6b)',
++      (tester) async {
++    final c = controller(maxScale: 0.01);
++    expect(c.camera.value.scale, lessThanOrEqualTo(0.01 + 1e-15),
++        reason: 'the nominal placement');
++    final sheet = sheetWorldRect(
++        c.document.components.get<PageComponent>(c.document.rootHandle)!);
++    expect([
++      sheet.minX,
++      sheet.minY,
++      sheet.maxX,
++      sheet.maxY
++    ], [
++      37000,
++      -36200,
++      51850,
++      -25700
++    ], reason: 'premise: the page');
++    await mount(tester, c);
++    final centre = c.canvasRect.value!.size.center(Offset.zero);
++    // Premise: unclamped, the page fit is 0.95 * 856 / 10500 = 0.077 px/mm.
++    expect(c.canvasRect.value!.size, const Size(1440, 856));
++    expect(c.cameraValue.value.scale, closeTo(0.01, 1e-15),
++        reason: 'start fit');
++    expectPixel(
++        c.cameraValue.value.worldToCanvas(pageCentre), centre, 'start fit');
++
++    c.camera.value = embeddingCamera();
++    c.fitToView();
++    await tester.pump();
++    expect(c.cameraValue.value.scale, closeTo(0.01, 1e-15),
++        reason: 'fitToView');
++    expectPixel(
++        c.cameraValue.value.worldToCanvas(pageCentre), centre, 'fitToView');
++
++    expect(c.fitToUnits({'1'}), isTrue);
++    await tester.pump();
++    final t = embeddingTables.first.transform;
++    final corners = [
++      for (final (x, y) in [
++        (embeddingBox.minX, embeddingBox.minY),
++        (embeddingBox.maxX, embeddingBox.minY),
++        (embeddingBox.maxX, embeddingBox.maxY),
++        (embeddingBox.minX, embeddingBox.maxY),
++      ])
++        world(t, x, y)
++    ];
++    final xs = corners.map((p) => p.dx), ys = corners.map((p) => p.dy);
++    final boxCentre = Offset(xs.reduce(math.min) / 2 + xs.reduce(math.max) / 2,
++        ys.reduce(math.min) / 2 + ys.reduce(math.max) / 2);
++    expect(c.cameraValue.value.scale, closeTo(0.01, 1e-15), reason: 'tables');
++    expectPixel(c.cameraValue.value.worldToCanvas(boxCentre), centre, 'tables');
++
++    final up = controller(minScale: 2);
++    await tester.pumpWidget(hostOf(up));
++    await tester.pump();
++    await tester.pump();
++    expect(up.cameraValue.value.scale, closeTo(2, 1e-12), reason: 'min');
++    expectPixel(up.cameraValue.value.worldToCanvas(pageCentre), centre, 'min');
++  });
++
++  testWidgets(
++      'CR2 a view moved by its parent\'s padding, not resized and not laid '
++      'out again: canvasRect, worldToGlobal and globalToWorld follow '
++      '(M-H19b canvasRect)', (tester) async {
++    final c = controller();
++    await tester.binding.setSurfaceSize(const Size(1440, 900));
++    addTearDown(() => tester.binding.setSurfaceSize(null));
++    // One view instance: the padding's change rebuilds nothing below it.
++    final view = PlanCanvas(controller: c);
++    Widget at(EdgeInsets padding) => MaterialApp(
++        home: Scaffold(
++            body: Padding(
++                padding: padding,
++                child: Align(
++                    alignment: Alignment.topLeft,
++                    child: SizedBox(width: 1000, height: 700, child: view)))));
++    await tester.pumpWidget(at(const EdgeInsets.only(left: 10, top: 20)));
++    await tester.pump();
++    await tester.pump();
++    final before = c.canvasRect.value!;
++    expect(before, canvasOnScreen(tester));
++    c.camera.value = embeddingCamera();
++
++    await tester.pumpWidget(at(const EdgeInsets.only(left: 130, top: 75)));
++    await tester.pump();
++    final after = c.canvasRect.value!;
++    expect(after, canvasOnScreen(tester));
++    expect(after.size, before.size);
++    expect(after.topLeft - before.topLeft, const Offset(120, 55));
++
++    final w = centreOf('1');
++    final want =
++        canvasOnScreen(tester).topLeft + canvasOfCamera(embeddingCamera(), w);
++    expectPixel(c.worldToGlobal(w)!, want, 'worldToGlobal');
++    final back = c.globalToWorld(want)!;
++    expect(back.dx, near(w.dx));
++    expect(back.dy, near(w.dy));
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/controller/unit_changes_test.dart b/packages/jet_cad_2d_plan/test/controller/unit_changes_test.dart
+new file mode 100644
+index 00000000..4b2fde2c
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/controller/unit_changes_test.dart
+@@ -0,0 +1,620 @@
++// Ported from jet_cad_floor_plan test/host/design_changes_test.dart (2b
++// Task 9, spec S3 `unitChanges`, S5): the design's unit changes. DC7,
++// DC10, DC15 and DC16 need the service mode (Tasks 11 and 14). DC8, DC9,
++// DC11, DC12, DC13 and DC17 were ported by 2a for the object-level
++// `changes` stream (plan_change_test.dart); they are ported again here for
++// `unitChanges`, whose code is its own (controller ruling R-13, F-T9c).
++// Today's header follows.
++//
++// Host embedding API spec E-5 (Slice 2 plan, Task 3): the controller's
++// unitChanges -- a design edit, undo or redo reported as the tables
++// added, removed and changed, by instance, in ascending instance order;
++// PlanUnitsReplaced on load and newPlan in either mode, after the old
++// design's last changes; nothing from the selection mode; nothing read while
++// no one listens. On the embedding fixture: tables turned 30 degrees,
++// mirrored at 90, scaled (1.5, 0.8), turned 180, all 40 m off the origin;
++// `5` hidden, `L` locked; `7` and ` 7 ` sharing a number; an unnumbered
++// table; `9` with no finite corner. The design view is mounted, so the
++// shell's TableLabelSystem runs (the Delete's data expander, the labels).
++// Expected centres come from the fixture's transforms, by the forward
++// transform.
++import 'dart:async';
++
++import 'package:flutter/material.dart';
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show kUnitLabelTag;
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:jet_cad_2d_plan/src/units/unit_detail.dart'
++    show diffUnitDetails;
++
++import '../support/unit_embedding_fixture.dart';
++import '../support/unit_fixtures.dart' show fxKit;
++
++/// Data as a host writes it: keys out of order, a value with a space, a dot
++/// and a non-ASCII letter, an empty value.
++Map<String, String> hostData() => {
++      'zeta': 'Masa 4.ğ',
++      'id': '7f3c-ä',
++      'alpha': '',
++    };
++
++/// A controller over the fixture, disposed after the test.
++PlanController fixtureController() {
++  final c = PlanController(kits: [fxKit()], json: embeddingPlanJson());
++  addTearDown(c.dispose);
++  return c;
++}
++
++/// [fixtureController] shown in a design view of 1440 x 900, fitted.
++Future<PlanController> mounted(WidgetTester tester) async {
++  final c = fixtureController();
++  await tester.binding.setSurfaceSize(const Size(1440, 900));
++  addTearDown(() => tester.binding.setSurfaceSize(null));
++  await tester
++      .pumpWidget(MaterialApp(home: Scaffold(body: PlanEditor(controller: c))));
++  await tester.pump();
++  await tester.pump();
++  return c;
++}
++
++/// Every change [c] reports from now on, in order.
++List<PlanUnitChange> listen(PlanController c) {
++  final seen = <PlanUnitChange>[];
++  final sub = c.unitChanges.listen(seen.add);
++  addTearDown(sub.cancel);
++  return seen;
++}
++
++/// The instances of the tables numbered [n] in [c]'s active plan, ascending.
++List<Handle> instancesOf(PlanController c, String n) =>
++    [for (final t in c.unitIndex.withLabel(n)) t.instance];
++
++/// The detail of [instance] in [c]'s current list.
++PlanUnitDetail detailOf(PlanController c, Handle instance) =>
++    c.unitDetails[c.unitDetailInstances.indexOf(instance)];
++
++/// [d] with the fields given replaced.
++PlanUnitDetail copyOf(PlanUnitDetail d,
++        {PlanUnit? table, bool? locked, Map<String, String>? data}) =>
++    PlanUnitDetail(
++        unit: table ?? d.unit,
++        center: d.center,
++        size: d.size,
++        rotation: d.rotation,
++        mirrored: d.mirrored,
++        corners: d.corners,
++        layer: d.layer,
++        locked: locked ?? d.locked,
++        data: data ?? d.data);
++
++/// The fixture's table labelled [label].
++EmbeddingTable fixtureTable(String label) =>
++    embeddingTables.firstWhere((t) => t.label == label);
++
++/// The world image of definition point ([x], [y]) through [t].
++Offset worldOf(Transform2 t, double x, double y) =>
++    Offset(t.a * x + t.c * y + t.e, t.b * x + t.d * y + t.f);
++
++/// [embeddingBox]'s centre, (700, 100), through [t].
++Offset boxCentre(Transform2 t) => worldOf(t, 700, 100);
++
++/// [actual] is [expected] within 1e-12 relative.
++void expectNear(Offset? actual, Offset expected, String reason) {
++  expect(actual, isNotNull, reason: reason);
++  expect(actual!.dx, closeTo(expected.dx, expected.dx.abs() * 1e-12),
++      reason: reason);
++  expect(actual.dy, closeTo(expected.dy, expected.dy.abs() * 1e-12),
++      reason: reason);
++}
++
++void main() {
++  group('with the design view mounted', () {
++    testWidgets(
++        'DC1 one edit, several changes in ascending instance order: '
++        'setUnitsData on L, 4 and 1 (in that order) is a Changed for 1, 4 '
++        'and L, the data only', (tester) async {
++      final c = await mounted(tester);
++      final one = instancesOf(c, '1').single,
++          four = instancesOf(c, '4').single,
++          l = instancesOf(c, 'L').single;
++      expect(one.value < four.value && four.value < l.value, isTrue,
++          reason: 'premise: placed 1, 4, L');
++      final b1 = detailOf(c, one), b4 = detailOf(c, four), bl = detailOf(c, l);
++      final seen = listen(c);
++
++      expect(
++          c.setUnitsData({
++            'L': {'id': 'l'},
++            '4': hostData(),
++            ' 1 ': {'zeta': 'z', 'id': 'one'},
++          }),
++          isTrue);
++      expect(seen, isEmpty, reason: 'delivered asynchronously');
++      await tester.pump();
++      expect(seen, [
++        PlanUnitChanged(b1, copyOf(b1, data: {'id': 'one', 'zeta': 'z'})),
++        PlanUnitChanged(b4, copyOf(b4, data: hostData())),
++        PlanUnitChanged(bl, copyOf(bl, data: {'id': 'l'})),
++      ]);
++      expectNear(b1.center, boxCentre(fixtureTable('1').transform),
++          'premise: 1 where the fixture puts it');
++      expect(bl.locked, isTrue, reason: 'premise: a locked table takes data');
++    });
++
++    testWidgets(
++        'DC2 a layer locked: one Changed per table on it, locked only; its '
++        'undo the reverse; the hidden layer shown: one Changed for 5, now '
++        'with its geometry', (tester) async {
++      final c = await mounted(tester);
++      final before = c.unitDetails;
++      final doc = c.document;
++      final seen = listen(c);
++      final zero = doc.tables.layers[ReservedHandles.layerZero]!;
++
++      doc.commands.execute(SetLayerCommand(zero.copyWith(locked: true)));
++      await tester.pump();
++      final onZero = [
++        for (final d in before)
++          if (d.layer == zero.name) d
++      ];
++      expect(onZero, hasLength(8),
++          reason: 'premise: 1, 2, 3, 4, both 7s, the unnumbered, 9');
++      expect(seen, [
++        for (final d in onZero) PlanUnitChanged(d, copyOf(d, locked: true))
++      ]);
++
++      seen.clear();
++      c.undo();
++      await tester.pump();
++      expect(seen, [
++        for (final d in onZero) PlanUnitChanged(copyOf(d, locked: true), d)
++      ]);
++
++      seen.clear();
++      final hidden = doc.tables.layers.byName(kEmbeddingHidden)!;
++      doc.commands.execute(SetLayerCommand(hidden.copyWith(visible: true)));
++      await tester.pump();
++      expect(seen, hasLength(1));
++      final change = seen.single as PlanUnitChanged;
++      expect(change.before.unit.label, '5');
++      expect(change.before.center, isNull, reason: 'hidden: no geometry');
++      expect(change.after.unit.visible, isTrue);
++      expectNear(change.after.center, boxCentre(fixtureTable('5').transform),
++          'shown: its box centre, by the forward transform');
++      expect(change.after.layer, kEmbeddingHidden);
++    });
++
++    testWidgets(
++        'DC3 a renumber of 1 to 21: one Changed, the number only, its data '
++        'kept', (tester) async {
++      final c = await mounted(tester);
++      expect(c.setUnitData('1', hostData()), isTrue);
++      final one = instancesOf(c, '1').single;
++      final b1 = detailOf(c, one);
++      expect(b1.data, hostData(), reason: 'premise');
++      final seen = listen(c);
++
++      final label = c.unitIndex.withLabel('1').single;
++      c.document.commands
++          .execute(SetEntityTextCommand(label.label!, '21', kUnitLabelTag));
++      await tester.pump();
++      expect(seen, [
++        PlanUnitChanged(
++            b1,
++            copyOf(b1,
++                table: PlanUnit(
++                    label: '21',
++                    kind: b1.unit.kind,
++                    capacity: b1.unit.capacity,
++                    symbolKey: b1.unit.symbolKey))),
++      ]);
++      expect((seen.single as PlanUnitChanged).after.data, hostData());
++    });
++
++    testWidgets(
++        'DC4 setUnitData: one Changed, the data only; the same data again '
++        'reports nothing; undo and redo report the reverse and the same',
++        (tester) async {
++      final c = await mounted(tester);
++      final two = instancesOf(c, '2').single;
++      final b2 = detailOf(c, two);
++      expect(b2.mirrored, isTrue, reason: 'premise: 2 is the mirrored one');
++      final seen = listen(c);
++
++      expect(c.setUnitData('2', hostData()), isTrue);
++      await tester.pump();
++      final changed = PlanUnitChanged(b2, copyOf(b2, data: hostData()));
++      expect(seen, [changed]);
++      expect(c.setUnitData(' 2 ', hostData()), isTrue);
++      await tester.pump();
++      expect(seen, [changed], reason: 'no edit, no change');
++
++      c.undo();
++      await tester.pump();
++      expect(seen.last, PlanUnitChanged(changed.after, b2));
++      c.redo();
++      await tester.pump();
++      expect(seen, [changed, PlanUnitChanged(changed.after, b2), changed]);
++    });
++
++    testWidgets(
++        'DC5 M-H25: deleting 3 is exactly [Removed(3)]; its undo exactly '
++        '[Added(3)], equal to it, data included; its redo the Removed again',
++        (tester) async {
++      final c = await mounted(tester);
++      expect(c.setUnitData('3', hostData()), isTrue);
++      final three = instancesOf(c, '3').single;
++      final b3 = detailOf(c, three);
++      expectNear(b3.center, boxCentre(fixtureTable('3').transform),
++          'premise: 3 where the fixture puts it');
++      expect(b3.data, hostData(), reason: 'premise');
++      expect(c.unitDetailInstances.last.value > three.value, isTrue,
++          reason: 'premise: tables after 3, which an index diff shifts');
++      final seen = listen(c);
++
++      c.select({'3'});
++      await tester.pump();
++      expect(c.editorSelectedUnits.value, {'3'}, reason: 'premise');
++      await tester.sendKeyDownEvent(LogicalKeyboardKey.delete);
++      await tester.sendKeyUpEvent(LogicalKeyboardKey.delete);
++      await tester.pump();
++      expect(c.document.tree[three], isNull, reason: 'premise: deleted');
++      expect(seen, [PlanUnitRemoved(b3)]);
++
++      c.undo();
++      await tester.pump();
++      expect(seen, [PlanUnitRemoved(b3), PlanUnitAdded(b3)]);
++      expect(
++          (seen[1] as PlanUnitAdded).unit, (seen[0] as PlanUnitRemoved).unit);
++      expect((seen[1] as PlanUnitAdded).unit.data, hostData());
++
++      c.redo();
++      await tester.pump();
++      expect(seen.skip(2), [PlanUnitRemoved(b3)]);
++    });
++
++    testWidgets(
++        'DC6 M-H25: a move of " 7 " is exactly one Changed whose before and '
++        'after are that table\'s, never the other 7\'s; then a move of 7, '
++        'the same for it', (tester) async {
++      final c = await mounted(tester);
++      final sevens = instancesOf(c, '7');
++      expect(sevens, hasLength(2), reason: 'premise: 7 and " 7 "');
++      final seen = listen(c);
++      // " 7 " (placed second, mirrored) first, then 7: a diff keyed by the
++      // number, whichever of the two it keeps, misses one of them.
++      for (final (index, label, mirrored) in [
++        (1, ' 7 ', true),
++        (0, '7', false),
++      ]) {
++        seen.clear();
++        final instance = sevens[index];
++        final before = detailOf(c, instance);
++        final fixture = fixtureTable(label);
++        expect(before.mirrored, mirrored, reason: 'premise: "$label"');
++        expectNear(before.center, boxCentre(fixture.transform), 'premise');
++
++        final shift = Transform2.translation(1200, -700);
++        c.document.commands.execute(
++            TransformNodeCommand(instance, shift.multiply(fixture.transform)));
++        await tester.pump();
++        expect(seen, hasLength(1), reason: '"$label"');
++        final change = seen.single as PlanUnitChanged;
++        expect(change.before, before, reason: '"$label"');
++        expectNear(change.after.center,
++            boxCentre(shift.multiply(fixture.transform)), 'moved by the shift');
++        expect(change.after.mirrored, mirrored);
++        expect(change.after.rotation, closeTo(before.rotation, 1e-12));
++        expect(change.after.unit, before.unit);
++        expect(change.after, detailOf(c, instance));
++      }
++    });
++
++    // DC7 (service moves report nothing) needs the service mode: Task 11.
++
++    testWidgets(
++        'DC8 newPlan: exactly [PlanUnitsReplaced()], no Removed per '
++        'table; a load: the same', (tester) async {
++      final c = await mounted(tester);
++      final seen = listen(c);
++      c.newPlan();
++      await tester.pump();
++      expect(seen, [const PlanUnitsReplaced()]);
++      expect(c.unitDetails, isEmpty, reason: 'premise: an empty plan');
++      c.load(embeddingPlanJson());
++      await tester.pump();
++      expect(seen, [const PlanUnitsReplaced(), const PlanUnitsReplaced()]);
++    });
++
++    testWidgets(
++        'DC9 an edit then a load in one synchronous step: the edit\'s change, '
++        'then PlanUnitsReplaced, then an edit of the loaded plan',
++        (tester) async {
++      final c = await mounted(tester);
++      final b2 = detailOf(c, instancesOf(c, '2').single);
++      final seen = listen(c);
++
++      expect(c.setUnitData('2', hostData()), isTrue);
++      c.load(embeddingPlanJson());
++      final l = detailOf(c, instancesOf(c, 'L').single);
++      expect(c.setUnitData('L', {'id': 'l'}), isTrue);
++      expect(seen, isEmpty, reason: 'delivered asynchronously');
++      await tester.pump();
++      expect(seen, [
++        PlanUnitChanged(b2, copyOf(b2, data: hostData())),
++        const PlanUnitsReplaced(),
++        PlanUnitChanged(l, copyOf(l, data: {'id': 'l'})),
++      ]);
++    });
++  });
++
++  // DC10 (PlanUnitsReplaced in the service mode) is Task 11's.
++
++  testWidgets(
++      'DC11 nothing is read with no listener, nor after the last cancel; one '
++      'read per listen and per moved design; two edits of one synchronous '
++      'step are one read and one report', (tester) async {
++    final c = fixtureController();
++    final doc = c.document;
++    final zero = doc.tables.layers[ReservedHandles.layerZero]!;
++    expect(c.setUnitData('1', hostData()), isTrue);
++    doc.commands.execute(SetLayerCommand(zero.copyWith(locked: true)));
++    c.undo();
++    c.redo();
++    await tester.pump();
++    c.load(embeddingPlanJson());
++    c.newPlan();
++    c.load(embeddingPlanJson());
++    await tester.pump();
++    expect(c.debugUnitScans, 0, reason: 'no listener: nothing read');
++
++    final first = <PlanUnitChange>[];
++    final a = c.unitChanges.listen(first.add);
++    expect(c.debugUnitScans, 1, reason: 'the baseline');
++    final second = <PlanUnitChange>[];
++    final b = c.unitChanges.listen(second.add);
++    expect(c.debugUnitScans, 1, reason: 'one baseline for every listener');
++
++    final one = instancesOf(c, '1').single;
++    final b1 = detailOf(c, one);
++    expect(c.setUnitData('1', {'id': 'a'}), isTrue);
++    expect(c.setUnitData('1', {'id': 'b'}), isTrue);
++    await tester.pump();
++    expect(c.debugUnitScans, 2, reason: 'the second event finds nothing new');
++    final change = PlanUnitChanged(b1, copyOf(b1, data: {'id': 'b'}));
++    expect(first, [change]);
++    expect(second, [change]);
++
++    // Not awaited: awaiting a cancel here left the next pump hanging (seen
++    // while writing this test); the cancel itself is synchronous.
++    unawaited(a.cancel());
++    expect(c.setUnitData('1', {'id': 'c'}), isTrue);
++    await tester.pump();
++    expect(c.debugUnitScans, 3, reason: 'one listener left');
++    expect(second, [change, isA<PlanUnitChanged>()]);
++    expect(first, [change]);
++
++    unawaited(b.cancel());
++    final scans = c.debugUnitScans;
++    expect(c.setUnitData('1', {'id': 'd'}), isTrue);
++    c.undo();
++    await tester.pump();
++    c.load(embeddingPlanJson());
++    c.newPlan();
++    await tester.pump();
++    expect(c.debugUnitScans, scans, reason: 'after the last cancel: nothing');
++
++    c.load(embeddingPlanJson());
++    await tester.pump();
++    expect(c.debugUnitScans, scans, reason: 'premise: still nothing');
++    final two = detailOf(c, instancesOf(c, '2').single);
++    expect(c.setUnitData('2', {'id': 'before'}), isTrue);
++    final third = listen(c);
++    expect(c.debugUnitScans, scans + 1, reason: 'a new baseline');
++    await tester.pump();
++    expect(third, isEmpty,
++        reason: 'an edit made before the listen is not owed');
++    expect(c.setUnitData('2', hostData()), isTrue);
++    await tester.pump();
++    expect(third, [
++      PlanUnitChanged(
++          copyOf(two, data: {'id': 'before'}), copyOf(two, data: hostData()))
++    ]);
++    expect(c.debugUnitScans, scans + 2);
++  });
++
++  testWidgets(
++      'DC12 dispose closes the stream: an edit made just before it is not '
++      'reported, and nothing comes after', (tester) async {
++    final c = PlanController(kits: [fxKit()], json: embeddingPlanJson());
++    final seen = <PlanUnitChange>[];
++    var done = false;
++    c.unitChanges.listen(seen.add, onDone: () => done = true);
++    expect(c.setUnitData('1', hostData()), isTrue);
++    c.dispose();
++    await tester.pump();
++    expect(seen, isEmpty);
++    expect(done, isTrue);
++  });
++
++  test('DC13 the four changes: ==, hashCode and toString', () {
++    const table =
++        PlanUnit(label: '7', kind: 'table', capacity: 4, symbolKey: 'k');
++    const a = PlanUnitDetail(
++        unit: table,
++        center: Offset(46100.5, -30900.4),
++        size: Size(800, 600),
++        rotation: 1.25,
++        mirrored: true,
++        corners: [Offset(1, 2), Offset(3, 4), Offset(5, 6), Offset(7, 8)],
++        layer: 'Locked',
++        locked: true,
++        data: {'id': 'x'});
++    const b = PlanUnitDetail(
++        unit: table,
++        center: null,
++        size: null,
++        rotation: 0,
++        mirrored: false,
++        corners: [],
++        layer: '0',
++        locked: false);
++    final a2 = PlanUnitDetail(
++        unit: const PlanUnit(
++            label: '7', kind: 'table', capacity: 4, symbolKey: 'k'),
++        center: const Offset(46100.5, -30900.4),
++        size: const Size(800, 600),
++        rotation: 1.25,
++        mirrored: true,
++        corners: [
++          const Offset(1, 2),
++          const Offset(3, 4),
++          const Offset(5, 6),
++          const Offset(7, 8)
++        ],
++        layer: 'Locked',
++        locked: true,
++        data: {'id': 'x'});
++    expect(a2 == a, isTrue, reason: 'premise: equal, not identical');
++
++    expect(PlanUnitAdded(a), PlanUnitAdded(a2));
++    expect(PlanUnitAdded(a).hashCode, PlanUnitAdded(a2).hashCode);
++    expect(PlanUnitAdded(a) == PlanUnitAdded(b), isFalse);
++    expect(PlanUnitAdded(a) == PlanUnitRemoved(a), isFalse);
++    expect(PlanUnitRemoved(a), PlanUnitRemoved(a2));
++    expect(PlanUnitRemoved(a).hashCode, PlanUnitRemoved(a2).hashCode);
++    expect(PlanUnitRemoved(a) == PlanUnitRemoved(b), isFalse);
++    expect(PlanUnitChanged(a, b), PlanUnitChanged(a2, b));
++    expect(PlanUnitChanged(a, b).hashCode, PlanUnitChanged(a2, b).hashCode);
++    expect(PlanUnitChanged(a, b) == PlanUnitChanged(b, a), isFalse,
++        reason: 'before and after are ordered');
++    expect(PlanUnitChanged(a, b) == PlanUnitChanged(a, a), isFalse);
++    expect(const PlanUnitsReplaced(), const PlanUnitsReplaced());
++    expect(
++        const PlanUnitsReplaced().hashCode, const PlanUnitsReplaced().hashCode);
++    expect(const PlanUnitsReplaced() == PlanUnitAdded(a), isFalse);
++
++    const ta = 'PlanUnitDetail(PlanUnit(7, table, 4, k, visible: true), '
++        'center: Offset(46100.5, -30900.4), size: Size(800.0, 600.0), '
++        'rotation: 1.25, mirrored: true, corners: [Offset(1.0, 2.0), '
++        'Offset(3.0, 4.0), Offset(5.0, 6.0), Offset(7.0, 8.0)], '
++        'layer: Locked, locked: true, data: {id: x})';
++    const tb = 'PlanUnitDetail(PlanUnit(7, table, 4, k, visible: true), '
++        'center: null, size: null, rotation: 0.0, mirrored: false, '
++        'corners: [], layer: 0, locked: false, data: {})';
++    expect(PlanUnitAdded(a).toString(), 'PlanUnitAdded($ta)');
++    expect(PlanUnitRemoved(b).toString(), 'PlanUnitRemoved($tb)');
++    expect(PlanUnitChanged(a, b).toString(), 'PlanUnitChanged($ta, $tb)');
++    expect(const PlanUnitsReplaced().toString(), 'PlanUnitsReplaced()');
++  });
++
++  test('DC14 the diff: by instance, ascending, whatever the numbers', () {
++    PlanUnitDetail t(String? n, {String layer = '0'}) => PlanUnitDetail(
++        unit: PlanUnit(label: n, kind: 'table', capacity: 2, symbolKey: null),
++        center: null,
++        size: null,
++        rotation: 0,
++        mirrored: false,
++        corners: const [],
++        layer: layer,
++        locked: false);
++    // 0x31 removed, 0x33 renumbered to the removed one's number, 0x34
++    // unchanged, 0x35 added, 0x36 moved to another layer.
++    final changes = diffUnitDetails(
++        const [Handle(0x31), Handle(0x33), Handle(0x34), Handle(0x36)],
++        [t('7'), t('8'), t(null), t('7')],
++        const [Handle(0x33), Handle(0x34), Handle(0x35), Handle(0x36)],
++        [t('7'), t(null), t('8'), t('7', layer: 'B')]);
++    expect(changes, [
++      PlanUnitRemoved(t('7')),
++      PlanUnitChanged(t('8'), t('7')),
++      PlanUnitAdded(t('8')),
++      PlanUnitChanged(t('7'), t('7', layer: 'B')),
++    ]);
++    expect(diffUnitDetails(const [], const [], const [], const []), isEmpty);
++  });
++
++  // DC15 and DC16 (a service move) are Tasks 11 and 14's.
++
++  testWidgets(
++      'DC17 O10: a failed load reports nothing and drops nothing owed: an '
++      'edit, then load of "not json" and of a JSON that is no plan, both '
++      'throwing, is exactly the edit\'s Changed, no PlanUnitsReplaced',
++      (tester) async {
++    final c = fixtureController();
++    final b1 = detailOf(c, instancesOf(c, '1').single);
++    final seen = listen(c);
++
++    expect(c.setUnitData('1', hostData()), isTrue);
++    expect(() => c.load('not json'), throwsFormatException);
++    expect(() => c.load('{"x": 1}'), throwsFormatException);
++    await tester.pump();
++    final changed = PlanUnitChanged(b1, copyOf(b1, data: hostData()));
++    expect(seen, [changed]);
++
++    expect(() => c.load('not json'), throwsFormatException);
++    await tester.pump();
++    expect(seen, [changed], reason: 'nothing owed, nothing reported');
++    expect(c.setUnitData('1', {'id': 'next'}), isTrue);
++    await tester.pump();
++    expect(
++        seen,
++        [
++          changed,
++          PlanUnitChanged(changed.after, copyOf(b1, data: {'id': 'next'}))
++        ],
++        reason: 'the same plan, the same baseline');
++  });
++
++  testWidgets(
++      'DC18 final review F-1: an edit, a load and dispose() in one '
++      'synchronous step deliver nothing -- not the edit\'s Changed nor the '
++      'PlanUnitsReplaced the load reported -- and then done', (tester) async {
++    final c = PlanController(kits: [fxKit()], json: embeddingPlanJson());
++    final seen = <PlanUnitChange>[];
++    var done = false;
++    c.unitChanges.listen(seen.add, onDone: () => done = true);
++    expect(c.setUnitData('1', hostData()), isTrue);
++    c.load(embeddingPlanJson());
++    c.dispose();
++    await tester.pump();
++    expect(seen, isEmpty);
++    expect(done, isTrue);
++
++    // newPlan, too.
++    final d = PlanController(kits: [fxKit()], json: embeddingPlanJson());
++    final seenD = <PlanUnitChange>[];
++    var doneD = false;
++    d.unitChanges.listen(seenD.add, onDone: () => doneD = true);
++    d.newPlan();
++    d.dispose();
++    await tester.pump();
++    expect(seenD, isEmpty);
++    expect(doneD, isTrue);
++  });
++
++  testWidgets(
++      'DC19 final review F-1: a listener that disposes the controller on the '
++      'first change of a report hears no second one, and then done',
++      (tester) async {
++    final c = PlanController(kits: [fxKit()], json: embeddingPlanJson());
++    final seen = <PlanUnitChange>[];
++    var done = false;
++    c.unitChanges.listen((change) {
++      seen.add(change);
++      c.dispose();
++    }, onDone: () => done = true);
++    expect(
++        c.setUnitsData({
++          '1': {'id': 'one'},
++          '2': {'id': 'two'},
++        }),
++        isTrue);
++    await tester.pump();
++    expect(seen, hasLength(1), reason: 'the report had two changes');
++    expect(seen.single, isA<PlanUnitChanged>());
++    expect(done, isTrue);
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/controller/unit_colour_test.dart b/packages/jet_cad_2d_plan/test/controller/unit_colour_test.dart
+new file mode 100644
+index 00000000..b37aecf8
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/controller/unit_colour_test.dart
+@@ -0,0 +1,453 @@
++// Ported from jet_cad_floor_plan test/host/table_color_test.dart (2b Task
++// 9, spec S2 "Per-unit data", S3 "Design writes"): setUnitColour and
++// setUnitsColour on the embedding fixture. TC1 (the component's encoding)
++// is Task 6's; TC6 (the service mode) is Task 11's. Today's header
++// follows.
++//
++// Plan colours spec PC-4 and PC-11 (Slice 2 plan, Task 2): a table's colour
++// as the plan stores it -- the `jetcad.unit_colour` component on the table's
++// instance -- and as a host reads and writes it: `PlanUnitDetail.colour`,
++// `setUnitColour` and `setUnitsColour`, which share one path with the
++// table-data setters. On the embedding fixture: tables turned 30 degrees,
++// mirrored at 90, scaled, turned 180, all 40 m off the origin, their top
++// off-centre and asymmetric; `5` hidden, `L` locked; `7` and ` 7 ` sharing
++// a number; an unnumbered table. Hues `teal` and `purple`, and the unknown
++// name `magenta`.
++import 'dart:convert';
++
++import 'package:flutter/material.dart';
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/authoring.dart'
++    show CatalogPolyline, CatalogSymbol, CatalogUnit;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart'
++    show PlanSwatch, UnitKinds, kUnitLabelTag;
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:jet_cad_2d_plan/src/kits/locks.dart' show LockSet;
++import 'package:jet_cad_2d_plan/src/panels/symbol_section.dart'
++    show changeSizeCommand;
++import 'package:jet_cad_2d_plan/src/units/unit_components.dart';
++import 'package:jet_cad_2d_plan/src/units/unit_index.dart';
++import 'package:jet_cad_2d_plan/src/units/unit_problems.dart' show UnitProblem;
++
++import '../support/unit_embedding_fixture.dart';
++import '../support/unit_fixtures.dart' show entryOf, fxKit;
++
++const PlanSwatch teal = PlanSwatch.teal;
++const PlanSwatch purple = PlanSwatch.purple;
++
++PlanController controller(WidgetTester tester, [String? json]) {
++  final c = PlanController(kits: [fxKit()], json: json ?? embeddingPlanJson());
++  addTearDown(c.dispose);
++  return c;
++}
++
++/// [controller] shown in a design view of 1440 x 900, fitted (the shell's
++/// Delete and its data expander run).
++Future<PlanController> mounted(WidgetTester tester) async {
++  final c = controller(tester);
++  await tester.binding.setSurfaceSize(const Size(1440, 900));
++  addTearDown(() => tester.binding.setSurfaceSize(null));
++  await tester
++      .pumpWidget(MaterialApp(home: Scaffold(body: PlanEditor(controller: c))));
++  await tester.pump();
++  await tester.pump();
++  return c;
++}
++
++/// The units of [doc], read now (the fixture kit loaded).
++UnitIndex unitsOfDoc(DraftDocument doc) => UnitIndex.of(doc,
++    catalog: ParametricCatalog(), locks: LockSet.scan(doc, (_) => true));
++
++/// The instance of the one table numbered [n] in [doc].
++Handle instanceOf(DraftDocument doc, String n) =>
++    unitsOfDoc(doc).withLabel(n).single.instance;
++
++/// [doc]'s unit diagnostics (today's `tableDiagnostics`).
++List<Diagnostic> unitDiagnostics(DraftDocument doc) =>
++    unitsOfDoc(doc).diagnostics();
++
++/// The details of [c] carrying [n], in order.
++List<PlanUnitDetail> detailsOf(PlanController c, String n) => [
++      for (final d in c.unitDetails)
++        if (d.unit.label == n) d
++    ];
++
++/// The `jetcad.unit_colour` section of the encoding [json], or null.
++Map<String, Object?>? colorSection(String json) =>
++    ((jsonDecode(json) as Map)['components'] as Map)['jetcad.unit_colour']
++        as Map<String, Object?>?;
++
++/// The embedding fixture with [payloads] (by number) written as raw
++/// `jetcad.unit_colour` payloads, in the codec's own order (type ids
++/// sorted, handles ascending), so this build writes it back byte for byte.
++String fixtureWith(Map<String, Object?> payloads) {
++  final c = PlanController(kits: [fxKit()], json: embeddingPlanJson());
++  final doc = c.document;
++  final byHandle = <int, Object?>{
++    for (final e in payloads.entries) instanceOf(doc, e.key).value: e.value
++  };
++  c.dispose();
++  final json = jsonDecode(embeddingPlanJson()) as Map<String, Object?>;
++  final components = (json['components']! as Map).cast<String, Object?>();
++  components['jetcad.unit_colour'] = {
++    for (final h in byHandle.keys.toList()..sort()) '$h': byHandle[h]
++  };
++  json['components'] = {
++    for (final k in components.keys.toList()..sort()) k: components[k]
++  };
++  return jsonEncode(json);
++}
++
++/// Every change [c] reports from now on, in order.
++List<PlanUnitChange> listen(PlanController c) {
++  final seen = <PlanUnitChange>[];
++  final sub = c.unitChanges.listen(seen.add);
++  addTearDown(sub.cancel);
++  return seen;
++}
++
++/// The labels of the commands [doc] applies from now on.
++List<String> labelsOf(DraftDocument doc) {
++  final labels = <String>[];
++  final sub = doc.changes.listen((e) {
++    if (e is CommandApplied) labels.add(e.label);
++  });
++  addTearDown(sub.cancel);
++  return labels;
++}
++
++/// [d] with its colour replaced.
++PlanUnitDetail withColor(PlanUnitDetail d, PlanSwatch? color) => PlanUnitDetail(
++    unit: d.unit,
++    center: d.center,
++    size: d.size,
++    rotation: d.rotation,
++    mirrored: d.mirrored,
++    corners: d.corners,
++    layer: d.layer,
++    locked: d.locked,
++    data: d.data,
++    colour: color);
++
++void main() {
++  // TC1 (the component's encoding) is Task 6's (unit_components_test).
++
++  testWidgets(
++      'TC2 setUnitColour: true; one undo step labelled "Unit colour"; '
++      'dirty, canUndo and revision moved; tableDetails reads it; the file '
++      'holds it on the instance; undo removes it, redo puts it back',
++      (tester) async {
++    final c = controller(tester);
++    await tester.pump();
++    final doc = c.document;
++    final labels = labelsOf(doc);
++    final revision = c.revision.value;
++    final depth = doc.commands.undoDepth;
++    final empty = c.save();
++    expect(c.dirty.value, isFalse);
++    expect(colorSection(empty), isNull, reason: 'premise');
++
++    expect(c.setUnitColour('1', teal), isTrue);
++    expect(c.dirty.value, isTrue, reason: 'on return');
++    expect(c.canUndo.value, isTrue, reason: 'on return');
++    expect(doc.commands.undoDepth, depth + 1);
++    await tester.pump();
++    expect(labels, ['Unit colour']);
++    expect(c.revision.value, greaterThan(revision));
++    expect(detailsOf(c, '1').single.colour, teal);
++    for (final d in c.unitDetails) {
++      if (d.unit.label == '1') continue;
++      expect(d.colour, isNull, reason: '${d.unit}');
++    }
++    final one = instanceOf(doc, '1').value;
++    final saved = c.save();
++    expect(saved, contains('"jetcad.unit_colour":{"$one":{"color":"teal"}}'));
++    expect(colorSection(saved), {
++      '$one': {'color': 'teal'}
++    });
++
++    final back = controller(tester, saved);
++    expect(back.save(), saved, reason: 'byte for byte');
++    expect(detailsOf(back, '1').single.colour, teal);
++
++    c.undo();
++    await tester.pump();
++    expect(detailsOf(c, '1').single.colour, isNull);
++    expect(colorSection(c.save()), isNull);
++    expect(c.save(), empty);
++    c.redo();
++    await tester.pump();
++    expect(detailsOf(c, '1').single.colour, teal);
++    expect(c.save(), saved);
++  });
++
++  testWidgets(
++      'TC3 M-C9 setUnitsColour: one undo step for several tables; one bad '
++      'entry (a number two tables carry, the same number twice, an unknown '
++      'one) changes nothing, whatever its place in the map', (tester) async {
++    // Each bad map on a controller of its own: nothing edited, nothing to
++    // undo. The valid entries come first, so a path that executes as it
++    // goes has changed table 1 by the time it meets the bad one.
++    final bad = <String, Map<String, PlanSwatch?>>{
++      'shared number': {'1': teal, '7': purple},
++      'shared number (padded)': {'1': teal, ' 7 ': purple},
++      'the same number twice': {'1': teal, ' 1 ': purple},
++      'unknown number': {'1': teal, '42': purple},
++      'empty number': {'1': teal, '': purple},
++    };
++    for (final MapEntry(key: why, value: wanted) in bad.entries) {
++      final fresh = controller(tester);
++      final before = fresh.save();
++      expect(fresh.setUnitsColour(wanted), isFalse, reason: why);
++      expect(detailsOf(fresh, '1').single.colour, isNull, reason: why);
++      expect(fresh.document.commands.undoDepth, 0, reason: why);
++      expect(fresh.canUndo.value, isFalse, reason: why);
++      expect(fresh.dirty.value, isFalse, reason: why);
++      expect(fresh.save(), before, reason: why);
++    }
++    final c = controller(tester);
++    final doc = c.document;
++    expect(c.setUnitsColour({'1': teal, ' 2 ': purple, 'L': null}), isTrue);
++    expect(doc.commands.undoDepth, 1, reason: 'one step for two edits');
++    expect(detailsOf(c, '1').single.colour, teal);
++    expect(detailsOf(c, '2').single.colour, purple);
++    expect(detailsOf(c, 'L').single.colour, isNull);
++    c.undo();
++    expect(doc.commands.undoDepth, 0);
++    expect(detailsOf(c, '1').single.colour, isNull);
++    expect(detailsOf(c, '2').single.colour, isNull);
++
++    expect(c.setUnitColour('7', teal), isFalse);
++    expect(c.setUnitColour('42', teal), isFalse);
++    expect(c.setUnitsColour(const {}), isTrue, reason: 'nothing to change');
++    expect(doc.commands.undoDepth, 0);
++  });
++
++  testWidgets(
++      'TC4 an entry equal to the table\'s colour is skipped: no edit; '
++      'removing a colour that is not there is true with no edit',
++      (tester) async {
++    final c = controller(tester);
++    final doc = c.document;
++    expect(c.setUnitColour('1', teal), isTrue);
++    expect(doc.commands.undoDepth, 1);
++    expect(c.setUnitColour(' 1 ', teal), isTrue);
++    expect(doc.commands.undoDepth, 1, reason: 'the second is no edit');
++    expect(c.setUnitColour('2', null), isTrue);
++    expect(doc.commands.undoDepth, 1, reason: 'no colour to remove');
++    expect(c.setUnitsColour({'1': teal, '2': null}), isTrue);
++    expect(doc.commands.undoDepth, 1, reason: 'both skipped');
++    expect(c.setUnitsColour({'1': teal, '3': purple}), isTrue);
++    expect(doc.commands.undoDepth, 2, reason: 'only 3 is an edit');
++    expect(c.setUnitColour('1', null), isTrue);
++    expect(doc.commands.undoDepth, 3);
++    expect(detailsOf(c, '1').single.colour, isNull);
++    expect(colorSection(c.save())!.length, 1, reason: 'only 3 left');
++  });
++
++  testWidgets(
++      'TC5 a table on the hidden layer and one on the locked layer take a '
++      'colour, and the API recolours the locked one', (tester) async {
++    final c = controller(tester);
++    expect(detailsOf(c, '5').single.center, isNull,
++        reason: 'premise: 5 is hidden');
++    expect(detailsOf(c, 'L').single.locked, isTrue, reason: 'premise');
++    expect(c.setUnitsColour({'5': teal, 'L': purple}), isTrue);
++    expect(detailsOf(c, '5').single.colour, teal);
++    expect(detailsOf(c, 'L').single.colour, purple);
++    expect(detailsOf(c, 'L').single.locked, isTrue);
++    expect(c.setUnitColour('L', PlanSwatch.red), isTrue);
++    expect(detailsOf(c, 'L').single.colour, PlanSwatch.red);
++    expect(c.setUnitColour('L', null), isTrue);
++    expect(detailsOf(c, 'L').single.colour, isNull);
++    expect(detailsOf(c, '5').single.colour, teal);
++  });
++
++  // TC6 (the service mode throws a StateError) is Task 11's: its Step 3
++  // appends it here.
++
++  testWidgets(
++      'TC7 M-C2 M-PC11-b a colour this release cannot read: the plan opens; '
++      'each such table reads colour null and is reported table.invalid_color; '
++      'the payloads are written back byte for byte; null removes one without '
++      'a change reported, a hue replaces one', (tester) async {
++    final payloads = <String, Object?>{
++      '1': {'color': 7},
++      '2': {'color': 'magenta'},
++      '3': {'color': 'teal', 'x': 1},
++      'L': {'hue': 'teal'},
++      '4': {'color': 'purple'},
++    };
++    final json = fixtureWith(payloads);
++    final c = controller(tester);
++    c.load(json);
++    expect(c.save(), json, reason: 'written back as read');
++    expect(controller(tester, json).save(), json);
++    for (final n in ['1', '2', '3', 'L']) {
++      expect(detailsOf(c, n).single.colour, isNull, reason: n);
++    }
++    expect(detailsOf(c, '4').single.colour, purple,
++        reason: 'a readable payload beside them reads');
++    final doc = c.document;
++    List<Handle> invalid() => [
++          for (final d in unitDiagnostics(doc))
++            if (d.code == 'unit.invalid_colour') d.handles.single
++        ];
++    expect(invalid(), [
++      for (final n in ['1', '2', '3', 'L']) instanceOf(doc, n)
++    ]);
++    expect(UnitProblem.invalidColour, 'unit.invalid_colour');
++    final warning =
++        unitDiagnostics(doc).firstWhere((d) => d.code == 'unit.invalid_colour');
++    expect(warning.severity, DiagnosticSeverity.warning);
++    expect(warning.message, contains(instanceOf(doc, '1').toHex()));
++
++    // Today's service-copy check (the copy decodes it the same way) needs
++    // the service mode: Task 11.
++
++    final seen = listen(c);
++    expect(c.dirty.value, isFalse);
++    expect(c.setUnitColour('1', null), isTrue, reason: 'removes the kept one');
++    expect(c.dirty.value, isTrue, reason: 'an edit');
++    await tester.pump();
++    expect(seen, isEmpty,
++        reason: 'colour null before and after: no change to report');
++    final section = colorSection(c.save())!;
++    expect(section.containsKey('${instanceOf(doc, '1').value}'), isFalse);
++    expect(section['${instanceOf(doc, '2').value}'], {'color': 'magenta'});
++    expect(section['${instanceOf(doc, '3').value}'], payloads['3']);
++    expect(section['${instanceOf(doc, 'L').value}'], payloads['L']);
++
++    expect(c.setUnitColour('2', teal), isTrue, reason: 'replaces magenta');
++    await tester.pump();
++    expect(seen, hasLength(1));
++    final change = seen.single as PlanUnitChanged;
++    expect(change.before.colour, isNull);
++    expect(change.after.colour, teal);
++    expect(invalid(), [
++      for (final n in ['3', 'L']) instanceOf(doc, n)
++    ]);
++    c.undo();
++    c.undo();
++    expect(c.save(), json, reason: 'undo restores the kept payloads');
++  });
++
++  testWidgets(
++      'TC8 M-C11 (witness) deleting a coloured table in the editor drops '
++      'its colour in the same step; Undo puts it back: the component, the '
++      'table in tableDetails, and unitChanges\' Added carrying the colour',
++      (tester) async {
++    final c = await mounted(tester);
++    final doc = c.document;
++    expect(c.setUnitColour('3', teal), isTrue);
++    final three = instanceOf(doc, '3');
++    final withColor = detailsOf(c, '3').single;
++    expect(withColor.colour, teal, reason: 'premise');
++    expect(c.unitDetailInstances.last.value > three.value, isTrue,
++        reason: 'premise: tables after 3, which an index diff shifts');
++    final before = c.save();
++    c.markSaved();
++    final seen = listen(c);
++
++    c.select({'3'});
++    await tester.pump();
++    expect(c.editorSelectedUnits.value, {'3'}, reason: 'premise');
++    await tester.sendKeyDownEvent(LogicalKeyboardKey.delete);
++    await tester.sendKeyUpEvent(LogicalKeyboardKey.delete);
++    await tester.pump();
++    expect(doc.tree[three], isNull, reason: 'premise: deleted');
++    expect(doc.components.get<UnitColour>(three), isNull,
++        reason: 'the colour left with the table');
++    expect(c.save(), isNot(contains('jetcad.unit_colour')));
++    expect(seen, [PlanUnitRemoved(withColor)]);
++    expect((seen.single as PlanUnitRemoved).unit.colour, teal);
++
++    c.undo();
++    await tester.pump();
++    expect(doc.components.get<UnitColour>(three), UnitColour(teal));
++    expect(detailsOf(c, '3').single, withColor);
++    expect(detailsOf(c, '3').single.colour, teal);
++    expect(c.save(), before);
++    expect(c.dirty.value, isFalse, reason: 'back at the save point');
++    expect(seen, [PlanUnitRemoved(withColor), PlanUnitAdded(withColor)]);
++    expect((seen[1] as PlanUnitAdded).unit.colour, teal);
++  });
++
++  testWidgets(
++      'TC9 M-C14 unitChanges: a recolour is one Changed, colour null to '
++      'teal and nothing else; a renumber and a change of size keep the '
++      'colour', (tester) async {
++    final c = await mounted(tester);
++    final doc = c.document;
++    final two = instanceOf(doc, '2');
++    final b2 = detailsOf(c, '2').single;
++    expect(b2.mirrored, isTrue, reason: 'premise: 2 is the mirrored one');
++    expect(b2.colour, isNull);
++    final seen = listen(c);
++
++    expect(c.setUnitColour('2', teal), isTrue);
++    await tester.pump();
++    expect(seen, [PlanUnitChanged(b2, withColor(b2, teal))]);
++    expect((seen.single as PlanUnitChanged).before.colour, isNull);
++    expect((seen.single as PlanUnitChanged).after.colour, teal);
++    expect(withColor(b2, teal) == b2, isFalse, reason: '== reads the colour');
++    expect(withColor(b2, teal).hashCode == b2.hashCode, isFalse);
++    expect(withColor(b2, teal), withColor(b2, teal));
++    expect(withColor(b2, teal) == withColor(b2, purple), isFalse);
++    expect(withColor(b2, teal).toString(), contains('colour: '));
++    expect(b2.toString(), isNot(contains('colour')),
++        reason: 'no colour, no change to a host\'s log line');
++
++    expect(c.setUnitColour('2', teal), isTrue);
++    await tester.pump();
++    expect(seen, hasLength(1), reason: 'no edit, no change');
++
++    // A renumber of the coloured table keeps the colour.
++    seen.clear();
++    final label = c.unitIndex.withLabel('2').single.label!;
++    doc.commands.execute(SetEntityTextCommand(label, '22', kUnitLabelTag));
++    await tester.pump();
++    expect(detailsOf(c, '2'), isEmpty);
++    expect(detailsOf(c, '22').single.colour, teal);
++    expect(seen, hasLength(1));
++    expect((seen.single as PlanUnitChanged).before.colour, teal);
++    expect((seen.single as PlanUnitChanged).after.colour, teal);
++    expect(c.setUnitColour('22', purple), isTrue);
++    expect(detailsOf(c, '22').single.colour, purple);
++    expect(c.setUnitColour('22', teal), isTrue);
++
++    // Change size (the Symbol section's Size menu, F-17): the instance
++    // takes another definition; its components stay on the instance.
++    seen.clear();
++    const other = CatalogSymbol(
++      key: 'fx.embedding.wide',
++      name: 'Test embedding table, wide',
++      category: 'Tests',
++      tags: ['table', 'test'],
++      unit: CatalogUnit(kind: UnitKinds.table, capacity: 6),
++      base: (0, 0),
++      shapes: [
++        CatalogPolyline([(300, -200), (1500, -200), (1300, 400), (300, 250)],
++            closed: true),
++      ],
++    );
++    final node = doc.tree[two]! as InstanceNode;
++    final oldDefinition = node.definition;
++    doc.commands.execute(changeSizeCommand(doc, two, entryOf(other))!);
++    await tester.pump();
++    expect((doc.tree[two]! as InstanceNode).definition, isNot(oldDefinition),
++        reason: 'premise: another definition');
++    expect(doc.components.get<UnitColour>(two), UnitColour(teal));
++    final now = c.unitDetails[c.unitDetailInstances.indexOf(two)];
++    expect(now.colour, teal);
++    expect(now.unit.capacity, 6, reason: 'premise: the new size');
++    expect(seen, hasLength(1));
++    expect((seen.single as PlanUnitChanged).before.colour, teal);
++    expect((seen.single as PlanUnitChanged).after.colour, teal);
++    c.undo();
++    await tester.pump();
++    expect(c.unitDetails[c.unitDetailInstances.indexOf(two)].colour, teal);
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/controller/unit_data_test.dart b/packages/jet_cad_2d_plan/test/controller/unit_data_test.dart
+new file mode 100644
+index 00000000..039c33bd
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/controller/unit_data_test.dart
+@@ -0,0 +1,493 @@
++// Ported from jet_cad_floor_plan test/host/table_data_test.dart (2b Task
++// 9, spec S2 "Per-unit data", S3 "Design writes"): setUnitData and
++// setUnitsData on the embedding fixture. HD4 (the service mode) is Task
++// 11's. Today's header follows.
++//
++// Host embedding API spec E-6, E-7, E-9 gates 2 and 3 (Slice 2 plan, Task
++// 2): the host's data on a table through the controller -- setUnitData and
++// setUnitsData, tableDetails' data, the save and the load, the service
++// copy, renumbering, undo and redo, and the editor's Delete -- on the
++// embedding fixture: tables turned 30 degrees, mirrored at 90, scaled,
++// turned 180, all 40 m off the origin; `5` hidden, `L` locked; `7` and ` 7 `
++// sharing a number. Data is written with its keys out of order, a
++// 64-character key, a 1024-unit value and non-ASCII text.
++import 'dart:convert';
++
++import 'package:flutter/material.dart';
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show kUnitLabelTag;
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:jet_cad_2d_plan/src/kits/locks.dart' show LockSet;
++import 'package:jet_cad_2d_plan/src/units/unit_index.dart';
++
++import '../support/unit_embedding_fixture.dart';
++import '../support/unit_fixtures.dart' show fxKit;
++
++/// Data as a host writes it: keys out of order, a value with a space, a dot
++/// and a non-ASCII letter, an empty value.
++Map<String, String> hostData() => {
++      'zeta': 'Masa 4.ğ',
++      'id': '7f3c-ä',
++      'alpha': '',
++    };
++
++/// [hostData]'s payload as written: keys sorted.
++const String hostPayload =
++    '{"data":{"alpha":"","id":"7f3c-ä","zeta":"Masa 4.ğ"}}';
++
++/// A key of exactly 64 characters of the allowed set.
++final String key64 = 'k${'a_.-9' * 12}xyz';
++
++/// A value of exactly 1024 UTF-16 units, non-ASCII included.
++final String value1024 = '${'ş' * 1000}${'x' * 24}';
++
++/// A value of exactly 1024 UTF-16 units that is only 512 characters: each
++/// U+1F37D is a surrogate pair (E-6 counts units, review R-1).
++final String astral1024 = '\u{1F37D}' * 512;
++
++/// A value of 1025 UTF-16 units that is only 1024 characters.
++final String astral1025 = '${'x' * 1023}\u{1F37D}';
++
++PlanController controller(WidgetTester tester, [String? json]) {
++  final c = PlanController(kits: [fxKit()], json: json ?? embeddingPlanJson());
++  addTearDown(c.dispose);
++  return c;
++}
++
++/// The units of [doc], read now (the fixture kit loaded).
++UnitIndex unitsOfDoc(DraftDocument doc) => UnitIndex.of(doc,
++    catalog: ParametricCatalog(), locks: LockSet.scan(doc, (_) => true));
++
++/// The instance of the one table numbered [n] in [doc].
++Handle instanceOf(DraftDocument doc, String n) =>
++    unitsOfDoc(doc).withLabel(n).single.instance;
++
++/// [doc]'s unit diagnostics (today's `tableDiagnostics`).
++List<Diagnostic> unitDiagnostics(DraftDocument doc) =>
++    unitsOfDoc(doc).diagnostics();
++
++/// The details of [c] carrying [n], in order.
++List<PlanUnitDetail> detailsOf(PlanController c, String n) => [
++      for (final d in c.unitDetails)
++        if (d.unit.label == n) d
++    ];
++
++/// The `jetcad.unit_data` section of the encoding [json], or null.
++Map<String, Object?>? dataSection(String json) =>
++    ((jsonDecode(json) as Map)['components'] as Map)['jetcad.unit_data']
++        as Map<String, Object?>?;
++
++/// The root group's children in the encoding [json].
++List<Object?> rootChildren(String json) {
++  final map = jsonDecode(json) as Map<String, Object?>;
++  final root = (map['nodes']! as List)
++      .cast<Map<String, Object?>>()
++      .firstWhere((n) => n['handle'] == map['root']);
++  return root['children']! as List;
++}
++
++/// The embedding fixture with [payloads] (by number) written as raw
++/// `jetcad.unit_data` payloads, through bytes, in the codec's own order
++/// (type ids sorted, handles ascending), so this build writes it back
++/// byte for byte.
++String fixtureWith(Map<String, Object?> payloads) {
++  final c = PlanController(kits: [fxKit()], json: embeddingPlanJson());
++  final doc = c.document;
++  final byHandle = <int, Object?>{
++    for (final e in payloads.entries) instanceOf(doc, e.key).value: e.value
++  };
++  c.dispose();
++  final json = jsonDecode(embeddingPlanJson()) as Map<String, Object?>;
++  final components = (json['components']! as Map).cast<String, Object?>();
++  components['jetcad.unit_data'] = {
++    for (final h in byHandle.keys.toList()..sort()) '$h': byHandle[h]
++  };
++  json['components'] = {
++    for (final k in components.keys.toList()..sort()) k: components[k]
++  };
++  return jsonEncode(json);
++}
++
++void main() {
++  testWidgets(
++      'HD1 E-9 gate 2: data on 1 (30°), 2 (mirrored) and L (locked) '
++      'round-trips through designJson and load byte for byte, and '
++      'tableDetails reads it back on the same tables', (tester) async {
++    final c = controller(tester);
++    final third = {'z': 'Ω', key64: value1024, 'a.b-c_9': 'x y.z'};
++    expect(
++        c.setUnitsData({
++          '1': hostData(),
++          ' 2 ': {'id': 'bbb'},
++          'L': third,
++        }),
++        isTrue);
++    final saved = c.save();
++    expect((jsonDecode(saved) as Map)['schemaVersion'], 10);
++    expect(dataSection(saved), hasLength(3));
++
++    final back = controller(tester, saved);
++    expect(back.save(), saved, reason: 'byte for byte');
++    final other = controller(tester);
++    other.load(saved);
++    expect(other.save(), saved);
++    for (final r in [c, back, other]) {
++      expect(detailsOf(r, '1').single.data, hostData());
++      expect(detailsOf(r, '1').single.data.keys, ['alpha', 'id', 'zeta']);
++      expect(detailsOf(r, '2').single.data, {'id': 'bbb'});
++      expect(detailsOf(r, 'L').single.data, third);
++      expect(detailsOf(r, 'L').single.locked, isTrue);
++      for (final d in r.unitDetails) {
++        if (const {'1', '2', 'L'}.contains(d.unit.label)) continue;
++        expect(d.data, isEmpty, reason: '${d.unit}');
++      }
++    }
++    expect(back.unitDetails, c.unitDetails, reason: 'data included');
++    expect(
++        () => back.unitDetails.first.data['q'] = 'r', throwsUnsupportedError);
++  });
++
++  testWidgets(
++      'HD2 M-H24: data inserted as zeta, id, alpha is written with its keys '
++      'sorted, under the table\'s instance', (tester) async {
++    final c = controller(tester);
++    expect(c.setUnitData('1', hostData()), isTrue);
++    final h = instanceOf(c.document, '1').value;
++    expect(c.save(), contains('"jetcad.unit_data":{"$h":$hostPayload}'));
++  });
++
++  testWidgets(
++      'HD3 M-H22: a number two tables carry is refused, whichever way it is '
++      'written; so are an unknown and an empty number', (tester) async {
++    final c = controller(tester);
++    final before = c.save();
++    for (final n in ['7', ' 7 ', '42', '', '  ']) {
++      expect(c.setUnitData(n, hostData()), isFalse, reason: '"$n"');
++    }
++    await tester.pump();
++    expect(detailsOf(c, '7'), hasLength(2), reason: 'premise: two 7s');
++    for (final d in detailsOf(c, '7')) {
++      expect(d.data, isEmpty);
++    }
++    expect(c.save(), before);
++    expect(c.canUndo.value, isFalse);
++    expect(c.dirty.value, isFalse);
++  });
++
++  // HD4 (the service mode throws a StateError) is Task 11's: its Step 3
++  // appends it here.
++
++  testWidgets(
++      'HD5 M-H24b: an empty map removes the data: no jetcad.unit_data '
++      'section at all', (tester) async {
++    final c = controller(tester);
++    final empty = c.save();
++    c.setUnitData('1', hostData());
++    expect(dataSection(c.save()), isNotNull, reason: 'premise');
++    expect(c.setUnitData('1', const {}), isTrue);
++    final json = c.save();
++    expect(json, isNot(contains('jetcad.unit_data')));
++    expect(json, empty);
++    expect(detailsOf(c, '1').single.data, isEmpty);
++    expect(c.setUnitData('1', const {}), isTrue,
++        reason: 'no data to remove: true, no step');
++  });
++
++  testWidgets(
++      'HD6 M-H28: a plan whose data is outside the limits loads; each such '
++      'table reads empty data, is reported table.invalid_data, and is '
++      'written back byte for byte; a later setUnitData replaces it',
++      (tester) async {
++    final payloads = <String, Object?>{
++      '1': {
++        'data': {for (var i = 0; i < 33; i++) 'k$i': 'v$i'}
++      },
++      '2': {
++        'data': {'Bad Key': 'x', 'alpha': 'a'}
++      },
++      '3': {
++        'data': {'a': '${value1024}x'}
++      },
++      '4': {
++        'data': {'id': 'x', 'seats': 4}
++      },
++      'L': {
++        'data': ['id', 'x']
++      },
++      '5': jsonDecode(hostPayload),
++    };
++    final json = fixtureWith(payloads);
++    final c = controller(tester);
++    c.load(json);
++    expect(c.save(), json, reason: 'written back as read');
++    expect(controller(tester, json).save(), json);
++    for (final n in ['1', '2', '3', '4', 'L']) {
++      expect(detailsOf(c, n).single.data, isEmpty, reason: n);
++    }
++    expect(detailsOf(c, '5').single.data, hostData(),
++        reason: 'a valid payload beside them reads (hidden table)');
++    final doc = c.document;
++    final invalid = unitDiagnostics(doc)
++        .where((d) => d.code == 'unit.invalid_data')
++        .map((d) => d.handles.single)
++        .toList();
++    expect(invalid, [
++      for (final n in ['1', '2', '3', '4', 'L']) instanceOf(doc, n)
++    ]);
++
++    // Today's service-copy check (the copy decodes it the same way) needs
++    // the service mode: Task 11.
++
++    expect(c.setUnitData('1', {'id': 'one'}), isTrue);
++    expect(c.setUnitData('2', const {}), isTrue, reason: 'removes it');
++    final next = c.save();
++    final section = dataSection(next)!;
++    expect(section['${instanceOf(doc, '1').value}'], {
++      'data': {'id': 'one'}
++    });
++    expect(section.containsKey('${instanceOf(doc, '2').value}'), isFalse);
++    expect(section['${instanceOf(doc, '3').value}'], payloads['3']);
++    expect(
++        unitDiagnostics(doc)
++            .where((d) => d.code == 'unit.invalid_data')
++            .map((d) => d.handles.single),
++        [
++          for (final n in ['3', '4', 'L']) instanceOf(doc, n)
++        ]);
++    c.undo();
++    c.undo();
++    expect(c.save(), json, reason: 'undo restores the kept payloads');
++  });
++
++  testWidgets(
++      'HD7 M-H29(setUnitsData): one bad entry changes nothing: an '
++      'ambiguous number, an unknown one, two keys trimming to one number '
++      'are false; a map outside the limits throws first', (tester) async {
++    final c = controller(tester);
++    final before = c.save();
++    expect(c.setUnitsData({'1': hostData(), '7': hostData()}), isFalse);
++    expect(c.setUnitsData({'1': hostData(), '42': hostData()}), isFalse);
++    expect(
++        c.setUnitsData({
++          '1': hostData(),
++          ' 1': {'id': 'b'}
++        }),
++        isFalse);
++    expect(
++        () => c.setUnitsData({
++              '1': hostData(),
++              '2': {'Bad': 'x'}
++            }),
++        throwsArgumentError);
++    expect(
++        () => c.setUnitsData({
++              '42': hostData(),
++              '2': {'a': 'x\u0085'}
++            }),
++        throwsArgumentError,
++        reason: 'the maps are checked before the numbers');
++    await tester.pump();
++    expect(detailsOf(c, '1').single.data, isEmpty);
++    expect(c.canUndo.value, isFalse);
++    expect(c.save(), before);
++  });
++
++  testWidgets(
++      'HD8 setUnitsData is one undo step labelled "Unit data"; entries '
++      'already equal are skipped; nothing to change is no step; hidden and '
++      'locked tables take data', (tester) async {
++    final c = controller(tester);
++    final doc = c.document;
++    final labels = <String>[];
++    final sub = doc.changes.listen((e) {
++      if (e is CommandApplied) labels.add(e.label);
++    });
++    addTearDown(sub.cancel);
++    final depth = doc.commands.undoDepth;
++    expect(
++        c.setUnitsData({
++          '5': {'id': 'hidden'},
++          'L': {'id': 'locked'},
++          '3': hostData(),
++        }),
++        isTrue);
++    expect(doc.commands.undoDepth, depth + 1);
++    expect(detailsOf(c, '5').single.center, isNull,
++        reason: 'premise: 5 is hidden');
++    expect(detailsOf(c, '5').single.data, {'id': 'hidden'});
++    expect(detailsOf(c, 'L').single.data, {'id': 'locked'});
++
++    final after = c.save();
++    expect(
++        c.setUnitsData({
++          '5': {'id': 'hidden'},
++          ' L ': {'id': 'locked'},
++        }),
++        isTrue);
++    expect(
++        c.setUnitData('3', {'zeta': 'Masa 4.ğ', 'alpha': '', 'id': '7f3c-ä'}),
++        isTrue);
++    expect(c.setUnitsData(const {}), isTrue);
++    expect(doc.commands.undoDepth, depth + 1, reason: 'no step');
++    expect(c.save(), after);
++
++    expect(
++        c.setUnitsData({
++          '5': const {},
++          '3': hostData(),
++          '4': {'id': '4'}
++        }),
++        isTrue);
++    expect(doc.commands.undoDepth, depth + 2);
++    expect(detailsOf(c, '5').single.data, isEmpty);
++    expect(detailsOf(c, '4').single.data, {'id': '4'});
++    await tester.pump();
++    expect(labels, ['Unit data', 'Unit data']);
++    c.undo();
++    expect(c.save(), after);
++  });
++
++  testWidgets(
++      'HD9 the limits through the controller: the boundaries accepted, one '
++      'past each refused with an ArgumentError, nothing changed',
++      (tester) async {
++    final c = controller(tester);
++    final full = {
++      for (var i = 0; i < 31; i++) 'k${i.toString().padLeft(2, '0')}': '$i',
++      key64: value1024,
++    };
++    expect(c.setUnitData('4', full), isTrue);
++    expect(detailsOf(c, '4').single.data, full);
++    final before = c.save();
++    final refused = <Map<String, String>>[
++      {...full, 'k99': 'x'},
++      {'${key64}q': 'v'},
++      {'a': '${value1024}x'},
++      {'a': astral1025},
++      {'a': 'x\u0085y'},
++      {'Id': 'x'},
++    ];
++    for (final data in refused) {
++      expect(() => c.setUnitData('4', data), throwsArgumentError,
++          reason: '$data');
++    }
++    expect(c.save(), before);
++    expect(detailsOf(c, '4').single.data, full);
++
++    // E-6 counts UTF-16 units, not characters (review R-1): 512 surrogate
++    // pairs are 1024 units, accepted; 1023 units and one pair are 1025,
++    // refused on write, and kept verbatim and read empty on load.
++    expect(c.setUnitData('4', {'a': astral1024}), isTrue);
++    expect(detailsOf(c, '4').single.data, {'a': astral1024});
++    final json = fixtureWith({
++      '4': {
++        'data': {'a': astral1025}
++      },
++    });
++    c.load(json);
++    expect(c.save(), json, reason: 'written back as read');
++    expect(detailsOf(c, '4').single.data, isEmpty);
++    final doc = c.document;
++    expect(
++        unitDiagnostics(doc)
++            .where((d) => d.code == 'unit.invalid_data')
++            .map((d) => d.handles.single),
++        [instanceOf(doc, '4')]);
++  });
++
++  testWidgets('HD10 renumbering 1 to 21 keeps its data: it is the instance\'s',
++      (tester) async {
++    final c = controller(tester);
++    c.setUnitData('1', hostData());
++    final doc = c.document;
++    final label = c.unitIndex.withLabel('1').single.label!;
++    doc.commands.execute(SetEntityTextCommand(label, '21', kUnitLabelTag));
++    expect(detailsOf(c, '1'), isEmpty);
++    expect(detailsOf(c, '21').single.data, hostData());
++    expect(c.setUnitData('21', {'id': 'new'}), isTrue);
++    expect(detailsOf(c, '21').single.data, {'id': 'new'});
++    expect(c.setUnitData('1', {'id': 'x'}), isFalse);
++  });
++
++  testWidgets(
++      'HD11 undo and redo of setUnitData; dirty and canUndo on return, '
++      'revision after the change; dirty again after markSaved', (tester) async {
++    final c = controller(tester);
++    await tester.pump();
++    final revision = c.revision.value;
++    expect(c.dirty.value, isFalse);
++    expect(c.setUnitData('2', hostData()), isTrue);
++    expect(c.dirty.value, isTrue, reason: 'on return');
++    expect(c.canUndo.value, isTrue, reason: 'on return');
++    await tester.pump();
++    expect(c.revision.value, greaterThan(revision));
++    final withData = c.save();
++    c.markSaved();
++    expect(c.dirty.value, isFalse);
++
++    c.undo();
++    await tester.pump();
++    expect(detailsOf(c, '2').single.data, isEmpty);
++    expect(dataSection(c.save()), isNull);
++    expect(c.dirty.value, isTrue);
++    c.redo();
++    await tester.pump();
++    expect(detailsOf(c, '2').single.data, hostData());
++    expect(c.save(), withData);
++    expect(c.dirty.value, isFalse, reason: 'back at the save point');
++    expect(c.setUnitData('2', {'id': 'other'}), isTrue);
++    expect(c.dirty.value, isTrue, reason: 'an edit after markSaved');
++  });
++
++  testWidgets(
++      'HD12 M-H27 (E-9 gate 3): the editor\'s Delete of table 1 drops its '
++      'data in the same step; Undo puts it back, the plan as it was byte '
++      'for byte (O-10), not dirty', (tester) async {
++    final c = controller(tester);
++    await tester.binding.setSurfaceSize(const Size(1440, 900));
++    addTearDown(() => tester.binding.setSurfaceSize(null));
++    await tester.pumpWidget(
++        MaterialApp(home: Scaffold(body: PlanEditor(controller: c))));
++    await tester.pump();
++    await tester.pump();
++    expect(
++        c.setUnitsData({
++          '1': hostData(),
++          '2': {'id': 'two'}
++        }),
++        isTrue);
++    final doc = c.document;
++    final one = instanceOf(doc, '1'), two = instanceOf(doc, '2');
++    final before = c.save();
++    c.markSaved();
++    final root = rootChildren(before);
++    expect(root.indexOf(one.value), lessThan(root.length - 1),
++        reason: 'premise: table 1 is not the root\'s last child');
++    final depth = doc.commands.undoDepth;
++    c.select({'1'});
++    await tester.pump();
++    expect(c.editorSelectedUnits.value, {'1'}, reason: 'premise');
++
++    await tester.sendKeyDownEvent(LogicalKeyboardKey.delete);
++    await tester.sendKeyUpEvent(LogicalKeyboardKey.delete);
++    await tester.pump();
++    expect(doc.tree[one], isNull, reason: 'premise: deleted');
++    expect(doc.commands.undoDepth, depth + 1, reason: 'one step');
++    final deleted = c.save();
++    expect(dataSection(deleted), {
++      '${two.value}': {
++        'data': {'id': 'two'}
++      }
++    });
++
++    await tester.sendKeyDownEvent(LogicalKeyboardKey.control);
++    await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
++    await tester.sendKeyUpEvent(LogicalKeyboardKey.control);
++    await tester.pump();
++    expect(detailsOf(c, '1').single.data, hostData());
++    expect(c.save(), before);
++    expect(c.dirty.value, isFalse, reason: 'back at the save point');
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/controller/unit_detail_test.dart b/packages/jet_cad_2d_plan/test/controller/unit_detail_test.dart
+new file mode 100644
+index 00000000..62627429
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/controller/unit_detail_test.dart
+@@ -0,0 +1,496 @@
++// Ported from jet_cad_floor_plan test/host/table_detail_test.dart (2b
++// Task 9, spec S3 "The unit API"). Host embedding API spec, Slice 1, G-1
++// and G-4: a unit's detail (`PlanController.unitDetails`) and the unit at
++// a canvas point (`unitAt`). Today's header follows.
++//
++// Host embedding API spec, Slice 1, G-1 and G-4: a table's detail
++// (`FloorPlanController.tableDetails`) and the table at a canvas point
++// (`tableAt`), over the shared non-degenerate fixture (embedding_fixture):
++// an off-base box, turned, mirrored, non-uniformly scaled tables 40 m off
++// the origin, hidden and locked layers, a shared number, an unnumbered
++// table, non-finite corners, and a panned camera at 0.37 px/mm.
++// Expectations are the fixture's box through each table's own transform.
++import 'dart:math' as math;
++import 'dart:typed_data' show Float64List;
++import 'dart:ui' show Offset, PointerDeviceKind, Size;
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:jet_cad_2d_plan/src/units/unit_detail.dart' show unitDetailOf;
++
++import '../support/unit_embedding_fixture.dart';
++
++/// World [x], [y] through [t].
++Offset world(Transform2 t, double x, double y) =>
++    Offset(t.a * x + t.c * y + t.e, t.b * x + t.d * y + t.f);
++
++void expectOffset(Offset? got, Offset want, String reason) {
++  expect(got, isNotNull, reason: reason);
++  expect(got!.dx, near(want.dx), reason: '$reason: x');
++  expect(got.dy, near(want.dy), reason: '$reason: y');
++}
++
++/// The fixture's tables that the planner shows: not hidden, finite.
++Iterable<(EmbeddingTable, PlanUnitDetail)> shown(PlanController c) sync* {
++  final details = c.unitDetails;
++  expect(details, hasLength(embeddingTables.length), reason: 'premise');
++  for (var i = 0; i < details.length; i++) {
++    final t = embeddingTables[i];
++    if (t.layer == kEmbeddingHidden || !t.finite) continue;
++    yield (t, details[i]);
++  }
++}
++
++/// The canvas point of [t]'s local ([x], [y]) under [c]'s camera.
++Offset canvasAt(PlanController c, Transform2 t, double x, double y) {
++  final w = world(t, x, y);
++  final p = canvasOf(c.camera.value, w.dx, w.dy);
++  return Offset(p.x, p.y);
++}
++
++EmbeddingTable fixtureTable(String? number) =>
++    embeddingTables.firstWhere((t) => t.number == number);
++
++void main() {
++  testWidgets(
++      'TD0 premise: the document\'s box of the symbol is the fixture\'s, off '
++      'its base point', (tester) async {
++    final c = embeddingController();
++    final d = c.document;
++    final t = c.unitIndex.units.first;
++    final box = d.definitionBounds(t.definition, d.leavesByOwner());
++    expect([
++      box.minX,
++      box.minY,
++      box.maxX,
++      box.maxY
++    ], [
++      embeddingBox.minX,
++      embeddingBox.minY,
++      embeddingBox.maxX,
++      embeddingBox.maxY
++    ]);
++    expect(embeddingBox.center.x != 0 || embeddingBox.center.y != 0, isTrue);
++  });
++
++  testWidgets(
++      'TD1 one detail per table, ascending by handle as `tables` lists them, '
++      'its PlanUnit that one, its layer and lock its layer\'s, no data',
++      (tester) async {
++    final c = embeddingController();
++    final details = c.unitDetails;
++    expect([for (final d in details) d.unit], c.units);
++    expect([for (final d in details) d.unit.label],
++        [for (final t in embeddingTables) t.number]);
++    for (var i = 0; i < details.length; i++) {
++      final t = embeddingTables[i], d = details[i];
++      expect(d.unit.capacity, 4);
++      expect(d.unit.symbolKey, embeddingTable.key);
++      expect(d.unit.visible, t.layer != kEmbeddingHidden, reason: t.label);
++      expect(d.layer, t.layer, reason: t.label);
++      expect(d.locked, t.layer == kEmbeddingLocked, reason: t.label);
++      expect(d.data, isEmpty);
++    }
++  });
++
++  testWidgets(
++      'TD2 M-H1, M-H13: center is the box\'s centre through the placement -- '
++      'not a box corner, not the placement\'s translation (the box is off '
++      'its base point)', (tester) async {
++    final c = embeddingController();
++    final cx = embeddingBox.center.x, cy = embeddingBox.center.y;
++    var seen = 0;
++    for (final (t, d) in shown(c)) {
++      final want = world(t.transform, cx, cy);
++      expectOffset(d.center, want, '${t.label}');
++      // Premise: neither the corner nor the translation is the centre.
++      final corner = world(t.transform, embeddingBox.minX, embeddingBox.minY);
++      expect((corner - want).distance, greaterThan(100));
++      expect((Offset(t.transform.e, t.transform.f) - want).distance,
++          greaterThan(100));
++      seen++;
++    }
++    expect(seen, 8, reason: 'premise: every table but 5 and 9');
++  });
++
++  testWidgets(
++      'TD3 M-H2: rotation is the counter-clockwise turn, atan2(b, a): the 30 '
++      'degree table reads +pi/6; every turn as built, mirrored or scaled',
++      (tester) async {
++    final c = embeddingController();
++    final one = c.unitDetails.first;
++    expect(one.unit.label, '1');
++    expect(one.rotation, near(math.pi / 6));
++    for (final (t, d) in shown(c)) {
++      expect(d.rotation, near(t.degrees * math.pi / 180), reason: t.label);
++    }
++  });
++
++  testWidgets(
++      'TD4 M-H3, O4: mirrored is det < 0 -- not a < 0, not a·d < 0: the 180 '
++      'degree table is not mirrored, the exact 90 degree one is',
++      (tester) async {
++    final c = embeddingController();
++    final four = c.unitDetails[3], two = c.unitDetails[1];
++    expect(four.unit.label, '4');
++    expect(two.unit.label, '2');
++    // Premise: the first column's x is negative for 4 and not for 2.
++    expect(fixtureTable('4').transform.a, lessThan(0));
++    expect(fixtureTable('2').transform.a, greaterThanOrEqualTo(0));
++    // Premise: 2's a·d is 0, not negative, while its det is -1.
++    expect(fixtureTable('2').transform.a * fixtureTable('2').transform.d, 0);
++    expect(fixtureTable('2').transform.determinant, -1);
++    expect(four.mirrored, isFalse, reason: '180 degrees, unmirrored');
++    expect(two.mirrored, isTrue, reason: 'mirrored at 90 degrees');
++    for (final (t, d) in shown(c)) {
++      expect(d.mirrored, t.sy < 0, reason: t.label);
++    }
++  });
++
++  testWidgets(
++      'TD5 M-H14: size is the box\'s width and height times the placement\'s '
++      'column lengths: the (1.5, 0.8) table is 1200 x 480', (tester) async {
++    final c = embeddingController();
++    final three = c.unitDetails[2];
++    expect(three.unit.label, '3');
++    expect(three.size!.width, near(800 * 1.5));
++    expect(three.size!.height, near(600 * 0.8));
++    for (final (t, d) in shown(c)) {
++      expect(d.size!.width, near(embeddingBox.size.x * t.sx.abs()),
++          reason: t.label);
++      expect(d.size!.height, near(embeddingBox.size.y * t.sy.abs()),
++          reason: t.label);
++    }
++  });
++
++  testWidgets(
++      'TD6 corners: the box\'s four corners in the world, counter-clockwise '
++      'from its (min, min) corner whatever the mirror, unmodifiable',
++      (tester) async {
++    final c = embeddingController();
++    final b = embeddingBox;
++    for (final (t, d) in shown(c)) {
++      final p00 = world(t.transform, b.minX, b.minY),
++          p10 = world(t.transform, b.maxX, b.minY),
++          p11 = world(t.transform, b.maxX, b.maxY),
++          p01 = world(t.transform, b.minX, b.maxY);
++      // The fixture knows which of its tables mirror.
++      final want = t.sy < 0 ? [p00, p01, p11, p10] : [p00, p10, p11, p01];
++      expect(d.corners, hasLength(4), reason: t.label);
++      for (var i = 0; i < 4; i++) {
++        expectOffset(d.corners[i], want[i], '${t.label} corner $i');
++      }
++      // Counter-clockwise: the shoelace area is positive, the box's own.
++      var twice = 0.0;
++      for (var i = 0; i < 4; i++) {
++        final p = d.corners[i], q = d.corners[(i + 1) % 4];
++        twice += p.dx * q.dy - q.dx * p.dy;
++      }
++      final area = d.size!.width * d.size!.height;
++      expect(twice / 2, closeTo(area, 1e-9 * area), reason: t.label);
++      expect(() => d.corners.add(Offset.zero), throwsUnsupportedError);
++    }
++  });
++
++  testWidgets(
++      'TD7 a table on a hidden layer and one with non-finite corners report '
++      'no geometry; the locked table does, locked', (tester) async {
++    final c = embeddingController();
++    final details = c.unitDetails;
++    for (final n in ['5', '9']) {
++      final d = details.singleWhere((d) => d.unit.label == n);
++      expect(d.center, isNull, reason: n);
++      expect(d.size, isNull, reason: n);
++      expect(d.corners, isEmpty, reason: n);
++      expect(d.rotation, 0, reason: n);
++      expect(d.mirrored, isFalse, reason: n);
++    }
++    expect(details.singleWhere((d) => d.unit.label == '5').layer,
++        kEmbeddingHidden);
++    final l = details.singleWhere((d) => d.unit.label == 'L');
++    expect(l.locked, isTrue);
++    expect(l.layer, kEmbeddingLocked);
++    expect(l.center, isNotNull);
++    final sevens = [
++      for (final d in details)
++        if (d.unit.label == '7') d
++    ];
++    expect(sevens, hasLength(2), reason: 'both tables numbered 7');
++    expect(sevens[0].center, isNot(sevens[1].center));
++    expect(details.where((d) => d.unit.label == null), hasLength(1));
++  });
++
++  testWidgets(
++      'TD8 cached: two reads at the same key are identical and unmodifiable; '
++      'an edit or a mode switch makes a new list', (tester) async {
++    final c = embeddingController();
++    final first = c.unitDetails;
++    expect(identical(c.unitDetails, first), isTrue);
++    expect(() => first.removeLast(), throwsUnsupportedError);
++    await tester.pump();
++    expect(identical(c.unitDetails, first), isTrue, reason: 'nothing changed');
++
++    final d = c.document;
++    final one = c.unitIndex.units.first.instance;
++    final node = d.tree[one]! as InstanceNode;
++    d.commands.execute(TransformNodeCommand(
++        one, Transform2.translation(500, 0).multiply(node.transform)));
++    final moved = c.unitDetails;
++    expect(identical(moved, first), isFalse);
++    expect(moved.first.center!.dx, near(first.first.center!.dx + 500));
++    expect(identical(c.unitDetails, moved), isTrue);
++    // Today's mode-switch tail (a new, equal list in the selection mode)
++    // needs the service mode: Task 11.
++  });
++
++  testWidgets(
++      'TD9 M-H15: a layer hidden outside the history (a table edit, no '
++      'command) reads at the next revision, though the state id is back '
++      'where it was', (tester) async {
++    final c = embeddingController();
++    var revisions = 0;
++    void count() => revisions++;
++    c.revision.addListener(count);
++    addTearDown(() => c.revision.removeListener(count));
++    final d = c.document;
++    final before = c.unitDetails;
++    expect(before.singleWhere((t) => t.unit.label == 'L').center, isNotNull);
++    final state = d.commands.stateId;
++
++    final locked = d.tables.layers.byName(kEmbeddingLocked)!;
++    d.tables.layers
++      ..remove(locked.handle)
++      ..add(locked.copyWith(visible: false));
++    // An edit and its undo: `revision` moves, the state id comes back.
++    final one = c.unitIndex.units.first.instance;
++    final node = d.tree[one]! as InstanceNode;
++    d.commands.execute(TransformNodeCommand(
++        one, Transform2.translation(500, 0).multiply(node.transform)));
++    c.undo();
++    await tester.pump();
++    expect(revisions, greaterThan(0), reason: 'premise: revision moved');
++    expect(d.commands.stateId, state, reason: 'premise: the same state');
++
++    final l = c.unitDetails.singleWhere((t) => t.unit.label == 'L');
++    expect(l.center, isNull, reason: 'its layer is hidden now');
++    expect(l.unit.visible, isFalse);
++  });
++
++  testWidgets(
++      'TD11 R-1, R-2 (O6, O10): a load of another plan at the same (state, '
++      'revision) key reads the loaded plan: table 1\'s new centre in '
++      'tableDetails, its new place in tableAt', (tester) async {
++    final c = embeddingController();
++    final one = fixtureTable('1');
++    final oldTop = canvasAt(c, one.transform, 600, 0);
++    final before = c.unitDetails;
++    expect(before.first.unit.label, '1');
++    expectOffset(
++        before.first.center,
++        world(one.transform, embeddingBox.center.x, embeddingBox.center.y),
++        'premise: 1 where the fixture puts it');
++    expect(c.unitAt(oldTop), '1', reason: 'premise: the picker is built');
++
++    // The fixture with table 1 moved 2 m along x, by a second controller.
++    final other = embeddingController();
++    final od = other.document;
++    final h = other.unitIndex.withLabel('1').single.instance;
++    final node = od.tree[h]! as InstanceNode;
++    od.commands.execute(TransformNodeCommand(
++        h, Transform2.translation(2000, 0).multiply(node.transform)));
++    final json = other.save();
++
++    final oldDocument = c.document;
++    final oldKey =
++        (oldDocument.commands.stateId, oldDocument.tables.mutationRevision);
++    c.load(json);
++    // The load refits the camera: the fixture's again.
++    c.camera.value = embeddingCamera();
++    final d = c.document;
++    expect(identical(d, oldDocument), isFalse, reason: 'premise: a new plan');
++    expect((d.commands.stateId, d.tables.mutationRevision), oldKey,
++        reason: 'premise: the key alone does not tell the plans apart');
++
++    final moved = Transform2.translation(2000, 0).multiply(one.transform);
++    final after = c.unitDetails;
++    expect(after.first.unit.label, '1');
++    expectOffset(
++        after.first.center,
++        world(moved, embeddingBox.center.x, embeddingBox.center.y),
++        'O6: 1 moved by the load');
++    expect(c.unitAt(oldTop), isNull, reason: 'O10: 1 is gone from there');
++    expect(c.unitAt(canvasAt(c, moved, 600, 0)), '1',
++        reason: 'O10: 1 is at its loaded place');
++  });
++
++  test(
++      'TD12 R-4 (O2, O3): rotation is in (-pi, pi]: a half turn written with '
++      'b = -0.0 reads +pi, not -pi; no turn written with b = -0.0 reads '
++      '+0.0', () {
++    const table =
++        PlanUnit(label: '1', kind: 'table', capacity: 4, symbolKey: 'k');
++    PlanUnitDetail of(Transform2 t) {
++      final b = embeddingBox;
++      final corners = Float64List(8);
++      for (final (i, (x, y)) in [
++        (b.minX, b.minY),
++        (b.maxX, b.minY),
++        (b.maxX, b.maxY),
++        (b.minX, b.maxY)
++      ].indexed) {
++        final p = world(t, x, y);
++        corners[2 * i] = p.dx;
++        corners[2 * i + 1] = p.dy;
++      }
++      return unitDetailOf(
++          unit: table,
++          transform: t,
++          box: b,
++          corners: corners,
++          layer: '0',
++          locked: false);
++    }
++
++    // Premise: atan2 reads the sign of a zero b.
++    expect(math.atan2(-0.0, -1), -math.pi);
++    expect(math.atan2(-0.0, 1).isNegative, isTrue);
++
++    final half = of(const Transform2(-1, -0.0, 0, -1, 45000, -33000));
++    expect(half.rotation, math.pi);
++    expect(half.mirrored, isFalse);
++
++    final none = of(const Transform2(1, -0.0, 0, 1, 45000, -33000));
++    expect(none.rotation, 0);
++    expect(none.rotation.isNegative, isFalse);
++    expect(none.toString(), contains('rotation: 0.0,'));
++    expect(none, of(const Transform2(1, 0, 0, 1, 45000, -33000)));
++  });
++
++  testWidgets(
++      'TD13 R-5 (O9): a layer missing from the plan\'s layers (a hand-edited '
++      'file) reads shown and unlocked, named \'\', as the picker reads it',
++      (tester) async {
++    final c = embeddingController();
++    final d = c.document;
++    final locked = d.tables.layers.byName(kEmbeddingLocked)!;
++    d.tables.layers.remove(locked.handle);
++    final l = fixtureTable('L');
++    final i = embeddingTables.indexOf(l);
++    final detail = c.unitDetails[i];
++    expect(detail.unit.label, 'L');
++    expect(detail.unit.visible, isTrue);
++    expect(detail.layer, '');
++    expect(detail.locked, isFalse);
++    expectOffset(detail.center,
++        world(l.transform, embeddingBox.center.x, embeddingBox.center.y), 'L');
++    expect(c.units[i].visible, isTrue, reason: 'as `tables` reads it');
++    expect(c.unitAt(canvasAt(c, l.transform, 600, 0)), 'L');
++  });
++
++  test('TD10 PlanUnitDetail: ==, hashCode and toString by every field', () {
++    const table =
++        PlanUnit(label: '7', kind: 'table', capacity: 4, symbolKey: 'k');
++    PlanUnitDetail make(
++            {PlanUnit t = table,
++            Offset? center = const Offset(40700, -26900),
++            Size? size = const Size(800, 600),
++            double rotation = 0.5,
++            bool mirrored = true,
++            List<Offset> corners = const [Offset(1, 2), Offset(3, 4)],
++            String layer = 'L',
++            bool locked = true,
++            Map<String, String> data = const {}}) =>
++        PlanUnitDetail(
++            unit: t,
++            center: center,
++            size: size,
++            rotation: rotation,
++            mirrored: mirrored,
++            corners: corners,
++            layer: layer,
++            locked: locked,
++            data: data);
++    final a = make();
++    final same = make(corners: [const Offset(1, 2), const Offset(3, 4)]);
++    expect(a, same);
++    expect(a.hashCode, same.hashCode);
++    for (final other in [
++      make(
++          t: const PlanUnit(
++              label: '8', kind: 'table', capacity: 4, symbolKey: 'k')),
++      make(center: const Offset(40700, -26901)),
++      make(center: null),
++      make(size: const Size(800, 601)),
++      make(rotation: 0.25),
++      make(mirrored: false),
++      make(corners: const [Offset(1, 2), Offset(3, 5)]),
++      make(corners: const [Offset(3, 4), Offset(1, 2)]),
++      make(layer: '0'),
++      make(locked: false),
++      make(data: const {'id': '42'}),
++    ]) {
++      expect(a == other, isFalse, reason: '$other');
++    }
++    expect(make(data: const {'a': '1', 'b': '2'}),
++        make(data: const {'b': '2', 'a': '1'}));
++    expect(make(data: const {'a': '1', 'b': '2'}).hashCode,
++        make(data: const {'b': '2', 'a': '1'}).hashCode);
++    expect(
++        a.toString(),
++        'PlanUnitDetail(PlanUnit(7, table, 4, k, visible: true), '
++        'center: Offset(40700.0, -26900.0), size: Size(800.0, 600.0), '
++        'rotation: 0.5, mirrored: true, corners: [Offset(1.0, 2.0), '
++        'Offset(3.0, 4.0)], layer: L, locked: true, data: {})');
++  });
++
++  // G-4: `tableAt`.
++
++  testWidgets(
++      'TA1 tableAt: a point on a top, in a box off the top, nowhere; the '
++      'unnumbered table and a hidden one answer null, the locked one and '
++      'each 7 their number; the default kind is a mouse', (tester) async {
++    final c = embeddingController();
++    // On the top (the quadrilateral holds local (600, 0)).
++    for (final t in embeddingTables) {
++      if (!t.finite) continue;
++      final want = t.layer == kEmbeddingHidden ? null : t.number;
++      expect(c.unitAt(canvasAt(c, t.transform, 600, 0)), want,
++          reason: '${t.label} on its top');
++    }
++    // In the box, outside the top: local (1050, 350).
++    final one = fixtureTable('1');
++    expect(c.unitAt(canvasAt(c, one.transform, 1050, 350)), '1');
++    // Between the tables.
++    expect(c.unitAt(canvasAt(c, one.transform, 2200, 100)), isNull);
++    expect(
++        c.unitAt(canvasAt(c, one.transform, 2200, 100),
++            kind: PointerDeviceKind.touch),
++        isNull,
++        reason: 'far beyond a finger\'s reach');
++  });
++
++  testWidgets(
++      'TA2 M-H19b(tableAt), O8: a finger 30 mm (11 px) off a table\'s box '
++      'finds it, a mouse or a stylus does not; 80 mm (30 px) off, a finger '
++      'does not', (tester) async {
++    final c = embeddingController();
++    final one = fixtureTable('1');
++    final x = embeddingBox.maxX, y = embeddingBox.center.y;
++    final near = canvasAt(c, one.transform, x + 30, y);
++    final far = canvasAt(c, one.transform, x + 80, y);
++    // Premise: 24 px is 64.9 mm at 0.37 px/mm.
++    expect(30 * 0.37, lessThan(24));
++    expect(80 * 0.37, greaterThan(24));
++    expect(c.unitAt(near), isNull, reason: 'a mouse picks by containment');
++    expect(c.unitAt(near, kind: PointerDeviceKind.mouse), isNull);
++    expect(c.unitAt(near, kind: PointerDeviceKind.stylus), isNull,
++        reason: 'O8: only a finger gets the reach');
++    expect(c.unitAt(near, kind: PointerDeviceKind.touch), '1',
++        reason: 'within a finger\'s reach');
++    expect(c.unitAt(far, kind: PointerDeviceKind.touch), isNull,
++        reason: 'beyond a finger\'s reach');
++  });
++  // TA3 (tableAt follows the camera and the mode) is Task 11's: it needs
++  // the service mode.
++}
+diff --git a/packages/jet_cad_2d_plan/test/editor/units_only_select_test.dart b/packages/jet_cad_2d_plan/test/editor/units_only_select_test.dart
+index d4aa2480..cb9a6d18 100644
+--- a/packages/jet_cad_2d_plan/test/editor/units_only_select_test.dart
++++ b/packages/jet_cad_2d_plan/test/editor/units_only_select_test.dart
+@@ -388,11 +388,71 @@ void main() {
+         (tester) async {
+       final c = await mountUnitEditor(tester, permissions: P.unitsOnly);
+       // 40 mm (about 15 px) beyond each box on its local x axis: within a
+       // finger's 24 px, beyond a mouse's 6; every other table is farther.
+       await fingerTap(tester, screenOf(tester, c, onTable(c, 'L', 1140, 100)));
+       expect(selected(c), isEmpty, reason: 'L, locked: never by reach');
+       await fingerTap(tester, screenOf(tester, c, onTable(c, '1', 1140, 100)));
+       expect(selected(c), {keyOf(c, '1')}, reason: 'the control');
+     });
+   });
++
++  // 2b Task 9: editor_select_test.dart's T5-c and T5-d, over the unit API
++  // (setUnitData, unitDetails, editorSelectedUnits).
++  group('delete (T5-c)', () {
++    testWidgets(
++        'T5-c readOnly: Delete removes nothing; tablesOnly: Delete removes '
++        '1 and its data, and Undo restores both', (tester) async {
++      final c = await mountUnitEditor(tester, permissions: P.readOnly);
++      expect(c.setUnitData('1', const {'pos': 'a1'}), isTrue,
++          reason: 'a host call under readOnly (V-5)');
++      Map<String, String>? dataOf1() =>
++          c.unitDetails.where((d) => d.unit.label == '1').firstOrNull?.data;
++      expect(dataOf1(), const {'pos': 'a1'});
++      await click(tester, screenOf(tester, c, edgeOf(c, '1')));
++      expect(selected(c), {keyOf(c, '1')});
++      final before = encoded(c);
++      await press(tester, LogicalKeyboardKey.delete);
++      await press(tester, LogicalKeyboardKey.backspace);
++      expect(encoded(c), before);
++      await setPermissions(tester, c, P.unitsOnly);
++      await click(tester, screenOf(tester, c, topOf(c, '1')));
++      expect(selected(c), {keyOf(c, '1')});
++      await press(tester, LogicalKeyboardKey.delete);
++      expect(unitsIn(c).withLabel('1'), isEmpty);
++      expect(dataOf1(), isNull);
++      c.undo();
++      await tester.pump();
++      expect(unitsIn(c).withLabel('1'), hasLength(1));
++      expect(dataOf1(), const {'pos': 'a1'});
++    });
++  });
++
++  group('a change across a selection (S-9 g, T5-d)', () {
++    testWidgets(
++        'T5-d full, a wall and 1 selected, then tablesOnly: the selection '
++        'holds 1 alone, and Delete removes 1 only', (tester) async {
++      final c = await mountUnitEditor(tester);
++      final d = c.document;
++      // The north wall's stand-in: the root-level line from
++      // editorNorthWall's first point (today's first WallParams object).
++      final north = [
++        for (final slot in d.entities.liveSlots)
++          if (d.entities.kindAt(slot) == EntityKind.line &&
++              d.entities.ownerAt(slot) == d.rootHandle &&
++              startOf(d, d.entities.handleAt(slot)) == editorNorthWall.$1)
++            d.entities.handleAt(slot),
++      ].single;
++      final wall = SelectionKey.root(north);
++      c.selection.replace([wall, keyOf(c, '1')]);
++      await tester.pump();
++      final tables = c.editorSelectedUnits.value;
++      await setPermissions(tester, c, P.unitsOnly);
++      expect(selected(c), {keyOf(c, '1')});
++      expect(c.editorSelectedUnits.value, tables, reason: 'no table left it');
++      // The canvas has the focus; Delete reaches the select tool.
++      await press(tester, LogicalKeyboardKey.delete);
++      expect(unitsIn(c).withLabel('1'), isEmpty);
++      expect(isLine(d, wall.target), isTrue);
++    });
++  });
+ }
+diff --git a/packages/jet_cad_2d_plan/test/l10n/value_words_test.dart b/packages/jet_cad_2d_plan/test/l10n/value_words_test.dart
+index 57017872..c62594c6 100644
+--- a/packages/jet_cad_2d_plan/test/l10n/value_words_test.dart
++++ b/packages/jet_cad_2d_plan/test/l10n/value_words_test.dart
+@@ -1,19 +1,22 @@
+ // Spec 14d L5, L6 (revision 2): the values the engine and the planner hand
+ // out instead of sentences, worded in each language (M-14d-t). Ported from
+ // jet_cad_floor_plan (2a Task 9): VW1 (the layer-name problems); VW2-VW4
+-// (tables, numbering, rooms) are 2b's. W-VW5, W-VW6: the plan library's
++// (tables, numbering, rooms) are 2b's: VW4 here (2b Task 9). W-VW5, W-VW6: the plan library's
+ // own words.
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show PlanSwatch;
+ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/unit_fixtures.dart';
+ 
+ const languages = <PlanStrings>[
+   PlanStringsEn(),
+   PlanStringsDe(),
+   PlanStringsTr(),
+ ];
+ 
+ /// [word] in each language: never empty, holding every [parts], and
+ /// different in each language.
+ void expectWorded(String Function(PlanStrings s) word,
+@@ -79,11 +82,38 @@ void main() {
+         english: 'Locked objects cannot change layer');
+   });
+ 
+   test('ED-W the file commands\' words in each language', () {
+     // M-ED-W: a language that returns the English text for one of them.
+     expectWorded((s) => s.newDocument, english: 'New');
+     expectWorded((s) => s.open, english: 'Open…');
+     expectWorded((s) => s.save, english: 'Save');
+     expectWorded((s) => s.saveAs, english: 'Save As…');
+   });
++
++  testWidgets(
++      'VW4 the controller\'s numbering warnings are values: duplicates by '
++      'first appearance, then the unnumbered tables (L6)', (tester) async {
++    // 2b Task 9: today's three numbered placements, the third renumbered
++    // 1 and the second emptied, are placed here unlabelled and labelled by
++    // hand (the first and the third 1, the second none); a fourth labelled
++    // 4.
++    final doc = unitPlan();
++    final placed = [
++      for (final (x, turns) in const [(-2600.5, 1), (2300.25, 0), (900.75, 2)])
++        placeAt(doc, tableSymbol(seats: 4), Vector2(x, 1400.5),
++            quarterTurns: turns),
++    ];
++    addUnitLabel(doc, placed[0], '1');
++    addUnitLabel(doc, placed[2], '1');
++    // A fourth table, numbered once: no warning.
++    addUnitLabel(doc,
++        placeAt(doc, tableSymbol(seats: 4), Vector2(4100.25, -900.5)), '4');
++    final c = PlanController(
++        kits: [fxKit()], json: encodePlan(doc, validateKitSet([fxKit()])));
++    addTearDown(c.dispose);
++    expect(c.labelWarnings, const [
++      DuplicateLabel(label: '1', count: 2),
++      Unlabelled(kind: 'table', capacity: 4, symbolKey: 'fx.table.two'),
++    ]);
++  });
+ }
+diff --git a/packages/jet_cad_2d_plan/test/support/unit_embedding_fixture.dart b/packages/jet_cad_2d_plan/test/support/unit_embedding_fixture.dart
+new file mode 100644
+index 00000000..5a3fa5e6
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/support/unit_embedding_fixture.dart
+@@ -0,0 +1,122 @@
++// The host embedding API's fixture (jet_cad_floor_plan/test/host/
++// embedding_fixture.dart), ported for the unit API (2b Task 9): the
++// hand-made unit whose box is off its base point, with an asymmetric top;
++// copies of it turned 30 degrees, mirrored at 90 degrees, scaled
++// non-uniformly (1.5, 0.8) and turned 180 degrees unmirrored, all 40 m off
++// the origin; a unit on a hidden and one on a locked layer; two units
++// sharing a label, an unlabelled unit and a unit whose corners are not
++// finite; and a camera that is not the identity (panned, 0.37 px/mm).
++// Tests compute their expectations from [embeddingBox] and each unit's
++// [EmbeddingTable.transform] by the forward transform, never from the code
++// under test.
++import 'dart:math' as math;
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
++    show ViewportTransform;
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++
++import 'harness.dart' show planText;
++import 'unit_editor_fixture.dart'
++    show embeddingPlacement, embeddingTable, kEmbeddingHidden, kEmbeddingLocked;
++import 'unit_fixtures.dart';
++
++export 'unit_editor_fixture.dart'
++    show
++        embeddingBox,
++        embeddingPlacement,
++        embeddingTable,
++        kEmbeddingHidden,
++        kEmbeddingLocked;
++
++/// One unit of the fixture, as the test knows it.
++final class EmbeddingTable {
++  const EmbeddingTable(this.label, this.transform,
++      {this.degrees = 0,
++      this.sx = 1,
++      this.sy = 1,
++      this.layer = '0',
++      this.finite = true});
++
++  /// The label written, or null for an unlabelled unit.
++  final String? label;
++
++  /// Definition space to world.
++  final Transform2 transform;
++  final double degrees, sx, sy;
++
++  /// `0`, [kEmbeddingHidden] or [kEmbeddingLocked].
++  final String layer;
++
++  /// Whether its box's corners are finite in the world.
++  final bool finite;
++
++  /// The label the plan reads: trimmed, null for none.
++  String? get number => label?.trim();
++}
++
++/// The fixture's units in placement order (embedding_fixture.dart:82-120).
++final List<EmbeddingTable> embeddingTables = [
++  EmbeddingTable('1', embeddingPlacement(40000, -27000, 30), degrees: 30),
++  const EmbeddingTable('2', Transform2(0, 1, 1, 0, 43000, -27000),
++      degrees: 90, sy: -1),
++  EmbeddingTable('3', embeddingPlacement(46000, -27000, -20, sx: 1.5, sy: 0.8),
++      degrees: -20, sx: 1.5, sy: 0.8),
++  EmbeddingTable('4', embeddingPlacement(49000, -27000, 180), degrees: 180),
++  EmbeddingTable('5', embeddingPlacement(40000, -31000, 45),
++      degrees: 45, layer: kEmbeddingHidden),
++  EmbeddingTable('L', embeddingPlacement(43000, -31000, 120, sy: -1),
++      degrees: 120, sy: -1, layer: kEmbeddingLocked),
++  EmbeddingTable('7', embeddingPlacement(46000, -31000, 60), degrees: 60),
++  EmbeddingTable(' 7 ', embeddingPlacement(49000, -31000, -150, sy: -1),
++      degrees: -150, sy: -1),
++  EmbeddingTable(null, embeddingPlacement(40000, -35000, 15), degrees: 15),
++  const EmbeddingTable('9', Transform2(1e306, 0, 0, 1e-306, 43000, -35000),
++      sx: 1e306, sy: 1e-306, finite: false),
++];
++
++/// The fixture plan, as a plan file over [fxKit]: [tables]
++/// ([embeddingTables] by default) on an A4 page at 1:50 from (37,000,
++/// -36,200) around them.
++String embeddingPlanJson({Iterable<EmbeddingTable>? tables}) =>
++    planText([fxKit()], (doc) {
++      doc.commands.execute(SetComponentCommand<PageComponent>(
++          doc.rootHandle, PageComponent(originX: 37000, originY: -36200)));
++      final hidden = addLayer(doc, kEmbeddingHidden, visible: false);
++      final locked = addLayer(doc, kEmbeddingLocked, locked: true);
++      for (final t in tables ?? embeddingTables) {
++        final h = placeUnit(doc, embeddingTable,
++            transform: t.transform,
++            layer: switch (t.layer) {
++              kEmbeddingHidden => hidden,
++              kEmbeddingLocked => locked,
++              _ => ReservedHandles.layerZero,
++            });
++        if (t.label case final label?) addUnitLabel(doc, h, label);
++      }
++      doc.commands.clearHistory();
++    });
++
++/// The camera every call runs under: 0.37 px/mm, y flipped, panned so the
++/// units sit near the canvas's top left.
++ViewportTransform embeddingCamera() => ViewportTransform(
++    worldToScreenMatrix: Transform2(0.37, 0, 0, -0.37, -14612.25, -9431.5));
++
++/// World ([x], [y]) in the canvas of [camera], by the forward transform.
++({double x, double y}) canvasOf(ViewportTransform camera, double x, double y) {
++  final m = camera.worldToScreenMatrix;
++  return (x: m.a * x + m.c * y + m.e, y: m.b * x + m.d * y + m.f);
++}
++
++/// A controller over [embeddingPlanJson] (or [json]) under
++/// [embeddingCamera], disposed at tear-down.
++PlanController embeddingController({String? json}) {
++  final c = PlanController(kits: [fxKit()], json: json ?? embeddingPlanJson());
++  addTearDown(c.dispose);
++  c.camera.value = embeddingCamera();
++  return c;
++}
++
++/// Within a relative 1e-12 of [want], an absolute 1e-12 near 0.
++Matcher near(double want) => closeTo(want, 1e-12 * math.max(want.abs(), 1.0));
+diff --git a/packages/jet_cad_2d_plan/test/units/unit_api_test.dart b/packages/jet_cad_2d_plan/test/units/unit_api_test.dart
+new file mode 100644
+index 00000000..d170226e
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/units/unit_api_test.dart
+@@ -0,0 +1,248 @@
++// 2b Task 9, spec S3 "The unit API" and S2 "Per-unit data": the units of
++// the design, placed and generated, their details and data, the design
++// writes and their refusals, select and fitToUnits in design, and
++// unitChanges for a row edit. Over Task 5's service fixture (a turned,
++// mirrored table off the origin; two seats-only rows, one turned, one
++// curved) and Task 8's editor fixture (the units 1 and 2 placed).
++import 'package:flutter/painting.dart' show Size;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:jet_cad_2d_plan/src/units/unit_index.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/harness.dart';
++import '../support/service_fixture.dart' show serviceFixture;
++import '../support/test_kit.dart';
++import '../support/unit_editor_fixture.dart' show unitEditorPlanJson;
++import '../support/unit_fixtures.dart' show fxKit;
++
++PlanController design() =>
++    controllerFor(kits: [unitKit()], json: serviceFixture().json);
++
++/// The units of [c] labelled [prefix]1, [prefix]2, … (one row's seats).
++List<UnitInfo> seatsLabelled(PlanController c, String prefix) => [
++      for (final u in c.unitIndex.units)
++        if (u.generated && (u.text?.startsWith(prefix) ?? false)) u,
++    ];
++
++/// The row whose seats are labelled [prefix]….
++Handle rowOf(PlanController c, String prefix) =>
++    seatsLabelled(c, prefix).first.owner!;
++
++/// One edit: [row]'s seat count set to [n] (Task 5's row component).
++void setRowCount(PlanController c, Handle row, int n) {
++  final p = c.document.components.get<RowComponent>(row)!;
++  expect(
++      c.execute(SetComponentCommand<RowComponent>(row, p.copyWith(count: n))),
++      isTrue);
++}
++
++/// One edit: [row]'s label prefix set to [prefix].
++void setRowPrefix(PlanController c, Handle row, String prefix) {
++  final p = c.document.components.get<RowComponent>(row)!;
++  expect(
++      c.execute(
++          SetComponentCommand<RowComponent>(row, p.copyWith(prefix: prefix))),
++      isTrue);
++}
++
++PlanUnitDetail detailOf(PlanController c, String label) =>
++    c.unitDetails.singleWhere((d) => d.unit.label == label);
++
++/// The placed table's label (the fixture's one placed unit).
++String tableLabel(PlanController c) =>
++    c.unitIndex.units.singleWhere((u) => !u.generated).text!;
++
++void main() {
++  TestWidgetsFlutterBinding.ensureInitialized();
++
++  test(
++      'UA-units the design\'s units: the placed table and every seat, '
++      'ascending by instance; a seat names its row\'s type', () {
++    final c = design();
++    final units = c.units;
++    final index = c.unitIndex.units;
++    expect(units, hasLength(index.length));
++    expect(units.where((u) => u.generatedBy == null), hasLength(1));
++    // M-UA0: `generatedBy: u.ownerType` written `generatedBy: null`.
++    expect(units.where((u) => u.generatedBy == 'test.row').length,
++        index.length - 1);
++    final seat = units.firstWhere((u) => u.generatedBy != null);
++    expect((seat.kind, seat.capacity), (UnitKinds.seat, 1));
++    expect(c.unitDetails.map((d) => d.unit), units);
++  });
++
++  test(
++      'UA-shrink-data a row of 12 seats carrying data and a colour shrunk to '
++      '10: seats 1-10 keep their handles, data and colour; 11 and 12 '
++      'vanish; undo brings them back with theirs (Review Focus 1)', () {
++    final c = design();
++    final row = rowOf(c, 'A');
++    setRowCount(c, row, 12);
++    final labels = [for (var i = 1; i <= 12; i++) 'A$i'];
++    expect(
++        c.setUnitsData({
++          for (final l in labels) l: {'pos': l.toLowerCase()}
++        }),
++        isTrue);
++    expect(c.setUnitColour('A11', PlanSwatch.teal), isTrue);
++    expect(c.setUnitColour('A3', PlanSwatch.purple), isTrue);
++    final handles = {
++      for (final u in seatsLabelled(c, 'A')) u.text!: u.instance,
++    };
++    expect(handles.keys.toSet(), labels.toSet(), reason: 'premise');
++    setRowCount(c, row, 10);
++    for (var i = 1; i <= 10; i++) {
++      final l = 'A$i';
++      expect(c.unitIndex.withLabel(l).single.instance, handles[l], reason: l);
++      // M-UA1: _detailsOf reading the data of `u.definition`.
++      expect(detailOf(c, l).data, {'pos': l.toLowerCase()}, reason: l);
++    }
++    expect(detailOf(c, 'A3').colour, PlanSwatch.purple);
++    expect(c.unitIndex.withLabel('A11'), isEmpty);
++    expect(c.unitIndex.withLabel('A12'), isEmpty);
++    c.undo();
++    expect(c.unitIndex.withLabel('A11').single.instance, handles['A11']);
++    expect(detailOf(c, 'A11').data, {'pos': 'a11'});
++    expect(detailOf(c, 'A11').colour, PlanSwatch.teal);
++    expect(detailOf(c, 'A12').data, {'pos': 'a12'});
++  });
++
++  test(
++      'UA-seat-data data and a colour on a seat of the turned row: the '
++      'write passes the guard, the detail reads them, its geometry is the '
++      'seat\'s world place', () {
++    final c = design();
++    final seat = seatsLabelled(c, 'B')[1];
++    final label = seat.text!;
++    // M-UA2 (Task 2's guard, cross-check): the components-only write on a
++    // generated instance refused.
++    expect(c.setUnitData(label, const {'id': 'b2'}), isTrue);
++    expect(c.setUnitColour(label, PlanSwatch.orange), isTrue);
++    final d = detailOf(c, label);
++    expect(d.data, {'id': 'b2'});
++    expect(d.colour, PlanSwatch.orange);
++    final box = c.document
++        .definitionBounds(seat.definition, c.document.leavesByOwner());
++    final centre = c.document.tree
++        .accumulatedTransform(seat.instance)
++        .transformPoint(
++            Vector2((box.minX + box.maxX) / 2, (box.minY + box.maxY) / 2));
++    expect(d.center!.dx, closeTo(centre.x, 1e-9));
++    expect(d.center!.dy, closeTo(centre.y, 1e-9));
++  });
++
++  test(
++      'UA-locked-write under a frozen row a seat takes no data, no colour '
++      'and no label: false, no step, no lock hint', () {
++    final c = design();
++    final row = rowOf(c, 'A');
++    c.lockBroken({row});
++    final depth = c.document.commands.undoDepth;
++    // M-UA3: the lock-set check removed (execute refuses, the hint shows).
++    expect(c.setUnitData('A1', const {'id': 'x'}), isFalse);
++    expect(c.setUnitColour('A1', PlanSwatch.red), isFalse);
++    expect(c.lockHint.value, isFalse);
++    expect(c.document.commands.undoDepth, depth);
++    // The placed table is not under the frozen row: it takes data.
++    expect(c.setUnitData(tableLabel(c), const {'id': 't'}), isTrue);
++  });
++
++  test(
++      'UA-label-used a label another unit holds is refused, a seat\'s '
++      'included; a free one is one Label step', () {
++    final c = design();
++    final table = tableLabel(c);
++    final depth = c.document.commands.undoDepth;
++    // M-UA4: the check against the other units' labels removed.
++    expect(c.setUnitLabel(table, 'A1'), isFalse);
++    expect(c.document.commands.undoDepth, depth);
++    expect(c.setUnitLabel(table, ' 77 '), isTrue);
++    expect(c.unitIndex.withLabel('77').single.generated, isFalse);
++    expect(c.document.commands.undoDepth, depth + 1);
++    expect(() => c.setUnitLabel('77', 'ninechars'), throwsArgumentError);
++    expect(() => c.setUnitLabel('77', 'a\nb'), throwsArgumentError);
++  });
++
++  test('UA-label-seat a seat\'s label is its type\'s: setUnitLabel is false',
++      () {
++    final c = design();
++    final seat = seatsLabelled(c, 'A').first;
++    final text =
++        c.document.entities.textAt(c.document.entities.slotOf(seat.label!)!);
++    // M-UA5: `u.generated ||` dropped (the ATTRIB edit reaches the guard).
++    expect(c.setUnitLabel(seat.text!, 'Z9'), isFalse);
++    expect(c.document.entities.textAt(c.document.entities.slotOf(seat.label!)!),
++        text);
++  });
++
++  test(
++      'UA-labels-swap setUnitsLabel swaps two tables\' labels in one step; '
++      'setUnitLabel alone to a held label is false', () {
++    final c = controllerFor(kits: [fxKit()], json: unitEditorPlanJson());
++    final one = c.unitIndex.withLabel('1').single.instance;
++    final two = c.unitIndex.withLabel('2').single.instance;
++    expect(c.setUnitLabel('1', '2'), isFalse);
++    final depth = c.document.commands.undoDepth;
++    // M-UA6: the after-call check reading the current labels only.
++    expect(c.setUnitsLabel({'1': '2', '2': '1'}), isTrue);
++    expect(c.document.commands.undoDepth, depth + 1);
++    expect(c.unitIndex.withLabel('1').single.instance, two);
++    expect(c.unitIndex.withLabel('2').single.instance, one);
++    expect(c.setUnitsLabel({'1': '9', '2': '9'}), isFalse,
++        reason: 'one label twice');
++  });
++
++  test(
++      'UA-select-design select in design takes placed units only: a seat\'s '
++      'label is ignored', () {
++    final c = design();
++    final table = c.unitIndex.units.singleWhere((u) => !u.generated);
++    // M-UA7: `if (placedOnly && u.generated) continue;` removed.
++    c.select({'A1', table.text!});
++    expect(c.selection.keys, {SelectionKey.root(table.instance)});
++    expect(c.editorSelectedUnits.value, {table.text});
++  });
++
++  test(
++      'UA-fit-seat fitToUnits frames a seat by its label: true, and the '
++      'framing is not the page\'s', () {
++    final c = design();
++    // M-UA8: generated units skipped in the units' bounds.
++    expect(c.fitToUnits({'B1'}), isTrue);
++    expect(c.framingFor(const Size(1440, 900)), isNotNull);
++    expect(c.fitToUnits({'nope'}), isFalse);
++  });
++
++  test(
++      'UA-changes-row a row edit reports one change per changed seat, an '
++      'add or a remove per seat grown or shrunk, and a relabel as a change',
++      () async {
++    final c = design();
++    final row = rowOf(c, 'A');
++    final n = seatsLabelled(c, 'A').length;
++    final seen = <PlanUnitChange>[];
++    final sub = c.unitChanges.listen(seen.add);
++    addTearDown(sub.cancel);
++    setRowCount(c, row, n + 2);
++    await Future<void>.delayed(Duration.zero);
++    expect(seen.whereType<PlanUnitAdded>(), hasLength(2));
++    expect(seen.whereType<PlanUnitRemoved>(), isEmpty);
++    seen.clear();
++    setRowCount(c, row, n);
++    await Future<void>.delayed(Duration.zero);
++    expect(seen.whereType<PlanUnitRemoved>(), hasLength(2));
++    expect(seen.whereType<PlanUnitAdded>(), isEmpty);
++    seen.clear();
++    setRowPrefix(c, row, 'C');
++    await Future<void>.delayed(Duration.zero);
++    // M-UA9: the diff matching by label (a relabel as a remove and an add).
++    expect(seen, hasLength(n));
++    expect(seen, everyElement(isA<PlanUnitChanged>()));
++    expect(seen.cast<PlanUnitChanged>().map((ch) => ch.after.unit.label),
++        [for (var i = 1; i <= n; i++) 'C$i']);
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/units/unit_fit_test.dart b/packages/jet_cad_2d_plan/test/units/unit_fit_test.dart
+new file mode 100644
+index 00000000..cdd2429a
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/units/unit_fit_test.dart
+@@ -0,0 +1,91 @@
++// Ported from jet_cad_floor_plan test/host/table_fit_test.dart (2b Task 9):
++// frameUnits, today's frameTables. Today's header follows.
++//
++// Zone spec Z3: the camera a framing sets -- the box grown by the margin,
++// then about its centre to the minimum span, fitted with the 5 % margin and
++// y flipped, its scale clamped about the same centre. Boxes are off the
++// origin and not square.
++import 'dart:ui' show Size;
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
++    show ViewportTransform;
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart'
++    show kPlanMaxScale, kPlanMinScale;
++import 'package:jet_cad_2d_plan/src/units/unit_fit.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++/// [camera] takes [box]'s centre to [viewport]'s within 1e-6 px, with y
++/// flipped: a point above the centre is drawn above it, one right of it to
++/// the right.
++void expectCentred(ViewportTransform camera, Aabb2 box, Size viewport) {
++  final c = camera.worldToScreen(box.center);
++  expect(c.x, closeTo(viewport.width / 2, 1e-6), reason: 'centre x');
++  expect(c.y, closeTo(viewport.height / 2, 1e-6), reason: 'centre y');
++  final up = camera.worldToScreen(box.center + Vector2(0, 100));
++  final right = camera.worldToScreen(box.center + Vector2(100, 0));
++  expect(up.y, lessThan(c.y), reason: 'y up is drawn above');
++  expect(right.x, greaterThan(c.x));
++  final m = camera.worldToScreenMatrix;
++  expect([m.b, m.c], [0, 0]);
++  expect(m.d, -m.a, reason: 'one scale, y flipped');
++}
++
++void main() {
++  test(
++      'TF1 a 380 mm stool in 1000 x 700: 3 m of floor on each axis, '
++      'centred (M-Z4, M-Z6)', () {
++    const box = Aabb2.raw(41210.25, -27390.5, 41590.25, -27010.5);
++    const size = Size(1000, 700);
++    final camera = frameUnits(box, size);
++    expect(camera.worldToScreenMatrix.a, closeTo(0.95 * 700 / 3000, 1e-15));
++    expectCentred(camera, box, size);
++  });
++
++  test(
++      'TF2 a box wide in x, flat in y: the margin on both sides of x, the '
++      'minimum about the centre in y (M-Z5, M-Z6)', () {
++    // 11,000 x 1,200 grows to 12,000 x 2,200, then 12,000 x 3,000. In
++    // 1200 x 900 x binds: 0.1 against 0.3.
++    const box = Aabb2.raw(39500.5, -36800.75, 50500.5, -35600.75);
++    const size = Size(1200, 900);
++    final camera = frameUnits(box, size);
++    expect(camera.worldToScreenMatrix.a,
++        closeTo(0.95 * 1200 / (11000 + 2 * 500), 1e-15));
++    expectCentred(camera, box, size);
++  });
++
++  test(
++      'TF3 past the minimum on both axes: the margin on each, whichever '
++      'axis binds (M-Z5)', () {
++    // 4,000 x 2,600 grows to 5,000 x 3,600.
++    const box = Aabb2.raw(-38250.5, 26100.25, -34250.5, 28700.25);
++    const ySize = Size(1000, 700); // 0.2 against 0.194...: y binds
++    final y = frameUnits(box, ySize);
++    expect(
++        y.worldToScreenMatrix.a, closeTo(0.95 * 700 / (2600 + 2 * 500), 1e-15));
++    expectCentred(y, box, ySize);
++    const xSize = Size(900, 700); // 0.18 against 0.194...: x binds
++    final x = frameUnits(box, xSize);
++    expect(
++        x.worldToScreenMatrix.a, closeTo(0.95 * 900 / (4000 + 2 * 500), 1e-15));
++    expectCentred(x, box, xSize);
++  });
++
++  test(
++      'TF4 the clamp, about the centre: a 1e7 px view gives kPlanMaxScale, a '
++      '1e9 mm box kPlanMinScale (M-Z4, M-Z6)', () {
++    const small = Aabb2.raw(41210.25, -27390.5, 41590.25, -27010.5);
++    const huge = Size(1e7, 7e6);
++    final near = frameUnits(small, huge);
++    expect(near.worldToScreenMatrix.a, kPlanMaxScale);
++    expectCentred(near, small, huge);
++
++    const wide = Aabb2.raw(4.5e6, -1.2e6, 4.5e6 + 1e9, -1.2e6 + 6e8);
++    const size = Size(1000, 700);
++    final far = frameUnits(wide, size);
++    expect(far.worldToScreenMatrix.a, kPlanMinScale);
++    expectCentred(far, wide, size);
++  });
++}

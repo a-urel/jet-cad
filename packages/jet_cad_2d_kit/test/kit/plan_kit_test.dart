@@ -104,6 +104,32 @@ void main() {
     expect(kit.validate().single.message, contains('tool:sample.wall'));
   });
 
+  test(
+      'K2B-validate a unit kind word under the kit is sound; under another '
+      'kit, under none, or dotted, it is foreign', () {
+    const sound = PlanKit(
+        id: 'sample',
+        version: '0.1.0',
+        names: KitNames({
+          'en': {'unit:sample/booth': 'Booth'},
+          'tr': {'unit:sample/booth': 'Loca'},
+        }));
+    // M-K2B-10: `'unit'` left out of the slash branch (unknownWordId).
+    expect(sound.validate(), isEmpty);
+    for (final id in ['unit:other/booth', 'unit:booth', 'unit:sample.booth']) {
+      final kit = PlanKit(
+          id: 'sample',
+          version: '0.1.0',
+          names: KitNames({
+            'en': {id: 'x'},
+          }));
+      // M-K2B-11: `'unit'` in the dot branch instead ('unit:sample/booth'
+      // is then foreign, and 'unit:sample.booth' sound).
+      expect(codes(kit), [KitProblemCode.foreignWordId], reason: id);
+      expect(kit.validate().single.message, contains(id));
+    }
+  });
+
   group('the code side (spec 2a P1)', () {
     /// Every word the code kit needs, in English, and some in Turkish.
     const Map<String, String> english = {

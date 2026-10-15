@@ -12,10 +12,14 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show registerKitComponents;
 
 import '../file/plan_file.dart' show ensureManifest;
+import '../theme/plan_theme.dart' show kUnitColourOpacity;
+import '../units/unit_components.dart' show registerUnitComponents;
+import '../units/unit_index.dart' show UnitIndex;
 import 'builtin_exporters.dart';
 import 'export_font.dart';
 import 'page_printer.dart';
 import 'registries.dart';
+import 'unit_colour_underlay.dart' show unitColourUnderlay, unitFillsOf;
 
 bool _never() => false;
 
@@ -35,6 +39,7 @@ final class PlanPageFlows {
     required void Function() settle,
     required void Function(String json) load,
     PlanExportFonts? fonts,
+    UnitIndex Function()? units,
   })  : exporters = List.unmodifiable(<PlanExporter>[
           const PlanPdfExporter(),
           const PlanPngExporter(),
@@ -46,7 +51,8 @@ final class PlanPageFlows {
         _document = document,
         _catalog = catalog,
         _settle = settle,
-        _load = load {
+        _load = load,
+        _units = units {
     checkRegistry(exporters: exporters, importers: importers);
   }
 
@@ -82,6 +88,10 @@ final class PlanPageFlows {
   final ParametricCatalog Function() _catalog;
   final void Function() _settle;
   final void Function(String json) _load;
+
+  /// The live document's unit index, for the built-ins' fills; null makes
+  /// none.
+  final UnitIndex Function()? _units;
 
   final ValueNotifier<bool> _ready = ValueNotifier(true);
   bool _disposed = false;
@@ -148,6 +158,7 @@ final class PlanPageFlows {
           measurer: measurer, registerComponents: (r) {
         PageComponent.register(r);
         registerKitComponents(r);
+        registerUnitComponents(r);
         catalog.registerComponents(r);
       }, diagnostics: <Diagnostic>[], keepUnreadableComponents: true);
     } catch (_) {
@@ -178,7 +189,9 @@ final class PlanPageFlows {
   /// bytes. The exporter gets a copy, disposed when its bytes are back.
   Future<PlanExport?> exportOnce(
       String exporterId, PlanExportChoice choice, String name,
-      {DraftDocument? document, bool Function() cancelled = _never}) async {
+      {DraftDocument? document,
+      bool Function() cancelled = _never,
+      double unitColourOpacity = kUnitColourOpacity}) async {
     final exporter = exporterOf(exporterId);
     final live = document ?? _document();
     if (!identical(live, _document())) return null;
@@ -188,12 +201,9 @@ final class PlanPageFlows {
     final copy = _copyOf(live);
     final Uint8List bytes;
     try {
-      bytes = await exporter.export(PlanExportRequest(
-          document: copy.document,
-          page: exportPageOf(copy.document),
-          choice: choice,
-          omitted: omittedOf(copy.document),
-          fonts: fonts));
+      final request = _requestOf(copy.document, live, choice,
+          unitColourOpacity: unitColourOpacity);
+      bytes = await exporter.export(request);
     } finally {
       _disposeCopy(copy);
     }
@@ -210,25 +220,47 @@ final class PlanPageFlows {
   /// [cancelled] says so after them; true once the printer is done.
   Future<bool> printOnce(PagePrinter printer, String name,
       {PlanExportChoice choice = PlanExportChoice.initial,
-      bool Function() cancelled = _never}) async {
+      bool Function() cancelled = _never,
+      double unitColourOpacity = kUnitColourOpacity}) async {
     final live = _document();
     final page = exportPageOf(live);
     if (page == null) return false;
     final copy = _copyOf(live);
     final Uint8List bytes;
     try {
-      bytes = await const PlanPdfExporter().export(PlanExportRequest(
-          document: copy.document,
-          page: exportPageOf(copy.document),
-          choice: choice,
-          omitted: omittedOf(copy.document),
-          fonts: fonts));
+      final request = _requestOf(copy.document, live, choice,
+          unitColourOpacity: unitColourOpacity);
+      bytes = await const PlanPdfExporter().export(request);
     } finally {
       _disposeCopy(copy);
     }
     if (cancelled() || !identical(live, _document())) return false;
     await printer.print(bytes, name, printPageFormat(page));
     return true;
+  }
+
+  /// The request for [copy] (a copy of [live]) as [choice] says, its unit
+  /// fills made from [live]'s unit index (2b spec S4): the built-ins draw
+  /// them, through [unitFillsOf]; a host's exporter reads the request's
+  /// `unitColourOpacity`. Inside the caller's `try`, so the copy is
+  /// disposed whatever throws here.
+  PlanExportRequest _requestOf(
+      DraftDocument copy, DraftDocument live, PlanExportChoice choice,
+      {required double unitColourOpacity}) {
+    final omitted = omittedOf(copy);
+    final request = PlanExportRequest(
+        document: copy,
+        page: exportPageOf(copy),
+        choice: choice,
+        omitted: omitted,
+        fonts: fonts,
+        unitColourOpacity: unitColourOpacity);
+    final units = _units;
+    unitFillsOf[request] = units == null
+        ? const []
+        : unitColourUnderlay(units(), live, unitColourOpacity,
+            omitted: omitted);
+    return request;
   }
 
   static void _disposeCopy(
@@ -239,19 +271,25 @@ final class PlanPageFlows {
 
   /// `PlanController.export`: an unknown id throws at once.
   Future<PlanExport?> export(String exporterId, PlanExportChoice choice,
-      {required String name}) {
+      {required String name, double unitColourOpacity = kUnitColourOpacity}) {
     exporterOf(exporterId);
-    return guarded<PlanExport?>(null,
-        () => exportOnce(exporterId, choice, name, cancelled: () => _disposed));
+    return guarded<PlanExport?>(
+        null,
+        () => exportOnce(exporterId, choice, name,
+            cancelled: () => _disposed, unitColourOpacity: unitColourOpacity));
   }
 
   /// `PlanController.print`.
   Future<bool> print(PlanExportChoice choice,
-          {required PagePrinter printer, required String name}) =>
+          {required PagePrinter printer,
+          required String name,
+          double unitColourOpacity = kUnitColourOpacity}) =>
       guarded<bool>(
           false,
           () => printOnce(printer, name,
-              choice: choice, cancelled: () => _disposed));
+              choice: choice,
+              cancelled: () => _disposed,
+              unitColourOpacity: unitColourOpacity));
 
   /// `PlanController.import`: an unknown id throws at once; the importer's
   /// text, with an empty manifest added when it has none, is loaded.

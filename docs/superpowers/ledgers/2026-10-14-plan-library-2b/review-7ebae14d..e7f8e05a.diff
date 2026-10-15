@@ -1,0 +1,2059 @@
+# Review package: 7ebae14d..HEAD
+
+## Commits
+e7f8e05a feat(plan): the service mode's session and the mode switch (2b S3)
+
+## Files changed
+ packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart  |   1 +
+ .../lib/src/controller/plan_controller.dart        | 275 +++++++++++++---
+ .../lib/src/service/service_session.dart           | 187 +++++++++++
+ packages/jet_cad_2d_plan/test/barrel_test.dart     |   2 +
+ .../jet_cad_2d_plan/test/controller/mode_test.dart | 111 +++++++
+ .../test/controller/unit_changes_test.dart         |  44 ++-
+ .../test/controller/unit_colour_test.dart          |  47 ++-
+ .../test/controller/unit_data_test.dart            |  36 +-
+ .../test/controller/unit_detail_test.dart          |  42 ++-
+ .../test/service/service_session_test.dart         | 363 +++++++++++++++++++++
+ .../test/support/service_plans.dart                | 247 ++++++++++++++
+ 11 files changed, 1292 insertions(+), 63 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart b/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart
+index 9c39c657..ffceff4c 100644
+--- a/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart
++++ b/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart
+@@ -57,20 +57,21 @@ export 'src/kits/locks.dart' show PlanLocked;
+ export 'src/l10n/localizations.dart'
+     show PlanLocalizations, planLocalizationsDelegates, planSupportedLocales;
+ export 'src/l10n/strings.dart' show PlanStrings;
+ export 'src/l10n/strings_de.dart' show PlanStringsDe;
+ export 'src/l10n/strings_en.dart' show PlanStringsEn;
+ export 'src/l10n/strings_tr.dart' show PlanStringsTr;
+ export 'src/panels/plan_layer_panel.dart' show PlanLayerPanel;
+ export 'src/panels/plan_page_panel.dart' show PlanPagePanel;
+ export 'src/panels/plan_property_panel.dart' show PlanPropertyPanel;
+ export 'src/panels/plan_symbol_gallery.dart' show PlanSymbolGallery;
++export 'src/service/service_session.dart' show PlanMode;
+ export 'src/shortcuts/plan_shortcut_guard.dart' show PlanShortcutGuard;
+ export 'src/shortcuts/plan_shortcuts.dart' show PlanShortcuts;
+ export 'src/symbols/plan_symbol.dart' show PlanSymbol;
+ export 'src/symbols/plan_symbol_loader.dart'
+     show PlanSymbolLoad, PlanSymbolLoader;
+ export 'src/theme/plan_theme.dart' show PlanTheme;
+ export 'src/units/unit_detail.dart'
+     show
+         PlanUnit,
+         PlanUnitAdded,
+diff --git a/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart b/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
+index d0c34b85..3f0b90a4 100644
+--- a/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
++++ b/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
+@@ -19,20 +19,21 @@ import '../file/manifest.dart';
+ import '../file/plan_file.dart';
+ import '../file/plan_format_exception.dart';
+ import '../kits/guard.dart';
+ import '../kits/kit_set.dart';
+ import '../kits/locks.dart';
+ import '../l10n/document_separator.dart';
+ import '../l10n/strings.dart';
+ import '../export/page_flows.dart';
+ import '../export/page_printer.dart';
+ import '../export/registries.dart';
++import '../service/service_session.dart';
+ import '../service/unit_picker.dart';
+ import '../shortcuts/tool_letters.dart';
+ import '../symbols/plan_symbol.dart';
+ import '../symbols/plan_symbol_loader.dart';
+ import '../tools/generic_tools.dart';
+ import '../tools/move_resolver.dart';
+ import '../tools/plan_select_gates.dart';
+ import '../tools/plan_symbol_tool.dart';
+ import '../units/unit_components.dart';
+ import '../units/unit_detail.dart';
+@@ -259,23 +260,24 @@ class PlanController extends ChangeNotifier {
+             maxScale: maxScale),
+         toolSettings = ToolSettingsStore(kits) {
+     pageFlows = PlanPageFlows(
+       exporters: exporters,
+       importers: importers,
+       unexported: {
+         for (final kit in kits.kits)
+           for (final type in kit.types)
+             if (!type.exported) type.id,
+       },
+-      // `this.`: the constructor's own `document` parameter is the first
+-      // plan, never the current one.
+-      document: () => this.document,
++      // The active document (spec 2b S3): export and print act on the
++      // copy in service. A switch before the bytes are made answers null,
++      // as a replaced plan does.
++      document: () => activeDocument,
+       catalog: () => catalog,
+       settle: settlePendingInput,
+       load: load,
+     );
+     _services = {
+       for (final kit in kits.kits)
+         kit.id: KitServices(
+             kit, _host, KitNamesWords(_names[kit.id]!, () => _locale.value)),
+     };
+     _open(document, measurer, loadDiagnostics);
+@@ -632,20 +634,27 @@ class PlanController extends ChangeNotifier {
+   ValueListenable<Set<Handle>> get locked => _locked;
+ 
+   /// Whether [handle] is locked: a locked object, inside one, or inside a
+   /// locked symbol's definition. The property panel shows no section for
+   /// it; the pickers refuse it.
+   bool isLocked(Handle handle) => _session.locks.covers(document, handle);
+ 
+   /// Locks [objects] in the middle of a session (spec P4: a type's code
+   /// failed, Task 11): adds them to the lock set, clears the undo history
+   /// so no earlier edit can be undone onto them, and tells the listeners.
++  ///
++  /// A lock is no edit (it moves no state id): by itself it moves neither
++  /// [revision] nor [unitChanges], though [unitDetails] reads the new
++  /// `locked` at once (spec 2b S3 names edits, undo, redo, a mode switch,
++  /// [load] and [newPlan] for both). When the edit that froze the objects
++  /// applies on its retry, that edit reports the lock with it; when the
++  /// retry is refused, the lock is reported with the next design change.
+   @internal
+   void lockBroken(Set<Handle> objects) {
+     if (objects.isEmpty) return;
+     _session.locks.addBroken(document, objects);
+     document.commands.clearHistory();
+     _locked.value = _session.locks.objects;
+     // clearHistory emits no change: refresh the undo listenables here.
+     _refreshFlags();
+     grips.gatesChanged();
+     notifyListeners();
+@@ -674,21 +683,24 @@ class PlanController extends ChangeNotifier {
+   /// refused, the refusal caught here: [PlanLocked] (and [lockHint] set;
+   /// the engine's refusal of a write on a frozen, locked object is one),
+   /// `DanglingReferenceError` (E2's refusal of a frozen object's
+   /// referrer), `PermissionDeniedError` (the engine permissions the
+   /// editor's permissions set, e.g. [PlanPermissions.readOnly]),
+   /// `ArgumentError`, and a kit's hook failure the retry did not cure (one
+   /// diagnostic). `StateError` (`PartialMutationError` included, after the
+   /// damage is handled) goes on to the caller.
+   ///
+   /// Drops the pending symbol definitions (spec 2b S2).
++  ///
++  /// False in service (spec 2b S3): the design is not edited there.
+   bool execute(DraftCommand command) {
++    if (_service != null) return false;
+     _pendingDefinitions.clear();
+     try {
+       document.commands.execute(command);
+       return true;
+     } on PlanLocked {
+       lockHint.value = true;
+       return false;
+     } on DanglingReferenceError {
+       return false;
+     } on PermissionDeniedError {
+@@ -735,50 +747,55 @@ class PlanController extends ChangeNotifier {
+   PlanType<Component>? typeOf(Handle object) {
+     final typeId = catalog.typeIdOf(document, object);
+     return typeId == null ? null : kits.typeOf(typeId);
+   }
+ 
+   // ---------------------------------------------------------------------
+   // The unit API (spec 2b S3), design side (Task 9). Task 11 re-points the
+   // seams below to the service copy in service; every member that switches
+   // on the mode reads them.
+ 
+-  /// The active document's units (Task 11: the copy's in service).
+-  UnitIndexCache get _activeUnits => _session.units;
++  /// The active document's units: the copy's in service (spec S3).
++  UnitIndexCache get _activeUnits => _service?.units ?? _session.units;
+ 
+-  /// The active document (Task 11: the copy in service).
+-  DraftDocument get _activeDocument => _session.document;
++  /// The active document: the copy in service.
++  DraftDocument get _activeDocument => activeDocument;
+ 
+-  /// The active selection (Task 11: the copy's in service).
+-  SelectionController get _activeSelection => _session.selection;
++  /// The active selection: the copy's in service.
++  SelectionController get _activeSelection => activeSelection;
+ 
+-  /// Whether the design is the active document (Task 11: the mode).
+-  bool get _inDesign => true;
++  /// Whether the design is the active document.
++  bool get _inDesign => _service == null;
+ 
+-  /// Throws a [StateError] naming [who] in service (Task 11): a design
+-  /// write is refused there (spec S3). Nothing in design.
+-  void _requireDesign(String who) {}
++  /// Throws a [StateError] naming [who] in service: a design write is
++  /// refused there (spec S3, today's P-5). Nothing in design.
++  void _requireDesign(String who) {
++    if (_service != null) {
++      throw StateError('$who needs the design mode (P-5)');
++    }
++  }
+ 
+   /// [labels], each label of a group replaced by its members in service
+   /// (Task 12). The labels as given in design.
+   Set<String> _expandLabels(Set<String> labels) => labels;
+ 
+   /// The active document's unit index (`@internal`): the panels, the
+   /// inspector and the tests read it.
+   @internal
+   UnitIndex get unitIndex => _activeUnits.current;
+ 
+   final ValueNotifier<int> _revision = ValueNotifier(0);
+ 
+   /// Moves whenever the active plan changes: an edit, an undo or a redo of
+-  /// it, [load], [newPlan] (Task 11 adds the mode switch, Task 13 the reset
+-  /// and the restore). A host re-reads [units] and [labelWarnings] on it.
++  /// it (the design's in design, the copy's in service), a mode switch,
++  /// [load], [newPlan] (Task 13 adds the reset and the restore). A host
++  /// re-reads [units] and [labelWarnings] on it.
+   ValueListenable<int> get revision => _revision;
+ 
+   late final _PlanCameraValue _cameraValue = _PlanCameraValue(camera);
+ 
+   /// Where the plan is on the canvas: a new [PlanCamera] at every pan, zoom
+   /// and fit; two reads with no camera change in between are identical.
+   ValueListenable<PlanCamera> get cameraValue => _cameraValue;
+ 
+   /// The global point that shows [world], or null with no canvas mounted.
+   Offset? worldToGlobal(Offset world) {
+@@ -940,20 +957,24 @@ class PlanController extends ChangeNotifier {
+   final ValueNotifier<Set<String>> _selectedUnits =
+       ValueNotifier(const <String>{});
+   final ValueNotifier<Set<String>> _editorSelected =
+       ValueNotifier(const <String>{});
+ 
+   /// The labels of the units selected in the design's editor (today's
+   /// `editorSelectedTables`, :796-800): the active selection's in design,
+   /// empty in service. Unmodifiable; it notifies only when the set changes.
+   ValueListenable<Set<String>> get editorSelectedUnits => _editorSelected;
+ 
++  /// The labels of the active selection's units (today's
++  /// `selectedTables`): the design's in design, the copy's in service.
++  ValueListenable<Set<String>> get selectedUnits => _selectedUnits;
++
+   /// The labels of the active selection's units (today's
+   /// `_refreshSelected`, :1921-1940).
+   void _refreshSelected() {
+     final index = _activeUnits.current;
+     final labels = <String>{
+       for (final k in _activeSelection.keys)
+         if (k.chain.isEmpty)
+           if (index[k.target]?.text case final t?) t,
+     };
+     if (!setEquals(labels, _selectedUnits.value)) {
+@@ -1053,21 +1074,22 @@ class PlanController extends ChangeNotifier {
+     }
+     return _runHostEdit(edits, label);
+   }
+ 
+   /// Executes [edits] as one step labelled [label], the engine's
+   /// permissions lifted (a host call is not gated, 2a P2); true with
+   /// nothing to do.
+   bool _runHostEdit(List<DraftCommand> edits, String label) {
+     if (edits.isEmpty) return true;
+     var applied = false;
+-    _unrestricted(
++    final commands = document.commands;
++    _unrestricted(commands,
+         () => applied = execute(CompoundCommand(edits, label: label)));
+     _refreshFlags();
+     return applied;
+   }
+ 
+   /// Makes [next] the label of the placed unit labelled [label] (spec S3):
+   /// one "Label" step. An [ArgumentError] when [next] breaks the text rule
+   /// (one to eight UTF-16 units, no control character, trimmed); false,
+   /// changing nothing, when [label] names no unit or several, a generated
+   /// unit (its type gives its label), a unit under a locked object, or when
+@@ -1164,20 +1186,26 @@ class PlanController extends ChangeNotifier {
+     if (before == null || _disposed || before.isAt(_session.units.current)) {
+       return;
+     }
+     final after = _unitBaseline = _unitsNow();
+     for (final change in diffUnitDetails(
+         before.instances, before.details, after.instances, after.details)) {
+       _unitOut.add(change);
+     }
+   }
+ 
++  /// The design's selection changed: the selected labels follow it while
++  /// the design is active (in service they are the copy's).
++  void _onDesignSelection() {
++    if (_inDesign) _refreshSelected();
++  }
++
+   /// A design change (its `commands.changes`): the flags, the revision
+   /// while the design is active, the selected labels, the unit changes.
+   void _onDesignChange() {
+     _refreshFlags();
+     if (_inDesign) _revision.value++;
+     _refreshSelected();
+     _reportUnits();
+   }
+ 
+   // ---------------------------------------------------------------------
+@@ -1235,21 +1263,21 @@ class PlanController extends ChangeNotifier {
+     session.lockExpander
+       ..onHookFailure = session.boundary.recover
+       ..onPartialMutation = session.boundary.partialMutation
+       ..onRefusedEdit = session.boundary.recoverRefused
+       ..onRetryFailed = session.boundary.retryFailed;
+     session.runKitFactories(kits, _services, _disabledTools);
+     session.tools.addListener(_onTools);
+     session.history = document.commands.changes.listen((_) {
+       if (!_disposed) _onDesignChange();
+     });
+-    session.selection.addListener(_refreshSelected);
++    session.selection.addListener(_onDesignSelection);
+     _loadDiagnostics = List.unmodifiable(loadDiagnostics);
+     _readManifest();
+     _tracker.attach(document);
+     // The load's checks (spec P4), once the views, the kit products and the
+     // manifest's diagnostics are in place: E4's unreadable components, then
+     // one dry run of the plan.
+     session.boundary.reportUnreadable(_loadDiagnostics);
+     session.boundary.probeLoaded();
+     _reportUnofferedKinds();
+   }
+@@ -1272,24 +1300,33 @@ class PlanController extends ChangeNotifier {
+   /// cancelled and select armed; the old plan's owed changes reported;
+   /// 2. the old document's kit products disposed; 3. the factories run
+   /// over the new document. The old views go after the next frame.
+   void _replace(DraftDocument document, FlutterTextMeasurer measurer,
+       {required bool unsettled, List<Diagnostic> loadDiagnostics = const []}) {
+     final old = _session;
+     old.tools.activate(old.toolById(planSelectToolId)!);
+     old.tools.removeListener(_onTools);
+     _tracker.detach();
+     _reportUnits();
+-    old.selection.removeListener(_refreshSelected);
++    old.selection.removeListener(_onDesignSelection);
+     old.disposeKitProducts();
+     old.detach();
+     _open(document, measurer, loadDiagnostics);
++    // In service the copy is rebuilt from the new design, the mode kept
++    // (today's `_replaceDesign`).
++    final service = _service;
++    if (service != null) {
++      final copy = _buildService();
++      _attachService(copy);
++      _service = copy;
++      _dropService(service);
++    }
+     _tracker.replaced();
+     if (_unitBaseline != null) {
+       _unitOut.add(const PlanUnitsReplaced());
+       _unitBaseline = _unitsNow();
+     }
+     _atPicker = null;
+     _refreshSelected();
+     _revision.value++;
+     _activeTool.value = planSelectToolId;
+     _savedState = document.commands.stateId;
+@@ -1308,75 +1345,213 @@ class PlanController extends ChangeNotifier {
+   /// R-2).
+   void _drop(DocumentSession session) {
+     _dropped.add(session);
+     SchedulerBinding.instance
+       ..addPostFrameCallback((_) {
+         if (_dropped.remove(session)) session.dispose();
+       })
+       ..ensureVisualUpdate();
+   }
+ 
++  // ---------------------------------------------------------------------
++  // The mode (spec 2b S3 "Mode and copy").
++
++  final ValueNotifier<PlanMode> _mode = ValueNotifier(PlanMode.design);
++
++  /// The service copy while the mode is service; null in design.
++  ServiceSession? _service;
++
++  /// Copies let go of whose disposal waits for the next frame (R-2).
++  final List<ServiceSession> _droppedServices = [];
++
++  /// The mode. Changed by [setMode].
++  ValueListenable<PlanMode> get mode => _mode;
++
++  /// The document the mode shows: the design, or the service copy.
++  DraftDocument get activeDocument => _service?.document ?? _session.document;
++
++  /// The active document's selection: the design's, or the copy's.
++  SelectionController get activeSelection =>
++      _service?.selection ?? _session.selection;
++
++  /// The service copy and its systems; null in design.
++  @internal
++  ServiceSession? get serviceSession => _service;
++
++  /// Switches the mode (spec S3). Into service: a copy of the design, the
++  /// design's tool back to plan.select. Out of it: the copy is discarded
++  /// with every service edit. The selected labels are selected again in
++  /// the new mode, by its rules. Moves [revision] and notifies.
++  void setMode(PlanMode next) {
++    if (next == _mode.value) return;
++    settlePendingInput();
++    // The settle may have relabelled a selected unit: read it now.
++    _refreshSelected();
++    final labels = _selectedUnits.value;
++    if (next == PlanMode.service) {
++      final design = _session;
++      // `_onTools` moves `activeTool` back to plan.select.
++      design.tools.activate(design.toolById(planSelectToolId)!);
++      final copy = _buildService();
++      _attachService(copy);
++      _service = copy;
++    } else {
++      final old = _service!;
++      _service = null;
++      _dropService(old);
++    }
++    _mode.value = next;
++    _select(labels);
++    _refreshFlags();
++    _revision.value++;
++    notifyListeners();
++  }
++
++  /// A copy of the design, its systems installed, nothing listening yet.
++  ServiceSession _buildService() {
++    final design = _session;
++    final measurer = FlutterTextMeasurer();
++    final DraftDocument copy;
++    try {
++      copy = serviceCopyOf(design.document,
++          register: _registerComponents, measurer: measurer);
++    } catch (_) {
++      measurer.clear();
++      rethrow;
++    }
++    return ServiceSession(
++        document: copy,
++        measurer: measurer,
++        catalog: catalog,
++        camera: camera,
++        locks: design.locks,
++        frozen: design.frozen,
++        locked: _locked,
++        log: _diagnostics,
++        lock: _lockFromCopy,
++        damage: _damageCopy);
++  }
++
++  /// The controller listens to [s]: its changes and its selection.
++  void _attachService(ServiceSession s) {
++    s.history = s.document.commands.changes.listen((_) {
++      if (_disposed || !identical(s, _service)) return;
++      _onServiceChanged();
++    });
++    void onSelection() {
++      if (!_disposed && identical(s, _service)) _refreshSelected();
++    }
++
++    s.onSelection = onSelection;
++    s.selection.addListener(onSelection);
++  }
++
++  /// The active copy changed (a move, an undo or a redo of one).
++  void _onServiceChanged() {
++    _refreshFlags();
++    _revision.value++;
++    _refreshSelected();
++  }
++
++  /// Lets [s] go (R-2): its listeners now, the session after the frame
++  /// that unmounts its view.
++  void _dropService(ServiceSession s) {
++    s.detach();
++    _droppedServices.add(s);
++    SchedulerBinding.instance
++      ..addPostFrameCallback((_) {
++        if (_droppedServices.remove(s)) s.dispose();
++      })
++      ..ensureVisualUpdate();
++  }
++
++  /// The copy's boundary froze [objects] (spec S3): they join the design's
++  /// lock set (refreshed over the design, whose handles the copy shares),
++  /// the copy's history is cleared so no earlier service step is undone
++  /// onto them, and the listeners are told. The design's history is never
++  /// touched (Risks, B3). As [lockBroken], it moves neither [revision] nor
++  /// [unitChanges] by itself.
++  void _lockFromCopy(ServiceSession s, Set<Handle> objects) {
++    if (objects.isEmpty) return;
++    _session.locks.addBroken(document, objects);
++    s.document.commands.clearHistory();
++    _locked.value = _session.locks.objects;
++    _refreshFlags();
++    grips.gatesChanged();
++    notifyListeners();
++  }
++
++  /// E3 in the copy: a rollback threw there. The copy is rebuilt from
++  /// what it holds (its history cleared); the design is not touched.
++  void _damageCopy(ServiceSession s, PartialMutationError error) {
++    s.document.commands.notifyLoaded();
++    _refreshFlags();
++    notifyListeners();
++  }
++
++  /// [dirty] reads the design; the history flags the active document.
+   void _refreshFlags() {
+-    final commands = document.commands;
+-    _dirty.value = commands.stateId != _savedState;
+-    _canUndo.value = commands.canUndo;
+-    _canRedo.value = commands.canRedo;
++    _dirty.value = document.commands.stateId != _savedState;
++    final active = activeDocument.commands;
++    _canUndo.value = active.canUndo;
++    _canRedo.value = active.canRedo;
+   }
+ 
+   // ---------------------------------------------------------------------
+   // Undo and redo.
+ 
+   ValueListenable<bool> get canUndo => _canUndo;
+   ValueListenable<bool> get canRedo => _canRedo;
+ 
+   bool get _midShape => _session.tools.active.isMidShape;
+ 
+-  /// Undoes the last step, after settling pending input; nothing while the
++  /// Undoes the active document's last step (the copy's in service, spec
++  /// 2b S3), after settling pending input; in design, nothing while the
+   /// active tool is part-way through a shape (today's S-4). A replay that
+-  /// leaves the plan partially mutated (E3) does not escape: the plan is
+-  /// rebuilt from what it holds and marked [damaged], as in [execute].
++  /// leaves the plan partially mutated (E3) does not escape: the document
++  /// is rebuilt from what it holds (the design marked [damaged]), as in
++  /// [execute].
+   void undo() {
+-    if (_midShape) return;
++    if (_service == null && _midShape) return;
+     settlePendingInput();
+-    final commands = document.commands;
++    final commands = activeDocument.commands;
+     if (!commands.canUndo) return;
+     try {
+-      _unrestricted(commands.undo);
++      _unrestricted(commands, commands.undo);
+     } on PartialMutationError catch (error) {
+-      _session.boundary.partialMutation(error);
++      (_service?.boundary ?? _session.boundary).partialMutation(error);
+     }
+   }
+ 
+-  /// Runs [step] with the document's engine permissions lifted, then puts
++  /// Runs [step] with [commands]' engine permissions lifted, then puts
+   /// them back: a host's undo or redo is not gated (spec P2), and the
+   /// dispatcher checks permissions on undo and redo too (undo.dart:213).
+-  void _unrestricted(void Function() step) {
+-    final commands = document.commands;
++  void _unrestricted(CommandDispatcher commands, void Function() step) {
+     final saved = commands.permissions;
+     commands.permissions = DraftPermissions.all;
+     try {
+       step();
+     } finally {
+       commands.permissions = saved;
+     }
+   }
+ 
+-  /// Redoes the next step, as [undo].
++  /// Redoes the active document's next step, as [undo].
+   void redo() {
+-    if (_midShape) return;
++    if (_service == null && _midShape) return;
+     settlePendingInput();
+-    final commands = document.commands;
++    final commands = activeDocument.commands;
+     if (!commands.canRedo) return;
+     try {
+-      _unrestricted(commands.redo);
++      _unrestricted(commands, commands.redo);
+     } on PartialMutationError catch (error) {
+-      _session.boundary.partialMutation(error);
++      (_service?.boundary ?? _session.boundary).partialMutation(error);
+     }
+   }
+ 
+   // ---------------------------------------------------------------------
+   // Tools and the selection.
+ 
+   /// The active tool's id (`plan.select`, a kit's `<kit>.<tool>`).
+   ValueListenable<String> get activeTool => _activeTool;
+ 
+   void _onTools() {
+@@ -1474,22 +1649,23 @@ class PlanController extends ChangeNotifier {
+   @internal
+   ValueNotifier<bool> get fill => _fill;
+ 
+   /// Deletes the selection as the select tool's Delete does, one undo step
+   /// (spec P2), after settling pending input: through the select tool's
+   /// gates (the permissions' `delete`, the locks). False with nothing
+   /// selected, while a shape is part-way, under `delete: false`, with a
+   /// locked object selected, and when every selected object is refused. A
+   /// delete a lock refuses on commit (a locked object inside a selected
+   /// group, Task 11) answers false and sets [lockHint], as [execute] does.
++  /// False in service (spec 2b S3): the design is not edited there.
+   bool deleteSelection() {
+-    if (_midShape) return false;
++    if (_service != null || _midShape) return false;
+     settlePendingInput();
+     final session = _session;
+     try {
+       return session.select.deleteSelection(session.toolContext);
+     } on PlanLocked {
+       lockHint.value = true;
+       return false;
+     } on DanglingReferenceError {
+       return false;
+     } on KitHookFailure catch (failure) {
+@@ -1594,22 +1770,25 @@ class PlanController extends ChangeNotifier {
+     _reported = locale;
+     _reportedStrings = strings;
+     final untouched = _untouched;
+     _unsettled = null;
+     if (!untouched) return;
+     final d = document;
+     final page = d.components.get<PageComponent>(d.rootHandle)!;
+     final separator = _separatorOf(locale);
+     if (page.decimalSeparator == separator) return;
+     // The controller's own settling, not an edit: not gated (spec P2).
+-    _unrestricted(() => d.commands.execute(SetComponentCommand<PageComponent>(
+-        d.rootHandle, page.copyWith(decimalSeparator: separator))));
++    // The design's, even in service: it settles the design's separator.
++    _unrestricted(
++        d.commands,
++        () => d.commands.execute(SetComponentCommand<PageComponent>(
++            d.rootHandle, page.copyWith(decimalSeparator: separator))));
+     d.commands.clearHistory();
+     _savedState = d.commands.stateId;
+   }
+ 
+   // ---------------------------------------------------------------------
+   // State.
+ 
+   ValueListenable<List<KitDiagnostic>> get diagnostics => _diagnostics;
+ 
+   /// The symbol libraries' state (spec P2): loading until every source has
+@@ -1899,40 +2078,52 @@ class PlanController extends ChangeNotifier {
+   // ---------------------------------------------------------------------
+ 
+   @override
+   void dispose() {
+     _disposed = true;
+     _tracker.detach();
+     for (final s in _dropped) {
+       s.dispose();
+     }
+     _dropped.clear();
++    for (final s in _droppedServices) {
++      s.dispose();
++    }
++    _droppedServices.clear();
++    final service = _service;
++    _service = null;
++    if (service != null) {
++      service
++        ..detach()
++        ..dispose();
++    }
+     final session = _session;
+     session.tools.removeListener(_onTools);
+-    session.selection.removeListener(_refreshSelected);
++    session.selection.removeListener(_onDesignSelection);
+     session
+       ..disposeKitProducts()
+       ..detach()
+       ..dispose();
+     if (_ownsThumbnails) thumbnails.dispose();
+     if (_ownsSymbolLoader) _symbolLoader.dispose();
+     _armed.dispose();
+     toolSettings.dispose();
+     _diagnostics.dispose();
+     _locale.dispose();
+     _symbolsState.dispose();
+     _dirty.dispose();
+     _canUndo.dispose();
+     _canRedo.dispose();
+     _activeTool.dispose();
+     _fill.dispose();
+     _locked.dispose();
++    _mode.dispose();
+     lockHint.dispose();
+     _damaged.dispose();
+     _canvasRect.dispose();
+     _fits.dispose();
+     _revision.dispose();
+     _selectedUnits.dispose();
+     _editorSelected.dispose();
+     _unitBaseline = null;
+     _snap.dispose();
+     _snapping.dispose();
+diff --git a/packages/jet_cad_2d_plan/lib/src/service/service_session.dart b/packages/jet_cad_2d_plan/lib/src/service/service_session.dart
+new file mode 100644
+index 00000000..8fedf6c7
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/service/service_session.dart
+@@ -0,0 +1,187 @@
++// The service copy and everything over it (spec 2b S3 "Mode and copy"):
++// the design's text decoded under runtime permissions, its parametric
++// system over the guarded catalog and the design's frozen set, its unit
++// label system, its lock expander over the design's lock set, its own
++// failure boundary, its index, page, selection, outlines, unit index and
++// tool controller. Today's service copy and its systems
++// (jet_cad_floor_plan's floor_plan_controller.dart:1305-1319,
++// host/service_view.dart:124-130, :242-245), built like 2a's
++// DocumentSession (controller/session.dart:29-89).
++import 'dart:async';
++
++import 'package:flutter/foundation.dart' show ValueListenable, VoidCallback;
++import 'package:flutter/material.dart' show Canvas, KeyEventResult, Size;
++import 'package:flutter/services.dart' show KeyEvent;
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++
++import '../kits/guard.dart';
++import '../kits/locks.dart';
++import '../units/unit_index.dart';
++import '../units/unit_label_system.dart';
++
++/// The controller's two modes (spec S3).
++enum PlanMode {
++  /// The editor over the plan the host loads and saves.
++  design,
++
++  /// A copy of the design under runtime permissions: units are tapped,
++  /// selected, given statuses, grouped and moved; nothing done here
++  /// reaches the design.
++  service,
++}
++
++/// [design]'s text decoded as a service copy (today's `_copyOf`): under
++/// `DraftPermissions.runtime` (transforms and components only), with
++/// [register]'s components, a component the design keeps raw (E4) kept
++/// raw. The handles are the design's.
++DraftDocument serviceCopyOf(DraftDocument design,
++        {required void Function(ComponentRegistry registry) register,
++        required TextMeasurer measurer}) =>
++    DraftDocumentCodec.decodeString(DraftDocumentCodec.encodeToString(design),
++        measurer: measurer,
++        permissions: DraftPermissions.runtime,
++        diagnostics: <Diagnostic>[],
++        keepUnreadableComponents: true,
++        registerComponents: register);
++
++/// The service copy and its systems and views (spec S3). Made when service
++/// is entered (and by a load, a new plan, a reset or a restore in
++/// service), disposed after the frame that unmounts its view.
++final class ServiceSession {
++  /// [locks] and [frozen] are the design session's own (the handles are
++  /// the same in both documents); [lock] and [damage] receive this
++  /// session with what its boundary found. The copy's one tool is an idle
++  /// placeholder until Task 14's `ServiceTool`.
++  ServiceSession({
++    required this.document,
++    required this.measurer,
++    required ParametricCatalog catalog,
++    required CameraController camera,
++    required LockSet locks,
++    required Set<Handle> frozen,
++    required ValueListenable<Set<Handle>> locked,
++    required DiagnosticsLog log,
++    required void Function(ServiceSession session, Set<Handle> objects) lock,
++    required void Function(ServiceSession session, PartialMutationError error)
++        damage,
++  })  : page = PageNotifier(document),
++        index = SpatialIndex(document) {
++    // The selection before the outlines (it prunes a dead key first), as
++    // the design's (session.dart:49-56).
++    selection = SelectionController(document);
++    outlines = OutlineCache(document, selection);
++    toolContext = ToolContext(
++        document: document,
++        index: index,
++        camera: camera,
++        selection: selection,
++        page: page);
++    tool = _IdleTool();
++    tools = ToolController(initial: tool, context: toolContext);
++    // The design's stack (Task 7): parametric, unit labels, lock.
++    parametric = ParametricSystem(document, catalog, isFrozen: frozen.contains)
++      ..install();
++    labels = UnitLabelSystem(document)..install();
++    lockExpander = LockExpander(document, locks)..install();
++    boundary = FailureBoundary(
++        document: document,
++        catalog: catalog,
++        system: parametric,
++        frozen: frozen,
++        log: log,
++        lock: (objects) => lock(this, objects),
++        damage: (error) => damage(this, error));
++    // As the design's (plan_controller.dart's `_open`): a hook failure is
++    // probed, frozen and retried once.
++    lockExpander
++      ..onHookFailure = boundary.recover
++      ..onPartialMutation = boundary.partialMutation
++      ..onRefusedEdit = boundary.recoverRefused
++      ..onRetryFailed = boundary.retryFailed;
++    // Last, as the design's (session.dart): it listens to [locked], so no
++    // later step can throw and leak the listener.
++    units = UnitIndexCache(document,
++        catalog: catalog, locks: locks, locked: locked);
++  }
++
++  /// The copy.
++  final DraftDocument document;
++  final FlutterTextMeasurer measurer;
++  final PageNotifier page;
++  final SpatialIndex index;
++  late final SelectionController selection;
++  late final OutlineCache outlines;
++
++  /// The copy's units: what everything in service reads.
++  late final UnitIndexCache units;
++  late final ToolContext toolContext;
++
++  /// The copy's one tool, which [tools] holds.
++  late final Tool tool;
++  late final ToolController tools;
++  late final ParametricSystem parametric;
++  late final UnitLabelSystem labels;
++  late final LockExpander lockExpander;
++  late final FailureBoundary boundary;
++
++  /// The controller's subscription to the copy's changes, and its
++  /// selection listener; [detach] drops both.
++  StreamSubscription<DocChange>? history;
++  VoidCallback? onSelection;
++
++  bool get canUndo => document.commands.canUndo;
++  bool get canRedo => document.commands.canRedo;
++
++  /// Stops the controller listening, at once.
++  void detach() {
++    final h = history;
++    history = null;
++    if (h != null) unawaited(h.cancel());
++    final l = onSelection;
++    onSelection = null;
++    if (l != null) selection.removeListener(l);
++  }
++
++  /// Everything, after the frame that unmounts the view: the tool
++  /// controller before the tool, the outlines before the selection, the
++  /// systems last in first out, the index before the document.
++  void dispose() {
++    tools.dispose();
++    tool.dispose();
++    outlines.dispose();
++    selection.dispose();
++    page.dispose();
++    units.dispose();
++    lockExpander.dispose();
++    labels.dispose();
++    parametric.dispose();
++    index.dispose();
++    unawaited(document.dispose());
++    measurer.clear();
++  }
++}
++
++/// The copy's tool until Task 14's service tool: it reacts to nothing.
++final class _IdleTool extends Tool {
++  @override
++  String get name => 'plan.service';
++  @override
++  ToolPhase get phase => ToolPhase.idle;
++  @override
++  void onPointerDown(ToolPointerEvent e, ToolContext ctx) {}
++  @override
++  void onPointerMove(ToolPointerEvent e, ToolContext ctx) {}
++  @override
++  void onPointerUp(ToolPointerEvent e, ToolContext ctx) {}
++  @override
++  void onPointerExit(ToolContext ctx) {}
++  @override
++  KeyEventResult onKey(KeyEvent event, ToolContext ctx) =>
++      KeyEventResult.ignored;
++  @override
++  void cancel(ToolContext ctx) {}
++  @override
++  void paintOverlay(Canvas canvas, ViewportTransform camera, Size viewport,
++      PaperPalette paper) {}
++}
+diff --git a/packages/jet_cad_2d_plan/test/barrel_test.dart b/packages/jet_cad_2d_plan/test/barrel_test.dart
+index cdf55c22..c7aff989 100644
+--- a/packages/jet_cad_2d_plan/test/barrel_test.dart
++++ b/packages/jet_cad_2d_plan/test/barrel_test.dart
+@@ -58,20 +58,22 @@ void main() {
+       'PlanPageExporter', 'PlanExportDialog', 'PagePrinter',
+       'PrintingPagePrinter',
+       // Task 20
+       'PlanEditor', 'PlanEditorBar', 'PlanEditorAction', 'PlanFileCallback',
+       // 2b Task 8
+       'isUnitSymbol',
+       // 2b Task 9
+       'BadLabel', 'DuplicateLabel', 'PlanCamera', 'PlanUnit', 'PlanUnitAdded',
+       'PlanUnitChange', 'PlanUnitChanged', 'PlanUnitDetail', 'PlanUnitRemoved',
+       'PlanUnitsReplaced', 'Unlabelled', 'UnitLabelProblem', 'UnitLabelWarning',
++      // 2b Task 11
++      'PlanMode',
+     });
+   });
+ 
+   testWidgets('ED-9b the editor\'s names, through the barrel alone',
+       (tester) async {
+     final c = PlanController(kits: const []);
+     addTearDown(c.dispose);
+     PlanExport? last;
+     const PagePrinter printer = PrintingPagePrinter();
+     await tester.pumpWidget(MaterialApp(
+diff --git a/packages/jet_cad_2d_plan/test/controller/mode_test.dart b/packages/jet_cad_2d_plan/test/controller/mode_test.dart
+new file mode 100644
+index 00000000..172bfa1c
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/controller/mode_test.dart
+@@ -0,0 +1,111 @@
++// jet_cad_floor_plan's test/host/controller_test.dart C3, C4, C5, C8 and
++// CD1, the service halves, assertions unchanged (spec 2b S3, A12): the
++// copy, its permissions, a load in service, a refused load in service,
++// unitDetails following the active document.
++import 'dart:convert';
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:jet_cad_2d_plan/src/symbols/symbol_placer.dart'
++    show placementTransform;
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/harness.dart';
++import '../support/service_plans.dart';
++import '../support/test_kit.dart';
++
++PlanController controller(String json) =>
++    controllerFor(kits: [testKit()], json: json);
++
++void main() {
++  testWidgets(
++      'MD-C3 leaving service discards the copy; re-entering shows the design '
++      '(C3, M-14b2-2)', (tester) async {
++    final c = controller(servicePlanText());
++    final designed = parts(unitNode(c.activeDocument, '1').transform);
++    c.setMode(PlanMode.service);
++    move(c, '1', 750, -250);
++    expect(parts(unitNode(c.activeDocument, '1').transform), isNot(designed));
++    c.setMode(PlanMode.design);
++    c.setMode(PlanMode.service);
++    expect(parts(unitNode(c.activeDocument, '1').transform), designed);
++    await tester.pump();
++  });
++
++  testWidgets('MD-C4 the copy refuses geometry and structure (C4, M-14b2-6)',
++      (tester) async {
++    final c = controller(servicePlanText());
++    c.setMode(PlanMode.service);
++    expect(c.activeDocument.commands.permissions, DraftPermissions.runtime);
++    expect(() => drawLine(c), throwsA(isA<PermissionDeniedError>()));
++    expect(() => move(c, '3', 10, 10), returnsNormally,
++        reason: 'a move is a transform');
++    await tester.pump();
++  });
++
++  testWidgets(
++      'MD-C5 load clears the selection and rebuilds the copy from the new '
++      'plan (C5, M-14b2-3)', (tester) async {
++    final c = controller(servicePlanText());
++    c.setMode(PlanMode.service);
++    c.select({'1', '2'});
++    expect(c.selectedUnits.value, {'1', '2'});
++    move(c, '2', 900, 900);
++    // The same plan, table 2 elsewhere: same handles, same labels.
++    c.load(servicePlanText(secondAt: Vector2(5000, -3700)));
++    expect(c.mode.value, PlanMode.service);
++    expect(c.selectedUnits.value, isEmpty);
++    final placed =
++        placementTransform(at: Vector2(5000, -3700), basePoint: tableBase);
++    expect(parts(unitNode(c.activeDocument, '2').transform), parts(placed));
++    expect(c.dirty.value, isFalse);
++    await tester.pump();
++  });
++
++  testWidgets(
++      'MD-C8 a bad plan changes nothing in service: broken structure, '
++      'unknown schema (C8, M-14b2-8)', (tester) async {
++    final c = controller(servicePlanText());
++    c.setMode(PlanMode.service);
++    c.select({'3'});
++    move(c, '3', -300, 200);
++    final moved = parts(unitNode(c.activeDocument, '3').transform);
++    final document = c.activeDocument;
++    final good = jsonDecode(servicePlanText()) as Map<String, Object?>;
++    final broken = jsonEncode({...good, 'entities': 7});
++    final future = jsonEncode({...good, 'schemaVersion': 9999});
++    for (final bad in [broken, future, '{}']) {
++      expect(() => c.load(bad), throwsFormatException, reason: bad);
++    }
++    expect(c.activeDocument, same(document));
++    expect(c.mode.value, PlanMode.service);
++    expect(c.selectedUnits.value, {'3'});
++    expect(parts(unitNode(c.activeDocument, '3').transform), moved);
++    await tester.pump();
++  });
++
++  testWidgets(
++      'MD-CD1 a service move changes unitDetails in service, and not the '
++      'design\'s: back in design the unit is where it was designed (CD1, '
++      'M-H4)', (tester) async {
++    final c = controller(servicePlanText());
++    final designed =
++        unitNode(c.document, '1').transform.transformPoint(tableBase);
++    double x() => c.unitDetails.first.center!.dx;
++    double y() => c.unitDetails.first.center!.dy;
++    expect(c.unitDetails.first.unit.label, '1', reason: 'premise');
++    expect(x(), closeTo(designed.x, 1e-12 * designed.x.abs()));
++
++    c.setMode(PlanMode.service);
++    move(c, '1', 750, -250);
++    await tester.pump();
++    expect(x(), closeTo(designed.x + 750, 1e-12 * designed.x.abs()));
++    expect(y(), closeTo(designed.y - 250, 1e-12 * designed.y.abs()));
++
++    c.setMode(PlanMode.design);
++    await tester.pump();
++    expect(x(), closeTo(designed.x, 1e-12 * designed.x.abs()));
++    expect(y(), closeTo(designed.y, 1e-12 * designed.y.abs()));
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/controller/unit_changes_test.dart b/packages/jet_cad_2d_plan/test/controller/unit_changes_test.dart
+index 4b2fde2c..570659e8 100644
+--- a/packages/jet_cad_2d_plan/test/controller/unit_changes_test.dart
++++ b/packages/jet_cad_2d_plan/test/controller/unit_changes_test.dart
+@@ -1,13 +1,15 @@
+ // Ported from jet_cad_floor_plan test/host/design_changes_test.dart (2b
+-// Task 9, spec S3 `unitChanges`, S5): the design's unit changes. DC7,
+-// DC10, DC15 and DC16 need the service mode (Tasks 11 and 14). DC8, DC9,
++// Task 9, spec S3 `unitChanges`, S5): the design's unit changes. DC10 and
++// DC16 (the service mode) are Task 11's; DC7 and DC15 read Task 13's
++// `serviceEdited` (DC7 also its record and reset, and a service drag), so
++// they wait for it. DC8, DC9,
+ // DC11, DC12, DC13 and DC17 were ported by 2a for the object-level
+ // `changes` stream (plan_change_test.dart); they are ported again here for
+ // `unitChanges`, whose code is its own (controller ruling R-13, F-T9c).
+ // Today's header follows.
+ //
+ // Host embedding API spec E-5 (Slice 2 plan, Task 3): the controller's
+ // unitChanges -- a design edit, undo or redo reported as the tables
+ // added, removed and changed, by instance, in ascending instance order;
+ // PlanUnitsReplaced on load and newPlan in either mode, after the old
+ // design's last changes; nothing from the selection mode; nothing read while
+@@ -305,21 +307,22 @@ void main() {
+         expect(change.before, before, reason: '"$label"');
+         expectNear(change.after.center,
+             boxCentre(shift.multiply(fixture.transform)), 'moved by the shift');
+         expect(change.after.mirrored, mirrored);
+         expect(change.after.rotation, closeTo(before.rotation, 1e-12));
+         expect(change.after.unit, before.unit);
+         expect(change.after, detailOf(c, instance));
+       }
+     });
+ 
+-    // DC7 (service moves report nothing) needs the service mode: Task 11.
++    // DC7 (service moves report nothing) reads Task 13's serviceEdited,
++    // record and reset, and drags with the service tool: not ported here.
+ 
+     testWidgets(
+         'DC8 newPlan: exactly [PlanUnitsReplaced()], no Removed per '
+         'table; a load: the same', (tester) async {
+       final c = await mounted(tester);
+       final seen = listen(c);
+       c.newPlan();
+       await tester.pump();
+       expect(seen, [const PlanUnitsReplaced()]);
+       expect(c.unitDetails, isEmpty, reason: 'premise: an empty plan');
+@@ -343,21 +346,35 @@ void main() {
+       expect(seen, isEmpty, reason: 'delivered asynchronously');
+       await tester.pump();
+       expect(seen, [
+         PlanUnitChanged(b2, copyOf(b2, data: hostData())),
+         const PlanUnitsReplaced(),
+         PlanUnitChanged(l, copyOf(l, data: {'id': 'l'})),
+       ]);
+     });
+   });
+ 
+-  // DC10 (PlanUnitsReplaced in the service mode) is Task 11's.
++  testWidgets(
++      'DC10 M-H29(PlanReplaced in service): there, a load is '
++      'exactly [PlanUnitsReplaced()], and so is a newPlan', (tester) async {
++    final c = fixtureController();
++    c.setMode(PlanMode.service);
++    await tester.pump();
++    final seen = listen(c);
++    c.load(embeddingPlanJson());
++    await tester.pump();
++    expect(seen, [const PlanUnitsReplaced()]);
++    c.newPlan();
++    await tester.pump();
++    expect(seen, [const PlanUnitsReplaced(), const PlanUnitsReplaced()]);
++    expect(c.mode.value, PlanMode.service, reason: 'premise');
++  });
+ 
+   testWidgets(
+       'DC11 nothing is read with no listener, nor after the last cancel; one '
+       'read per listen and per moved design; two edits of one synchronous '
+       'step are one read and one report', (tester) async {
+     final c = fixtureController();
+     final doc = c.document;
+     final zero = doc.tables.layers[ReservedHandles.layerZero]!;
+     expect(c.setUnitData('1', hostData()), isTrue);
+     doc.commands.execute(SetLayerCommand(zero.copyWith(locked: true)));
+@@ -529,21 +546,38 @@ void main() {
+         [t('7'), t(null), t('8'), t('7', layer: 'B')]);
+     expect(changes, [
+       PlanUnitRemoved(t('7')),
+       PlanUnitChanged(t('8'), t('7')),
+       PlanUnitAdded(t('8')),
+       PlanUnitChanged(t('7'), t('7', layer: 'B')),
+     ]);
+     expect(diffUnitDetails(const [], const [], const [], const []), isEmpty);
+   });
+ 
+-  // DC15 and DC16 (a service move) are Tasks 11 and 14's.
++  // DC15 (a listen in service after a service move) reads Task 13's
++  // serviceEdited as a premise: not ported here.
++
++  testWidgets(
++      'DC16 M-H29(service moves), the trigger alone: an edit then '
++      'setMode(service) in one synchronous step is reported at the next '
++      'pump, not withheld until the design moves again', (tester) async {
++    final c = fixtureController();
++    final b2 = detailOf(c, instancesOf(c, '2').single);
++    final seen = listen(c);
++
++    expect(c.setUnitData('2', hostData()), isTrue);
++    c.setMode(PlanMode.service);
++    expect(seen, isEmpty, reason: 'delivered asynchronously');
++    await tester.pump();
++    expect(seen, [PlanUnitChanged(b2, copyOf(b2, data: hostData()))]);
++    expect(c.mode.value, PlanMode.service, reason: 'premise');
++  });
+ 
+   testWidgets(
+       'DC17 O10: a failed load reports nothing and drops nothing owed: an '
+       'edit, then load of "not json" and of a JSON that is no plan, both '
+       'throwing, is exactly the edit\'s Changed, no PlanUnitsReplaced',
+       (tester) async {
+     final c = fixtureController();
+     final b1 = detailOf(c, instancesOf(c, '1').single);
+     final seen = listen(c);
+ 
+diff --git a/packages/jet_cad_2d_plan/test/controller/unit_colour_test.dart b/packages/jet_cad_2d_plan/test/controller/unit_colour_test.dart
+index b37aecf8..45dc0030 100644
+--- a/packages/jet_cad_2d_plan/test/controller/unit_colour_test.dart
++++ b/packages/jet_cad_2d_plan/test/controller/unit_colour_test.dart
+@@ -1,15 +1,15 @@
+ // Ported from jet_cad_floor_plan test/host/table_color_test.dart (2b Task
+ // 9, spec S2 "Per-unit data", S3 "Design writes"): setUnitColour and
+ // setUnitsColour on the embedding fixture. TC1 (the component's encoding)
+-// is Task 6's; TC6 (the service mode) is Task 11's. Today's header
+-// follows.
++// is Task 6's; TC6 and TC7's service-copy block (the service mode) are
++// Task 11's, appended there. Today's header follows.
+ //
+ // Plan colours spec PC-4 and PC-11 (Slice 2 plan, Task 2): a table's colour
+ // as the plan stores it -- the `jetcad.unit_colour` component on the table's
+ // instance -- and as a host reads and writes it: `PlanUnitDetail.colour`,
+ // `setUnitColour` and `setUnitsColour`, which share one path with the
+ // table-data setters. On the embedding fixture: tables turned 30 degrees,
+ // mirrored at 90, scaled, turned 180, all 40 m off the origin, their top
+ // off-centre and asymmetric; `5` hidden, `L` locked; `7` and ` 7 ` sharing
+ // a number; an unnumbered table. Hues `teal` and `purple`, and the unknown
+ // name `magenta`.
+@@ -258,22 +258,51 @@ void main() {
+     expect(detailsOf(c, '5').single.colour, teal);
+     expect(detailsOf(c, 'L').single.colour, purple);
+     expect(detailsOf(c, 'L').single.locked, isTrue);
+     expect(c.setUnitColour('L', PlanSwatch.red), isTrue);
+     expect(detailsOf(c, 'L').single.colour, PlanSwatch.red);
+     expect(c.setUnitColour('L', null), isTrue);
+     expect(detailsOf(c, 'L').single.colour, isNull);
+     expect(detailsOf(c, '5').single.colour, teal);
+   });
+ 
+-  // TC6 (the service mode throws a StateError) is Task 11's: its Step 3
+-  // appends it here.
++  testWidgets(
++      'TC6 M-PC11-a in service setUnitColour and setUnitsColour '
++      'throw a StateError, the design untouched; the service copy reads the '
++      'design\'s colour', (tester) async {
++    final c = controller(tester);
++    expect(c.setUnitColour('2', purple), isTrue);
++    final before = c.save();
++    c.setMode(PlanMode.service);
++    await tester.pump();
++    expect(detailsOf(c, '2').single.colour, purple,
++        reason: 'the copy carries it, read only');
++    expect(detailsOf(c, '1').single.colour, isNull);
++    expect(() => c.setUnitColour('1', teal), throwsStateError);
++    expect(() => c.setUnitsColour({'1': teal}), throwsStateError);
++    expect(() => c.setUnitColour('2', null), throwsStateError);
++    expect(() => c.setUnitsColour(const {}), throwsStateError);
++    expect(
++        () => c.setUnitColour('1', teal),
++        throwsA(isA<StateError>().having((e) => e.message, 'message',
++            'setUnitColour needs the design mode (P-5)')));
++    expect(
++        () => c.setUnitData('1', const {'a': 'b'}),
++        throwsA(isA<StateError>().having((e) => e.message, 'message',
++            'setUnitData needs the design mode (P-5)')));
++    await tester.pump();
++    expect(c.save(), before);
++    expect(c.canUndo.value, isFalse);
++    c.setMode(PlanMode.design);
++    expect(detailsOf(c, '1').single.colour, isNull);
++    expect(detailsOf(c, '2').single.colour, purple);
++  });
+ 
+   testWidgets(
+       'TC7 M-C2 M-PC11-b a colour this release cannot read: the plan opens; '
+       'each such table reads colour null and is reported table.invalid_color; '
+       'the payloads are written back byte for byte; null removes one without '
+       'a change reported, a hue replaces one', (tester) async {
+     final payloads = <String, Object?>{
+       '1': {'color': 7},
+       '2': {'color': 'magenta'},
+       '3': {'color': 'teal', 'x': 1},
+@@ -297,22 +326,28 @@ void main() {
+         ];
+     expect(invalid(), [
+       for (final n in ['1', '2', '3', 'L']) instanceOf(doc, n)
+     ]);
+     expect(UnitProblem.invalidColour, 'unit.invalid_colour');
+     final warning =
+         unitDiagnostics(doc).firstWhere((d) => d.code == 'unit.invalid_colour');
+     expect(warning.severity, DiagnosticSeverity.warning);
+     expect(warning.message, contains(instanceOf(doc, '1').toHex()));
+ 
+-    // Today's service-copy check (the copy decodes it the same way) needs
+-    // the service mode: Task 11.
++    // The service copy decodes it the same way.
++    c.setMode(PlanMode.service);
++    await tester.pump();
++    expect(detailsOf(c, '1').single.colour, isNull);
++    expect(detailsOf(c, '2').single.colour, isNull);
++    expect(detailsOf(c, '4').single.colour, purple);
++    c.setMode(PlanMode.design);
++    await tester.pump();
+ 
+     final seen = listen(c);
+     expect(c.dirty.value, isFalse);
+     expect(c.setUnitColour('1', null), isTrue, reason: 'removes the kept one');
+     expect(c.dirty.value, isTrue, reason: 'an edit');
+     await tester.pump();
+     expect(seen, isEmpty,
+         reason: 'colour null before and after: no change to report');
+     final section = colorSection(c.save())!;
+     expect(section.containsKey('${instanceOf(doc, '1').value}'), isFalse);
+diff --git a/packages/jet_cad_2d_plan/test/controller/unit_data_test.dart b/packages/jet_cad_2d_plan/test/controller/unit_data_test.dart
+index 039c33bd..92533fd0 100644
+--- a/packages/jet_cad_2d_plan/test/controller/unit_data_test.dart
++++ b/packages/jet_cad_2d_plan/test/controller/unit_data_test.dart
+@@ -1,14 +1,14 @@
+ // Ported from jet_cad_floor_plan test/host/table_data_test.dart (2b Task
+ // 9, spec S2 "Per-unit data", S3 "Design writes"): setUnitData and
+-// setUnitsData on the embedding fixture. HD4 (the service mode) is Task
+-// 11's. Today's header follows.
++// setUnitsData on the embedding fixture. HD4 and HD6's service-copy block
++// (the service mode) are Task 11's, appended there. Today's header follows.
+ //
+ // Host embedding API spec E-6, E-7, E-9 gates 2 and 3 (Slice 2 plan, Task
+ // 2): the host's data on a table through the controller -- setUnitData and
+ // setUnitsData, tableDetails' data, the save and the load, the service
+ // copy, renumbering, undo and redo, and the editor's Delete -- on the
+ // embedding fixture: tables turned 30 degrees, mirrored at 90, scaled,
+ // turned 180, all 40 m off the origin; `5` hidden, `L` locked; `7` and ` 7 `
+ // sharing a number. Data is written with its keys out of order, a
+ // 64-character key, a 1024-unit value and non-ASCII text.
+ import 'dart:convert';
+@@ -169,22 +169,42 @@ void main() {
+     await tester.pump();
+     expect(detailsOf(c, '7'), hasLength(2), reason: 'premise: two 7s');
+     for (final d in detailsOf(c, '7')) {
+       expect(d.data, isEmpty);
+     }
+     expect(c.save(), before);
+     expect(c.canUndo.value, isFalse);
+     expect(c.dirty.value, isFalse);
+   });
+ 
+-  // HD4 (the service mode throws a StateError) is Task 11's: its Step 3
+-  // appends it here.
++  testWidgets(
++      'HD4 M-H23: in service both throw a StateError; the design '
++      'and the copy are untouched', (tester) async {
++    final c = controller(tester);
++    c.setUnitData('2', {'id': 'two'});
++    final before = c.save();
++    c.setMode(PlanMode.service);
++    await tester.pump();
++    final copy = c.unitDetails;
++    expect(detailsOf(c, '2').single.data, {'id': 'two'},
++        reason: 'the copy carries it, read only');
++    expect(() => c.setUnitData('1', hostData()), throwsStateError);
++    expect(() => c.setUnitsData({'1': hostData()}), throwsStateError);
++    expect(() => c.setUnitData('2', const {}), throwsStateError);
++    await tester.pump();
++    expect(c.save(), before);
++    expect(c.unitDetails, copy);
++    expect(c.canUndo.value, isFalse);
++    c.setMode(PlanMode.design);
++    expect(detailsOf(c, '1').single.data, isEmpty);
++    expect(detailsOf(c, '2').single.data, {'id': 'two'});
++  });
+ 
+   testWidgets(
+       'HD5 M-H24b: an empty map removes the data: no jetcad.unit_data '
+       'section at all', (tester) async {
+     final c = controller(tester);
+     final empty = c.save();
+     c.setUnitData('1', hostData());
+     expect(dataSection(c.save()), isNotNull, reason: 'premise');
+     expect(c.setUnitData('1', const {}), isTrue);
+     final json = c.save();
+@@ -230,22 +250,26 @@ void main() {
+         reason: 'a valid payload beside them reads (hidden table)');
+     final doc = c.document;
+     final invalid = unitDiagnostics(doc)
+         .where((d) => d.code == 'unit.invalid_data')
+         .map((d) => d.handles.single)
+         .toList();
+     expect(invalid, [
+       for (final n in ['1', '2', '3', '4', 'L']) instanceOf(doc, n)
+     ]);
+ 
+-    // Today's service-copy check (the copy decodes it the same way) needs
+-    // the service mode: Task 11.
++    // The service copy decodes it the same way.
++    c.setMode(PlanMode.service);
++    await tester.pump();
++    expect(detailsOf(c, '1').single.data, isEmpty);
++    expect(detailsOf(c, '5').single.data, hostData());
++    c.setMode(PlanMode.design);
+ 
+     expect(c.setUnitData('1', {'id': 'one'}), isTrue);
+     expect(c.setUnitData('2', const {}), isTrue, reason: 'removes it');
+     final next = c.save();
+     final section = dataSection(next)!;
+     expect(section['${instanceOf(doc, '1').value}'], {
+       'data': {'id': 'one'}
+     });
+     expect(section.containsKey('${instanceOf(doc, '2').value}'), isFalse);
+     expect(section['${instanceOf(doc, '3').value}'], payloads['3']);
+diff --git a/packages/jet_cad_2d_plan/test/controller/unit_detail_test.dart b/packages/jet_cad_2d_plan/test/controller/unit_detail_test.dart
+index 62627429..b85e56cd 100644
+--- a/packages/jet_cad_2d_plan/test/controller/unit_detail_test.dart
++++ b/packages/jet_cad_2d_plan/test/controller/unit_detail_test.dart
+@@ -233,22 +233,24 @@ void main() {
+ 
+     final d = c.document;
+     final one = c.unitIndex.units.first.instance;
+     final node = d.tree[one]! as InstanceNode;
+     d.commands.execute(TransformNodeCommand(
+         one, Transform2.translation(500, 0).multiply(node.transform)));
+     final moved = c.unitDetails;
+     expect(identical(moved, first), isFalse);
+     expect(moved.first.center!.dx, near(first.first.center!.dx + 500));
+     expect(identical(c.unitDetails, moved), isTrue);
+-    // Today's mode-switch tail (a new, equal list in the selection mode)
+-    // needs the service mode: Task 11.
++
++    c.setMode(PlanMode.service);
++    expect(identical(c.unitDetails, moved), isFalse);
++    expect(c.unitDetails, moved, reason: 'the copy is equal');
+   });
+ 
+   testWidgets(
+       'TD9 M-H15: a layer hidden outside the history (a table edit, no '
+       'command) reads at the next revision, though the state id is back '
+       'where it was', (tester) async {
+     final c = embeddingController();
+     var revisions = 0;
+     void count() => revisions++;
+     c.revision.addListener(count);
+@@ -484,13 +486,45 @@ void main() {
+     expect(80 * 0.37, greaterThan(24));
+     expect(c.unitAt(near), isNull, reason: 'a mouse picks by containment');
+     expect(c.unitAt(near, kind: PointerDeviceKind.mouse), isNull);
+     expect(c.unitAt(near, kind: PointerDeviceKind.stylus), isNull,
+         reason: 'O8: only a finger gets the reach');
+     expect(c.unitAt(near, kind: PointerDeviceKind.touch), '1',
+         reason: 'within a finger\'s reach');
+     expect(c.unitAt(far, kind: PointerDeviceKind.touch), isNull,
+         reason: 'beyond a finger\'s reach');
+   });
+-  // TA3 (tableAt follows the camera and the mode) is Task 11's: it needs
+-  // the service mode.
++
++  testWidgets(
++      'TA3 unitAt follows the camera and the mode: a service move is found '
++      'at the table\'s new place in service, at its old one '
++      'after switching back', (tester) async {
++    final c = embeddingController();
++    final one = fixtureTable('1');
++    final at = canvasAt(c, one.transform, 600, 0);
++    expect(c.unitAt(at), '1');
++    // A pan of 200 px moves what is under the point.
++    c.camera.panBy(const Offset(200, 0));
++    expect(c.unitAt(at), isNull);
++    c.camera.value = embeddingCamera();
++
++    c.setMode(PlanMode.service);
++    // Today's mode switch reframes the camera (R-13; the chrome is Task
++    // 16's): the fixture's again.
++    c.camera.value = embeddingCamera();
++    final d = c.activeDocument;
++    final h = c.unitIndex.withLabel('1').single.instance;
++    final node = d.tree[h]! as InstanceNode;
++    d.commands.execute(CompoundCommand([
++      TransformNodeCommand(
++          h, Transform2.translation(1500, 0).multiply(node.transform))
++    ], label: 'Move'));
++    final moved = Transform2.translation(1500, 0).multiply(one.transform);
++    expect(c.unitAt(canvasAt(c, moved, 600, 0)), '1');
++    expect(c.unitAt(at), isNull);
++
++    c.setMode(PlanMode.design);
++    c.camera.value = embeddingCamera();
++    expect(c.unitAt(at), '1');
++    expect(c.unitAt(canvasAt(c, moved, 600, 0)), isNull);
++  });
+ }
+diff --git a/packages/jet_cad_2d_plan/test/service/service_session_test.dart b/packages/jet_cad_2d_plan/test/service/service_session_test.dart
+new file mode 100644
+index 00000000..ac878735
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/service/service_session_test.dart
+@@ -0,0 +1,363 @@
++// Spec 2b S3 "Mode and copy": the service copy in a ServiceSession of its
++// own, with its own lock expander over the design's lock set and its own
++// failure boundary (its freeze clears the copy's history only, then
++// retries once); which members stay on the design and which switch on
++// `mode`; execute and the design writes refused in service; the copy's
++// lifetime.
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++// box_kit.dart and test_kit.dart both declare `addObject` and `DiscType`;
++// box_kit.dart and harness.dart both declare `addLine`: only what is used
++// is shown.
++import '../support/box_kit.dart'
++    show
++        Switches,
++        SquareParams,
++        DiscParams,
++        boxKit,
++        ringKit,
++        addObject,
++        atSquare,
++        nearSquare;
++import '../support/harness.dart' show controllerFor;
++import '../support/recording_exporters.dart';
++import '../support/service_plans.dart';
++import '../support/test_kit.dart' show testKit, unitKit;
++
++List<KitDiagnostic> failuresOf(PlanController c) => [
++      for (final d in c.diagnostics.value)
++        if (d.code == KitDiagnosticCode.hookFailed) d
++    ];
++
++Transform2 transformOf(DraftDocument d, Handle h) => switch (d.tree[h]) {
++      final InstanceNode n => n.transform,
++      final GroupNode n => n.transform,
++      _ => throw StateError('no node ${h.toHex()}'),
++    };
++
++void main() {
++  testWidgets(
++      'SM-members document, selection, index, page, outlines, parametric, '
++      'frozen and the kits\' services stay on the design in service; '
++      'activeDocument and activeSelection are the copy\'s, runtime, with '
++      'the design\'s handles; back in design both are the design\'s',
++      (tester) async {
++    final c = controllerFor(kits: [testKit()], json: servicePlanText());
++    final design = c.document;
++    final selection = c.selection;
++    final index = c.index;
++    final page = c.page;
++    final outlines = c.outlines;
++    final parametric = c.parametric;
++    final frozen = c.frozen;
++    expect(c.mode.value, PlanMode.design);
++    expect(c.activeDocument, same(design));
++    expect(c.activeSelection, same(selection));
++    expect(c.serviceSession, isNull);
++
++    c.setMode(PlanMode.service);
++    expect(c.mode.value, PlanMode.service);
++    final s = c.serviceSession!;
++    // M-SM3: `document` reads the active document.
++    expect(c.document, same(design));
++    expect(c.selection, same(selection));
++    expect(c.index, same(index));
++    expect(c.page, same(page));
++    expect(c.outlines, same(outlines));
++    expect(c.parametric, same(parametric));
++    expect(c.frozen, same(frozen));
++    expect(c.servicesOf('test').document, same(design));
++    expect(c.activeDocument, same(s.document));
++    expect(c.activeDocument, isNot(same(design)));
++    expect(c.activeSelection, same(s.selection));
++    expect(c.activeSelection, isNot(same(selection)));
++    expect(s.document.commands.permissions, DraftPermissions.runtime);
++    for (final label in ['1', '2', '3']) {
++      expect(unitNode(s.document, label).handle, unitNode(design, label).handle,
++          reason: 'the copy keeps the design\'s handles');
++    }
++    expect(
++        c.unitIndex.units.map((u) => u.instance),
++        [
++          for (final l in ['1', '2', '3']) unitNode(design, l).handle
++        ],
++        reason: 'the unit index is the copy\'s, ascending');
++
++    c.setMode(PlanMode.design);
++    expect(c.serviceSession, isNull);
++    expect(c.activeDocument, same(design));
++    expect(c.activeSelection, same(selection));
++    await tester.pump();
++  });
++
++  testWidgets(
++      'SM-lifetime a load and a new plan in service rebuild the copy from '
++      'the new design; leaving service drops it; each dropped copy is '
++      'disposed after the frame, its systems uninstalled', (tester) async {
++    final c = controllerFor(kits: [testKit()], json: servicePlanText());
++    c.setMode(PlanMode.service);
++    final first = c.serviceSession!;
++    c.load(servicePlanText(secondAt: Vector2(5000.5, -3700.25)));
++    expect(c.mode.value, PlanMode.service);
++    final second = c.serviceSession!;
++    expect(second, isNot(same(first)));
++    expect(parts(unitNode(c.activeDocument, '2').transform),
++        parts(unitNode(c.document, '2').transform),
++        reason: 'the copy of the new design');
++    c.newPlan();
++    final third = c.serviceSession!;
++    expect(third, isNot(same(second)));
++    expect(c.unitIndex.units, isEmpty);
++    c.setMode(PlanMode.design);
++    expect(c.serviceSession, isNull);
++    await tester.pump();
++    for (final s in [first, second, third]) {
++      // M-SM10: a dropped copy is never disposed.
++      expect(() => s.selection.addListener(() {}), throwsFlutterError);
++      expect(s.document.commands.isDisposed, isTrue);
++      expect(s.document.commands.expander, isNull,
++          reason: 'the lock, label and parametric systems, last in first out');
++    }
++  });
++
++  testWidgets(
++      'SM-select the selection is kept by label across a mode switch; '
++      'design selects placed units only, service a seat too; '
++      'editorSelectedUnits is empty in service', (tester) async {
++    final h = hall();
++    final c = controllerFor(kits: [unitKit()], json: h.json);
++    final seat = h.seats[0][1];
++    final seatLabel = labelOf(c.document, seat)!;
++    final tableLabel = labelOf(c.document, h.table)!;
++    c.select({tableLabel, seatLabel});
++    expect(c.activeSelection.keys, {SelectionKey.root(h.table)},
++        reason: 'design: placed units only');
++    expect(c.selectedUnits.value, {tableLabel});
++    expect(c.editorSelectedUnits.value, {tableLabel});
++
++    c.setMode(PlanMode.service);
++    // M-SM9: setMode does not select again by label.
++    expect(c.activeSelection.keys, {SelectionKey.root(h.table)});
++    expect(c.selectedUnits.value, {tableLabel});
++    // M-SM8: `_inDesign` does not follow the mode.
++    expect(c.editorSelectedUnits.value, isEmpty, reason: 'service');
++    c.select({tableLabel, seatLabel, 'nope'});
++    expect(c.activeSelection.keys,
++        {SelectionKey.root(h.table), SelectionKey.root(seat)});
++    expect(c.selectedUnits.value, {tableLabel, seatLabel});
++    expect(c.selection.keys, {SelectionKey.root(h.table)},
++        reason: 'the design\'s selection is untouched in service');
++
++    c.setMode(PlanMode.design);
++    expect(c.selectedUnits.value, {tableLabel},
++        reason: 'the seat is not selectable in design');
++    expect(c.selection.keys, {SelectionKey.root(h.table)});
++    expect(c.editorSelectedUnits.value, {tableLabel});
++    await tester.pump();
++  });
++
++  testWidgets(
++      'SM-undo undo, redo, canUndo and canRedo act on the copy in service '
++      'and on the design in design; a service undo never reaches the '
++      'design', (tester) async {
++    final c = controllerFor(kits: [testKit()], json: servicePlanText());
++    drawLine(c);
++    await tester.pump();
++    expect(c.canUndo.value, isTrue, reason: 'premise: a design step');
++    c.setMode(PlanMode.service);
++    // M-SM12: the flags read the design.
++    expect(c.canUndo.value, isFalse, reason: 'the copy has no history');
++    final designed = parts(unitNode(c.activeDocument, '1').transform);
++    move(c, '1', 333.5, -71.25);
++    await tester.pump();
++    expect(c.canUndo.value, isTrue);
++    // M-SM11: undo acts on the design.
++    c.undo();
++    expect(parts(unitNode(c.activeDocument, '1').transform), designed);
++    await tester.pump();
++    expect(c.canUndo.value, isFalse);
++    expect(c.canRedo.value, isTrue);
++    c.redo();
++    expect(parts(unitNode(c.activeDocument, '1').transform), isNot(designed));
++    expect(c.document.commands.undoDepth, 1, reason: 'the design untouched');
++    expect(c.document.commands.canRedo, isFalse);
++    c.setMode(PlanMode.design);
++    expect(c.canUndo.value, isTrue);
++    expect(c.canRedo.value, isFalse);
++    await tester.pump();
++  });
++
++  testWidgets(
++      'SM-execute-false in service execute answers false and leaves the '
++      'design as it was; deleteSelection answers false; the design writes '
++      'throw StateError; back in design execute applies', (tester) async {
++    final c = controllerFor(kits: [testKit()], json: servicePlanText());
++    c.select({'1'});
++    expect(c.selection.keys, hasLength(1), reason: 'premise');
++    c.setMode(PlanMode.service);
++    // Made first: making it takes a handle from the design's seed.
++    final line = addDrafted(c.document, EntityKind.line,
++        linePayload(Vector2(-500.5, 700.25), Vector2(1800.75, 2400.5)),
++        layer: ReservedHandles.layerZero);
++    final state = c.document.commands.stateId;
++    final before = c.save();
++    // M-SM1: execute does not check the mode.
++    expect(c.execute(line), isFalse);
++    expect(c.document.commands.stateId, state);
++    expect(c.dirty.value, isFalse);
++    // M-SM14: deleteSelection does not check the mode.
++    expect(c.deleteSelection(), isFalse);
++    expect(c.save(), before, reason: 'table 1 is still in the design');
++    // M-SM2: `_requireDesign` lets the write through.
++    expect(
++        () => c.setUnitData('1', const {'seat': 'window'}), throwsStateError);
++    expect(() => c.setUnitColour('1', PlanSwatch.teal), throwsStateError);
++    expect(() => c.setUnitLabel('1', '7'), throwsStateError);
++    c.setMode(PlanMode.design);
++    expect(
++        c.execute(addDrafted(c.document, EntityKind.line,
++            linePayload(Vector2(-500.5, 700.25), Vector2(1800.75, 2400.5)),
++            layer: ReservedHandles.layerZero)),
++        isTrue);
++    await tester.pump();
++  });
++
++  testWidgets(
++      'SM-export in service an export is handed the copy as it is; in '
++      'design the design', (tester) async {
++    final acme = RecordingExporter('acme.json', 'json', 'application/json');
++    final c = PlanController(
++        kits: [testKit()], json: servicePlanText(), exporters: [acme]);
++    addTearDown(c.dispose);
++    c.setMode(PlanMode.service);
++    move(c, '1', 750.5, -250.25);
++    final copy = DraftDocumentCodec.encodeToString(c.activeDocument);
++    final design = DraftDocumentCodec.encodeToString(c.document);
++    expect(copy, isNot(design), reason: 'premise: a service move');
++    await tester
++        .runAsync(() => c.export('acme.json', PlanExportChoice.initial));
++    // M-SM13: the page flows read the design.
++    expect(acme.seen.single, copy);
++    c.setMode(PlanMode.design);
++    await tester
++        .runAsync(() => c.export('acme.json', PlanExportChoice.initial));
++    expect(acme.seen.last, design);
++  });
++
++  testWidgets(
++      'SM-copy-lock the copy refuses a forged command under a locked '
++      'object (a table of a missing kit), rolled back, nothing in its '
++      'history; an unlocked table moves', (tester) async {
++    final c = controllerFor(kits: [testKit()], json: lockedPlanText());
++    final gone = unitNode(c.document, '5').handle;
++    expect(c.isLocked(gone), isTrue, reason: 'premise: the design locks it');
++    c.setMode(PlanMode.service);
++    final copy = c.activeDocument;
++    final before = DraftDocumentCodec.encodeToString(copy);
++    final at = transformOf(copy, gone);
++    // M-SM4: the copy's lock expander is not installed.
++    expect(
++        () => copy.commands.execute(TransformNodeCommand(
++            gone, Transform2.translation(410.5, -95.25).multiply(at))),
++        throwsA(isA<PlanLocked>()));
++    expect(DraftDocumentCodec.encodeToString(copy), before,
++        reason: 'rolled back');
++    expect(copy.commands.canUndo, isFalse);
++    expect(() => move(c, '1', 410.5, -95.25), returnsNormally);
++    await tester.pump();
++  });
++
++  testWidgets(
++      'SM-copy-boundary a kit hook throwing during a service move: the '
++      'object frozen and locked in both documents, one diagnostic, the '
++      'copy\'s history cleared and the design\'s kept, the move applied by '
++      'the retry; a second type throwing on the retry refuses the move',
++      (tester) async {
++    final sw = Switches();
++    final c = controllerFor(kits: [boxKit(sw), ringKit(sw)]);
++    final d = c.document;
++    final square =
++        addObject(d, atSquare, const SquareParams(side: 1200, poisoned: true));
++    final table = unitDefinition(d, key: 'box.table.square.four');
++    final t = placeDef(
++        d, table, turned(table, -2600.25, 1400.5, kDeg37, mirrored: true),
++        label: '1');
++    await tester.pump();
++    expect(c.canUndo.value, isTrue, reason: 'premise: the design has history');
++
++    c.setMode(PlanMode.service);
++    final copy = c.activeDocument;
++    move(c, '1', 120.5, 0);
++    expect(copy.commands.undoDepth, 1, reason: 'premise: a first step');
++    sw.failing.add('reach');
++    final at = transformOf(copy, t);
++    final to = Transform2.translation(750.5, -250.25).multiply(at);
++    copy.commands.execute(TransformNodeCommand(t, to));
++    expect(parts(transformOf(copy, t)), parts(to), reason: 'the retry');
++    // M-SM6: `_lockFromCopy` does not add to the lock set.
++    expect(c.locked.value, {square});
++    // M-SM7: the copy's system ignores the shared frozen set.
++    expect(c.frozen, {square});
++    final failures = failuresOf(c);
++    expect(failures, hasLength(1));
++    expect((failures.single.kitId, failures.single.subject),
++        ('box', SquareParams.id));
++    // M-SM5: the lock clears the design's history instead of the copy's.
++    expect(copy.commands.undoDepth, 1,
++        reason: 'the copy\'s history cleared, then the retried move');
++    expect(c.document.commands.canUndo, isTrue,
++        reason: 'the design\'s history is kept');
++    final sq = transformOf(copy, square);
++    expect(
++        () => copy.commands.execute(TransformNodeCommand(
++            square, Transform2.translation(10.5, 0).multiply(sq))),
++        throwsA(isA<PlanLocked>()),
++        reason: 'locked in the copy');
++
++    c.setMode(PlanMode.design);
++    expect(c.canUndo.value, isTrue);
++    expect(
++        c.execute(TransformNodeCommand(
++            square,
++            Transform2.translation(10.5, 0)
++                .multiply(transformOf(c.document, square)))),
++        isFalse,
++        reason: 'locked in the design');
++    expect(c.lockHint.value, isTrue);
++
++    // A second type's hook throws on the retry: the move is refused.
++    final sw2 = Switches();
++    final c2 = controllerFor(kits: [boxKit(sw2), ringKit(sw2)]);
++    final d2 = c2.document;
++    final square2 =
++        addObject(d2, atSquare, const SquareParams(side: 1200, poisoned: true));
++    final disc = addObject(d2, nearSquare(-3000.5, 2500.25, 0.5),
++        const DiscParams(radius: 400, poisoned: true));
++    expect(square2.value < disc.value, isTrue,
++        reason: 'premise: the square is surveyed first');
++    final table2 = unitDefinition(d2, key: 'box.table.square.four');
++    final t2 = placeDef(d2, table2, turned(table2, 2300.75, -1700.5, -kDeg37),
++        label: '1');
++    c2.setMode(PlanMode.service);
++    final copy2 = c2.activeDocument;
++    final before = DraftDocumentCodec.encodeToString(copy2);
++    sw2.failing.add('reach');
++    expect(
++        () => copy2.commands.execute(TransformNodeCommand(
++            t2,
++            Transform2.translation(640.375, 12.5)
++                .multiply(transformOf(copy2, t2)))),
++        throwsA(isA<KitHookFailure>()));
++    expect(DraftDocumentCodec.encodeToString(copy2), before,
++        reason: 'refused: nothing applied');
++    expect(c2.frozen, {square2},
++        reason: 'the first type froze; the second failed on the retry');
++    expect(copy2.commands.canUndo, isFalse);
++    await tester.pump();
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/support/service_plans.dart b/packages/jet_cad_2d_plan/test/support/service_plans.dart
+new file mode 100644
+index 00000000..0f7229a6
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/support/service_plans.dart
+@@ -0,0 +1,247 @@
++// Plans for the service-mode tests (2b Tasks 11-13). A placed unit is built
++// by engine commands, independent of any symbol library: a definition
++// carrying `jetcad.symbol` and `jetcad.unit` with one closed leaf off the
++// origin, and an instance carrying its UNIT label (`unitLabelAttrib`, Task
++// 3). Every placement is off the origin, turned, most mirrored (CLAUDE.md).
++// The helpers are today's (jet_cad_floor_plan's
++// test/host/controller_test.dart:26-79): `move`, `drawLine`, `parts`.
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:jet_cad_2d_plan/src/symbols/symbol_placer.dart'
++    show placementTransform;
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import 'harness.dart';
++import 'service_fixture.dart' show serviceFixture;
++import 'test_kit.dart';
++import 'unit_fixtures.dart' show kDeg37;
++
++// One owner per helper (controller ruling R-19): `kDeg37` and `addLayer`
++// are the units' fixture's (Tasks 6 and 8), re-exported for Tasks 11-13.
++export 'unit_fixtures.dart' show addLayer, kDeg37;
++
++/// A unit definition made by [unitDefinition]: its handle, its base point
++/// and its first leaf's box (the served top).
++typedef UnitDef = ({Handle handle, Vector2 base, Aabb2 top});
++
++/// The table's leaf: a closed 1200 x 800 rectangle off the origin; the base
++/// point is its box's centre.
++final List<Vector2> tableOutline = [
++  Vector2(50, 30),
++  Vector2(1250, 30),
++  Vector2(1250, 830),
++  Vector2(50, 830),
++];
++
++/// The table's base point, the centre of [tableOutline]'s box.
++final Vector2 tableBase = Vector2(650, 430);
++
++/// Adds a symbol definition keyed [key] (version 1) to [d], one closed
++/// leaf (a rectangle, or a circle when [round]); with [unit], a
++/// `jetcad.unit` of [kind], [capacity] and [labelling].
++UnitDef unitDefinition(DraftDocument d,
++    {required String key,
++    String name = 'Table',
++    String kind = UnitKinds.table,
++    int capacity = 4,
++    UnitLabelling labelling = UnitLabelling.numbered,
++    bool unit = true,
++    bool round = false}) {
++  final def = d.handleSeed.next();
++  final leaf = d.handleSeed.next();
++  final base = round ? Vector2(300, 260) : tableBase;
++  final top = round
++      ? Aabb2.fromPoints([Vector2(50, 10), Vector2(550, 510)])
++      : Aabb2.fromPoints(tableOutline);
++  d.commands.execute(CompoundCommand([
++    AddDefinitionCommand(Definition(
++        handle: def, name: '$key@1', basePoint: base, children: const [])),
++    SetComponentCommand<SymbolComponent>(
++        def,
++        SymbolComponent(
++            key: key,
++            version: 1,
++            name: name,
++            category: 'Service',
++            tags: const ['service'])),
++    if (unit)
++      SetComponentCommand<UnitComponent>(def,
++          UnitComponent(kind: kind, capacity: capacity, labelling: labelling)),
++    AddEntityCommand(
++        record: draftRecord(
++            leaf, def, round ? EntityKind.circle : EntityKind.polyline,
++            layer: ReservedHandles.layerZero),
++        payload: round
++            ? circlePayload(Vector2(300, 260), 250)
++            : polylinePayload(tableOutline, closed: true)),
++  ], label: 'Add definition'));
++  return (handle: def, base: base, top: top);
++}
++
++/// Places [def] at [at] on [layer] (layer 0 by default), with a UNIT label
++/// reading [label] when one is given (the shape the placer writes: layer
++/// 0, BYBLOCK, centred, upright in the world); the instance's handle.
++Handle placeDef(DraftDocument d, UnitDef def, Transform2 at,
++    {String? label, Handle? layer}) {
++  final instance = d.handleSeed.next();
++  final commands = <DraftCommand>[
++    AddNodeCommand(InstanceNode(
++        handle: instance,
++        parent: d.rootHandle,
++        definition: def.handle,
++        layer: layer ?? ReservedHandles.layerZero,
++        transform: at)),
++  ];
++  if (label != null) {
++    final a = unitLabelAttrib(label,
++        instanceToWorld: at, anchor: def.base, top: def.top);
++    commands.add(AddEntityCommand(
++        record: EntityRecord(
++            handle: d.handleSeed.next(),
++            owner: instance,
++            kind: EntityKind.attrib,
++            layer: ReservedHandles.layerZero,
++            linetype: ReservedHandles.byBlockLinetype,
++            linetypeScale: 1.0,
++            geomIndex: 0,
++            color: const ByBlockColor(),
++            lineweight: kByBlock,
++            transparency: kByBlock,
++            flags: 0,
++            text: a.text,
++            tag: a.tag,
++            textAttrs: a.textAttrs),
++        payload: a.payload));
++  }
++  d.commands.execute(CompoundCommand(commands, label: 'Place unit'));
++  return instance;
++}
++
++/// A placement whose [def]'s base point lands at ([x], [y]), turned by
++/// [angle] (radians), mirrored when [mirrored].
++Transform2 turned(UnitDef def, double x, double y, double angle,
++        {bool mirrored = false}) =>
++    Transform2.translation(x, y)
++        .multiply(Transform2.rotation(angle))
++        .multiply(Transform2.scale(mirrored ? -1 : 1, 1))
++        .multiply(Transform2.translation(-def.base.x, -def.base.y));
++
++/// Today's `planJson` (controller_test.dart:26-43), saved: tables 1
++/// (a quarter turn, mirrored) and 2, a stool 3 (capacity 1, half-turned)
++/// and a planter (a symbol that is no unit). [duplicate] labels the stool
++/// "2"; [secondAt] moves table 2.
++String servicePlanText({bool duplicate = false, Vector2? secondAt}) =>
++    planText([testKit()], (d) {
++      final table = unitDefinition(d, key: 'test.table.square.four');
++      final stool = unitDefinition(d,
++          key: 'test.stool.round.one', name: 'Stool', capacity: 1, round: true);
++      final planter = unitDefinition(d,
++          key: 'test.planter.square.one', name: 'Planter', unit: false);
++      placeDef(
++          d,
++          table,
++          placementTransform(
++              at: Vector2(-2600, 1400),
++              basePoint: table.base,
++              quarterTurns: 1,
++              mirrored: true),
++          label: '1');
++      placeDef(
++          d,
++          table,
++          placementTransform(
++              at: secondAt ?? Vector2(2300, 1400), basePoint: table.base),
++          label: '2');
++      placeDef(
++          d,
++          stool,
++          placementTransform(
++              at: Vector2(300, -2100), basePoint: stool.base, quarterTurns: 2),
++          label: duplicate ? '2' : '3');
++      placeDef(d, planter,
++          placementTransform(at: Vector2(4100, -900), basePoint: planter.base));
++    });
++
++/// A saved plan with tables 1 and 2 of the test kit and a table 5 whose
++/// symbol's kit (`gone`) the host does not load: locked (spec S2 "Locked
++/// units").
++String lockedPlanText() => planText([testKit()], (d) {
++      final table = unitDefinition(d, key: 'test.table.square.four');
++      final gone = unitDefinition(d, key: 'gone.table.square.four');
++      placeDef(
++          d, table, turned(table, -2600.25, 1400.5, kDeg37, mirrored: true),
++          label: '1');
++      placeDef(d, table, turned(table, 2300.75, 1700.25, -kDeg37), label: '2');
++      placeDef(d, gone, turned(gone, 5100.5, -900.75, kDeg37 * 2), label: '5');
++    });
++
++/// [instance]'s UNIT label entity: the lowest handle, as `UnitIndex` reads
++/// it; null when it has none.
++Handle? labelEntityOf(DraftDocument d, Handle instance) {
++  Handle? lowest;
++  final e = d.entities;
++  for (final slot in e.liveSlots) {
++    if (e.ownerAt(slot) != instance) continue;
++    if (e.kindAt(slot) != EntityKind.attrib || e.tagAt(slot) != kUnitLabelTag) {
++      continue;
++    }
++    final h = e.handleAt(slot);
++    if (lowest == null || h.value < lowest.value) lowest = h;
++  }
++  return lowest;
++}
++
++/// [instance]'s label, trimmed; null when it has none or an empty one.
++String? labelOf(DraftDocument d, Handle instance) {
++  final h = labelEntityOf(d, instance);
++  if (h == null) return null;
++  final text = d.entities.textAt(d.entities.slotOf(h)!).trim();
++  return text.isEmpty ? null : text;
++}
++
++/// The root-level instances of [d] labelled [label], ascending.
++List<InstanceNode> unitNodes(DraftDocument d, String label) => [
++      for (final n in d.tree.nodes)
++        if (n is InstanceNode &&
++            n.parent == d.rootHandle &&
++            labelOf(d, n.handle) == label)
++          n,
++    ]..sort((a, b) => a.handle.value.compareTo(b.handle.value));
++
++/// The one root-level instance of [d] labelled [label] (today's
++/// `tableNode`).
++InstanceNode unitNode(DraftDocument d, String label) =>
++    unitNodes(d, label).single;
++
++List<double> parts(Transform2 t) => [t.a, t.b, t.c, t.d, t.e, t.f];
++
++/// A move of the unit labelled [label] in the active document (a service
++/// move in service, a design edit in design): one step.
++void move(PlanController c, String label, double dx, double dy) {
++  final node = unitNode(c.activeDocument, label);
++  c.activeDocument.commands.execute(CompoundCommand([
++    TransformNodeCommand(
++        node.handle, Transform2.translation(dx, dy).multiply(node.transform))
++  ], label: 'Move'));
++}
++
++/// An edit of the active document: a line on layer 0 (refused by the
++/// copy's runtime permissions).
++void drawLine(PlanController c) =>
++    addLine(c.activeDocument, Vector2(-500, 700), Vector2(1800, 2400));
++
++/// Task 5's service fixture as these tests read it (a plan over
++/// `unitKit()`): the plan text, the placed table (labelled `12`, turned and
++/// mirrored), the two rows (A, six seats, turned; B, five seats, curved)
++/// and each row's seats ascending by handle (`A1…`, `B1…`).
++({String json, Handle table, List<Handle> rows, List<List<Handle>> seats})
++    hall() {
++  final f = serviceFixture();
++  return (
++    json: f.json,
++    table: f.table,
++    rows: [f.rowA, f.rowB],
++    seats: [f.seatsA, f.seatsB],
++  );
++}

@@ -92,6 +92,7 @@ KitNames editing(KitNames names, String locale, Map<String, String?> edits) {
 
 void main() {
   test('F0 the sample kit conforms', () {
+    // M-K2B-14: the UnitKinds exemption dropped: the sample's tables and stool need a unit word.
     expect(problems(), isEmpty);
   });
 
@@ -481,6 +482,64 @@ void main() {
             sameAsEnglish: sampleSameAsEnglish,
           ),
           isEmpty);
+    });
+  });
+
+  group('unit kinds (spec 2b S4)', () {
+    // Two booths: a kind the contract does not name. New keys, so the
+    // generator writes them into the library and the snapshot.
+    CatalogSymbol booth(String key, String name, double x) => CatalogSymbol(
+          key: key,
+          name: name,
+          category: tables,
+          tags: const ['booth'],
+          unit: const CatalogUnit(kind: 'booth', capacity: 6),
+          base: (x + 900, 2450),
+          shapes: [rect(x, 2000, 1800, 900)],
+        );
+    final catalog = Catalog(kit: 'sample', symbols: [
+      ...sampleSymbols,
+      booth('sample.booth.corner', 'Corner booth', 3000),
+      booth('sample.booth.long', 'Long booth', 5200),
+    ]);
+    final g = generated(catalog);
+
+    /// The sample's words, the booths' symbol words in its two locales, and
+    /// [english] (none when empty).
+    KitNames named(Map<String, String> english) => KitNames({
+          ...sampleNames.words,
+          'de': {
+            ...sampleNames.words['de']!,
+            'symbol:sample.booth.corner': 'Eckbank',
+            'symbol:sample.booth.long': 'Lange Bank',
+          },
+          'tr': {
+            ...sampleNames.words['tr']!,
+            'symbol:sample.booth.corner': 'Köşe koltuk',
+            'symbol:sample.booth.long': 'Uzun koltuk',
+          },
+          if (english.isNotEmpty) 'en': english,
+        });
+
+    List<KitProblem> boothProblems(KitNames names) => problems(
+        catalog: catalog,
+        library: g.library,
+        snapshot: g.snapshot,
+        names: names);
+
+    test(
+        'K2B-conf a kind outside UnitKinds needs an English unit word, once '
+        'per kind; the declared locales are not held to it', () {
+      // M-K2B-12: the unit kind check not called.
+      final found = boothProblems(named(const {}));
+      // M-K2B-13: the once-per-kind set dropped (two problems).
+      expect(codes(found), [KitProblemCode.unitKindWord]);
+      expect(found.single.message, contains('"unit:sample/booth"'));
+      expect(
+          boothProblems(named(const {'unit:sample/booth': 'Booth'})), isEmpty);
+      expect(codes(boothProblems(named(const {'unit:other/booth': 'Booth'}))),
+          [KitProblemCode.unitKindWord],
+          reason: "another kit's word does not count");
     });
   });
 }

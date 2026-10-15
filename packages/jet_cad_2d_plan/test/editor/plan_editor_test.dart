@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
     show InteractionLayer, SelectionKey;
+import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show SymbolsState;
 import 'package:jet_cad_2d_plan/src/canvas/plan_canvas.dart';
 import 'package:jet_cad_2d_plan/src/controller/permissions.dart';
 import 'package:jet_cad_2d_plan/src/controller/plan_controller.dart';
@@ -19,7 +20,6 @@ import 'package:jet_cad_2d_plan/src/panels/plan_layer_panel.dart';
 import 'package:jet_cad_2d_plan/src/panels/plan_page_panel.dart';
 import 'package:jet_cad_2d_plan/src/panels/plan_property_panel.dart';
 import 'package:jet_cad_2d_plan/src/panels/plan_symbol_gallery.dart';
-import 'package:jet_cad_2d_plan/src/symbols/plan_symbols_state.dart';
 import 'package:jet_cad_2d_plan/src/theme/plan_theme.dart';
 
 import '../support/editor_host.dart';
@@ -532,7 +532,7 @@ void main() {
           PlanEditor(
               controller: c, symbolFilter: (s) => s.id != 'demo.bed.double@1'));
       await tester.runAsync(() async {
-        while (c.symbolsState.value != PlanSymbolsState.ready) {
+        while (c.symbolsState.value != SymbolsState.ready) {
           await Future<void>.delayed(const Duration(milliseconds: 20));
         }
       });

@@ -15,9 +15,12 @@ import '../attach/attachment_registry.dart';
 import '../kits/guard.dart';
 import '../kits/kit_set.dart';
 import '../kits/locks.dart';
+import '../service/unit_picker.dart';
 import '../tools/generic_tools.dart';
 import '../tools/plan_select_gates.dart';
 import '../tools/plan_symbol_tool.dart';
+import '../units/unit_index.dart';
+import '../units/unit_label_system.dart';
 import 'grip_dispatch.dart';
 import 'permissions.dart';
 import 'services.dart';
@@ -52,7 +55,12 @@ final class DocumentSession {
     // grip cache rebuilds after the outlines.
     selection = SelectionController(document);
     gates = PlanSelectGates(
-        permissions: permissions, selection: selection, locked: locked);
+        permissions: permissions,
+        selection: selection,
+        locked: locked,
+        catalog: catalog,
+        picker: () => unitPicker,
+        units: () => units.current);
     outlines = OutlineCache(document, selection);
     grips = GripCache(document, selection, outlines,
         objects: LockedGrips(locks,
@@ -81,11 +89,18 @@ final class DocumentSession {
     for (final e in generic.byId.entries) {
       if (e.key != planSelectToolId) addTool(e.key, e.value);
     }
-    // :1050-1057: the document arrives built; the system installs last,
-    // and the lock expander stacks after it.
+    // :1050-1057: the document arrives built; the system installs last.
+    // Spec 2b S2: parametric system -> unit label system -> lock expander,
+    // so the lock checks the stamps too.
     parametric = ParametricSystem(document, catalog, isFrozen: frozen.contains)
       ..install();
+    labels = UnitLabelSystem(document)..install();
     lockExpander = LockExpander(document, locks)..install();
+    // Spec 2b S2: the document's units, rebuilt on its state id, its
+    // layers' revision and the controller's locked set. Last: it listens to
+    // [locked], so no later step can throw and leak the listener.
+    units = UnitIndexCache(document,
+        catalog: catalog, locks: locks, locked: locked);
   }
 
   final DraftDocument document;
@@ -114,13 +129,25 @@ final class DocumentSession {
   late final ToolController tools;
   late final ParametricSystem parametric;
 
+  /// The placed units' label stamps (spec 2b S2).
+  late final UnitLabelSystem labels;
+
   /// The document's lock set and expander (spec P4).
   late final LockSet locks;
   late final LockExpander lockExpander;
 
+  /// The document's units (spec 2b S2, `UnitIndex`).
+  late final UnitIndexCache units;
+
   /// The select tool's and the grip cache's gates: the permissions and the
   /// locks (spec P2, P4).
   late final PlanSelectGates gates;
+
+  /// The design's units-only picker (spec S4 selectUnitsOnly): placed,
+  /// unlocked units, made at its first use and kept for the session's life
+  /// (today's `_tablePicker`, planner_shell.dart:444).
+  late final UnitPicker unitPicker =
+      UnitPicker(document, units, skipLocked: true, placedOnly: true);
 
   /// The generic tools (Task 12). The map holds each of them, guarded, and
   /// disposes them: never [GenericToolSet.dispose] here (a second dispose
@@ -275,7 +302,9 @@ final class DocumentSession {
     selection.dispose();
     page.dispose();
     gates.dispose();
+    units.dispose();
     lockExpander.dispose();
+    labels.dispose();
     parametric.dispose();
     index.dispose();
     unawaited(document.dispose());

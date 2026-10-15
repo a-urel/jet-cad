@@ -8,8 +8,11 @@ import 'package:jet_cad_2d/jet_cad_2d.dart'
         LayerNameEmpty,
         LayerNameProblem,
         LayerNameTooLong;
-import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show PlanSwatch;
+import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show PlanSwatch, UnitKinds;
 
+import '../units/unit_label.dart' show UnitLabelProblem, kUnitLabelMaxLength;
+import '../units/unit_problems.dart'
+    show BadLabel, DuplicateLabel, Unlabelled, UnitLabelWarning;
 import 'strings.dart';
 
 /// The plan library's words in German.
@@ -308,4 +311,55 @@ class PlanStringsDe extends PlanStrings {
   String get planDamaged =>
       'Eine Bearbeitung ist fehlgeschlagen; der Plan ist möglicherweise '
       'beschädigt';
+
+  @override
+  String get merge => 'Zusammenlegen';
+
+  @override
+  String get split => 'Trennen';
+
+  @override
+  String get number => 'Nummer';
+
+  @override
+  String get label => 'Bezeichnung';
+
+  @override
+  String get capacity => 'Plätze';
+
+  @override
+  String get rotateLeft => '90° nach links drehen';
+
+  @override
+  String get rotateRight => '90° nach rechts drehen';
+
+  @override
+  String labelProblem(UnitLabelProblem problem) => switch (problem) {
+        UnitLabelProblem.length => '1 bis $kUnitLabelMaxLength Zeichen',
+        UnitLabelProblem.control => 'Keine Zeilenumbrüche oder Steuerzeichen',
+      };
+
+  @override
+  String labelUsed(String label) => 'Die Nummer $label ist bereits vergeben';
+
+  @override
+  String labelWarning(UnitLabelWarning warning) => switch (warning) {
+        DuplicateLabel(:final label, :final count) =>
+          'Die Nummer $label wird von $count Tischen verwendet',
+        Unlabelled(:final kind, :final capacity) => kind == UnitKinds.table
+            ? (capacity == 1
+                ? 'Ein Tisch mit 1 Platz hat keine Nummer'
+                : 'Ein Tisch mit $capacity Plätzen hat keine Nummer')
+            : '${unitKind(kind) ?? kind} mit $capacity '
+                '${capacity == 1 ? 'Platz' : 'Plätzen'} hat keine Nummer',
+        BadLabel(:final label, :final problem) =>
+          '„$label" ist keine Bezeichnung: ${labelProblem(problem)}',
+      };
+
+  @override
+  String? unitKind(String kind) => switch (kind) {
+        UnitKinds.table => 'Tisch',
+        UnitKinds.seat => 'Sitzplatz',
+        _ => null,
+      };
 }

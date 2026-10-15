@@ -50,10 +50,10 @@ void main() {
             label: 'broken', read: () async => throw StateError('no file')),
       ]),
     ]);
-    expect(c.symbolsState.value, PlanSymbolsState.loading);
+    expect(c.symbolsState.value, SymbolsState.loading);
     expect(c.symbols, isEmpty);
     await settle();
-    expect(c.symbolsState.value, PlanSymbolsState.ready);
+    expect(c.symbolsState.value, SymbolsState.ready);
     expect(idsOf(c.symbols), [for (final s in demoCatalog.symbols) s.id],
         reason: 'retired symbols load; the gallery hides them');
     // M-S9: the load's diagnostics not added to the controller's log.
@@ -76,7 +76,7 @@ void main() {
           [SymbolLibrarySource(label: 'beta', read: () => betaRead.future)]),
     ]);
     useTestCamera(c);
-    expect(c.symbolsState.value, PlanSymbolsState.loading);
+    expect(c.symbolsState.value, SymbolsState.loading);
     final line =
         drawLine(c, Vector2(4120.5, -1415.25), Vector2(4730.75, -1102.5));
     final state = c.document.commands.stateId;
@@ -85,12 +85,12 @@ void main() {
 
     alphaRead.complete(itemsBytes('alpha', ['one', 'two']));
     await settle();
-    expect(c.symbolsState.value, PlanSymbolsState.loading,
+    expect(c.symbolsState.value, SymbolsState.loading,
         reason: 'beta has not settled');
     betaRead.completeError(StateError('beta asset missing'));
     await settle();
 
-    expect(c.symbolsState.value, PlanSymbolsState.ready);
+    expect(c.symbolsState.value, SymbolsState.ready);
     expect(idsOf(c.symbols), ['alpha.item.one@1', 'alpha.item.two@1']);
     expect(c.symbols.where((s) => s.kitId == 'beta'), isEmpty);
     expect(
@@ -126,7 +126,7 @@ void main() {
     final two = make([demoKit(source: read.source)],
         symbols: shared, thumbnails: thumbs);
     await settle();
-    expect(two.symbolsState.value, PlanSymbolsState.ready);
+    expect(two.symbolsState.value, SymbolsState.ready);
     expect(read.reads, 1);
 
     final own = PlanController(kits: [demoKit()]);
@@ -154,18 +154,18 @@ void main() {
     });
     final c = make([demoKit(source: read.source)]);
     await settle();
-    expect(c.symbolsState.value, PlanSymbolsState.failed);
+    expect(c.symbolsState.value, SymbolsState.failed);
     fail = false;
     final retry = c.retrySymbols();
-    expect(c.symbolsState.value, PlanSymbolsState.loading);
+    expect(c.symbolsState.value, SymbolsState.loading);
     await retry;
-    expect(c.symbolsState.value, PlanSymbolsState.ready);
+    expect(c.symbolsState.value, SymbolsState.ready);
     expect(read.reads, 2);
     final symbols = c.symbols;
     final again = c.retrySymbols();
     // M-S12: retrySymbols acts in every state (it goes back to loading;
     // the loader's cache keeps the read count at 2 either way).
-    expect(c.symbolsState.value, PlanSymbolsState.ready);
+    expect(c.symbolsState.value, SymbolsState.ready);
     await again;
     expect(read.reads, 2);
     expect(c.symbols, same(symbols), reason: 'nothing was loaded again');
@@ -186,14 +186,14 @@ void main() {
       symbolKit('beta', [beta.source]),
     ]);
     await settle();
-    expect(c.symbolsState.value, PlanSymbolsState.failed);
+    expect(c.symbolsState.value, SymbolsState.failed);
     expect(problemsOf(c), [
       ('alpha', 'alpha', KitDiagnosticCode.libraryUnreadable),
       ('beta', 'beta', KitDiagnosticCode.libraryUnreadable),
     ]);
     alphaFails = false;
     await c.retrySymbols();
-    expect(c.symbolsState.value, PlanSymbolsState.ready);
+    expect(c.symbolsState.value, SymbolsState.ready);
     expect(idsOf(c.symbols), ['alpha.item.one@1', 'alpha.item.two@1']);
     // M-S19: `_loadSymbols` without its `removeWhere`: alpha's fixed
     // failure stays on the bar.

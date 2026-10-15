@@ -9,6 +9,8 @@ import 'package:flutter/widgets.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart' show LayerNameProblem;
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show PlanSwatch;
 
+import '../units/unit_label.dart' show UnitLabelProblem;
+import '../units/unit_problems.dart' show UnitLabelWarning;
 import 'strings_de.dart';
 import 'strings_en.dart';
 import 'strings_tr.dart';
@@ -304,4 +306,40 @@ abstract class PlanStrings {
 
   /// The warning a damaged plan shows (spec P4: a rollback that threw).
   String get planDamaged;
+
+  // The units and the service mode (sub-project 2b).
+
+  /// The service bar's Merge.
+  String get merge;
+
+  /// The service bar's Split.
+  String get split;
+
+  /// The label field's title for a numbered unit ("Number").
+  String get number;
+
+  /// The label field's title for an assigned unit ("Label").
+  String get label;
+
+  /// The capacity read-out's title (today's "Seats").
+  String get capacity;
+
+  /// "Rotate 90° left".
+  String get rotateLeft;
+
+  /// "Rotate 90° right".
+  String get rotateRight;
+
+  /// Why a text cannot be a unit's label (the text rule).
+  String labelProblem(UnitLabelProblem problem);
+
+  /// A label another unit already holds.
+  String labelUsed(String label);
+
+  /// One of the plan's labelling problems.
+  String labelWarning(UnitLabelWarning warning);
+
+  /// The contract's unit kinds' words: `table` and `seat`; null for any
+  /// other kind (a kit words its own, `unit:<kit>/<kind>`).
+  String? unitKind(String kind);
 }

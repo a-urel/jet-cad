@@ -22,8 +22,8 @@ final class HookBoom implements Exception {
 }
 
 /// The hooks made to throw, by name: `reach`, `references`, `generate`,
-/// `diagnose`, `dissolves`, `placeBox`, `placeInput`, `readBox` (per object,
-/// for a poisoned one); `editCapability`, `referencePolicy`, `pageKey`,
+/// `instances`, `diagnose`, `dissolves`, `placeBox`, `placeInput`,
+/// `readBox` (per object, for a poisoned one); `editCapability`, `referencePolicy`, `pageKey`,
 /// `contributesPlace`, `readsPlaces`, `create` (type level); `fromJson` (a
 /// poisoned component's factory). Not a throw: `openRegion` makes a
 /// poisoned square's `generate` add an open region, which the engine's
@@ -162,6 +162,14 @@ final class SquareType extends ParametricType<SquareParams> {
       if (sw.takes('openRegion', p.poisoned))
         Generated.region(polylinePayload(c)),
     ];
+  }
+
+  /// No instance (E5's default), but switchable: a poisoned square's
+  /// `instances` throws when `instances` is failing (2b Task 4).
+  @override
+  List<GeneratedInstance> instances(ParametricView view, Handle self) {
+    sw.check('instances', view.paramsOf<SquareParams>(self)!.poisoned);
+    return const [];
   }
 
   @override

@@ -51,7 +51,7 @@ void main() {
     expect(load.symbols.first.names, same(beta.names));
     expect(load.symbols.first.component.key, 'beta.item.four');
     expect(load.diagnostics, isEmpty);
-    expect(load.state, PlanSymbolsState.ready);
+    expect(load.state, SymbolsState.ready);
     expect(() => load.symbols.add(load.symbols.first), throwsUnsupportedError);
   });
 
@@ -72,7 +72,7 @@ void main() {
         [('alpha', 'alpha.item.two@1', KitDiagnosticCode.symbolDuplicate)]);
     expect(load.symbols[1].entry.definition.basePoint.x, 400.5,
         reason: 'the first source\'s two, not the second\'s (at 300.5)');
-    expect(load.state, PlanSymbolsState.ready);
+    expect(load.state, SymbolsState.ready);
   });
 
   test('S-3 the same key at another version is a different symbol (LS4)',
@@ -103,7 +103,7 @@ void main() {
     expect(idsOf(load.symbols), ['alpha.item.one@1']);
     expect(problemsOf(load),
         [('alpha', 'wrong', KitDiagnosticCode.libraryKitMismatch)]);
-    expect(load.state, PlanSymbolsState.ready);
+    expect(load.state, SymbolsState.ready);
   });
 
   test(
@@ -134,7 +134,7 @@ void main() {
       'S-6 the state: no source is ready and empty; every source failed is '
       'failed; one loaded is ready', () async {
     final none = await loader().load(validateKitSet([symbolKit('alpha', [])]));
-    expect(none.state, PlanSymbolsState.ready);
+    expect(none.state, SymbolsState.ready);
     expect(none.symbols, isEmpty);
     final bad = SymbolLibrarySource(
         label: 'bad', read: () async => throw StateError('gone'));
@@ -145,7 +145,7 @@ void main() {
             label: 'mismatch', read: () async => itemsBytes('alpha', ['x'])),
       ]),
     ]));
-    expect(all.state, PlanSymbolsState.failed);
+    expect(all.state, SymbolsState.failed);
     // M-S6: `failed == total` written `failed > 0`.
     final one = await loader().load(validateKitSet([
       symbolKit('alpha', [
@@ -154,7 +154,7 @@ void main() {
             label: 'ok', read: () async => itemsBytes('alpha', ['one'])),
       ]),
     ]));
-    expect(one.state, PlanSymbolsState.ready);
+    expect(one.state, SymbolsState.ready);
   });
 
   test(

@@ -10,13 +10,13 @@ import 'package:flutter/services.dart'
     show HardwareKeyboard, KeyEvent, KeyUpEvent, LogicalKeyboardKey;
 import 'package:jet_cad_2d/jet_cad_2d.dart' show foregroundFor;
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show SymbolsState;
 
 import '../controller/plan_controller.dart';
 import '../l10n/locale_scope.dart';
 import '../l10n/strings.dart';
 import '../symbols/gallery_model.dart';
 import '../symbols/plan_symbol.dart';
-import '../symbols/plan_symbols_state.dart';
 import '../symbols/thumbnail_document.dart';
 import '../tools/generic_tools.dart' show PlanToolIds;
 import 'panel_focus.dart';
@@ -170,10 +170,10 @@ class _PlanSymbolGalleryState extends State<PlanSymbolGallery> {
       listenable:
           Listenable.merge([c, c.symbolsState, c.activeTool, c.armedSymbol]),
       builder: (context, _) => switch (c.symbolsState.value) {
-        PlanSymbolsState.loading => const _Loading(),
-        PlanSymbolsState.failed =>
+        SymbolsState.loading => const _Loading(),
+        SymbolsState.failed =>
           _Failed(onRetry: () => unawaited(c.retrySymbols())),
-        PlanSymbolsState.ready => _ready(context),
+        SymbolsState.ready => _ready(context),
       },
     );
   }

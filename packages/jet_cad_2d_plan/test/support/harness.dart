@@ -11,6 +11,8 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+import 'package:jet_cad_2d_plan/src/units/unit_components.dart'
+    show registerUnitComponents;
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import 'test_kit.dart';
@@ -26,13 +28,14 @@ ParametricCatalog catalogOf(List<PlanKit> kits) {
   return catalog;
 }
 
-/// The page, the contract's four components and [catalog]'s: what a plan
-/// document registers. Once per registry (`PageComponent.register` wipes
-/// a live page).
+/// The page, the contract's four components, the unit components and
+/// [catalog]'s: what a plan document registers. Once per registry
+/// (`PageComponent.register` wipes a live page).
 void registerPlanComponents(
     ComponentRegistry registry, ParametricCatalog catalog) {
   PageComponent.register(registry);
   registerKitComponents(registry);
+  registerUnitComponents(registry);
   catalog.registerComponents(registry);
 }
 

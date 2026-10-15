@@ -36,6 +36,10 @@ enum KitProblemCode {
   typeOutsideKit,
   toolOutsideKit,
   typePlaceConflict,
+
+  // Spec 2b S4: conformance, a unit kind the contract does not name with no
+  // English `unit:<kit>/<kind>` word.
+  unitKindWord,
 }
 
 @immutable

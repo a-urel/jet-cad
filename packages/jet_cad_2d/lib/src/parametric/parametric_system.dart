@@ -37,6 +37,28 @@ abstract class ParametricType<T extends Component> {
   /// parameters and its neighbours' — never from generated geometry.
   List<Generated> generate(ParametricView view, Handle self);
 
+  /// The symbol instances this object generates (spec 2b S1, E5), each
+  /// with its ATTRIBs, beside [generate]'s entities: in the group's local
+  /// space, from its own parameters and its neighbours' only, as [generate]
+  /// reads. Each becomes an `InstanceNode` child of the object's group, on
+  /// the object's layer, with `InstanceNode`'s default style fixed when it
+  /// is added; each [GeneratedAttrib] an ATTRIB the instance owns, on layer
+  /// 0, BYBLOCK, left out of the layer and style stamps.
+  ///
+  /// The i-th output meets the i-th existing instance, ascending by handle:
+  /// a matched instance keeps its handle and every component on it, and
+  /// its ATTRIBs are matched by tag. An unchanged output plans nothing. An
+  /// output naming a handle that is not a live definition throws
+  /// [GeneratedDefinitionError] from the plan, before any command.
+  ///
+  /// Called after [generate], with the same view, for every object an edit
+  /// regenerates and that does not dissolve, and by `drift()` and `probe`.
+  /// Must not mutate. Default: none. Every `InstanceNode` child of an
+  /// object's group is that object's generated instance, so a type that
+  /// keeps the default removes one on its next regeneration.
+  List<GeneratedInstance> instances(ParametricView view, Handle self) =>
+      const [];
+
   /// This client's report about one live object, [self] (spec 07 D12): a
   /// joint it could not build cleanly, a fallback it took. Called only by
   /// [ParametricSystem.diagnostics], with a view over a full survey, and
@@ -335,7 +357,53 @@ final class Generated {
   final int lineweight;
 }
 
-/// A direct edit of a generated entity (spec D6). Propagates like
+/// One ATTRIB of a [GeneratedInstance] (spec 2b S1): its [tag] (the key it
+/// is matched by), its [text] and its [payload], a text payload in the
+/// instance's local (definition) space, as an ATTRIB's coordinates are.
+/// [textAttrs] (`packTextAttrs`) is written on add only, like
+/// [Generated.textAttrs]; the text and the payload are rewritten on a match
+/// when they differ.
+final class GeneratedAttrib {
+  /// Throws `ArgumentError` for an empty [tag]: the planner matches by tag.
+  GeneratedAttrib(this.tag, this.text, this.payload, {this.textAttrs = 0}) {
+    if (tag.isEmpty) {
+      throw ArgumentError.value(
+          tag, 'tag', 'a generated ATTRIB needs a tag (spec 2b S1)');
+    }
+  }
+
+  final String tag;
+  final String text;
+  final GeometryPayload payload;
+  final int textAttrs;
+}
+
+/// One symbol instance a parametric type generates (spec 2b S1): an
+/// instance of the live definition [definition], placed by [transform] in
+/// the object's group's local space, with [attributes] as its ATTRIBs.
+final class GeneratedInstance {
+  /// Throws `ArgumentError` for two [attributes] with one tag. Keeps an
+  /// unmodifiable copy of [attributes].
+  GeneratedInstance(this.definition, this.transform,
+      {List<GeneratedAttrib> attributes = const []})
+      : attributes = List.unmodifiable(attributes) {
+    final tags = <String>{};
+    for (final a in this.attributes) {
+      if (!tags.add(a.tag)) {
+        throw ArgumentError.value(a.tag, 'attributes',
+            'two generated ATTRIBs carry one tag (spec 2b S1)');
+      }
+    }
+  }
+
+  final Handle definition;
+  final Transform2 transform;
+  final List<GeneratedAttrib> attributes;
+}
+
+/// A direct edit of a generated entity or a generated instance, or a node
+/// or entity added into a live object or onto one of its generated
+/// instances (spec D6, as amended by 2b S1). Propagates like
 /// `PermissionDeniedError`; the UI never offers the edit.
 class GeneratedGeometryError implements Exception {
   const GeneratedGeometryError(this.handle);
@@ -383,6 +451,26 @@ class DanglingReferenceError implements Exception {
   @override
   String toString() => 'DanglingReferenceError: ${object.toHex()} references '
       '${referent.toHex()}, which is not a live parametric object';
+}
+
+/// A generated instance naming a handle that is not a live definition
+/// (spec 2b S1, "The definition"). Thrown by the planner while planning,
+/// before any command: an edit is undone and nothing enters the history,
+/// `probe` returns it and `drift()` throws it. A host's failure boundary
+/// freezes the object (spec 2a E2); it is deliberately not a refusal.
+final class GeneratedDefinitionError implements Exception {
+  const GeneratedDefinitionError(this.object, this.definition);
+
+  /// The object whose `instances` named it.
+  final Handle object;
+
+  /// The handle named, which is not a live definition.
+  final Handle definition;
+
+  @override
+  String toString() => 'GeneratedDefinitionError: ${object.toHex()} '
+      'generated an instance of ${definition.toHex()}, which is not a live '
+      'definition';
 }
 
 /// Read-only access for [ParametricType.generate],
@@ -992,6 +1080,8 @@ final class _Registration<T extends Component> {
   }
 
   List<Generated> generate(ParametricView v, Handle h) => type.generate(v, h);
+  List<GeneratedInstance> instancesOf(ParametricView v, Handle h) =>
+      type.instances(v, h);
   bool dissolves(ParametricView v, Handle h) => type.dissolves(v, h);
   List<Diagnostic> diagnose(ParametricView v, Handle h) => type.diagnose(v, h);
 

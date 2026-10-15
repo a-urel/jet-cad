@@ -1,0 +1,139 @@
+# Review package: dded3b45..HEAD
+
+## Commits
+d0af9540 test(plan): pin servedTopOfEntry's closed-outline and open-polyline arms
+
+## Files changed
+ .../test/controller/symbol_definition_test.dart    | 53 ++++++++++++++++++++++
+ packages/jet_cad_2d_plan/test/support/box_kit.dart |  4 +-
+ 2 files changed, 55 insertions(+), 2 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_plan/test/controller/symbol_definition_test.dart b/packages/jet_cad_2d_plan/test/controller/symbol_definition_test.dart
+index da0b0b09..f55991c3 100644
+--- a/packages/jet_cad_2d_plan/test/controller/symbol_definition_test.dart
++++ b/packages/jet_cad_2d_plan/test/controller/symbol_definition_test.dart
+@@ -43,20 +43,53 @@ final Catalog pbCatalog = Catalog(kit: 'pb', symbols: [
+     base: (610.75, 205.5),
+     shapes: [
+       CatalogLine((110.75, 405.5), (1110.75, 405.5)),
+       CatalogPolyline(
+           [(160.75, 5.5), (1060.75, 5.5), (1060.75, 355.5), (160.75, 355.5)],
+           closed: true),
+     ],
+   ),
+ ]);
+ 
++/// Symbols for `servedTopOfEntry`'s other arms: a turned closed outline
++/// first with a larger line after it, an open polyline first with a larger
++/// circle after it.
++final Catalog polyCatalog = Catalog(kit: 'pp', symbols: [
++  const CatalogSymbol(
++    key: 'pp.closed.first',
++    name: 'Closed first',
++    category: 'Tables',
++    tags: ['table'],
++    base: (3000.5, 1300.25),
++    shapes: [
++      CatalogPolyline([
++        (3000.5, 1000.25),
++        (3400.5, 1300.25),
++        (3000.5, 1600.25),
++        (2600.5, 1300.25),
++      ], closed: true),
++      CatalogLine((2000.5, 800.25), (4000.5, 800.25)),
++    ],
++  ),
++  const CatalogSymbol(
++    key: 'pp.open.first',
++    name: 'Open first',
++    category: 'Tables',
++    tags: ['table'],
++    base: (1700.5, 900.25),
++    shapes: [
++      CatalogPolyline([(1500.5, 700.25), (1900.5, 900.25), (1500.5, 1100.25)]),
++      CatalogCircle((1700.5, 900.25), 600),
++    ],
++  ),
++]);
++
+ PlanKit pbKit() => symbolKit('pb', [
+       SymbolLibrarySource(
+           label: 'pb', read: () async => encodeLibrary(pbCatalog)),
+     ]);
+ 
+ const String table = 'pb.table.round@1';
+ 
+ PlanController make(List<PlanKit> kits) {
+   final c = PlanController(kits: kits);
+   addTearDown(c.dispose);
+@@ -146,20 +179,40 @@ void main() {
+     final shelf = s.symbolDefinition('pb.shelf.plain@1')!;
+     expect(shelf.basePoint, Vector2(610.75, 205.5));
+     // M-PB7: any first leaf taken as the top (the shelf's line).
+     expect(boxOf(shelf.top), [110.75, 5.5, 1110.75, 405.5]);
+     // The base point is the ref's own: writing it leaves the library as is.
+     shelf.basePoint.x = 0;
+     expect(c.symbolById('pb.shelf.plain@1')!.entry.definition.basePoint,
+         Vector2(610.75, 205.5));
+   });
+ 
++  test(
++      'PB-def-top-poly a closed outline first is the top, an open polyline '
++      'first is not (the leafless symbol is a library error, rule 4: the '
++      'empty-leaves guard is unreachable here)', () async {
++    final c = make([
++      symbolKit('pp', [
++        SymbolLibrarySource(
++            label: 'pp', read: () async => encodeLibrary(polyCatalog)),
++      ]),
++    ]);
++    await settle();
++    final s = c.servicesOf('pp');
++    final closed = s.symbolDefinition('pp.closed.first@1')!;
++    // M-PB9a: the polyline arm of `served` made false. M-PB9b:
++    // `isClosedPolyline` made true (the open case then reads the outline).
++    expect(boxOf(closed.top), [2600.5, 1000.25, 3400.5, 1600.25]);
++    final open = s.symbolDefinition('pp.open.first@1')!;
++    expect(boxOf(open.top), [1100.5, 300.25, 2300.5, 1500.25]);
++  });
++
+   test(
+       'PB-def-null null for a key no loaded library has, and while loading; '
+       'symbolsState is the controller\'s, failed included', () async {
+     final c = make([pbKit()]);
+     final s = c.servicesOf('pb');
+     // M-PB8: the services' own listenable (a ValueNotifier(ready)).
+     expect(identical(s.symbolsState, c.symbolsState), isTrue);
+     expect(s.symbolsState.value, SymbolsState.loading);
+     expect(s.symbolDefinition(table), isNull, reason: 'still loading');
+     await settle();
+diff --git a/packages/jet_cad_2d_plan/test/support/box_kit.dart b/packages/jet_cad_2d_plan/test/support/box_kit.dart
+index a7135463..a0f3cf22 100644
+--- a/packages/jet_cad_2d_plan/test/support/box_kit.dart
++++ b/packages/jet_cad_2d_plan/test/support/box_kit.dart
+@@ -15,22 +15,22 @@ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ /// What a switched hook throws.
+ final class HookBoom implements Exception {
+   const HookBoom(this.hook);
+   final String hook;
+   @override
+   String toString() => 'HookBoom($hook)';
+ }
+ 
+ /// The hooks made to throw, by name: `reach`, `references`, `generate`,
+-/// `instances`, `diagnose`, `dissolves`, `placeBox`, `placeInput`, `readBox` (per object,
+-/// for a poisoned one); `editCapability`, `referencePolicy`, `pageKey`,
++/// `instances`, `diagnose`, `dissolves`, `placeBox`, `placeInput`,
++/// `readBox` (per object, for a poisoned one); `editCapability`, `referencePolicy`, `pageKey`,
+ /// `contributesPlace`, `readsPlaces`, `create` (type level); `fromJson` (a
+ /// poisoned component's factory). Not a throw: `openRegion` makes a
+ /// poisoned square's `generate` add an open region, which the engine's
+ /// planner refuses outside any hook (an `ArgumentError`, no
+ /// KitHookFailure).
+ final class Switches {
+   final Set<String> failing = {};
+ 
+   /// Switches that act once, then turn themselves off (`openRegion`).
+   final Set<String> once = {};

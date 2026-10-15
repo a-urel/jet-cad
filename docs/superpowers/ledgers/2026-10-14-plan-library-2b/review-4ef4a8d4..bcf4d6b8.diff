@@ -1,0 +1,810 @@
+# Review package: 4ef4a8d4..HEAD
+
+## Commits
+bcf4d6b8 feat(engine): E5, the guard for generated instances (2b S1)
+
+## Files changed
+ docs/superpowers/specs/2026-09-26-rooms-design.md  |   2 +
+ packages/jet_cad_2d/CHANGELOG.md                   |  10 +
+ .../lib/src/parametric/parametric_system.dart      |   4 +-
+ .../lib/src/parametric/regeneration.dart           | 122 ++++++--
+ .../jet_cad_2d/test/parametric/cascade_test.dart   |   5 +
+ .../test/parametric/instance_guard_test.dart       | 314 +++++++++++++++++++++
+ 6 files changed, 429 insertions(+), 28 deletions(-)
+
+## Diff
+diff --git a/docs/superpowers/specs/2026-09-26-rooms-design.md b/docs/superpowers/specs/2026-09-26-rooms-design.md
+index 9d3f5cdb..e224d2ad 100644
+--- a/docs/superpowers/specs/2026-09-26-rooms-design.md
++++ b/docs/superpowers/specs/2026-09-26-rooms-design.md
+@@ -1068,20 +1068,22 @@ M-10c, M-10centroid, M-10offset, M-10offsetref.
+   is 92,903.04000000001, a little above the true square foot, so the
+   quotient falls just below the tie and reads **`28.12 ft²`**; squaring
+   3,048 as integers first would give the tie itself and `28.13`. The case
+   pins the double form this section specifies (the mutant X11-feet; Task
+   19's audit). Every other expected label keeps the 0.0005 m² clearance.
+ - **A tie follows the binary value** (the Task 11 review: 29,265,000 mm²
+   reads `29.27`); `-0.00` is unreachable (an area is never negative).
+ 
+ ### D12 — Engine (a): generated text
+ 
++**Amended by the 2b spec (2026-10-14, [S1](2026-10-14-plan-library-service-mode-design.md#s1-e5-a-parametric-type-generates-instances)):** "an ATTRIB needs a tag nobody generates" no longer holds for generated instances: `ParametricType.instances` returns `GeneratedInstance`s whose `GeneratedAttrib`s name their tag. `Generated` itself still refuses `attrib`, and a TEXT still needs `Generated.text`.
++
+ - **`Generated.text(GeometryPayload payload, String text, {DraftColor
+   color = ByLayer, int textAttrs = 0, int flags = 0})`**: a TEXT child
+   whose string the planner owns.
+ - **The plain `Generated(EntityKind.text, …)` and `Generated(
+   EntityKind.attrib, …)` throw `ArgumentError`** **[spec ruling]** (R-15):
+   a TEXT without its string is exactly the defect the research found; an
+   ATTRIB needs a tag nobody generates.
+ - **On add**, the record carries the string, `textAttrs`, colour and flags
+   (D13's record builder).
+ - **On a match** (the i-th generated TEXT against the i-th existing TEXT
+diff --git a/packages/jet_cad_2d/CHANGELOG.md b/packages/jet_cad_2d/CHANGELOG.md
+index 18d43f68..484d1a70 100644
+--- a/packages/jet_cad_2d/CHANGELOG.md
++++ b/packages/jet_cad_2d/CHANGELOG.md
+@@ -33,20 +33,30 @@
+   `InstanceNode` child of the object's group, on the object's layer, and
+   each `GeneratedAttrib(tag, text, payload)` an ATTRIB the instance owns,
+   on layer 0, BYBLOCK. The planner matches instances by position and
+   ATTRIBs by tag, so a regeneration keeps a seat's handle and everything
+   on it, and an unchanged output plans nothing. An output naming no live
+   definition throws `GeneratedDefinitionError` while planning: the edit is
+   refused, `probe` returns it and `drift()` throws it. Every
+   `InstanceNode` child of an object's group is now that object's
+   generated instance: a type that generates none removes it on its next
+   regeneration.
++- The edit guard covers generated instances. Moving, removing,
++  re-pointing or re-layering one, or editing or removing its ATTRIBs, is
++  refused with `GeneratedGeometryError`. A components-only write on one
++  passes and regenerates nothing. Any node or entity added into a live
++  object by anything but the planner is refused, and so is an entity added
++  onto one of its generated instances. This includes a `GroupNode`: until
++  now a group added into an object passed. A nested group a file brought in
++  stays editable. Removing an object's subtree (a dissolve, a reference
++  cascade) also removes the entities its instances own, so no ATTRIB is
++  left behind.
+ 
+ ## 0.7.2
+ 
+ Documentation and funding only; no code change. Plans are stored as in
+ 0.7.1.
+ 
+ - The README links the renderer (`jet_cad_2d_flutter`), the planner
+   (`jet_cad_floor_plan`) and the host guide, and says that a host adds
+   only the planner: it brings the engine and the renderer with it.
+ - Funding links (GitHub Sponsors, Buy Me a Coffee) in the pubspec.
+diff --git a/packages/jet_cad_2d/lib/src/parametric/parametric_system.dart b/packages/jet_cad_2d/lib/src/parametric/parametric_system.dart
+index 9650a346..c03f2f01 100644
+--- a/packages/jet_cad_2d/lib/src/parametric/parametric_system.dart
++++ b/packages/jet_cad_2d/lib/src/parametric/parametric_system.dart
+@@ -394,21 +394,23 @@ final class GeneratedInstance {
+             'two generated ATTRIBs carry one tag (spec 2b S1)');
+       }
+     }
+   }
+ 
+   final Handle definition;
+   final Transform2 transform;
+   final List<GeneratedAttrib> attributes;
+ }
+ 
+-/// A direct edit of a generated entity (spec D6). Propagates like
++/// A direct edit of a generated entity or a generated instance, or a node
++/// or entity added into a live object or onto one of its generated
++/// instances (spec D6, as amended by 2b S1). Propagates like
+ /// `PermissionDeniedError`; the UI never offers the edit.
+ class GeneratedGeometryError implements Exception {
+   const GeneratedGeometryError(this.handle);
+ 
+   final Handle handle;
+ 
+   @override
+   String toString() => 'GeneratedGeometryError: ${handle.toHex()} is '
+       'generated by a parametric object and cannot be edited directly';
+ }
+diff --git a/packages/jet_cad_2d/lib/src/parametric/regeneration.dart b/packages/jet_cad_2d/lib/src/parametric/regeneration.dart
+index 578d7098..96faa962 100644
+--- a/packages/jet_cad_2d/lib/src/parametric/regeneration.dart
++++ b/packages/jet_cad_2d/lib/src/parametric/regeneration.dart
+@@ -76,21 +76,22 @@ final class _Survey {
+       this.children,
+       this.owned,
+       this.declared,
+       this.references,
+       this.referrers,
+       this.page,
+       this.readers,
+       this.stray,
+       this.instances,
+       this.generated,
+-      this.leaves);
++      this.leaves,
++      this.nested);
+ 
+   /// Live objects, ascending, with their registration.
+   final Map<Handle, _Registration<Component>> objects;
+ 
+   /// Each object's registered component at this moment (spec 10 D16.1): the
+   /// snapshot every view built over this survey reads. A component is
+   /// immutable, so the reference is the snapshot.
+   final Map<Handle, Component> params;
+ 
+   /// Each object's accumulated transform at this moment (spec 10 D16.1),
+@@ -154,20 +155,25 @@ final class _Survey {
+   final Map<Handle, List<InstanceNode>> instances;
+ 
+   /// Each generated instance of [instances], by handle, to its node value;
+   /// its object is the node's `parent`.
+   final Map<Handle, InstanceNode> generated;
+ 
+   /// Each generated instance's own entities (its ATTRIBs, and whatever a
+   /// loaded file put on it), ascending; absent when none.
+   final Map<Handle, List<Handle>> leaves;
+ 
++  /// Each nested group of a live object (a `GroupNode` child of its group,
++  /// which a file brought in), to the object. The guard leaves it what it
++  /// is today (spec 2b S1): not generated, and not an add when edited.
++  final Map<Handle, Handle> nested;
++
+   final Map<Handle, List<Handle>> _neighbours = {};
+ 
+   /// [h]'s neighbours, ascending (spec 06 D3): the objects whose reach
+   /// overlaps [h]'s by more than `Tolerance.standard.linear` on both axes.
+   /// Empty for a handle that is not an object of this survey. The list is
+   /// unmodifiable: it is the memo itself.
+   List<Handle> neighboursOf(Handle h) {
+     final cached = _neighbours[h];
+     if (cached != null) return cached;
+     final a = reach[h];
+@@ -272,28 +278,31 @@ _Survey _survey(CommandTarget t, List<_Registration<Component>> types,
+   final params = {for (final h in order) h: objects[h]!.componentOf(t, h)};
+   final toWorld = {for (final h in order) h: _worldOf(t, h)};
+   // Ascending, like [objects]: `neighboursOf` walks it in handle order.
+   final reach = {
+     for (final h in order) h: objects[h]!.reachOf(params[h]!, toWorld[h]!),
+   };
+   // Spec 2b S1: each object's generated instances, from its group's own
+   // list, ascending by handle whatever order the list is in.
+   final instances = <Handle, List<InstanceNode>>{};
+   final generated = <Handle, InstanceNode>{};
++  final nested = <Handle, Handle>{};
+   for (final h in order) {
+     for (final c in (t.tree[h]! as GroupNode).children) {
+       final node = t.tree[c];
+-      if (node is InstanceNode &&
+-          node.parent == h &&
+-          !generated.containsKey(c)) {
++      if (node == null || node.parent != h) continue;
++      if (node is InstanceNode) {
++        if (generated.containsKey(c)) continue;
+         (instances[h] ??= []).add(node);
+         generated[c] = node;
++      } else {
++        nested[c] = h;
+       }
+     }
+   }
+   for (final list in instances.values) {
+     list.sort((a, b) => _byValue(a.handle, b.handle));
+   }
+   final children = <Handle, List<Handle>>{};
+   final owned = <Handle, Handle>{};
+   final leaves = <Handle, List<Handle>>{};
+   for (final slot in t.entities.liveSlots) {
+@@ -347,21 +356,22 @@ _Survey _survey(CommandTarget t, List<_Registration<Component>> types,
+       declared,
+       references,
+       {
+         for (final e in referrers.entries) e.key: List.unmodifiable(e.value),
+       },
+       t.components.get<PageComponent>(t.tree.root),
+       readers,
+       stray,
+       instances,
+       generated,
+-      leaves);
++      leaves,
++      nested);
+ }
+ 
+ /// The objects a page change seeds (spec 10 D14): every live object in
+ /// [after] of each registered type whose [ParametricType.pageKey] of the
+ /// two pages differs. `_run` calls it only when the page differs between
+ /// [before] and [after] (value equality, a stored value), so an edit that
+ /// leaves the page alone pays one `==` and never calls a `pageKey`.
+ Iterable<Handle> _pageSeeds(CommandTarget t,
+     List<_Registration<Component>> types, _Survey before, _Survey after) sync* {
+   for (final r in types) {
+@@ -865,45 +875,76 @@ List<DraftCommand> _instanceRemoval(
+       t.entities.kindAt(t.entities.slotOf(c)!) == EntityKind.fill;
+   return [
+     for (final c in leaves)
+       if (isFill(c)) RemoveEntityCommand(c),
+     for (final c in leaves)
+       if (!isFill(c)) RemoveEntityCommand(c),
+     RemoveNodeCommand(instance),
+   ];
+ }
+ 
+-/// The first touched handle that edits a generated entity, removes one
+-/// while its group lives, or adds one into a live object (spec D6).
++/// The first touched handle, ascending, that the guard refuses (spec 06 D6,
++/// as amended by 2b S1), or null. Two disjoint branches by what the handle
++/// was in [before], then the adds:
+ ///
+-/// For `h` in `G` (before.owned[h] != null): refused if `h` **still
+-/// exists** — a direct edit of a generated entity, regardless of what else
+-/// the same command did to its owner — or, when `h` was removed, if the
+-/// owner's group node still exists (spec D6's amendment for F4: whatever
+-/// its component now is, not only while it is still a live parametric
+-/// object -- a compound that detaches the component and then removes one
+-/// of its still-live children in the same command must still be refused).
+-/// Only a child removed *together with* its owning group is allowed.
++/// - **An owned entity** (`before.owned`: a child of a live object, or an
++///   ATTRIB of one of its generated instances): refused if it **still
++///   exists** -- a direct edit, regardless of what else the same command did
++///   to its owner -- or, when it was removed, if its object's group node
++///   still exists (spec D6's amendment for F4: whatever its component now
++///   is; a compound that detaches the component and then removes a
++///   still-live child must still be refused). Only a child removed
++///   *together with* its object's group is allowed.
++/// - **A generated instance** (`before.generated`): refused when, after the
++///   edit, it is gone while its object's group lives, or its node differs
++///   from the survey's value by `InstanceNode.==` (exact, every field): a
++///   move, a definition, a layer or a style change. A components-only
++///   write leaves the node as it was and passes (2b S1: per-unit data); it
++///   seeds nothing (`_run`).
++/// - **An add**: an entity the survey did not hold, owned by a live object
++///   or by a generated instance of one; a node, a `GroupNode` included,
++///   whose parent is a live object, unless the survey held it there (a
++///   nested group a file brought in stays what it is).
+ ///
+ /// A frozen object (spec 2a E2) is a plain group: a child added into it, or
+-/// one of its children edited, is not refused.
++/// one of its children or instances edited, is not refused.
+ Handle? _refused(CommandTarget t, List<_Registration<Component>> types,
+     _Survey before, Set<Handle> touched, bool Function(Handle)? frozen) {
+   for (final h in touched.toList()..sort(_byValue)) {
+     final owner = before.owned[h];
+     if (owner != null) {
+       if (t.entities.slotOf(h) != null) return h;
+       if (t.tree[owner] != null) return h;
+       continue;
+     }
++    final seat = before.generated[h];
++    if (seat != null) {
++      final now = t.tree[h];
++      if (now == null ? t.tree[seat.parent] != null : now != seat) return h;
++      continue;
++    }
+     final slot = t.entities.slotOf(h);
+-    if (slot != null && _isObject(t, types, t.entities.ownerAt(slot), frozen)) {
++    if (slot != null) {
++      final holder = t.entities.ownerAt(slot);
++      if (_isObject(t, types, holder, frozen)) return h;
++      final held = before.generated[holder];
++      if (held != null &&
++          t.tree[held.parent] != null &&
++          !(before.leaves[holder]?.contains(h) ?? false)) {
++        return h;
++      }
++      continue;
++    }
++    final node = t.tree[h];
++    if (node != null &&
++        before.nested[h] != node.parent &&
++        _isObject(t, types, node.parent, frozen)) {
+       return h;
+     }
+   }
+   return null;
+ }
+ 
+ /// [r]'s component on [h] in [s], or null when [h] carried none: from the
+ /// object snapshot when [r] names [h]'s object, else from [_Survey.stray].
+ Component? _heldBefore(_Survey s, _Registration<Component> r, Handle h) =>
+     identical(s.objects[h], r) ? s.params[h] : s.stray[(h, r)];
+@@ -1051,73 +1092,96 @@ CommandResult _cascade(CommandTarget t, List<_Registration<Component>> types,
+ /// **Every fill of the whole subtree goes first** (the doomed group's and
+ /// each nested group's, in that listed order), before any other leaf, so a
+ /// region's fill is removed before its boundary wherever each of the two
+ /// lives: `RemoveEntityCommand` on a fill is always available and undoes
+ /// exactly, whereas removing a boundary takes its fill with it only when
+ /// the pair could be rebuilt, and refuses a loaded, unfillable one (an open
+ /// boundary, or a fill in a nested group naming a boundary in [d], say),
+ /// which would refuse the whole edit.
+ ///
+ /// [d]'s own leaves are the survey's (an edit cannot add into a live
+-/// object, 06 D6); a nested group's are found by one scan of the live
+-/// slots, paid only when [d] has nested groups.
++/// object, 06 D6 as amended by 2b S1), and so are its generated instances'
++/// entities (2b S1). A nested group's leaves, and the entities of an
++/// instance the survey does not know (a nested group's), are found by one
++/// scan of the live slots, paid only when there is one. Every instance
++/// removed takes its entities first, so no ATTRIB is left behind (2b S1,
++/// "The dissolve gap closes").
+ ///
+ /// Two callers: [_cascade], with the before-survey, for a doomed referrer;
+ /// [_plan], with the after-survey, for a dissolving object (spec 10 D15).
+ List<DraftCommand> _subtreeRemoval(CommandTarget t, _Survey before, Handle d) {
+   final groups = <Handle>[];
++  final instances = <Handle>[];
+   void collect(Handle g) {
+     groups.add(g);
+     final node = t.tree[g];
+     if (node is! GroupNode) return;
+     for (final c in t.tree.childNodesOf(node.children)) {
+-      if (t.tree[c] is GroupNode) collect(c);
++      final child = t.tree[c];
++      if (child is GroupNode) {
++        collect(c);
++      } else if (child is InstanceNode) {
++        instances.add(c);
++      }
+     }
+   }
+ 
+   collect(d);
++  bool live(Handle c) => t.entities.slotOf(c) != null;
+   final leaves = <Handle, List<Handle>>{
+     d: [
+       for (final c in before.children[d] ?? const <Handle>[])
+-        if (t.entities.slotOf(c) != null) c,
++        if (live(c)) c,
+     ],
++    for (final i in before.instances[d] ?? const <InstanceNode>[])
++      i.handle: [
++        for (final c in before.leaves[i.handle] ?? const <Handle>[])
++          if (live(c)) c,
++      ],
++  };
++  final scanned = <Handle>{
++    ...groups.skip(1),
++    for (final i in instances)
++      if (!leaves.containsKey(i)) i,
+   };
+-  if (groups.length > 1) {
+-    final nested = groups.skip(1).toSet();
++  if (scanned.isNotEmpty) {
+     for (final slot in t.entities.liveSlots) {
+       final owner = t.entities.ownerAt(slot);
+-      if (nested.contains(owner)) {
++      if (scanned.contains(owner)) {
+         (leaves[owner] ??= []).add(t.entities.handleAt(slot));
+       }
+     }
+-    for (final list in leaves.values) {
+-      list.sort(_byValue);
++    for (final o in scanned) {
++      leaves[o]?.sort(_byValue);
+     }
+   }
+   bool isFill(Handle c) =>
+       t.entities.kindAt(t.entities.slotOf(c)!) == EntityKind.fill;
+   final out = <DraftCommand>[
+-    for (final g in groups)
++    for (final g in [...groups, ...instances])
+       for (final c in leaves[g] ?? const <Handle>[])
+         if (isFill(c)) RemoveEntityCommand(c),
+   ];
+   void remove(Handle g) {
+     for (final c in leaves[g] ?? const <Handle>[]) {
+       if (!isFill(c)) out.add(RemoveEntityCommand(c));
+     }
+     final node = t.tree[g];
+     if (node is GroupNode) {
+       for (final c in t.tree.childNodesOf(node.children)) {
+         final child = t.tree[c];
+         if (child is GroupNode) {
+           remove(c);
+         } else if (child is InstanceNode) {
++          for (final e in leaves[c] ?? const <Handle>[]) {
++            if (!isFill(e)) out.add(RemoveEntityCommand(e));
++          }
+           out.add(RemoveNodeCommand(c));
+         }
+       }
+     }
+     out.add(RemoveNodeCommand(g));
+   }
+ 
+   remove(d);
+   return out;
+ }
+@@ -1216,20 +1280,24 @@ CommandResult _run(ParametricEdit edit, CommandTarget t) {
+   // and leave nothing in history (spec D4 step 8).
+   final _Survey after;
+   final List<DraftCommand> plan;
+   try {
+     after = _survey(t, types, frozen);
+     // Ruling 06-3: only objects that were live before the edit.
+     final lost = [
+       for (final h in before.objects.keys)
+         if (!after.objects.containsKey(h) && t.tree[h] == null) h,
+     ];
++    // Spec 2b S1: a generated instance seeds nothing. It is neither an
++    // object nor in `owned`, so a components-only write on one (per-unit
++    // data) regenerates nothing and pays no `_checkDangling`. Any other
++    // edit of it was refused above.
+     final seeds = <Handle>{
+       for (final h in r.touched) ...[
+         // Ruling 06-4: a handle that was an object seeds too.
+         if (after.objects.containsKey(h) || before.objects.containsKey(h)) h,
+         if (before.owned[h] case final owner?) owner,
+       ],
+       ...lost,
+     };
+     _checkDangling(seeds, after);
+     // Spec 10 D14, Ruling 10-4: after the dangling-reference check, which
+diff --git a/packages/jet_cad_2d/test/parametric/cascade_test.dart b/packages/jet_cad_2d/test/parametric/cascade_test.dart
+index f63361b2..3132ba06 100644
+--- a/packages/jet_cad_2d/test/parametric/cascade_test.dart
++++ b/packages/jet_cad_2d/test/parametric/cascade_test.dart
+@@ -625,40 +625,45 @@ void main() {
+       'referrer\'s subtree as the select tool does: a nested group under P1, '
+       'with its own leaf, and an instance under P1 go too; validate() stays '
+       'clean; undo is exact', () {
+     final doc = scene();
+     final definition = doc.handleSeed.next();
+     doc.tree.addDefinition(Definition(
+         handle: definition,
+         name: 'Stool',
+         basePoint: Vector2(35.5, -12.25),
+         children: const []));
++    // Spec 2b S1: an edit may not add a node into a live object. A loaded
++    // file's shape: these come in past the parametric system.
++    final expander = doc.commands.expander;
++    doc.commands.expander = null;
+     final instance = doc.handleSeed.next();
+     doc.commands.execute(AddNodeCommand(InstanceNode(
+         handle: instance,
+         parent: hP1,
+         transform: Transform2.translation(-240, 95)
+             .multiply(Transform2.rotation(-0.35)),
+         definition: definition,
+         layer: ReservedHandles.layerZero)));
+     final nested = doc.handleSeed.next();
+     doc.commands.execute(AddNodeCommand(GroupNode(
+         handle: nested,
+         parent: hP1,
+         transform:
+             Transform2.translation(120, -80).multiply(Transform2.rotation(0.6)),
+         children: const [])));
+     final leaf = doc.handleSeed.next();
+     doc.commands.execute(AddEntityCommand(
+         record: draftRecord(leaf, nested, EntityKind.line,
+             layer: ReservedHandles.layerZero),
+         payload: linePayload(Vector2(10.5, 20.25), Vector2(310.75, 45.5))));
++    doc.commands.expander = expander;
+     expect(doc.validate(), isEmpty);
+     // Spec 2b S1: an InstanceNode child of P1's group is P1's generated
+     // instance; Pin generates none, so P1's plan would remove it.
+     expect(drift(doc), [hP1]);
+     final before = state(doc);
+     final depth = doc.commands.undoDepth;
+ 
+     doc.commands.execute(deleteObject(doc, hA));
+     expectGone(doc, hP1);
+     expect(doc.tree[nested], isNull);
+diff --git a/packages/jet_cad_2d/test/parametric/instance_guard_test.dart b/packages/jet_cad_2d/test/parametric/instance_guard_test.dart
+new file mode 100644
+index 00000000..8ed593ef
+--- /dev/null
++++ b/packages/jet_cad_2d/test/parametric/instance_guard_test.dart
+@@ -0,0 +1,314 @@
++// Spec 2b S1 "The guard" and "The dissolve gap closes" (E5): 06 D6's guard
++// gains a node branch for generated instances; any node or entity added
++// into a live object, or onto one of its generated instances, is refused;
++// a components-only write on a generated instance passes and seeds
++// nothing; a removed subtree takes its instances' entities with it.
++// Fixture: support/row_clients.dart (two rows off the origin, row 2 turned,
++// mirrored and curved).
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:test/test.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import 'support/row_clients.dart';
++
++const Tolerance exact = Tolerance(linear: 0, angular: 0);
++
++/// Runs [edit]: it must be refused with [GeneratedGeometryError] naming
++/// [handle], and leave the bytes, the history and the state as they were.
++/// A handle the edit adds is taken from the seed before this call.
++void expectRefused(
++    DraftDocument doc, DraftCommand edit, Handle handle, String what) {
++  final bytes = enc(doc);
++  final depth = doc.commands.undoDepth;
++  final state = doc.commands.stateId;
++  expect(
++      () => doc.commands.execute(edit),
++      throwsA(isA<GeneratedGeometryError>()
++          .having((e) => e.handle, 'handle', handle)),
++      reason: what);
++  expect(enc(doc), bytes, reason: what);
++  expect(doc.commands.undoDepth, depth, reason: what);
++  expect(doc.commands.stateId, state, reason: what);
++}
++
++/// Every live entity's owner is a live node or definition.
++void expectNoOrphan(DraftDocument doc) {
++  for (final slot in doc.entities.liveSlots) {
++    final owner = doc.entities.ownerAt(slot);
++    expect(
++        doc.tree[owner] != null || doc.tree.definition(owner) != null, isTrue,
++        reason: '${doc.entities.handleAt(slot).toHex()} is owned by '
++            '${owner.toHex()}, which is gone');
++  }
++}
++
++void main() {
++  setUp(resetRowCalls);
++
++  test(
++      'E5G-refuse a seat\'s move, removal, definition change and layer '
++      'change, and an edit or removal of its label, are each refused; the '
++      'row moved whole passes and its seats ride along untouched '
++      '(M-E5G-value, M-E5G-gone)', () {
++    final doc = hall();
++    final balcony = addLayer(doc, 'Balcony', 5);
++    final seat = seats(doc, hRow2)[3];
++    final label = leavesOf(doc, seat.handle).single;
++    expectRefused(
++        doc,
++        TransformNodeCommand(seat.handle,
++            seat.transform.multiply(Transform2.translation(25.5, -10.25))),
++        seat.handle,
++        'move');
++    expectRefused(doc, RemoveNodeCommand(seat.handle), seat.handle, 'removal');
++    expectRefused(doc, SetInstanceDefinitionCommand(seat.handle, hStool),
++        seat.handle, 'definition');
++    expectRefused(doc, SetInstanceLayerCommand(seat.handle, balcony),
++        seat.handle, 'layer');
++    expectRefused(
++        doc, SetEntityTextCommand(label, 'Z9', kSeatTag), label, 'label text');
++    expectRefused(doc, RemoveEntityCommand(label), label, 'label removal');
++    expectRefused(
++        doc,
++        CompoundCommand(
++            [RemoveEntityCommand(label), RemoveNodeCommand(seat.handle)],
++            label: 'Delete seat'),
++        seat.handle,
++        'the select tool\'s delete of one seat');
++
++    // Positive control: the row moved whole.
++    doc.commands.execute(TransformNodeCommand(
++        hRow2, atRow2.multiply(Transform2.translation(400.5, -120.25))));
++    // Equal, not identical: a refused edit's undo rebuilds the node.
++    expect(doc.tree[seat.handle], seat);
++    expect(leavesOf(doc, seat.handle), [label]);
++    expect(drift(doc), isEmpty);
++  });
++
++  test(
++      'E5G-component a components-only write on a seat passes, seeds '
++      'nothing, regenerates nothing and leaves the index alone; one undo '
++      'step (M-E5G-seed)', () async {
++    final doc = hall();
++    final seat = seats(doc, hRow1)[6].handle;
++    final index = SpatialIndex(doc);
++    index.forEachInRect(Aabb2(Vector2(-20000, -20000), Vector2(30000, 30000)),
++        const QueryFilter.all(), (_) {});
++    final rebuilds = index.rebuildCount;
++    final depth = doc.commands.undoDepth;
++    resetRowCalls();
++    final applied = await applying(
++        doc,
++        () => doc.commands.execute(
++            SetComponentCommand<SeatNote>(seat, const SeatNote('vip'))));
++    expect(rowGenerateCalls, isEmpty);
++    expect(rowInstanceCalls, isEmpty);
++    expect(applied.single.touched, {seat});
++    expect(applied.single.capability, Capability.components);
++    expect(index.rebuildCount, rebuilds);
++    expect(doc.components.get<SeatNote>(seat), const SeatNote('vip'));
++    expect(doc.commands.undoDepth, depth + 1);
++    doc.commands.undo();
++    expect(doc.components.get<SeatNote>(seat), isNull);
++    doc.commands.redo();
++    expect(doc.components.get<SeatNote>(seat), const SeatNote('vip'));
++    expect(rowGenerateCalls, isEmpty);
++    expect(rowInstanceCalls, isEmpty);
++    index.dispose();
++  });
++
++  test(
++      'E5G-add a node added into a live row is refused, a GroupNode '
++      'included, and so is an entity added onto one of its seats; the same '
++      'adds at the root pass, and a nested group a file brought in stays '
++      'editable (M-E5G-add-node, M-E5G-add-onto, M-E5G-nested)', () {
++    final doc = hall();
++    final seat = seats(doc, hRow1).first.handle;
++    final label = leavesOf(doc, seat).single;
++    final group = doc.handleSeed.next();
++    final instance = doc.handleSeed.next();
++    final attrib = doc.handleSeed.next();
++    final line = doc.handleSeed.next();
++    expectRefused(
++        doc,
++        AddNodeCommand(GroupNode(
++            handle: group,
++            parent: hRow1,
++            transform: Transform2.translation(50.5, 20.25),
++            children: const [])),
++        group,
++        'a group into the row');
++    expectRefused(
++        doc,
++        AddNodeCommand(InstanceNode(
++            handle: instance,
++            parent: hRow1,
++            transform: seatAt(row1, 12),
++            definition: hSeat,
++            layer: ReservedHandles.layerZero)),
++        instance,
++        'an instance into the row');
++    expectRefused(
++        doc,
++        AddEntityCommand(
++            record: recordOf(doc, label)
++                .copyWith(handle: attrib, tag: 'NOTE', text: 'aisle'),
++            payload: payloadOf(doc, label)),
++        attrib,
++        'an ATTRIB onto a seat');
++    expectRefused(
++        doc,
++        AddEntityCommand(
++            record: draftRecord(line, seat, EntityKind.line,
++                layer: ReservedHandles.layerZero),
++            payload: linePayload(Vector2(-120.5, 0), Vector2(120.5, 40.25))),
++        line,
++        'a LINE onto a seat');
++
++    // Positive controls: a group and an instance at the root, and an ATTRIB
++    // onto that plain instance, pass.
++    doc.commands.execute(AddNodeCommand(GroupNode(
++        handle: group,
++        parent: doc.rootHandle,
++        transform: atRow1.multiply(Transform2.translation(-2000.5, 0)),
++        children: const [])));
++    doc.commands.execute(AddNodeCommand(InstanceNode(
++        handle: instance,
++        parent: doc.rootHandle,
++        transform: atRow2.multiply(Transform2.translation(0, -1500.25)),
++        definition: hStool,
++        layer: ReservedHandles.layerZero)));
++    doc.commands.execute(AddEntityCommand(
++        record: recordOf(doc, label).copyWith(
++            handle: attrib, owner: instance, tag: 'NOTE', text: 'aisle'),
++        payload: payloadOf(doc, label)));
++    expect(doc.tree[group]!.parent, doc.rootHandle);
++    expect(doc.entities.ownerAt(doc.entities.slotOf(attrib)!), instance);
++
++    // A nested group a file brought into the row: moving it is not an add.
++    late Handle nested;
++    final loaded = loadedWith(doc, (raw) {
++      nested = raw.handleSeed.next();
++      raw.commands.execute(AddNodeCommand(GroupNode(
++          handle: nested,
++          parent: hRow1,
++          transform: Transform2.translation(-300.5, 450.25),
++          children: const [])));
++    });
++    expect(loaded.tree[nested]!.parent, hRow1);
++    final moved =
++        Transform2.translation(80.25, -40.5).multiply(Transform2.rotation(0.3));
++    loaded.commands.execute(TransformNodeCommand(nested, moved));
++    expect(loaded.tree[nested]!.transform.equals(moved, exact), isTrue);
++    expect(drift(loaded), isEmpty);
++  });
++
++  test(
++      'E5G-dissolve a dissolving row takes its seats\' labels with it, and a '
++      'loaded row takes a nested group\'s instance and its label too; undo '
++      'restores every one (M-E5G-dissolve, M-E5G-scan)', () {
++    final doc = hall();
++    final labels = labelsOf(doc, hRow1);
++    final ss = [for (final s in seats(doc, hRow1)) s.handle];
++    final row2Labels = labelsOf(doc, hRow2);
++    final placed = canon(doc);
++    doc.commands.execute(
++        SetComponentCommand<Row>(hRow1, row1.copyWith(dissolve: true)));
++    expect(doc.tree[hRow1], isNull);
++    for (final s in ss) {
++      expect(doc.tree[s], isNull);
++    }
++    for (final l in labels) {
++      expect(doc.entities.slotOf(l), isNull, reason: l.toHex());
++    }
++    expect(labelsOf(doc, hRow2), row2Labels);
++    expectNoOrphan(doc);
++    doc.commands.undo();
++    expect(canon(doc), placed);
++
++    late Handle group, instance, attrib;
++    final loaded = loadedWith(hall(), (raw) {
++      group = raw.handleSeed.next();
++      instance = raw.handleSeed.next();
++      attrib = raw.handleSeed.next();
++      raw.commands.execute(CompoundCommand([
++        AddNodeCommand(GroupNode(
++            handle: group,
++            parent: hRow1,
++            transform: Transform2.translation(-300.5, 450.25)
++                .multiply(Transform2.rotation(0.4)),
++            children: const [])),
++        AddNodeCommand(InstanceNode(
++            handle: instance,
++            parent: group,
++            transform: Transform2.translation(20.5, -15.25),
++            definition: hStool,
++            layer: ReservedHandles.layerZero)),
++        AddEntityCommand(
++            record: draftRecord(attrib, instance, EntityKind.attrib,
++                    layer: ReservedHandles.layerZero, text: 'Z1')
++                .copyWith(tag: kSeatTag),
++            payload: textPayload(Vector2(5.5, -8.25), 120.5)),
++      ], label: 'A nested group'));
++    });
++    expect(loaded.tree[instance]!.parent, group);
++    expect(drift(loaded), isEmpty);
++    final before = canon(loaded);
++    loaded.commands.execute(
++        SetComponentCommand<Row>(hRow1, row1.copyWith(dissolve: true)));
++    expect(loaded.tree[group], isNull);
++    expect(loaded.tree[instance], isNull);
++    expect(loaded.entities.slotOf(attrib), isNull);
++    expectNoOrphan(loaded);
++    loaded.commands.undo();
++    expect(canon(loaded), before);
++  });
++
++  test(
++      'E5G-undo refused edits leave nothing behind: undo and redo across '
++      'refused and allowed edits walk the same states (M-E5G-undo)', () {
++    final doc = hall();
++    final seat = seats(doc, hRow1)[4];
++    // Taken first: a refused add raises the seed no further.
++    final group = doc.handleSeed.next();
++    final s0 = canon(doc);
++    expectRefused(
++        doc,
++        TransformNodeCommand(
++            seat.handle, seat.transform.multiply(Transform2.rotation(0.25))),
++        seat.handle,
++        'move');
++    doc.commands.execute(
++        SetComponentCommand<SeatNote>(seat.handle, const SeatNote('window')));
++    final s1 = canon(doc);
++    doc.commands
++        .execute(SetComponentCommand<Row>(hRow1, row1.copyWith(count: 10)));
++    final s2 = canon(doc);
++    expectRefused(
++        doc,
++        AddNodeCommand(GroupNode(
++            handle: group,
++            parent: hRow1,
++            transform: Transform2.translation(10.5, 0),
++            children: const [])),
++        group,
++        'a group into the row');
++    doc.commands.execute(
++        SetComponentCommand<Row>(hRow1, row1.copyWith(count: 10, prefix: 'K')));
++    final s3 = canon(doc);
++    expect({s0, s1, s2, s3}, hasLength(4));
++
++    doc.commands.undo();
++    expect(canon(doc), s2);
++    doc.commands.undo();
++    expect(canon(doc), s1);
++    doc.commands.undo();
++    expect(canon(doc), s0);
++    doc.commands.redo();
++    expect(canon(doc), s1);
++    doc.commands.redo();
++    expect(canon(doc), s2);
++    doc.commands.redo();
++    expect(canon(doc), s3);
++  });
++}

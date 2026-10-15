@@ -80,7 +80,11 @@ final class _Survey {
       this.referrers,
       this.page,
       this.readers,
-      this.stray);
+      this.stray,
+      this.instances,
+      this.generated,
+      this.leaves,
+      this.nested);
 
   /// Live objects, ascending, with their registration.
   final Map<Handle, _Registration<Component>> objects;
@@ -97,10 +101,14 @@ final class _Survey {
   /// Each object's reach at this moment, one call per object.
   final Map<Handle, Aabb2> reach;
 
-  /// Each object's children, ascending.
+  /// Each object's children, ascending: its entities only. Its generated
+  /// instances are in [instances] (spec 2b S1).
   final Map<Handle, List<Handle>> children;
 
-  /// Every child of a live object, to its owner: the set G of spec D4.
+  /// Every child of a live object, and every ATTRIB of one of its generated
+  /// instances (spec 2b S1), to its object: the set G of spec D4. So 06 D6's
+  /// entity branch covers a generated ATTRIB, and an edit of one seeds its
+  /// object.
   final Map<Handle, Handle> owned;
 
   /// Each object's `references` as declared, from this survey's one call
@@ -138,6 +146,26 @@ final class _Survey {
   /// Read by [_written] through [_heldBefore], on the before-survey only.
   /// A frozen object's component (spec 2a E2) is one too.
   final Map<(Handle, _Registration<Component>), Component> stray;
+
+  /// Spec 2b S1: each live object's generated instances, the
+  /// `InstanceNode` children of its group, ascending by handle, each its
+  /// node value at this moment (nodes are immutable: a reference, not a
+  /// copy). Absent when it has none. A nested group's instances are not
+  /// generated.
+  final Map<Handle, List<InstanceNode>> instances;
+
+  /// Each generated instance of [instances], by handle, to its node value;
+  /// its object is the node's `parent`.
+  final Map<Handle, InstanceNode> generated;
+
+  /// Each generated instance's own entities (its ATTRIBs, and whatever a
+  /// loaded file put on it), ascending; absent when none.
+  final Map<Handle, List<Handle>> leaves;
+
+  /// Each nested group of a live object (a `GroupNode` child of its group,
+  /// which a file brought in), to the object. The guard leaves it what it
+  /// is today (spec 2b S1): not generated, and not an add when edited.
+  final Map<Handle, Handle> nested;
 
   final Map<Handle, List<Handle>> _neighbours = {};
 
@@ -253,16 +281,48 @@ _Survey _survey(CommandTarget t, List<_Registration<Component>> types,
   final reach = {
     for (final h in order) h: objects[h]!.reachOf(params[h]!, toWorld[h]!),
   };
+  // Spec 2b S1: each object's generated instances, from its group's own
+  // list, ascending by handle whatever order the list is in.
+  final instances = <Handle, List<InstanceNode>>{};
+  final generated = <Handle, InstanceNode>{};
+  final nested = <Handle, Handle>{};
+  for (final h in order) {
+    for (final c in (t.tree[h]! as GroupNode).children) {
+      final node = t.tree[c];
+      if (node == null || node.parent != h) continue;
+      if (node is InstanceNode) {
+        if (generated.containsKey(c)) continue;
+        (instances[h] ??= []).add(node);
+        generated[c] = node;
+      } else {
+        nested[c] = h;
+      }
+    }
+  }
+  for (final list in instances.values) {
+    list.sort((a, b) => _byValue(a.handle, b.handle));
+  }
   final children = <Handle, List<Handle>>{};
   final owned = <Handle, Handle>{};
+  final leaves = <Handle, List<Handle>>{};
   for (final slot in t.entities.liveSlots) {
     final owner = t.entities.ownerAt(slot);
-    if (!objects.containsKey(owner)) continue;
+    if (objects.containsKey(owner)) {
+      final h = t.entities.handleAt(slot);
+      (children[owner] ??= []).add(h);
+      owned[h] = owner;
+      continue;
+    }
+    final node = generated[owner];
+    if (node == null) continue;
     final h = t.entities.handleAt(slot);
-    (children[owner] ??= []).add(h);
-    owned[h] = owner;
+    (leaves[owner] ??= []).add(h);
+    if (t.entities.kindAt(slot) == EntityKind.attrib) owned[h] = node.parent;
   }
   for (final list in children.values) {
+    list.sort(_byValue);
+  }
+  for (final list in leaves.values) {
     list.sort(_byValue);
   }
   // Spec 08 D2: one pass, one `references` call per object. The pass walks
@@ -300,7 +360,11 @@ _Survey _survey(CommandTarget t, List<_Registration<Component>> types,
       },
       t.components.get<PageComponent>(t.tree.root),
       readers,
-      stray);
+      stray,
+      instances,
+      generated,
+      leaves,
+      nested);
 }
 
 /// The objects a page change seeds (spec 10 D14): every live object in
@@ -557,6 +621,10 @@ void _checkRegion(Handle h, GeometryPayload boundary) {
 /// Every added record comes from [_recordOf], on the
 /// object's layer.
 ///
+/// Then its generated instances (spec 2b S1, [_planInstances]): matched by
+/// position, ascending by handle, their ATTRIBs by tag, every command
+/// planned only on an exact-`==` difference of the stored value.
+///
 /// Each object is first asked whether it dissolves (spec 10 D15), with the
 /// same [view], before its `generate`. A dissolving object is not
 /// generated: its plan is [_subtreeRemoval] (the select tool's order),
@@ -657,24 +725,188 @@ List<DraftCommand> _plan(
     for (final c in surplus) {
       out.add(RemoveEntityCommand(c));
     }
+    // Spec 2b S1 "Matching": the object's generated instances, after its
+    // entities, from the same view.
+    reserved = _planInstances(
+        t, s, h, registration.instancesOf(view, h), layer, reserved, out);
   }
   return out;
 }
 
-/// The first touched handle that edits a generated entity, removes one
-/// while its group lives, or adds one into a live object (spec D6).
+/// Stored transforms compare exactly (12b R-15): `Transform2` has no `==`,
+/// and `InstanceNode.==` compares with this tolerance.
+const Tolerance _exact = Tolerance(linear: 0, angular: 0);
+
+/// The record of an ATTRIB the plan adds onto [instance] (spec 2b S1): the
+/// shape of today's table label, on layer 0 with BYBLOCK style, so it
+/// follows its instance; the layer and style stamps never touch it.
+EntityRecord _attribRecord(Handle handle, Handle instance, GeneratedAttrib a) =>
+    EntityRecord(
+      handle: handle,
+      owner: instance,
+      kind: EntityKind.attrib,
+      layer: ReservedHandles.layerZero,
+      linetype: ReservedHandles.byBlockLinetype,
+      linetypeScale: 1.0,
+      geomIndex: 0,
+      color: const ByBlockColor(),
+      lineweight: kByBlock,
+      transparency: kByBlock,
+      flags: 0,
+      text: a.text,
+      tag: a.tag,
+      textStyle: ReservedHandles.standardTextStyle,
+      textAttrs: a.textAttrs,
+    );
+
+/// Spec 2b S1 "Matching": plans [object]'s generated instances against
+/// [outputs] into [out], and returns the last handle reserved.
 ///
-/// For `h` in `G` (before.owned[h] != null): refused if `h` **still
-/// exists** — a direct edit of a generated entity, regardless of what else
-/// the same command did to its owner — or, when `h` was removed, if the
-/// owner's group node still exists (spec D6's amendment for F4: whatever
-/// its component now is, not only while it is still a live parametric
-/// object -- a compound that detaches the component and then removes one
-/// of its still-live children in the same command must still be refused).
-/// Only a child removed *together with* its owning group is allowed.
+/// First, every output must name a live definition, or this throws
+/// [GeneratedDefinitionError] (nothing has applied yet). Then the i-th
+/// output meets the i-th existing instance, ascending by handle: a new
+/// definition is a `SetInstanceDefinitionCommand`, a new transform a
+/// `TransformNodeCommand` (exact, [_exact]), a node off [layer] (the
+/// object's) a `SetInstanceLayerCommand.restore`; then its ATTRIBs
+/// ([_planAttributes]). An unmatched output is added under reserved
+/// handles, the node then its ATTRIBs, the node with `InstanceNode`'s
+/// default style. A surplus instance is removed ([_instanceRemoval]).
+int _planInstances(
+    CommandTarget t,
+    _Survey s,
+    Handle object,
+    List<GeneratedInstance> outputs,
+    Handle layer,
+    int reserved,
+    List<DraftCommand> out) {
+  for (final g in outputs) {
+    if (t.tree.definition(g.definition) == null) {
+      throw GeneratedDefinitionError(object, g.definition);
+    }
+  }
+  final existing = s.instances[object] ?? const <InstanceNode>[];
+  for (var i = 0; i < outputs.length; i++) {
+    final g = outputs[i];
+    if (i < existing.length) {
+      final node = existing[i];
+      final c = node.handle;
+      if (node.definition != g.definition) {
+        out.add(SetInstanceDefinitionCommand(c, g.definition));
+      }
+      if (!node.transform.equals(g.transform, _exact)) {
+        out.add(TransformNodeCommand(c, g.transform));
+      }
+      if (node.layer != layer) {
+        out.add(SetInstanceLayerCommand.restore(c, layer));
+      }
+      reserved = _planAttributes(t, s, c, g.attributes, reserved, out);
+    } else {
+      final c = Handle.checked(++reserved);
+      out.add(AddNodeCommand(InstanceNode(
+          handle: c,
+          parent: object,
+          transform: g.transform,
+          definition: g.definition,
+          layer: layer)));
+      for (final a in g.attributes) {
+        out.add(AddEntityCommand(
+            record: _attribRecord(Handle.checked(++reserved), c, a),
+            payload: a.payload));
+      }
+    }
+  }
+  for (final node in existing.skip(outputs.length)) {
+    out.addAll(_instanceRemoval(t, s, node.handle));
+  }
+  return reserved;
+}
+
+/// A matched instance's ATTRIBs against [attributes] (spec 2b S1): bucketed
+/// by tag, ascending, so the lowest handle of a tag is matched and the
+/// rest are surplus (a loaded file). A matched one gets
+/// `SetEntityGeometryCommand` for a new payload and `SetEntityTextCommand`
+/// for a new text, **passing its own tag** (the TEXT call's `''` would
+/// blank it, and the next regeneration would match nothing). An unmatched
+/// tag is added; a surplus one, or one of a tag no output names, is
+/// removed. Returns the last handle reserved.
+int _planAttributes(CommandTarget t, _Survey s, Handle instance,
+    List<GeneratedAttrib> attributes, int reserved, List<DraftCommand> out) {
+  final byTag = <String, Handle>{};
+  final surplus = <Handle>[];
+  for (final c in s.leaves[instance] ?? const <Handle>[]) {
+    final slot = t.entities.slotOf(c)!;
+    if (t.entities.kindAt(slot) != EntityKind.attrib) continue;
+    final tag = t.entities.tagAt(slot);
+    if (byTag.containsKey(tag)) {
+      surplus.add(c);
+    } else {
+      byTag[tag] = c;
+    }
+  }
+  for (final a in attributes) {
+    final c = byTag.remove(a.tag);
+    if (c == null) {
+      out.add(AddEntityCommand(
+          record: _attribRecord(Handle.checked(++reserved), instance, a),
+          payload: a.payload));
+      continue;
+    }
+    final slot = t.entities.slotOf(c)!;
+    if (!_samePayload(
+        t.geometry.peek(t.entities.geomIndexAt(slot)), a.payload)) {
+      out.add(SetEntityGeometryCommand(c, a.payload));
+    }
+    if (t.entities.textAt(slot) != a.text) {
+      out.add(SetEntityTextCommand(c, a.text, t.entities.tagAt(slot)));
+    }
+  }
+  for (final c in [...surplus, ...byTag.values]..sort(_byValue)) {
+    out.add(RemoveEntityCommand(c));
+  }
+  return reserved;
+}
+
+/// A surplus generated instance's removal: every entity it owns, fills
+/// first (a boundary's removal would take its fill), then its node.
+List<DraftCommand> _instanceRemoval(
+    CommandTarget t, _Survey s, Handle instance) {
+  final leaves = s.leaves[instance] ?? const <Handle>[];
+  bool isFill(Handle c) =>
+      t.entities.kindAt(t.entities.slotOf(c)!) == EntityKind.fill;
+  return [
+    for (final c in leaves)
+      if (isFill(c)) RemoveEntityCommand(c),
+    for (final c in leaves)
+      if (!isFill(c)) RemoveEntityCommand(c),
+    RemoveNodeCommand(instance),
+  ];
+}
+
+/// The first touched handle, ascending, that the guard refuses (spec 06 D6,
+/// as amended by 2b S1), or null. Two disjoint branches by what the handle
+/// was in [before], then the adds:
+///
+/// - **An owned entity** (`before.owned`: a child of a live object, or an
+///   ATTRIB of one of its generated instances): refused if it **still
+///   exists** -- a direct edit, regardless of what else the same command did
+///   to its owner -- or, when it was removed, if its object's group node
+///   still exists (spec D6's amendment for F4: whatever its component now
+///   is; a compound that detaches the component and then removes a
+///   still-live child must still be refused). Only a child removed
+///   *together with* its object's group is allowed.
+/// - **A generated instance** (`before.generated`): refused when, after the
+///   edit, it is gone while its object's group lives, or its node differs
+///   from the survey's value by `InstanceNode.==` (exact, every field): a
+///   move, a definition, a layer or a style change. A components-only
+///   write leaves the node as it was and passes (2b S1: per-unit data); it
+///   seeds nothing (`_run`).
+/// - **An add**: an entity the survey did not hold, owned by a live object
+///   or by a generated instance of one; a node, a `GroupNode` included,
+///   whose parent is a live object, unless the survey held it there (a
+///   nested group a file brought in stays what it is).
 ///
 /// A frozen object (spec 2a E2) is a plain group: a child added into it, or
-/// one of its children edited, is not refused.
+/// one of its children or instances edited, is not refused.
 Handle? _refused(CommandTarget t, List<_Registration<Component>> types,
     _Survey before, Set<Handle> touched, bool Function(Handle)? frozen) {
   for (final h in touched.toList()..sort(_byValue)) {
@@ -684,8 +916,28 @@ Handle? _refused(CommandTarget t, List<_Registration<Component>> types,
       if (t.tree[owner] != null) return h;
       continue;
     }
+    final seat = before.generated[h];
+    if (seat != null) {
+      final now = t.tree[h];
+      if (now == null ? t.tree[seat.parent] != null : now != seat) return h;
+      continue;
+    }
     final slot = t.entities.slotOf(h);
-    if (slot != null && _isObject(t, types, t.entities.ownerAt(slot), frozen)) {
+    if (slot != null) {
+      final holder = t.entities.ownerAt(slot);
+      if (_isObject(t, types, holder, frozen)) return h;
+      final held = before.generated[holder];
+      if (held != null &&
+          t.tree[held.parent] != null &&
+          !(before.leaves[holder]?.contains(h) ?? false)) {
+        return h;
+      }
+      continue;
+    }
+    final node = t.tree[h];
+    if (node != null &&
+        before.nested[h] != node.parent &&
+        _isObject(t, types, node.parent, frozen)) {
       return h;
     }
   }
@@ -847,45 +1099,65 @@ CommandResult _cascade(CommandTarget t, List<_Registration<Component>> types,
 /// which would refuse the whole edit.
 ///
 /// [d]'s own leaves are the survey's (an edit cannot add into a live
-/// object, 06 D6); a nested group's are found by one scan of the live
-/// slots, paid only when [d] has nested groups.
+/// object, 06 D6 as amended by 2b S1), and so are its generated instances'
+/// entities (2b S1). A nested group's leaves, and the entities of an
+/// instance the survey does not know (a nested group's), are found by one
+/// scan of the live slots, paid only when there is one. Every instance
+/// removed takes its entities first, so no ATTRIB is left behind (2b S1,
+/// "The dissolve gap closes").
 ///
 /// Two callers: [_cascade], with the before-survey, for a doomed referrer;
 /// [_plan], with the after-survey, for a dissolving object (spec 10 D15).
 List<DraftCommand> _subtreeRemoval(CommandTarget t, _Survey before, Handle d) {
   final groups = <Handle>[];
+  final instances = <Handle>[];
   void collect(Handle g) {
     groups.add(g);
     final node = t.tree[g];
     if (node is! GroupNode) return;
     for (final c in t.tree.childNodesOf(node.children)) {
-      if (t.tree[c] is GroupNode) collect(c);
+      final child = t.tree[c];
+      if (child is GroupNode) {
+        collect(c);
+      } else if (child is InstanceNode) {
+        instances.add(c);
+      }
     }
   }
 
   collect(d);
+  bool live(Handle c) => t.entities.slotOf(c) != null;
   final leaves = <Handle, List<Handle>>{
     d: [
       for (final c in before.children[d] ?? const <Handle>[])
-        if (t.entities.slotOf(c) != null) c,
+        if (live(c)) c,
     ],
+    for (final i in before.instances[d] ?? const <InstanceNode>[])
+      i.handle: [
+        for (final c in before.leaves[i.handle] ?? const <Handle>[])
+          if (live(c)) c,
+      ],
   };
-  if (groups.length > 1) {
-    final nested = groups.skip(1).toSet();
+  final scanned = <Handle>{
+    ...groups.skip(1),
+    for (final i in instances)
+      if (!leaves.containsKey(i)) i,
+  };
+  if (scanned.isNotEmpty) {
     for (final slot in t.entities.liveSlots) {
       final owner = t.entities.ownerAt(slot);
-      if (nested.contains(owner)) {
+      if (scanned.contains(owner)) {
         (leaves[owner] ??= []).add(t.entities.handleAt(slot));
       }
     }
-    for (final list in leaves.values) {
-      list.sort(_byValue);
+    for (final o in scanned) {
+      leaves[o]?.sort(_byValue);
     }
   }
   bool isFill(Handle c) =>
       t.entities.kindAt(t.entities.slotOf(c)!) == EntityKind.fill;
   final out = <DraftCommand>[
-    for (final g in groups)
+    for (final g in [...groups, ...instances])
       for (final c in leaves[g] ?? const <Handle>[])
         if (isFill(c)) RemoveEntityCommand(c),
   ];
@@ -900,6 +1172,9 @@ List<DraftCommand> _subtreeRemoval(CommandTarget t, _Survey before, Handle d) {
         if (child is GroupNode) {
           remove(c);
         } else if (child is InstanceNode) {
+          for (final e in leaves[c] ?? const <Handle>[]) {
+            if (!isFill(e)) out.add(RemoveEntityCommand(e));
+          }
           out.add(RemoveNodeCommand(c));
         }
       }
@@ -1012,6 +1287,10 @@ CommandResult _run(ParametricEdit edit, CommandTarget t) {
       for (final h in before.objects.keys)
         if (!after.objects.containsKey(h) && t.tree[h] == null) h,
     ];
+    // Spec 2b S1: a generated instance seeds nothing. It is neither an
+    // object nor in `owned`, so a components-only write on one (per-unit
+    // data) regenerates nothing and pays no `_checkDangling`. Any other
+    // edit of it was refused above.
     final seeds = <Handle>{
       for (final h in r.touched) ...[
         // Ruling 06-4: a handle that was an object seeds too.

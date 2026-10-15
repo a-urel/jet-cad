@@ -5,9 +5,12 @@ library;
 export 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
     show SymbolThumbnails;
 
+export 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show SymbolsState;
+
 export 'src/canvas/plan_canvas.dart' show PlanCanvas, kLockHintDuration;
 export 'src/controller/camera_bounds.dart' show kPlanMaxScale, kPlanMinScale;
-export 'src/controller/permissions.dart' show PlanPermissions;
+export 'src/controller/permissions.dart' show PlanPermissions, isUnitSymbol;
+export 'src/controller/plan_camera.dart' show PlanCamera;
 export 'src/controller/plan_change.dart'
     show
         PlanChange,
@@ -61,10 +64,34 @@ export 'src/panels/plan_layer_panel.dart' show PlanLayerPanel;
 export 'src/panels/plan_page_panel.dart' show PlanPagePanel;
 export 'src/panels/plan_property_panel.dart' show PlanPropertyPanel;
 export 'src/panels/plan_symbol_gallery.dart' show PlanSymbolGallery;
+export 'src/service/service_record.dart' show ServiceRestore;
+export 'src/service/service_session.dart' show PlanMode;
+export 'src/service/service_state.dart' show UnitGroup, UnitStatus;
+export 'src/service/service_tool.dart' show PlanFloorDrag, PlanLongPress;
+export 'src/service/view/plan_service_bar.dart'
+    show PlanServiceAction, PlanServiceBar;
+export 'src/service/view/plan_service_view.dart' show PlanServiceView;
+export 'src/service/view/unit_overlays.dart'
+    show
+        PlanOverlayLayout,
+        PlanOverlaySize,
+        PlanUnitOverlay,
+        PlanUnitOverlayBuilder;
 export 'src/shortcuts/plan_shortcut_guard.dart' show PlanShortcutGuard;
 export 'src/shortcuts/plan_shortcuts.dart' show PlanShortcuts;
 export 'src/symbols/plan_symbol.dart' show PlanSymbol;
 export 'src/symbols/plan_symbol_loader.dart'
     show PlanSymbolLoad, PlanSymbolLoader;
-export 'src/symbols/plan_symbols_state.dart' show PlanSymbolsState;
-export 'src/theme/plan_theme.dart' show PlanTheme;
+export 'src/theme/plan_theme.dart' show PlanTheme, kUnitColourOpacity;
+export 'src/units/unit_detail.dart'
+    show
+        PlanUnit,
+        PlanUnitAdded,
+        PlanUnitChange,
+        PlanUnitChanged,
+        PlanUnitDetail,
+        PlanUnitRemoved,
+        PlanUnitsReplaced;
+export 'src/units/unit_label.dart' show UnitLabelProblem;
+export 'src/units/unit_problems.dart'
+    show BadLabel, DuplicateLabel, Unlabelled, UnitLabelWarning, UnitProblem;

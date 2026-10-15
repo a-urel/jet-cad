@@ -42,6 +42,22 @@ void main() {
     expect(walk.visited, containsAll(files));
   });
 
+  test(
+      'K2B-pure the unit label, the host words and SymbolsState reach no '
+      'Flutter', () {
+    // Spec 2b S2: a kit's parametric type (pure Dart) builds its labels with
+    // unitLabelAttrib. M-K2B-15: import package:flutter/foundation.dart in
+    // unit_label.dart.
+    const files = [
+      'lib/src/kit/unit_label.dart',
+      'lib/src/kit/host_words.dart',
+      'lib/src/kit/symbols_state.dart',
+    ];
+    final walk = walkImports('.', 'jet_cad_2d_kit', files);
+    expect(walk.violations, isEmpty);
+    expect(walk.visited, containsAll(files));
+  });
+
   test('P2 a Flutter import two hops away is found', () {
     final root = tree({
       'lib/authoring.dart': "export 'src/model/a.dart';\n",

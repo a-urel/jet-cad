@@ -15,7 +15,8 @@ enum UnitLabelling {
   /// The plan gives a placed unit the next free number (a table).
   numbered,
 
-  /// A kit's type sets the label (a seat in a row).
+  /// The label comes from a kit's type (a seat in a row), the property
+  /// panel or the host; the plan gives no number.
   assigned,
 }
 

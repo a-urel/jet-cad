@@ -1,7 +1,7 @@
 // Spec P5: the built-in exporters, `plan.pdf` and `plan.png`, and the page
 // helpers the flows read. Ported from
-// jet_cad_floor_plan/lib/src/export/export_bytes.dart without the table
-// colours (2b): an empty underlay writes today's bytes.
+// jet_cad_floor_plan/lib/src/export/export_bytes.dart with the unit
+// colours the flows made (2b; `unitFillsOf`): no fill writes today's bytes.
 import 'dart:typed_data';
 
 import 'package:jet_cad_2d/jet_cad_2d.dart';
@@ -10,6 +10,7 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
 import 'package:pdf/pdf.dart' show PdfPageFormat;
 
 import 'registries.dart';
+import 'unit_colour_underlay.dart' show unitFillsOf;
 
 /// The page [document]'s root carries, or null when it has none. Read from
 /// the document, never from the screen (export_bytes.dart:18-24).
@@ -50,6 +51,7 @@ final class PlanPdfExporter implements PlanPageExporter {
       document: request.document,
       page: request.page!,
       fontBytes: await request.fonts.bytes,
+      underlay: unitFillsOf[request] ?? const [],
       omitOwners: request.omitted);
 }
 
@@ -74,5 +76,6 @@ final class PlanPngExporter implements PlanPageExporter {
       document: request.document,
       page: request.page!,
       dpi: _dpiOf(request.choice.dpi),
+      underlay: unitFillsOf[request] ?? const [],
       omitOwners: request.omitted);
 }

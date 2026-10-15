@@ -1,0 +1,3129 @@
+# Review package: 1a2c645e..HEAD
+
+## Commits
+c612fa1b feat(plan): units-only permissions and the design's unit selection (2b S2, S4)
+
+## Files changed
+ packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart  |   2 +-
+ .../lib/src/controller/permissions.dart            | 109 ++++--
+ .../lib/src/controller/plan_controller.dart        |  23 +-
+ .../lib/src/controller/session.dart                |  14 +-
+ .../lib/src/service/unit_picker.dart               | 335 +++++++++++++++++
+ .../lib/src/tools/plan_select_gates.dart           | 121 +++++-
+ packages/jet_cad_2d_plan/test/barrel_test.dart     |   2 +
+ .../test/controller/permissions_test.dart          | 118 +++++-
+ .../test/editor/units_only_select_test.dart        | 398 ++++++++++++++++++++
+ .../test/service/unit_picker_test.dart             | 411 +++++++++++++++++++++
+ .../test/support/unit_editor_fixture.dart          | 263 +++++++++++++
+ .../test/support/unit_fixtures.dart                | 210 ++++++++++-
+ .../test/tools/design_selection_test.dart          | 386 +++++++++++++++++++
+ .../test/tools/plan_select_gates_test.dart         |  38 +-
+ 14 files changed, 2370 insertions(+), 60 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart b/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart
+index c7272a4e..98cd02c8 100644
+--- a/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart
++++ b/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart
+@@ -2,21 +2,21 @@
+ /// composable widgets of design mode, over the kits a host loads.
+ library;
+ 
+ export 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
+     show SymbolThumbnails;
+ 
+ export 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show SymbolsState;
+ 
+ export 'src/canvas/plan_canvas.dart' show PlanCanvas, kLockHintDuration;
+ export 'src/controller/camera_bounds.dart' show kPlanMaxScale, kPlanMinScale;
+-export 'src/controller/permissions.dart' show PlanPermissions;
++export 'src/controller/permissions.dart' show PlanPermissions, isUnitSymbol;
+ export 'src/controller/plan_change.dart'
+     show
+         PlanChange,
+         PlanObjectAdded,
+         PlanObjectChanged,
+         PlanObjectRemoved,
+         PlanReplaced;
+ export 'src/controller/plan_controller.dart'
+     show PlanController, kPlanThumbnailCapacity;
+ export 'src/editor/plan_editor.dart' show PlanEditor, PlanFileCallback;
+diff --git a/packages/jet_cad_2d_plan/lib/src/controller/permissions.dart b/packages/jet_cad_2d_plan/lib/src/controller/permissions.dart
+index 3835cc9a..c0c0251e 100644
+--- a/packages/jet_cad_2d_plan/lib/src/controller/permissions.dart
++++ b/packages/jet_cad_2d_plan/lib/src/controller/permissions.dart
+@@ -1,116 +1,145 @@
+-// Spec P2 "Permissions": what the plan's widgets let their user do. The
+-// select gates, the palette and selectTool, the panels and the controller's
+-// widget-facing commands read it; a host's own calls are not gated. 2b adds
+-// the service flags and a units-only profile.
++// Spec P2 "Permissions" (2a) and 2b S4 "Permissions": what the plan's
++// widgets let their user do. The select gates, the palette and selectTool,
++// the panels and the controller's widget-facing commands read it; a host's
++// own calls are not gated. 2b adds relabel (today's renumber),
++// selectUnitsOnly (today's selectTablesOnly), the two service flags
++// (serviceMove, today's view parameter serviceMoves; serviceMerge, Merge and
++// Split), the unitsOnly profile and the gallery filter isUnitSymbol.
+ import 'package:flutter/foundation.dart' show immutable, setEquals;
+ import 'package:jet_cad_2d/jet_cad_2d.dart' show DraftPermissions;
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show PlanGate;
+ 
+-/// The editor's permissions (spec P2).
++import '../symbols/plan_symbol.dart';
++
++/// The editor's permissions (spec P2, 2b S4).
+ ///
+ /// - [tools]: the tool ids offered (the palette, the letters,
+ ///   `PlanController.selectTool`); null offers every tool. `plan.select` is
+ ///   always offered, whatever the set says. [copyWith] copies the set it
+ ///   is given, unmodifiable; the `const` constructor keeps the set as
+ ///   given.
+ /// - [move], [rotate], [mirror], [reshape], [delete]: the select tool's
+ ///   gates and the panel's matching fields; [changeLayer], [recolor]: the
+ ///   panel's layer field and colour row; [editLayers], [editPage]: the
+-///   Layer and Page panels; [relabel]: a unit's label field (2b's unit
+-///   section) and the property specs gated by it; [undo]: the Undo and
+-///   Redo buttons and chords; [export], [print]: theirs. A property
+-///   spec's `gate` names one of the first ten ([allows]).
++///   Layer and Page panels; [relabel]: the unit section's label field;
++///   [undo]: the Undo and Redo buttons and chords; [export], [print]:
++///   theirs. A property spec's `gate` names one of the first ten
++///   ([allows]).
++/// - [selectUnitsOnly]: the design's click and band pick placed units only
++///   (a restriction: off in [full]).
++/// - [serviceMove]: the service view's drags move units; [serviceMerge]:
++///   the service bar offers Merge and Split (still only with their
++///   callbacks). The design flags do not gate service (spec S4).
+ /// - [draft]: what the document's own `DraftPermissions` become.
+ @immutable
+ final class PlanPermissions {
+   const PlanPermissions({
+     this.tools,
+     this.move = true,
+     this.rotate = true,
+     this.mirror = true,
+     this.reshape = true,
+     this.delete = true,
+     this.changeLayer = true,
+     this.recolor = true,
+     this.editLayers = true,
+     this.editPage = true,
+     this.relabel = true,
+     this.undo = true,
+     this.export = true,
+     this.print = true,
++    this.selectUnitsOnly = false,
++    this.serviceMove = true,
++    this.serviceMerge = true,
+   });
+ 
+-  /// Every tool, every flag on: today's editor.
++  /// Every tool, every flag on, no restriction: today's editor.
+   static const PlanPermissions full = PlanPermissions();
+ 
+   /// Select, pan and zoom; no edit, no undo. Export and print stay: neither
+-  /// is an edit.
++  /// is an edit. The service flags stay: the profile governs the editor.
+   static const PlanPermissions readOnly = PlanPermissions(
+     tools: {_select},
+     move: false,
+     rotate: false,
+     mirror: false,
+     reshape: false,
+     delete: false,
+     changeLayer: false,
+     recolor: false,
+     editLayers: false,
+     editPage: false,
+     relabel: false,
+     undo: false,
+   );
+ 
++  /// Today's `tablesOnly` (editor_capabilities.dart:175-190): select and
++  /// place symbols; no mirror, reshape or layer change; no layer or page
++  /// editing; the click and the band pick placed units only. Hiding the
++  /// Layer and Page panels is `PlanEditor`'s options (2a P7); the gallery's
++  /// filter is [isUnitSymbol].
++  static const PlanPermissions unitsOnly = PlanPermissions(
++    tools: {_select, _symbol},
++    mirror: false,
++    reshape: false,
++    changeLayer: false,
++    editLayers: false,
++    editPage: false,
++    selectUnitsOnly: true,
++  );
++
+   static const String _select = 'plan.select';
++  static const String _symbol = 'plan.symbol';
+ 
+   final Set<String>? tools;
+   final bool move, rotate, mirror, reshape, delete;
+   final bool changeLayer, recolor, editLayers, editPage, relabel;
+   final bool undo, export, print;
++  final bool selectUnitsOnly, serviceMove, serviceMerge;
+ 
+   /// Whether the tool [id] is offered: `plan.select` always, else by
+   /// [tools] (null: every id).
+   bool allowsTool(String id) => id == _select || (tools?.contains(id) ?? true);
+ 
+   /// Whether [gate]'s flag is on.
+   bool allows(PlanGate gate) => switch (gate) {
+         PlanGate.move => move,
+         PlanGate.rotate => rotate,
+         PlanGate.mirror => mirror,
+         PlanGate.reshape => reshape,
+         PlanGate.delete => delete,
+         PlanGate.changeLayer => changeLayer,
+         PlanGate.recolor => recolor,
+         PlanGate.editLayers => editLayers,
+         PlanGate.editPage => editPage,
+         PlanGate.relabel => relabel,
+       };
+ 
+   /// Whether anything may be edited: an edit flag, or a tool other than
+-  /// `plan.select` (a drawing tool or a kit's).
++  /// `plan.select` (a drawing tool or a kit's). [selectUnitsOnly],
++  /// [serviceMove] and [serviceMerge] are not edits of the design.
+   bool get edits =>
+       move ||
+       rotate ||
+       mirror ||
+       reshape ||
+       delete ||
+       changeLayer ||
+       recolor ||
+       editLayers ||
+       editPage ||
+       relabel ||
+       (tools?.any((id) => id != _select) ?? true);
+ 
+   /// The document's engine permissions: [DraftPermissions.readOnly] when
+   /// nothing may be edited ([edits] false), else [DraftPermissions.all].
+-  /// An engine group maps onto several flags, so it closes only when every
+-  /// one of them is off.
+   DraftPermissions get draft =>
+       edits ? DraftPermissions.all : DraftPermissions.readOnly;
+ 
+   /// A copy with the given fields replaced; a null argument keeps the
+   /// field (so `copyWith(tools: null)` keeps the set: start from [full] for
+   /// every tool). A given [tools] is copied, unmodifiable.
+   PlanPermissions copyWith({
+     Set<String>? tools,
+     bool? move,
+     bool? rotate,
+@@ -118,71 +147,87 @@ final class PlanPermissions {
+     bool? reshape,
+     bool? delete,
+     bool? changeLayer,
+     bool? recolor,
+     bool? editLayers,
+     bool? editPage,
+     bool? relabel,
+     bool? undo,
+     bool? export,
+     bool? print,
++    bool? selectUnitsOnly,
++    bool? serviceMove,
++    bool? serviceMerge,
+   }) =>
+       PlanPermissions(
+         tools: tools == null ? this.tools : Set.unmodifiable(tools),
+         move: move ?? this.move,
+         rotate: rotate ?? this.rotate,
+         mirror: mirror ?? this.mirror,
+         reshape: reshape ?? this.reshape,
+         delete: delete ?? this.delete,
+         changeLayer: changeLayer ?? this.changeLayer,
+         recolor: recolor ?? this.recolor,
+         editLayers: editLayers ?? this.editLayers,
+         editPage: editPage ?? this.editPage,
+         relabel: relabel ?? this.relabel,
+         undo: undo ?? this.undo,
+         export: export ?? this.export,
+         print: print ?? this.print,
++        selectUnitsOnly: selectUnitsOnly ?? this.selectUnitsOnly,
++        serviceMove: serviceMove ?? this.serviceMove,
++        serviceMerge: serviceMerge ?? this.serviceMerge,
+       );
+ 
+-  /// The flags, in declaration order, by name.
+-  List<(String, bool)> get _flags => [
+-        ('move', move),
+-        ('rotate', rotate),
+-        ('mirror', mirror),
+-        ('reshape', reshape),
+-        ('delete', delete),
+-        ('changeLayer', changeLayer),
+-        ('recolor', recolor),
+-        ('editLayers', editLayers),
+-        ('editPage', editPage),
+-        ('relabel', relabel),
+-        ('undo', undo),
+-        ('export', export),
+-        ('print', print),
++  /// The flags, in declaration order: name, value and [full]'s value.
++  List<(String, bool, bool)> get _flags => [
++        ('move', move, true),
++        ('rotate', rotate, true),
++        ('mirror', mirror, true),
++        ('reshape', reshape, true),
++        ('delete', delete, true),
++        ('changeLayer', changeLayer, true),
++        ('recolor', recolor, true),
++        ('editLayers', editLayers, true),
++        ('editPage', editPage, true),
++        ('relabel', relabel, true),
++        ('undo', undo, true),
++        ('export', export, true),
++        ('print', print, true),
++        ('selectUnitsOnly', selectUnitsOnly, false),
++        ('serviceMove', serviceMove, true),
++        ('serviceMerge', serviceMerge, true),
+       ];
+ 
+   @override
+   bool operator ==(Object other) {
+     if (other is! PlanPermissions || !setEquals(other.tools, tools)) {
+       return false;
+     }
+     final a = other._flags, b = _flags;
+     for (var i = 0; i < a.length; i++) {
+       if (a[i].$2 != b[i].$2) return false;
+     }
+     return true;
+   }
+ 
+   @override
+   int get hashCode => Object.hash(
+       tools == null ? null : Object.hashAllUnordered(tools!),
+-      Object.hashAll([for (final (_, v) in _flags) v]));
++      Object.hashAll([for (final (_, v, _) in _flags) v]));
+ 
+   /// The fields that differ from [full], as `name: value`; the tools
+   /// sorted.
+   @override
+   String toString() => 'PlanPermissions(${[
+         if (tools case final t?) 'tools: {${(t.toList()..sort()).join(', ')}}',
+-        for (final (n, v) in _flags)
+-          if (!v) '$n: $v',
++        for (final (n, v, d) in _flags)
++          if (v != d) '$n: $v',
+       ].join(', ')})';
+ }
++
++/// The gallery's filter for [PlanPermissions.unitsOnly] (today's
++/// `tablesOnly` filter, editor_capabilities.dart:209-211, widened by spec
++/// S5): any symbol whose definition carries `jetcad.unit`, a seat
++/// included. Pass it to `PlanSymbolGallery(filter:)` or
++/// `PlanEditor(symbolFilter:)`.
++bool isUnitSymbol(PlanSymbol symbol) => symbol.entry.unit != null;
+diff --git a/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart b/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
+index 73bb8818..8aec9a05 100644
+--- a/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
++++ b/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
+@@ -911,27 +911,38 @@ class PlanController extends ChangeNotifier {
+   /// ([PlanPermissions.draft]), a drag whose gate closes is cancelled now,
+   /// and an active tool no longer allowed is cancelled and plan.select
+   /// armed.
+   PlanPermissions get permissions => _permissions;
+   set permissions(PlanPermissions value) {
+     if (value == _permissions) return;
+     final old = _permissions;
+     _permissions = value;
+     document.commands.permissions = value.draft;
+     final select = _session.select;
+-    final stale = switch (select.dragKind) {
+-      DragKind.move => old.move && !value.move,
+-      DragKind.rotate => old.rotate && !value.rotate,
+-      DragKind.reshape => old.reshape && !value.reshape,
+-      DragKind.band || null => false,
+-    };
++    final stale = old.selectUnitsOnly != value.selectUnitsOnly ||
++        switch (select.dragKind) {
++          DragKind.move => old.move && !value.move,
++          DragKind.rotate => old.rotate && !value.rotate,
++          DragKind.reshape => old.reshape && !value.reshape,
++          DragKind.band || null => false,
++        };
+     if (stale) select.cancel(toolController.context);
++    // Today's S-9 g (planner_shell.dart:1085-1095): a change to units only
++    // keeps the placed units of the selection.
++    if (value.selectUnitsOnly && !old.selectUnitsOnly) {
++      final index = _session.units.current;
++      final drop = [
++        for (final k in selection.keys)
++          if (!isPlacedUnitKey(index, k)) k
++      ];
++      if (drop.isNotEmpty) selection.remove(drop);
++    }
+     grips.gatesChanged();
+     if (!_allowsTool(activeTool.value)) {
+       selectTool(PlanToolIds.select);
+     } else if (activeTool.value == PlanToolIds.symbol &&
+         (old.rotate != value.rotate || old.mirror != value.mirror)) {
+       // The ghost never shows a turn or a mirror a click would not place
+       // (planner_shell.dart:1100-1104).
+       _session.symbolTool.gatesChanged();
+     }
+     notifyListeners();
+diff --git a/packages/jet_cad_2d_plan/lib/src/controller/session.dart b/packages/jet_cad_2d_plan/lib/src/controller/session.dart
+index 0e96fb26..f3898c6d 100644
+--- a/packages/jet_cad_2d_plan/lib/src/controller/session.dart
++++ b/packages/jet_cad_2d_plan/lib/src/controller/session.dart
+@@ -8,20 +8,21 @@ import 'dart:async';
+ 
+ import 'package:flutter/foundation.dart' show ValueListenable;
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+ 
+ import '../attach/attachment_registry.dart';
+ import '../kits/guard.dart';
+ import '../kits/kit_set.dart';
+ import '../kits/locks.dart';
++import '../service/unit_picker.dart';
+ import '../tools/generic_tools.dart';
+ import '../tools/plan_select_gates.dart';
+ import '../tools/plan_symbol_tool.dart';
+ import '../units/unit_index.dart';
+ import '../units/unit_label_system.dart';
+ import 'grip_dispatch.dart';
+ import 'permissions.dart';
+ import 'services.dart';
+ import 'shared_cache.dart';
+ 
+@@ -47,21 +48,26 @@ final class DocumentSession {
+         page = PageNotifier(document),
+         index = SpatialIndex(document),
+         dispatch = GripDispatch(catalog) {
+     locks = LockSet.scan(document, kitLoaded);
+     // planner_shell.dart:625-671, the order load-bearing: the selection
+     // prunes a dead key before the outline cache walks it; the gates
+     // listen to the selection before the outline and grip caches do; the
+     // grip cache rebuilds after the outlines.
+     selection = SelectionController(document);
+     gates = PlanSelectGates(
+-        permissions: permissions, selection: selection, locked: locked);
++        permissions: permissions,
++        selection: selection,
++        locked: locked,
++        catalog: catalog,
++        picker: () => unitPicker,
++        units: () => units.current);
+     outlines = OutlineCache(document, selection);
+     grips = GripCache(document, selection, outlines,
+         objects: LockedGrips(locks,
+             GuardedGrips(dispatch, typeIdOf: catalog.typeIdOf, log: log)),
+         gates: gates);
+     toolContext = ToolContext(
+         document: document,
+         index: index,
+         camera: camera,
+         selection: selection,
+@@ -130,20 +136,26 @@ final class DocumentSession {
+   late final LockSet locks;
+   late final LockExpander lockExpander;
+ 
+   /// The document's units (spec 2b S2, `UnitIndex`).
+   late final UnitIndexCache units;
+ 
+   /// The select tool's and the grip cache's gates: the permissions and the
+   /// locks (spec P2, P4).
+   late final PlanSelectGates gates;
+ 
++  /// The design's units-only picker (spec S4 selectUnitsOnly): placed,
++  /// unlocked units, made at its first use and kept for the session's life
++  /// (today's `_tablePicker`, planner_shell.dart:444).
++  late final UnitPicker unitPicker =
++      UnitPicker(document, units, skipLocked: true, placedOnly: true);
++
+   /// The generic tools (Task 12). The map holds each of them, guarded, and
+   /// disposes them: never [GenericToolSet.dispose] here (a second dispose
+   /// of a tool asserts).
+   late final GenericToolSet generic;
+   final SharedCache shared = SharedCache();
+ 
+   /// This document's attachment registry: none until
+   /// [runAttachmentFactories] makes it (Task 14).
+   AttachmentRegistry attachments = const NoAttachments();
+ 
+diff --git a/packages/jet_cad_2d_plan/lib/src/service/unit_picker.dart b/packages/jet_cad_2d_plan/lib/src/service/unit_picker.dart
+new file mode 100644
+index 00000000..e5089372
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/service/unit_picker.dart
+@@ -0,0 +1,335 @@
++// Picking a unit (spec 2b S4 "The unit picker"; today's TablePicker, spec
++// 14c S1, S2): a point inside a unit's top picks it, whatever else is drawn
++// there; failing that, a point inside the unit symbol's bounding box (its
++// chairs, the space between them) does; for a touch, failing both, the unit
++// whose box is nearest within the finger's reach. Ported from
++// jet_cad_floor_plan/lib/src/service/table_picker.dart over UnitIndex: placed
++// and generated units alike, each through its world transform (group ×
++// instance for a seat).
++//
++// No Flutter import: this file is Dart over `package:jet_cad_2d` only.
++import 'dart:math' as math;
++import 'dart:typed_data';
++
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:meta/meta.dart' show visibleForTesting;
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../units/unit_index.dart';
++import '../units/unit_label.dart' show firstLeafOf;
++
++/// A table's top in definition space (14s S4): its first leaf.
++sealed class UnitTop {
++  const UnitTop();
++
++  /// Whether ([x], [y]) is inside, a point within [tolerance] of the
++  /// boundary counting as inside (S1). [containsAt] with the point in a
++  /// list of its own.
++  bool contains(double x, double y, Tolerance tolerance) => containsAt(
++      Float64List(2)
++        ..[0] = x
++        ..[1] = y,
++      tolerance);
++
++  /// [contains] for the point `(point[0], point[1])`. The picker's own
++  /// call: the point reaches the top in a list it keeps, never as two
++  /// doubles through this dynamic call, which the VM's JIT boxes unless it
++  /// inlines the call -- two objects per table at every pick (Slice 2's
++  /// final review F-2).
++  bool containsAt(Float64List point, Tolerance tolerance);
++}
++
++/// A closed polyline's vertices, `x0, y0, x1, y1, ...`.
++final class PolygonTop extends UnitTop {
++  PolygonTop(this.xy);
++
++  final Float64List xy;
++
++  @override
++  bool containsAt(Float64List point, Tolerance tolerance) {
++    final x = point[0], y = point[1];
++    final n = xy.length ~/ 2;
++    if (n < 3) return false;
++    var inside = false;
++    for (var i = 0, j = n - 1; i < n; j = i++) {
++      final xi = xy[2 * i], yi = xy[2 * i + 1];
++      final xj = xy[2 * j], yj = xy[2 * j + 1];
++      if (_segmentDistance(x, y, xi, yi, xj, yj) <= tolerance.linear) {
++        return true;
++      }
++      // Even-odd: a ray to +x crosses the edge.
++      if ((yi > y) != (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) {
++        inside = !inside;
++      }
++    }
++    return inside;
++  }
++
++  static double _segmentDistance(
++      double px, double py, double ax, double ay, double bx, double by) {
++    final dx = bx - ax, dy = by - ay;
++    final len2 = dx * dx + dy * dy;
++    var t = len2 == 0 ? 0.0 : ((px - ax) * dx + (py - ay) * dy) / len2;
++    t = t.clamp(0.0, 1.0);
++    final cx = ax + t * dx - px, cy = ay + t * dy - py;
++    return math.sqrt(cx * cx + cy * cy);
++  }
++}
++
++/// A circle's centre and radius.
++final class CircleTop extends UnitTop {
++  const CircleTop(this.cx, this.cy, this.r);
++
++  final double cx, cy, r;
++
++  @override
++  bool containsAt(Float64List point, Tolerance tolerance) {
++    final dx = point[0] - cx, dy = point[1] - cy;
++    return math.sqrt(dx * dx + dy * dy) <= r + tolerance.linear;
++  }
++}
++
++/// The top of [definition] in [doc]: its lowest-handle leaf, when that is
++/// a closed polyline (its last vertex repeating its first, by exact `==`)
++/// or a circle; null otherwise (such a unit is picked by its box alone).
++/// [leavesByOwner] as for [firstLeafOf]. (table_picker.dart:88-110.)
++UnitTop? unitTopOf(DraftDocument doc, Handle definition,
++    [Map<Handle, List<int>>? leavesByOwner]) {
++  final leaf = firstLeafOf(doc, definition, leavesByOwner);
++  if (leaf == null) return null;
++  final payload = leaf.payload;
++  switch (leaf.kind) {
++    case EntityKind.circle:
++      return CircleTop(
++          payload.coords[0], payload.coords[1], payload.scalars[0]);
++    case EntityKind.polyline:
++      if (!isClosedPolyline(payload)) return null;
++      final xy = payload.coords;
++      return PolygonTop(
++          Float64List.fromList(Float64List.sublistView(xy, 0, xy.length - 2)));
++    default:
++      return null;
++  }
++}
++
++/// A unit the planner can show and act on (zone spec Z0): a unit on a
++/// visible layer, its world transform's determinant finite and non-zero,
++/// its box non-empty, the box's four corners finite in the world. The one
++/// rule for the picker, the framing, the details and the focus.
++final class UnitCandidate {
++  UnitCandidate(
++      {required this.unit,
++      required this.transform,
++      required this.box,
++      required this.corners,
++      required this.locked});
++
++  final UnitInfo unit;
++
++  /// Definition space to world: the unit's [UnitInfo.toWorld].
++  final Transform2 transform;
++
++  /// The symbol's bounding box in definition space.
++  final Aabb2 box;
++
++  /// [box]'s corners in the world, `x0, y0, ..., x3, y3`: its (min, min),
++  /// (max, min), (max, max) and (min, max) through [transform].
++  final Float64List corners;
++
++  /// [UnitInfo.locked]: picked and reported, never selected or moved.
++  final bool locked;
++
++  /// The axis-aligned bound of [corners] (zone spec Z2).
++  Aabb2 get worldBounds {
++    var minX = corners[0], minY = corners[1], maxX = minX, maxY = minY;
++    for (var i = 2; i < 8; i += 2) {
++      minX = math.min(minX, corners[i]);
++      maxX = math.max(maxX, corners[i]);
++      minY = math.min(minY, corners[i + 1]);
++      maxY = math.max(maxY, corners[i + 1]);
++    }
++    return Aabb2.raw(minX, minY, maxX, maxY);
++  }
++}
++
++/// One unit the picker can hit.
++final class PickCandidate {
++  PickCandidate(
++      {required this.unit,
++      required this.inverse,
++      required this.top,
++      required this.box,
++      required this.locked,
++      required this.scale});
++
++  final UnitInfo unit;
++
++  /// World to definition space.
++  final Transform2 inverse;
++
++  /// Null when the first leaf is no top.
++  final UnitTop? top;
++  final Aabb2 box;
++  final bool locked;
++
++  /// The world transform's linear scale, `sqrt(|det|)`.
++  final double scale;
++}
++
++/// The units of one document, ready to pick. The candidates are rebuilt
++/// when [units] gives a new index (a state, a layer or a lock change),
++/// never per pointer event; the tops and boxes are kept per definition for
++/// the picker's life. A pick allocates nothing per unit (CLAUDE.md; the
++/// ported `pick_allocation_test`, Task 14).
++class UnitPicker {
++  UnitPicker(this.document, this.units,
++      {this.skipLocked = false,
++      this.placedOnly = false,
++      @visibleForTesting Map<Handle, List<int>> Function()? leavesByOwner,
++      @visibleForTesting Transform2 Function(Transform2 transform)? invert})
++      : _leavesByOwner = leavesByOwner ?? document.leavesByOwner,
++        _invert = invert ?? _inverseOf;
++
++  final DraftDocument document;
++  final UnitIndexCache units;
++
++  /// Whether [pick] passes over a locked unit as if it were not there (the
++  /// design's units-only pick, today's `skipLocked: true`); false in
++  /// service, which picks a locked unit and never selects it (spec S2).
++  final bool skipLocked;
++
++  /// Whether [pick] passes over a generated unit (the design's units-only
++  /// pick: placed units only, spec S4).
++  final bool placedOnly;
++
++  final Map<Handle, List<int>> Function() _leavesByOwner;
++  final Transform2 Function(Transform2 transform) _invert;
++
++  static Transform2 _inverseOf(Transform2 transform) => transform.invert();
++
++  /// The boundary tolerance: a point on a top's edge is inside.
++  static const Tolerance tolerance = Tolerance(linear: 1e-6, angular: 1e-9);
++
++  final Float64List _point = Float64List(2);
++  List<PickCandidate> _candidates = const [];
++  final Map<Handle, UnitTop?> _tops = {};
++  final Map<Handle, Aabb2> _boxes = {};
++  UnitIndex? _index;
++
++  /// The candidates, ascending by instance handle.
++  List<PickCandidate> get candidates {
++    final index = units.current;
++    if (!identical(index, _index)) {
++      _candidates = _build(index);
++      _index = index;
++    }
++    return _candidates;
++  }
++
++  List<PickCandidate> _build(UnitIndex index) {
++    Map<Handle, List<int>>? leaves;
++    Map<Handle, List<int>> scan() => leaves ??= _leavesByOwner();
++    return [
++      for (final c
++          in candidatesOf(document, index, boxes: _boxes, leaves: scan))
++        PickCandidate(
++            unit: c.unit,
++            inverse: _invert(c.transform),
++            top: _tops.putIfAbsent(c.unit.definition,
++                () => unitTopOf(document, c.unit.definition, scan())),
++            box: c.box,
++            locked: c.locked,
++            scale: math.sqrt(c.transform.determinant.abs())),
++    ];
++  }
++
++  /// The candidates of [index] over [document] (zone spec Z0), ascending by
++  /// instance handle. [boxes] caches the definitions' boxes; [leaves] is
++  /// [DraftDocument.leavesByOwner] or a stand-in, called at most once.
++  /// O(units + entities) at document-change rate, never per frame.
++  static List<UnitCandidate> candidatesOf(
++      DraftDocument document, UnitIndex index,
++      {required Map<Handle, Aabb2> boxes,
++      required Map<Handle, List<int>> Function() leaves}) {
++    final out = <UnitCandidate>[];
++    Map<Handle, List<int>>? scanned;
++    for (final u in index.units) {
++      if (!u.visible) continue;
++      final m = u.toWorld;
++      final det = m.determinant;
++      if (det == 0 || !det.isFinite) continue;
++      final box = boxes.putIfAbsent(u.definition,
++          () => document.definitionBounds(u.definition, scanned ??= leaves()));
++      if (box.isEmpty) continue;
++      final corners = Float64List(8);
++      void corner(int i, double x, double y) {
++        corners[2 * i] = m.a * x + m.c * y + m.e;
++        corners[2 * i + 1] = m.b * x + m.d * y + m.f;
++      }
++
++      corner(0, box.minX, box.minY);
++      corner(1, box.maxX, box.minY);
++      corner(2, box.maxX, box.maxY);
++      corner(3, box.minX, box.maxY);
++      if (!corners.every((v) => v.isFinite)) continue;
++      out.add(UnitCandidate(
++          unit: u, transform: m, box: box, corners: corners, locked: u.locked));
++    }
++    return out;
++  }
++
++  /// Today's `TablePicker.pick` (table_picker.dart:306-363): the unit whose
++  /// top holds [world], the highest handle among several; else the unit
++  /// whose box holds it, the highest handle among several; else, with a
++  /// [reach], the unit whose box is nearest within [reach] world units, the
++  /// higher handle on a tie; else null. A unit [skipLocked] or [placedOnly]
++  /// passes over is not there. Allocates nothing per unit.
++  UnitInfo? pick(Vector2 world, {double reach = 0}) {
++    final list = candidates;
++    final storage = world.storage;
++    final wx = storage[0], wy = storage[1];
++    for (var i = list.length - 1; i >= 0; i--) {
++      final c = list[i];
++      if (_passes(c)) continue;
++      final m = c.inverse;
++      final top = c.top;
++      if (top == null) continue;
++      _point
++        ..[0] = m.a * wx + m.c * wy + m.e
++        ..[1] = m.b * wx + m.d * wy + m.f;
++      if (top.containsAt(_point, tolerance)) return c.unit;
++    }
++    for (var i = list.length - 1; i >= 0; i--) {
++      final c = list[i];
++      if (_passes(c)) continue;
++      final m = c.inverse;
++      final x = m.a * wx + m.c * wy + m.e, y = m.b * wx + m.d * wy + m.f;
++      if (_boxDistance(c.box, x, y) <= tolerance.linear) return c.unit;
++    }
++    if (reach <= 0) return null;
++    PickCandidate? best;
++    var bestDistance = reach;
++    for (var i = list.length - 1; i >= 0; i--) {
++      final c = list[i];
++      if (_passes(c)) continue;
++      final m = c.inverse;
++      final x = m.a * wx + m.c * wy + m.e, y = m.b * wx + m.d * wy + m.f;
++      final d = _boxDistance(c.box, x, y) * c.scale;
++      if (d < bestDistance || (best == null && d <= bestDistance)) {
++        best = c;
++        bestDistance = d;
++      }
++    }
++    return best?.unit;
++  }
++
++  bool _passes(PickCandidate c) =>
++      (skipLocked && c.locked) || (placedOnly && c.unit.generated);
++
++  /// The distance from ([x], [y]) to [box]; zero inside it.
++  static double _boxDistance(Aabb2 box, double x, double y) {
++    final dx = math.max(math.max(box.minX - x, x - box.maxX), 0.0);
++    final dy = math.max(math.max(box.minY - y, y - box.maxY), 0.0);
++    return math.sqrt(dx * dx + dy * dy);
++  }
++}
+diff --git a/packages/jet_cad_2d_plan/lib/src/tools/plan_select_gates.dart b/packages/jet_cad_2d_plan/lib/src/tools/plan_select_gates.dart
+index 42685bb6..c1f53bd0 100644
+--- a/packages/jet_cad_2d_plan/lib/src/tools/plan_select_gates.dart
++++ b/packages/jet_cad_2d_plan/lib/src/tools/plan_select_gates.dart
+@@ -1,38 +1,143 @@
+-// Spec P2 "Permissions" (the select gates: move, rotate, reshape, delete)
+-// and P4 "Locks" (the gates refuse a locked object), Task 12. One object on
+-// the select tool and on the grip cache, as today's shell shares one
+-// (planner_shell.dart:439-445, :648-657).
++// Spec 2a P2 "Permissions" (the select gates: move, rotate, reshape,
++// delete) and P4 "Locks" (the gates refuse a locked object), 2a Task 12; and
++// 2b S2 "In design, a generated unit stands for its object" and S4
++// selectUnitsOnly (Task 8). One object on the select tool and on the grip
++// cache, as today's shell shares one (planner_shell.dart:439-445,
++// :648-657, :1797-1846). jet_cad_2d_flutter is unchanged: the gates replace
++// the tool's pick and filter its band.
++import 'package:flutter/foundation.dart' show ValueListenable;
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++
+ import '../controller/permissions.dart';
+ import '../kits/locks.dart' show LockGates;
++import '../service/unit_picker.dart';
++import '../units/unit_index.dart';
++
++/// Past this many parents a chain is taken as no object's (the tree refuses
++/// cycles; this only bounds a malformed one).
++const int _maxDepth = 4096;
++
++/// The root-level object [h] stands for in design (spec S2), or null: the
++/// root-level node above [h] when it is a [GroupNode] other than [h] that
++/// is an object of a registered type ([ParametricCatalog.typeIdOf], frozen
++/// objects included) or a lock-set object ([locked], the controller's
++/// `locked`). A root-level key, and a key under a plain group, stand for
++/// themselves. An entity key starts from its owner. Walks the parents
++/// only: no allocation (hover rate).
++Handle? generatingObjectOf(
++    DraftDocument d, Handle h, ParametricCatalog catalog, Set<Handle> locked) {
++  final root = d.rootHandle;
++  var current = h;
++  final slot = d.entities.slotOf(h);
++  if (slot != null) current = d.entities.ownerAt(slot);
++  if (current == root) return null;
++  for (var depth = 0; depth < _maxDepth; depth++) {
++    final node = d.tree[current];
++    if (node == null) return null;
++    final up = node.parent;
++    if (up == root) {
++      if (current == h || node is! GroupNode) return null;
++      return catalog.typeIdOf(d, current) != null || locked.contains(current)
++          ? current
++          : null;
++    }
++    if (up.isNone || up == current) return null;
++    current = up;
++  }
++  return null;
++}
++
++/// Whether [key] names a placed unit of [index] (today's `_isTableKey`,
++/// planner_shell.dart:1787-1795): a root key whose target is a root-level
++/// instance of a unit definition.
++bool isPlacedUnitKey(UnitIndex index, SelectionKey key) =>
++    key.chain.isEmpty && index[key.target]?.generated == false;
+ 
+ /// The select tool's and the grip cache's gates: each drag kind and Delete
+ /// need their [PlanPermissions] flag, and a selection holding a locked
+-/// object (or a key inside one) shuts them all ([LockGates]).
++/// object (or a key inside one) shuts them all ([LockGates]). In design the
++/// pick and the band map a generated unit to its object (spec S2); under
++/// [PlanPermissions.selectUnitsOnly] they pick placed units only.
+ ///
+ /// The getters are read at every hover, key and frame (`SelectGates`'s
+-/// contract) and allocate nothing: the lock state is [LockGates]' cached
+-/// `bool`, and the permissions are read through one closure call.
++/// contract): the lock state is [LockGates]' cached `bool`, and the
++/// permissions are read through one closure call.
+ final class PlanSelectGates extends LockGates {
+   PlanSelectGates({
+     required PlanPermissions Function() permissions,
+     required super.selection,
+     required super.locked,
+-  }) : _permissions = permissions;
++    required ParametricCatalog catalog,
++    required UnitPicker Function() picker,
++    required UnitIndex Function() units,
++  })  : _permissions = permissions,
++        _lockedObjects = locked,
++        _catalog = catalog,
++        _picker = picker,
++        _units = units;
+ 
+   final PlanPermissions Function() _permissions;
++  final ValueListenable<Set<Handle>> _lockedObjects;
++  final ParametricCatalog _catalog;
++  final UnitPicker Function() _picker;
++  final UnitIndex Function() _units;
++  final HitPath _hit = HitPath();
+ 
+   /// The select tool's idle keys (Escape, Delete, Backspace while no
+   /// gesture runs): the shortcuts' option (Task 16 sets it).
+   @override
+   bool idleKeys = true;
+ 
++  /// The design's pick is always the gates' (spec S2).
++  @override
++  bool get restrictsPick => true;
++
++  /// The tool's own pick (the precise radius, then a finger's reach,
++  /// select_tool.dart:160-171), resolved by [resolveHit], then mapped to
++  /// its object ([generatingObjectOf]). Under selectUnitsOnly, the
++  /// units-only picker's: a placed unit's top, else its box, within the
++  /// pick tolerance for a mouse and the reach for a finger; a locked unit
++  /// passed over (planner_shell.dart:1817-1826).
++  @override
++  SelectionKey? pick(ToolPointerEvent e, ToolContext ctx) {
++    if (_permissions().selectUnitsOnly) {
++      final hit = _picker().pick(e.world,
++          reach: e.isTouch ? e.reachRadiusWorld : e.pickRadiusWorld);
++      return hit == null ? null : SelectionKey.root(hit.instance);
++    }
++    if (!ctx.index.pickInto(
++            e.world, e.pickRadiusWorld, const QueryFilter.picking(), _hit) &&
++        (e.reachRadiusWorld <= e.pickRadiusWorld ||
++            !ctx.index.pickInto(e.world, e.reachRadiusWorld,
++                const QueryFilter.picking(), _hit))) {
++      return null;
++    }
++    final key = resolveHit(_hit, ctx.document);
++    if (key == null) return null;
++    final object = generatingObjectOf(
++        ctx.document, key.target, _catalog, _lockedObjects.value);
++    return object == null ? key : SelectionKey.root(object);
++  }
++
++  /// A key under a parametric or lock-set object is refused (the band's
++  /// group rule gives the object itself: a crossing takes a row, a window
++  /// over a seats-only row takes nothing, decision 9). Under
++  /// selectUnitsOnly, placed units only.
++  @override
++  bool bandAccepts(DraftDocument d, SelectionKey key) {
++    if (_permissions().selectUnitsOnly) return isPlacedUnitKey(_units(), key);
++    return generatingObjectOf(d, key.target, _catalog, _lockedObjects.value) ==
++        null;
++  }
++
+   @override
+   bool get move => _permissions().move && super.move;
+ 
+   @override
+   bool get rotate => _permissions().rotate && super.rotate;
+ 
+   @override
+   bool get reshape => _permissions().reshape && super.reshape;
+ 
+   @override
+diff --git a/packages/jet_cad_2d_plan/test/barrel_test.dart b/packages/jet_cad_2d_plan/test/barrel_test.dart
+index 7b8afb4a..6cbd1938 100644
+--- a/packages/jet_cad_2d_plan/test/barrel_test.dart
++++ b/packages/jet_cad_2d_plan/test/barrel_test.dart
+@@ -52,20 +52,22 @@ void main() {
+       'PlanCanvas', 'kLockHintDuration', 'PlanToolPalette', 'PlanShortcuts',
+       'PlanShortcutGuard',
+       'PlanPropertyPanel', 'PlanLayerPanel', 'PlanPagePanel',
+       // Task 19
+       'PlanExport', 'PlanExportAnswer', 'PlanExportChoice', 'PlanExportDpi',
+       'PlanExportFonts', 'PlanExportRequest', 'PlanExporter', 'PlanImporter',
+       'PlanPageExporter', 'PlanExportDialog', 'PagePrinter',
+       'PrintingPagePrinter',
+       // Task 20
+       'PlanEditor', 'PlanEditorBar', 'PlanEditorAction', 'PlanFileCallback',
++      // 2b Task 8
++      'isUnitSymbol',
+     });
+   });
+ 
+   testWidgets('ED-9b the editor\'s names, through the barrel alone',
+       (tester) async {
+     final c = PlanController(kits: const []);
+     addTearDown(c.dispose);
+     PlanExport? last;
+     const PagePrinter printer = PrintingPagePrinter();
+     await tester.pumpWidget(MaterialApp(
+diff --git a/packages/jet_cad_2d_plan/test/controller/permissions_test.dart b/packages/jet_cad_2d_plan/test/controller/permissions_test.dart
+index 4fa1a528..949a3e3e 100644
+--- a/packages/jet_cad_2d_plan/test/controller/permissions_test.dart
++++ b/packages/jet_cad_2d_plan/test/controller/permissions_test.dart
+@@ -18,99 +18,139 @@ const List<String> kFlagNames = [
+   'reshape',
+   'delete',
+   'changeLayer',
+   'recolor',
+   'editLayers',
+   'editPage',
+   'relabel',
+   'undo',
+   'export',
+   'print',
++  'selectUnitsOnly',
++  'serviceMove',
++  'serviceMerge',
+ ];
+ 
+ Map<String, bool> flagsOf(P p) => {
+       'move': p.move,
+       'rotate': p.rotate,
+       'mirror': p.mirror,
+       'reshape': p.reshape,
+       'delete': p.delete,
+       'changeLayer': p.changeLayer,
+       'recolor': p.recolor,
+       'editLayers': p.editLayers,
+       'editPage': p.editPage,
+       'relabel': p.relabel,
+       'undo': p.undo,
+       'export': p.export,
+       'print': p.print,
++      'selectUnitsOnly': p.selectUnitsOnly,
++      'serviceMove': p.serviceMove,
++      'serviceMerge': p.serviceMerge,
+     };
+ 
+ P copyFlag(P p, String name, bool v) => switch (name) {
+       'move' => p.copyWith(move: v),
+       'rotate' => p.copyWith(rotate: v),
+       'mirror' => p.copyWith(mirror: v),
+       'reshape' => p.copyWith(reshape: v),
+       'delete' => p.copyWith(delete: v),
+       'changeLayer' => p.copyWith(changeLayer: v),
+       'recolor' => p.copyWith(recolor: v),
+       'editLayers' => p.copyWith(editLayers: v),
+       'editPage' => p.copyWith(editPage: v),
+       'relabel' => p.copyWith(relabel: v),
+       'undo' => p.copyWith(undo: v),
+       'export' => p.copyWith(export: v),
+       'print' => p.copyWith(print: v),
++      'selectUnitsOnly' => p.copyWith(selectUnitsOnly: v),
++      'serviceMove' => p.copyWith(serviceMove: v),
++      'serviceMerge' => p.copyWith(serviceMerge: v),
+       _ => throw ArgumentError(name),
+     };
+ 
+ /// The flag each gate reads (spec P3: a gate names a PlanPermissions flag).
+ const Map<PlanGate, String> kGateFlag = {
+   PlanGate.move: 'move',
+   PlanGate.rotate: 'rotate',
+   PlanGate.mirror: 'mirror',
+   PlanGate.reshape: 'reshape',
+   PlanGate.delete: 'delete',
+   PlanGate.changeLayer: 'changeLayer',
+   PlanGate.recolor: 'recolor',
+   PlanGate.editLayers: 'editLayers',
+   PlanGate.editPage: 'editPage',
+   PlanGate.relabel: 'relabel',
+ };
+ 
+-/// readOnly's flags, as spec P2 and today's S-12 list them.
++/// readOnly's flags, as spec P2 and today's S-12 list them (relabel is
++/// today's renumber, off in readOnly).
+ const Map<String, bool> kReadOnly = {
+   'move': false,
+   'rotate': false,
+   'mirror': false,
+   'reshape': false,
+   'delete': false,
+   'changeLayer': false,
+   'recolor': false,
+   'editLayers': false,
+   'editPage': false,
+   'relabel': false,
+   'undo': false,
+   'export': true,
+   'print': true,
++  'selectUnitsOnly': false,
++  'serviceMove': true,
++  'serviceMerge': true,
++};
++
++/// unitsOnly's flags (today's tablesOnly, editor_capabilities.dart:175-190,
++/// restricted to PlanPermissions' fields; spec S4).
++const Map<String, bool> kUnitsOnly = {
++  'move': true,
++  'rotate': true,
++  'mirror': false,
++  'reshape': false,
++  'delete': true,
++  'changeLayer': false,
++  'recolor': true,
++  'editLayers': false,
++  'editPage': false,
++  'relabel': true,
++  'undo': true,
++  'export': true,
++  'print': true,
++  'selectUnitsOnly': true,
++  'serviceMove': true,
++  'serviceMerge': true,
+ };
+ 
+ void main() {
+   test('PM-1 full and readOnly, field by field', () {
+     expect(P.full.tools, isNull, reason: 'every tool');
+-    expect(flagsOf(P.full), {for (final n in kFlagNames) n: true});
++    expect(flagsOf(P.full),
++        {for (final n in kFlagNames) n: n != 'selectUnitsOnly'});
+     expect(const P(), P.full);
+     // M-PM1: readOnly's `undo: false` dropped.
+     expect(P.readOnly.tools, {'plan.select'});
+     expect(flagsOf(P.readOnly), kReadOnly);
++    // EC2's tablesOnly half (editor_capabilities_test.dart:137-160), on
++    // PlanPermissions' fields.
++    expect(P.unitsOnly.tools, {'plan.select', 'plan.symbol'});
++    // M-PM1b: unitsOnly's `selectUnitsOnly: true` dropped.
++    expect(flagsOf(P.unitsOnly), kUnitsOnly);
+   });
+ 
+   test('PM-2 copyWith replaces exactly the field it names; null keeps', () {
+     for (final name in kFlagNames) {
+-      for (final base in [P.full, P.readOnly]) {
++      for (final base in [P.full, P.readOnly, P.unitsOnly]) {
+         final before = flagsOf(base);
+         final after = flagsOf(copyFlag(base, name, !before[name]!));
+         // M-PM2: `move: move ?? this.move` written `move: this.move`.
+         expect(after, {...before, name: !before[name]!},
+             reason: '$name on $base');
+         expect(copyFlag(base, name, before[name]!), base, reason: name);
+       }
+     }
+     final some = P.full.copyWith(tools: {'plan.select', 'plan.line'});
+     expect(some.tools, {'plan.select', 'plan.line'});
+@@ -129,26 +169,30 @@ void main() {
+ 
+   test('PM-3 == and hashCode over every field; the tools as a set', () {
+     final a = P.full.copyWith(tools: {'plan.line', 'plan.select', 'acme.x'});
+     final b = P.full.copyWith(tools: {'acme.x', 'plan.select', 'plan.line'});
+     expect(a, b);
+     expect(a.hashCode, b.hashCode);
+     // M-PM3: `setEquals(other.tools, tools) &&` dropped from ==.
+     expect(a == P.full.copyWith(tools: {'plan.select', 'plan.line'}), isFalse);
+     expect(a == P.full, isFalse, reason: 'a set is not "every tool"');
+     for (final name in kFlagNames) {
+-      final changed = copyFlag(P.full, name, false);
++      // Each flag turned from full's value (selectUnitsOnly is off there).
++      final changed = copyFlag(P.full, name, !flagsOf(P.full)[name]!);
+       expect(changed == P.full, isFalse, reason: name);
+       expect(P.full == changed, isFalse, reason: name);
+     }
+     expect(P.full == P.readOnly, isFalse);
+     expect(identical(P.readOnly, P.readOnly), isTrue);
++    expect(P.unitsOnly == P.readOnly, isFalse);
++    expect(identical(P.unitsOnly, P.unitsOnly), isTrue);
++    expect(P.unitsOnly, P.unitsOnly.copyWith());
+   });
+ 
+   test('PM-4 allowsTool: select always; null allows every id; a set its own',
+       () {
+     for (final id in ['plan.select', 'plan.line', 'acme.wall', 'x.y']) {
+       expect(P.full.allowsTool(id), isTrue, reason: id);
+     }
+     // M-PM4: `id == PlanToolIds.select ||` dropped.
+     final none = P.full.copyWith(tools: const <String>{});
+     expect(none.allowsTool('plan.select'), isTrue);
+@@ -180,22 +224,29 @@ void main() {
+     // M-PM6a: `draft` always DraftPermissions.all.
+     expect(P.readOnly.draft, same(DraftPermissions.readOnly));
+     expect(P.readOnly.edits, isFalse);
+     expect(P.full.draft, same(DraftPermissions.all));
+     for (final name in kFlagNames.take(10)) {
+       // move .. relabel: each alone is an edit.
+       final one = copyFlag(P.readOnly, name, true);
+       expect(one.edits, isTrue, reason: name);
+       expect(one.draft, same(DraftPermissions.all), reason: name);
+     }
+-    for (final name in ['undo', 'export', 'print']) {
+-      final one = copyFlag(P.readOnly, name, true);
++    for (final name in [
++      'undo',
++      'export',
++      'print',
++      'selectUnitsOnly',
++      'serviceMove',
++      'serviceMerge'
++    ]) {
++      final one = copyFlag(P.readOnly, name, !kReadOnly[name]!);
+       expect(one.draft, same(DraftPermissions.readOnly),
+           reason: '$name is not an edit');
+     }
+     // M-PM6b: the tools term dropped from `edits`.
+     final drawing = P.readOnly.copyWith(tools: {'plan.select', 'plan.line'});
+     expect(drawing.draft, same(DraftPermissions.all));
+     final everyTool = const P(
+         move: false,
+         rotate: false,
+         mirror: false,
+@@ -219,12 +270,67 @@ void main() {
+         'PlanPermissions(move: false, undo: false)');
+     expect(
+         P.readOnly.toString(),
+         'PlanPermissions(tools: {plan.select}, move: false, rotate: false, '
+         'mirror: false, reshape: false, delete: false, changeLayer: false, '
+         'recolor: false, editLayers: false, editPage: false, relabel: false, '
+         'undo: false)');
+     // The tools sorted, so the text is stable whatever the set's order.
+     expect(P.full.copyWith(tools: {'plan.text', 'acme.x'}).toString(),
+         'PlanPermissions(tools: {acme.x, plan.text})');
++    // EC5's tablesOnly text (editor_capabilities_test.dart:266-271), on
++    // PlanPermissions' fields: a restriction prints when on.
++    // M-PM7b: toString printing only the flags that are false.
++    expect(
++        P.unitsOnly.toString(),
++        'PlanPermissions(tools: {plan.select, plan.symbol}, mirror: false, '
++        'reshape: false, changeLayer: false, editLayers: false, '
++        'editPage: false, selectUnitsOnly: true)');
++  });
++
++  // EC3b (editor_capabilities_test.dart:386-435): two bases whose flags
++  // alternate, so a field copied from its neighbour is seen.
++  test(
++      'EC3b copyWith on two bases whose flags alternate: no argument keeps '
++      'every field, each flag replaces that field alone', () {
++    P alternating(bool first) {
++      final v = [for (var i = 0; i < kFlagNames.length; i++) i.isEven == first];
++      return P(
++        tools: const {'plan.select', 'plan.line', 'plan.symbol'},
++        move: v[0],
++        rotate: v[1],
++        mirror: v[2],
++        reshape: v[3],
++        delete: v[4],
++        changeLayer: v[5],
++        recolor: v[6],
++        editLayers: v[7],
++        editPage: v[8],
++        relabel: v[9],
++        undo: v[10],
++        export: v[11],
++        print: v[12],
++        selectUnitsOnly: v[13],
++        serviceMove: v[14],
++        serviceMerge: v[15],
++      );
++    }
++
++    for (final first in [true, false]) {
++      final base = alternating(first);
++      final flags = flagsOf(base);
++      for (final (i, name) in kFlagNames.indexed) {
++        expect(flags[name], i.isEven == first, reason: name);
++      }
++      expect(base.relabel, isNot(base.editPage));
++      final kept = base.copyWith();
++      expect(flagsOf(kept), flags, reason: 'copyWith() on $base');
++      expect(kept.tools, {'plan.select', 'plan.line', 'plan.symbol'});
++      for (final name in kFlagNames) {
++        // M-PM2b: `serviceMerge: serviceMerge ?? this.serviceMove`.
++        expect(flagsOf(copyFlag(base, name, !flags[name]!)),
++            {...flags, name: !flags[name]!},
++            reason: '$name on $base');
++      }
++    }
+   });
+ }
+diff --git a/packages/jet_cad_2d_plan/test/editor/units_only_select_test.dart b/packages/jet_cad_2d_plan/test/editor/units_only_select_test.dart
+new file mode 100644
+index 00000000..d4aa2480
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/editor/units_only_select_test.dart
+@@ -0,0 +1,398 @@
++// Ported from jet_cad_floor_plan's test/host/editor_select_test.dart (2b
++// Task 8, spec S4 selectUnitsOnly, the unitsOnly profile): its
++// `selectTablesOnly` and `tablesOnly` cases. The gates the controller
++// builds from its permissions, on the select tool and the grip cache --
++// selectUnitsOnly's pick (the unit picker: a top, else a box, a finger's
++// reach; a locked unit passed over) and band, `move`, `delete`, the
++// selection pruned on a change to units only and a drag cancelled by it.
++// Through `PlanEditor` on the unit editor fixture under `editorCamera()`;
++// screen points come from the camera's forward transform. The north wall
++// is a root-level line, the column a closed square (fixture changes, A12).
++import 'dart:math' as math;
++import 'dart:ui' as ui;
++
++import 'package:flutter/material.dart';
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
++    show InteractionLayer, SelectionKey;
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/harness.dart' show coordsOf;
++import '../support/unit_editor_fixture.dart';
++
++typedef P = PlanPermissions;
++
++/// The design's encoding: byte-identical means no edit.
++String encoded(PlanController c) =>
++    DraftDocumentCodec.encodeToString(c.document);
++
++/// Table [n]'s root key.
++SelectionKey keyOf(PlanController c, String n) =>
++    SelectionKey.root(tableOf(c, n));
++
++/// Table [n]'s transform.
++Transform2 transformOf(PlanController c, String n) =>
++    (c.document.tree[tableOf(c, n)]! as InstanceNode).transform;
++
++/// [local], in table [n]'s definition space, in the world.
++Vector2 onTable(PlanController c, String n, double x, double y) =>
++    transformOf(c, n).transformPoint(Vector2(x, y));
++
++/// A point inside table [n]'s top, away from its lines (the top is the
++/// quadrilateral (300, -200), (1100, -200), (900, 400), (300, 250)).
++Vector2 topOf(PlanController c, String n) => onTable(c, n, 500, 0);
++
++/// A point inside table [n]'s box, off its top: beyond the top's slanted
++/// edge from (1100, -200) to (900, 400).
++Vector2 boxOf(PlanController c, String n) => onTable(c, n, 1050, 350);
++
++/// A point on table [n]'s top's bottom edge: where the index's own pick
++/// (no `selectUnitsOnly`) finds the table, over the parquet.
++Vector2 edgeOf(PlanController c, String n) => onTable(c, n, 700, -200);
++
++/// [line]'s first point in the world (a root-level line).
++Vector2 startOf(DraftDocument d, Handle line) {
++  final p = coordsOf(d, line);
++  return Vector2(p[0], p[1]);
++}
++
++/// Whether [h] is a live line entity (today's wall).
++bool isLine(DraftDocument d, Handle h) {
++  final slot = d.entities.slotOf(h);
++  return slot != null && d.entities.kindAt(slot) == EntityKind.line;
++}
++
++/// The selection's keys.
++Set<SelectionKey> selected(PlanController c) => {...c.selection.keys};
++
++/// A mouse drag from [from] to [to] in eight steps; [before] runs after
++/// the last move and before the up.
++Future<void> drag(WidgetTester tester, Offset from, Offset to,
++    {Future<void> Function()? before}) async {
++  final g = await tester.createGesture(kind: ui.PointerDeviceKind.mouse);
++  await g.addPointer(location: from - const Offset(2, 2));
++  await g.moveTo(from);
++  await tester.pump();
++  await g.down(from);
++  await tester.pump();
++  for (var i = 1; i <= 8; i++) {
++    await g.moveTo(Offset.lerp(from, to, i / 8)!);
++    await tester.pump();
++  }
++  if (before != null) await before();
++  await g.up();
++  await tester.pump();
++  await g.removePointer();
++  await tester.pump();
++}
++
++/// A finger's tap at [at]: down, held past the touch hold-back, up.
++Future<void> fingerTap(WidgetTester tester, Offset at) async {
++  final g = await tester.startGesture(at,
++      pointer: 41, kind: ui.PointerDeviceKind.touch);
++  await tester.pump(const Duration(milliseconds: 150));
++  await g.up();
++  await tester.pump(const Duration(milliseconds: 300));
++}
++
++/// The turn of [m], in degrees.
++double degreesOf(Transform2 m) => math.atan2(m.b, m.a) * 180 / math.pi;
++
++/// The bands' corners: the whole canvas, inset 4 px.
++Rect canvasRect(WidgetTester tester) =>
++    tester.getRect(find.byType(InteractionLayer)).deflate(4);
++
++void main() {
++  group('selectUnitsOnly (M-H42, S-15)', () {
++    testWidgets(
++        'M-H42 tablesOnly: a window and a crossing band over the whole '
++        'canvas (walls, rooms and their edges, the dimension, the free '
++        'line, the group, the TEXT, the chair, every table) select exactly '
++        'the five visible unlocked tables; a crossing band over the north '
++        'wall, its room edge, the chair and 1 and 2 selects exactly 1 and 2; '
++        'one over the group, the free line and the TEXT selects nothing',
++        (tester) async {
++      final c = await mountUnitEditor(tester, permissions: P.unitsOnly);
++      final tables = {
++        for (final n in ['1', '2', '7', ' 7 ']) keyOf(c, n),
++        SelectionKey.root(
++            unitsIn(c).units.singleWhere((x) => x.text == null).instance),
++      };
++      final r = canvasRect(tester);
++      // A window band (left to right) and a crossing band (right to left).
++      await drag(tester, r.topLeft, r.bottomRight);
++      expect(selected(c), tables, reason: 'the window band');
++      c.selection.clear();
++      await tester.pump();
++      await drag(tester, r.bottomRight, r.topLeft);
++      expect(selected(c), tables, reason: 'the crossing band');
++      c.selection.clear();
++      await tester.pump();
++      // North: y 15,740..16,900 crosses the north wall and its inner face
++      // (16,750), the parquet, the chair and 1 and 2, x 21,450..24,450.
++      await drag(tester, screenOf(tester, c, Vector2(24450, 16900)),
++          screenOf(tester, c, Vector2(21450, 15740)));
++      expect(selected(c), {keyOf(c, '1'), keyOf(c, '2')},
++          reason: 'the north strip');
++      c.selection.clear();
++      await tester.pump();
++      // South-west: the group, the free line and the TEXT, no table.
++      await drag(tester, screenOf(tester, c, Vector2(23400, 14600)),
++          screenOf(tester, c, Vector2(21450, 13250)));
++      expect(selected(c), isEmpty, reason: 'the south-west strip');
++    });
++
++    testWidgets(
++        'M-H42 S-15 a click on a wall line, the free line or the TEXT '
++        'selects nothing under tablesOnly; a click inside 1\'s top away '
++        'from its lines selects 1, though the topmost hit there is a '
++        'parquet hairline (under full the same click selects the hairline); '
++        'inside its box off its top too', (tester) async {
++      final c = await mountUnitEditor(tester);
++      // The control under full: the engine's topmost hit inside 1's top is
++      // not 1 (S-15: a filter after it would lose the table).
++      await click(tester, screenOf(tester, c, topOf(c, '1')));
++      expect(selected(c), hasLength(1));
++      expect(selected(c).single, isNot(keyOf(c, '1')));
++      await click(tester, screenOf(tester, c, Vector2(22000, 16850)));
++      expect(selected(c), hasLength(1), reason: 'the north wall, under full');
++      final wall = selected(c).single;
++      expect(isLine(c.document, wall.target), isTrue);
++      await setPermissions(tester, c, P.unitsOnly);
++      expect(selected(c), isEmpty, reason: 'pruned (S-9 g)');
++      for (final (what, w) in [
++        ('the north wall', Vector2(22000, 16850)),
++        ('the column', Vector2(23500, 14000)),
++        ('the free line', Vector2(23000, 13850)),
++        ('the TEXT', Vector2(21750, 14300)),
++      ]) {
++        await click(tester, screenOf(tester, c, w));
++        expect(selected(c), isEmpty, reason: what);
++      }
++      await click(tester, screenOf(tester, c, topOf(c, '1')));
++      expect(selected(c), {keyOf(c, '1')}, reason: 'inside the top');
++      c.selection.clear();
++      await tester.pump();
++      await click(tester, screenOf(tester, c, boxOf(c, '2')));
++      expect(selected(c), {keyOf(c, '2')}, reason: 'inside the box');
++    });
++
++    testWidgets(
++        'S-15 a finger reaches a table within its reach under tablesOnly; a '
++        'mouse click at the same point selects nothing', (tester) async {
++      final c = await mountUnitEditor(tester, permissions: P.unitsOnly);
++      // 40 mm (about 15 px) beyond 1's box, on its local x axis; 2's box
++      // is over 300 mm away.
++      final near = screenOf(tester, c, onTable(c, '1', 1140, 100));
++      await click(tester, near);
++      expect(selected(c), isEmpty, reason: 'the mouse');
++      await fingerTap(tester, near);
++      expect(selected(c), {keyOf(c, '1')}, reason: 'the finger');
++    });
++
++    testWidgets(
++        'the tables on the hidden and the locked layers are never selected, '
++        'by a click or a band; a locked table is passed over, so the table '
++        'under it answers', (tester) async {
++      final c = await mountUnitEditor(tester, permissions: P.unitsOnly);
++      final d = c.document;
++      final hidden = unitsIn(c).withLabel('5').single;
++      final hiddenAt = (d.tree[hidden.instance]! as InstanceNode)
++          .transform
++          .transformPoint(Vector2(500, 0));
++      await click(tester, screenOf(tester, c, hiddenAt));
++      expect(selected(c), isEmpty, reason: '5, hidden');
++      await click(tester, screenOf(tester, c, topOf(c, 'L')));
++      expect(selected(c), isEmpty, reason: 'L, locked');
++      final r = canvasRect(tester);
++      await drag(tester, r.bottomRight, r.topLeft);
++      expect(selected(c).map((k) => k.target),
++          isNot(anyOf(contains(tableOf(c, 'L')), contains(hidden.instance))));
++      c.selection.clear();
++      await tester.pump();
++      // ` 7 ` (a lower handle than L, so drawn under it) moved under L.
++      d.commands.execute(
++          TransformNodeCommand(tableOf(c, ' 7 '), transformOf(c, 'L')));
++      await tester.pump();
++      await click(tester, screenOf(tester, c, topOf(c, 'L')));
++      expect(selected(c), {keyOf(c, ' 7 ')});
++    });
++  });
++
++  group('move (T5-a, S-9 h)', () {
++    testWidgets(
++        'T5-a readOnly: a body drag of 1 executes nothing; tablesOnly: it '
++        'moves 1 by the drag', (tester) async {
++      final c = await mountUnitEditor(tester, permissions: P.readOnly);
++      final before = encoded(c);
++      // readOnly picks by the index: the top's inside is a hairline; the
++      // table is clicked and pressed on its top's bottom edge.
++      final edge = screenOf(tester, c, edgeOf(c, '1'));
++      await click(tester, edge);
++      expect(selected(c), {keyOf(c, '1')}, reason: 'selectable');
++      await drag(tester, edge, edge + const Offset(80, -40));
++      expect(encoded(c), before, reason: 'readOnly');
++      expect(c.canUndo.value, isFalse);
++      await setPermissions(tester, c, P.unitsOnly);
++      final centre = centreOf(c, '1');
++      final from = screenOf(tester, c, topOf(c, '1'));
++      await drag(tester, from, from + const Offset(80, -40));
++      final moved = centreOf(c, '1') - centre;
++      // 80 px right and 40 px up at 0.37 px/mm, y up; the move is exact up
++      // to the grid's 50 mm snap.
++      expect(moved.x, closeTo(80 / 0.37, 50));
++      expect(moved.y, closeTo(40 / 0.37, 50));
++    });
++
++    testWidgets(
++        'S-9 h a body drag of 1 started under tablesOnly and switched to '
++        'move: false before its up executes nothing; kept under tablesOnly '
++        'it moves 1', (tester) async {
++      final c = await mountUnitEditor(tester, permissions: P.unitsOnly);
++      final from = screenOf(tester, c, topOf(c, '1'));
++      final before = encoded(c);
++      await drag(tester, from, from + const Offset(80, -40),
++          before: () =>
++              setPermissions(tester, c, P.unitsOnly.copyWith(move: false)));
++      expect(encoded(c), before);
++      expect(c.canUndo.value, isFalse);
++      await setPermissions(tester, c, P.unitsOnly);
++      await drag(tester, from, from + const Offset(80, -40));
++      expect(encoded(c), isNot(before));
++      expect(c.canUndo.value, isTrue);
++    });
++  });
++
++  group("the review's killers (Task 5 review R-1, R-3, R-4, R-5)", () {
++    // The north wall, beyond its inner face; a click there selects it.
++    final northWall = Vector2(25500, 16850);
++
++    testWidgets(
++        'R-1 a body drag of the north wall started under full, the host '
++        'switching to tablesOnly before its up: the drag is cancelled, the '
++        'design byte-identical; kept under full the same drag moves the '
++        'wall', (tester) async {
++      final c = await mountUnitEditor(tester);
++      final d = c.document;
++      Offset at(Vector2 w) => screenOf(tester, c, w);
++      await click(tester, at(northWall));
++      final wall = selected(c).single.target;
++      expect(isLine(d, wall), isTrue, reason: 'premise: the wall selected');
++      final before = encoded(c);
++      final ends = startOf(d, wall);
++      await drag(tester, at(northWall), at(northWall) + const Offset(0, -60),
++          before: () => setPermissions(tester, c, P.unitsOnly));
++      expect(encoded(c), before);
++      expect(c.canUndo.value, isFalse);
++      expect(selected(c), isEmpty, reason: 'pruned (S-9 g)');
++      // The control: the same drag under full moves the wall.
++      await setPermissions(tester, c, P.full);
++      await click(tester, at(northWall));
++      expect(selected(c).single.target, wall);
++      await drag(tester, at(northWall), at(northWall) + const Offset(0, -60));
++      expect(startOf(d, wall), isNot(ends));
++      expect(c.canUndo.value, isTrue);
++    });
++
++    testWidgets(
++        "R-1 the chair turned by its rotation grip, started under full, the "
++        'host switching to tablesOnly before its up: cancelled, the design '
++        'byte-identical; kept under full the same drag turns it',
++        (tester) async {
++      final c = await mountUnitEditor(tester);
++      final d = c.document;
++      Offset at(Vector2 w) => screenOf(tester, c, w);
++      // The chair's outline at local (50, 275).
++      final onChair = editorChairPlacement.transformPoint(Vector2(50, 275));
++      await click(tester, at(onChair));
++      final chair = selected(c).single.target;
++      final node = d.tree[chair];
++      expect(node, isA<InstanceNode>(), reason: 'premise: the chair');
++      Offset grip() {
++        // Its drawing's screen box, (50, 50)..(500, 500): the grip is 24
++        // px above its top edge's middle.
++        final corners = [
++          for (final (x, y) in const [
++            (50, 50),
++            (500, 50),
++            (500, 500),
++            (50, 500)
++          ])
++            at(editorChairPlacement
++                .transformPoint(Vector2(x.toDouble(), y.toDouble()))),
++        ];
++        final minX = corners.map((p) => p.dx).reduce(math.min);
++        final maxX = corners.map((p) => p.dx).reduce(math.max);
++        final minY = corners.map((p) => p.dy).reduce(math.min);
++        return Offset((minX + maxX) / 2, minY - 24);
++      }
++
++      final m = c.camera.value.worldToScreenMatrix;
++      expect(c.grips.hitsRotationGrip(grip() - canvasOrigin(tester), m), isTrue,
++          reason: 'premise: the rotation grip');
++      double turn() => degreesOf((d.tree[chair]! as InstanceNode).transform);
++      final turnBefore = turn();
++      final before = encoded(c);
++      await drag(tester, grip(), grip() + const Offset(120, 60),
++          before: () => setPermissions(tester, c, P.unitsOnly));
++      expect(encoded(c), before);
++      expect(c.canUndo.value, isFalse);
++      // The control.
++      await setPermissions(tester, c, P.full);
++      await click(tester, at(onChair));
++      expect(selected(c).single.target, chair);
++      await drag(tester, grip(), grip() + const Offset(120, 60));
++      expect(turn(), isNot(closeTo(turnBefore, 1)));
++    });
++
++    testWidgets(
++        'R-3 tablesOnly.copyWith(delete: false), 1 selected: Delete and '
++        'Backspace remove nothing, while a body drag still moves 1',
++        (tester) async {
++      final c = await mountUnitEditor(tester,
++          permissions: P.unitsOnly.copyWith(delete: false));
++      await click(tester, screenOf(tester, c, topOf(c, '1')));
++      expect(selected(c), {keyOf(c, '1')});
++      final before = encoded(c);
++      await press(tester, LogicalKeyboardKey.delete);
++      await press(tester, LogicalKeyboardKey.backspace);
++      expect(encoded(c), before);
++      expect(unitsIn(c).withLabel('1'), hasLength(1));
++      final centre = centreOf(c, '1');
++      final from = screenOf(tester, c, topOf(c, '1'));
++      await drag(tester, from, from + const Offset(80, -40));
++      expect(centreOf(c, '1').distanceTo(centre), greaterThan(100));
++    });
++
++    testWidgets(
++        'R-5 tablesOnly: a mouse click 3 px outside 1\'s box selects 1 (the '
++        'index pick\'s 6 px tolerance), one 15 px outside it nothing',
++        (tester) async {
++      final c = await mountUnitEditor(tester, permissions: P.unitsOnly);
++      final scale = c.camera.value.scale;
++      // Beyond the box's right edge (x 1,100) on its local x axis.
++      Offset outside(double px) =>
++          screenOf(tester, c, onTable(c, '1', 1100 + px / scale, 100));
++      await click(tester, outside(15));
++      expect(selected(c), isEmpty, reason: '15 px');
++      await click(tester, outside(3));
++      expect(selected(c), {keyOf(c, '1')}, reason: '3 px');
++    });
++
++    testWidgets(
++        'R-4 tablesOnly: a finger within its reach of the locked L, outside '
++        'L\'s box, selects nothing; at the same offset from 1 it selects 1',
++        (tester) async {
++      final c = await mountUnitEditor(tester, permissions: P.unitsOnly);
++      // 40 mm (about 15 px) beyond each box on its local x axis: within a
++      // finger's 24 px, beyond a mouse's 6; every other table is farther.
++      await fingerTap(tester, screenOf(tester, c, onTable(c, 'L', 1140, 100)));
++      expect(selected(c), isEmpty, reason: 'L, locked: never by reach');
++      await fingerTap(tester, screenOf(tester, c, onTable(c, '1', 1140, 100)));
++      expect(selected(c), {keyOf(c, '1')}, reason: 'the control');
++    });
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/service/unit_picker_test.dart b/packages/jet_cad_2d_plan/test/service/unit_picker_test.dart
+new file mode 100644
+index 00000000..bdfbd2c4
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/service/unit_picker_test.dart
+@@ -0,0 +1,411 @@
++// Ported from jet_cad_floor_plan's test/service/table_picker_test.dart (2b
++// Task 8, spec S4 "The unit picker"; ids suffixed K): spec 14c S1, S2, S9: a point inside a table's top picks it, through the
++// table's inverse transform; failing a top, a point inside the symbol's
++// bounding box does (a chair, the space between the chairs: the human,
++// 2026-10-04); a wall, a hidden table do not; a top beats a neighbour's
++// box; the highest handle wins; a locked table is picked and flagged.
++// Tables are off the origin, turned 37 degrees and mirrored.
++import 'dart:typed_data';
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_plan/src/service/unit_picker.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/harness.dart' show addLine;
++import '../support/unit_fixtures.dart';
++
++void main() {
++  // tableSymbol's top is 300..1500 x 300..1100; its chairs reach y -50 and
++  // y 1450, tucked 100 under the top.
++  test(
++      'TPK1 inside the top of a turned, mirrored table off the origin; on a '
++      'chair and off every line inside its box; not at the untransformed '
++      'spot (M-14h, M-14c2-1)', () {
++    final doc = unitPlan();
++    final t = placeTurned(doc, tableSymbol(), Vector2(41000, -27500));
++    final picker = pickerOf(doc);
++    expect(picker.pick(worldOf(t, 1450, 1050))?.instance, t.handle);
++    expect(picker.pick(worldOf(t, 320, 320))?.instance, t.handle);
++    expect(picker.pick(worldOf(t, 900, 100))?.instance, t.handle,
++        reason: 'a chair, outside the top, inside the box');
++    expect(picker.pick(worldOf(t, 400, 1300))?.instance, t.handle,
++        reason: 'beside the far chair: no shape, inside the box');
++    expect(picker.pick(worldOf(t, 400, 1500)), isNull,
++        reason: 'beyond the far chair: outside the box');
++    expect(picker.pick(worldOf(t, 1600, 700)), isNull);
++    expect(picker.pick(worldOf(t, 1500, 700))?.instance, t.handle,
++        reason: 'on the right edge, within the tolerance');
++    expect(picker.pick(worldOf(t, 900, 1100))?.instance, t.handle,
++        reason: 'on the far edge');
++    expect(picker.pick(Vector2(900, 700)), isNull,
++        reason: 'where the top would be without the transform');
++  });
++
++  test('TPK2 a wall over the top does not hide the table (M-14c)', () {
++    final doc = unitPlan();
++    final t = placeTurned(doc, tableSymbol(), Vector2(-3200, 1800));
++    final a = worldOf(t, 300, 700), b = worldOf(t, 1500, 700);
++    addLine(doc, a, b);
++    expect(pickerOf(doc).pick(worldOf(t, 900, 700))?.instance, t.handle);
++  });
++
++  test('TPK3 overlapping tables: the higher handle wins (M-14c2-2)', () {
++    final doc = unitPlan();
++    final low = placeTurned(doc, tableSymbol(), Vector2(500, 500));
++    final high =
++        placeTurned(doc, stoolSymbol, Vector2(500, 500), mirrored: false);
++    expect(high.handle.value, greaterThan(low.handle.value));
++    // The stool's seat is centred on (500, 500), inside the table's top.
++    expect(pickerOf(doc).pick(Vector2(500, 500))?.instance, high.handle);
++    expect(pickerOf(doc).pick(worldOf(low, 1450, 350))?.instance, low.handle);
++  });
++
++  test('TPK4 a round top: inside, on the edge, outside', () {
++    final doc = unitPlan();
++    final s = placeTurned(doc, stoolSymbol, Vector2(-9000, 7000));
++    final picker = pickerOf(doc);
++    expect(picker.pick(worldOf(s, 400 + 180, 300))?.instance, s.handle);
++    expect(picker.pick(worldOf(s, 400, 300 + 190))?.instance, s.handle,
++        reason: 'on the edge, within the tolerance');
++    expect(picker.pick(worldOf(s, 400 + 195, 300)), isNull);
++    expect(picker.pick(worldOf(s, 400 + 170, 300 - 170))?.instance, s.handle,
++        reason: 'off the seat, in the box\'s corner');
++  });
++
++  test(
++      'TPK5 a hidden table is not picked; a locked one is, flagged '
++      '(S9, M-14c2-10)', () {
++    final doc = unitPlan();
++    final hidden = addLayer(doc, 'Hidden', visible: false);
++    final locked = addLayer(doc, 'Locked', locked: true);
++    final a = placeTurned(doc, tableSymbol(), Vector2(0, 0));
++    final b = placeTurned(doc, tableSymbol(), Vector2(6000, 0));
++    doc.commands.execute(SetInstanceLayerCommand(a.handle, hidden));
++    doc.commands.execute(SetInstanceLayerCommand(b.handle, locked));
++    final picker = pickerOf(doc);
++    expect(picker.pick(worldOf(a, 900, 700)), isNull);
++    final hit = picker.pick(worldOf(b, 900, 700))!;
++    expect(hit.instance, b.handle);
++    expect(hit.locked, isTrue);
++  });
++
++  test('TPK6 a move is followed: the cache is keyed by the state id', () {
++    final doc = unitPlan();
++    final t = placeTurned(doc, tableSymbol(), Vector2(2000, 2000));
++    final picker = pickerOf(doc);
++    final inside = worldOf(t, 900, 700);
++    expect(picker.pick(inside)?.instance, t.handle);
++    doc.commands.execute(TransformNodeCommand(
++        t.handle, Transform2.translation(5000, 0).multiply(t.transform)));
++    expect(picker.pick(inside), isNull);
++    expect(picker.pick(inside + Vector2(5000, 0))?.instance, t.handle);
++  });
++
++  test(
++      'TPK7 an asymmetric top, mirrored, turned, 40 m off the origin: inside '
++      'near its edges (R-2, M-14c2-11)', () {
++    final doc = unitPlan();
++    final t = placeTurned(doc, trapezoidTable, Vector2(40000, -27000));
++    final picker = pickerOf(doc);
++    // Inside, near the short slanted edges.
++    for (final (x, y) in [(1250, 950), (560, 880), (260, 330), (1560, 320)]) {
++      expect(picker.pick(worldOf(t, x.toDouble(), y.toDouble()))?.instance,
++          t.handle,
++          reason: 'inside at ($x, $y)');
++    }
++    // Outside the box, just beyond its edges.
++    for (final (x, y) in [(900, 1050), (150, 650), (1650, 650), (900, 250)]) {
++      expect(picker.pick(worldOf(t, x.toDouble(), y.toDouble())), isNull,
++          reason: 'outside at ($x, $y)');
++    }
++  });
++
++  test(
++      'TPK7b a box asymmetric about the base point, mirrored and turned: '
++      'the box turns with the table; its world bounds do not pick', () {
++    // One chair, right of the top: the box spans x 300..1850, so a
++    // mirror about x 900 puts the chair at x -50..400 ([sideChairTable]).
++    final doc = unitPlan();
++    final t = placeTurned(doc, sideChairTable, Vector2(-38000, 26000));
++    final picker = pickerOf(doc);
++    expect(picker.pick(worldOf(t, 1800, 400))?.instance, t.handle,
++        reason: 'below the chair, inside the box');
++    expect(picker.pick(worldOf(t, 0, 700)), isNull,
++        reason: 'where the chair would be without the mirror');
++    expect(picker.pick(worldOf(t, 1900, 700)), isNull);
++    // The box's world bounds, turned 37 degrees, hold their corners; the
++    // box itself does not.
++    final world = Aabb2.raw(300, 300, 1850, 1100).transformedBy(t.transform);
++    final corner = Vector2(world.minX + 20, world.minY + 20);
++    expect(picker.pick(corner), isNull, reason: 'a world-bounds corner');
++  });
++
++  test(
++      'TPK10 a top beats a neighbour\'s box; between two boxes, off both '
++      'tops, the higher handle wins', () {
++    final doc = unitPlan();
++    // A's top spans world y -12,400..-11,600, its box -12,750..-11,250;
++    // B's box reaches down to y -11,650 (its lower chair), its top to
++    // -11,300. The pair is then turned 37 degrees about A.
++    placeAt(doc, tableSymbol(), Vector2(30000, -12000));
++    placeAt(doc, tableSymbol(), Vector2(30000, -10900));
++    final pivot = Vector2(30000, -12000);
++    final turn = Transform2.translation(pivot.x, pivot.y)
++        .multiply(Transform2.rotation(kDeg37))
++        .multiply(Transform2.translation(-pivot.x, -pivot.y));
++    final nodes = doc.tree.nodes.whereType<InstanceNode>().toList()
++      ..sort((x, y) => x.handle.value.compareTo(y.handle.value));
++    for (final n in nodes) {
++      doc.commands
++          .execute(TransformNodeCommand(n.handle, turn.multiply(n.transform)));
++    }
++    final a = nodes[0].handle, b = nodes[1].handle;
++    Vector2 world(double x, double y) => turn.transformPoint(Vector2(x, y));
++    final picker = pickerOf(doc);
++    expect(picker.pick(world(29500, -11620))?.instance, a,
++        reason: 'A\'s top, B\'s box: A, though B is drawn later');
++    expect(picker.pick(world(29500, -11500))?.instance, b,
++        reason: 'both boxes, neither top: B, drawn later');
++    expect(picker.pick(world(29500, -11200))?.instance, b, reason: 'B\'s top');
++  });
++
++  test(
++      'TPK11 one leaf map shared by a build: a definition whose lowest-handle '
++      'leaf is not in its lowest slot keeps its top; its box holds every '
++      'leaf', () {
++    final doc = unitPlan();
++    EntityRecord line(Handle h, Handle owner) => EntityRecord(
++          handle: h,
++          owner: owner,
++          kind: EntityKind.line,
++          layer: ReservedHandles.layerZero,
++          linetype: ReservedHandles.byLayerLinetype,
++          linetypeScale: 1.0,
++          geomIndex: 0,
++          color: const ByLayerColor(),
++          lineweight: kByLayer,
++          transparency: kByLayer,
++          flags: 0,
++        );
++    GeometryPayload segment(double x0, double y0, double x1, double y1) =>
++        GeometryPayload(
++            coords: Float64List.fromList([x0, y0, x1, y1]),
++            scalars: Float64List(0));
++    // A stray line takes slot 0; removed once the tables are placed, it
++    // leaves that slot to the next leaf, whose handle is the highest.
++    final stray = doc.handleSeed.next();
++    doc.commands.execute(AddEntityCommand(
++        record: line(stray, doc.rootHandle), payload: segment(0, 0, 10, 10)));
++    final a = placeTurned(doc, tableSymbol(), Vector2(41000, -27500));
++    final b = placeTurned(doc, trapezoidTable, Vector2(-38000, 26000));
++    doc.commands.execute(RemoveEntityCommand(stray));
++    // B's definition gains an open leaf right of its top, past its box.
++    final added = doc.handleSeed.next();
++    doc.commands.execute(AddEntityCommand(
++        record: line(added, b.definition),
++        payload: segment(1600, 300, 2400, 300)));
++    final leaves = doc.leavesByOwner()[b.definition]!;
++    expect(doc.entities.handleAt(leaves.first), added,
++        reason: 'premise: the added leaf is in the definition\'s lowest slot');
++
++    final picker = pickerOf(doc);
++    expect(picker.candidates.map((c) => c.unit.instance), [a.handle, b.handle]);
++    final top = picker.candidates[1].top! as PolygonTop;
++    expect(top.xy, [200, 300, 1600, 300, 1300, 1000, 500, 900],
++        reason: 'the lowest handle, not the lowest slot');
++    for (final d in [a.definition, b.definition]) {
++      expect((unitTopOf(doc, d, doc.leavesByOwner())! as PolygonTop).xy,
++          (unitTopOf(doc, d)! as PolygonTop).xy,
++          reason: 'the shared map and the scan agree');
++    }
++    expect(picker.pick(worldOf(b, 2350, 310))?.instance, b.handle,
++        reason: 'inside the box only through the added leaf');
++    expect(picker.pick(worldOf(b, 2450, 310)), isNull);
++    expect(picker.pick(worldOf(a, 900, 100))?.instance, a.handle);
++  });
++
++  test(
++      'TPK12 a build scans the entity store once, however many definitions, '
++      'and not at all once they are cached; every definition reads that '
++      'scan', () {
++    final doc = unitPlan();
++    final a = placeTurned(
++        doc, tableSymbol(key: 'fx.table.a'), Vector2(41000, -27500));
++    final b = placeTurned(
++        doc, tableSymbol(key: 'fx.table.b'), Vector2(-38000, 26000));
++    expect(a.definition, isNot(b.definition), reason: 'premise');
++    // The scan the picker sees is doctored: A keeps its top alone, B loses
++    // its top. A picker that scans again, behind the map, sees neither.
++    List<int> byHandle(List<int> slots) =>
++        [...slots]..sort((x, y) => doc.entities
++            .handleAt(x)
++            .value
++            .compareTo(doc.entities.handleAt(y).value));
++    var scans = 0;
++    Map<Handle, List<int>> doctored() {
++      scans++;
++      final map = doc.leavesByOwner();
++      map[a.definition] = [byHandle(map[a.definition]!).first];
++      map[b.definition] = byHandle(map[b.definition]!).sublist(1);
++      return map;
++    }
++
++    final picker = pickerOf(doc, leavesByOwner: doctored);
++    expect(picker.candidates.map((c) => c.unit.instance), [a.handle, b.handle]);
++    expect(scans, 1, reason: 'one scan for two definitions');
++    expect(picker.pick(worldOf(a, 900, 100)), isNull,
++        reason: 'A\'s box is its top alone: the chair is outside');
++    expect(picker.pick(worldOf(a, 900, 700))?.instance, a.handle);
++    expect((picker.candidates[1].top! as PolygonTop).xy,
++        [675, -50, 1125, -50, 1125, 400, 675, 400],
++        reason: 'B\'s top is its lowest remaining leaf, the near chair');
++    expect(picker.pick(worldOf(b, 400, 700)), isNull,
++        reason: 'B\'s box is its chairs\' alone: the top\'s left is out');
++
++    doc.commands.execute(TransformNodeCommand(
++        a.handle, Transform2.translation(5, 0).multiply(a.transform)));
++    expect(picker.candidates, hasLength(2), reason: 'premise: rebuilt');
++    expect(scans, 1, reason: 'both definitions cached: no scan');
++  });
++
++  test('TPK8 an open first leaf is no top: picked by its box (R-8, F-7)', () {
++    final doc = unitPlan();
++    final t = placeTurned(doc, openTable, Vector2(-4000, 2500));
++    final closed = placeTurned(doc, tableSymbol(), Vector2(4000, 2500));
++    final picker = pickerOf(doc);
++    expect(unitTopOf(doc, t.definition), isNull);
++    expect(picker.pick(worldOf(t, 900, 700))?.instance, t.handle);
++    expect(picker.pick(worldOf(t, 900, 1200)), isNull);
++    expect(picker.candidates.map((c) => c.unit.instance),
++        [t.handle, closed.handle]);
++    expect(picker.candidates.first.top, isNull);
++    final top = unitTopOf(doc, closed.definition)! as PolygonTop;
++    expect(top.xy, [300, 300, 1500, 300, 1500, 1100, 300, 1100],
++        reason: 'the closing vertex dropped');
++  });
++
++  test(
++      'TPK9 a reach picks the nearest box on a miss, not the later-drawn; '
++      'nothing beyond it (spec 14t R-11, M-14t-26)', () {
++    final doc = unitPlan();
++    // A (mirrored) and B face each other across a 100 mm gap: A's top
++    // spans world x 29,400..30,600, B's 30,700..31,900. Then the pair is
++    // turned 37 degrees about the gap, rigidly: distances are kept.
++    placeAt(doc, tableSymbol(), Vector2(30000, -12000), mirrored: true);
++    placeAt(doc, tableSymbol(), Vector2(31300, -12000));
++    final pivot = Vector2(30650, -12000);
++    final turn = Transform2.translation(pivot.x, pivot.y)
++        .multiply(Transform2.rotation(kDeg37))
++        .multiply(Transform2.translation(-pivot.x, -pivot.y));
++    final nodes = doc.tree.nodes.whereType<InstanceNode>().toList()
++      ..sort((x, y) => x.handle.value.compareTo(y.handle.value));
++    for (final n in nodes) {
++      doc.commands
++          .execute(TransformNodeCommand(n.handle, turn.multiply(n.transform)));
++    }
++    final a = nodes[0].handle, b = nodes[1].handle;
++    Vector2 world(double x) => turn.transformPoint(Vector2(x, -12000));
++    final picker = pickerOf(doc);
++    expect(picker.pick(world(30640)), isNull, reason: 'in the gap: a miss');
++    expect(picker.pick(world(30640), reach: 240)?.instance, a,
++        reason: '40 mm from A, 60 from B: A, though B is drawn later');
++    expect(picker.pick(world(30665), reach: 240)?.instance, b,
++        reason: '65 mm from A, 35 from B');
++    expect(picker.pick(world(29100), reach: 240), isNull,
++        reason: '300 mm from A');
++    expect(picker.pick(world(29200), reach: 240)?.instance, a,
++        reason: '200 mm from A: within the reach');
++
++    // A table scaled by 2 by hand, far off: its local units are 2 mm.
++    final c = placeTurned(doc, tableSymbol(), Vector2(45000, -20000));
++    final at = Vector2(45000, -20000);
++    doc.commands.execute(TransformNodeCommand(
++        c.handle,
++        Transform2.translation(at.x, at.y)
++            .multiply(Transform2.scale(2, 2))
++            .multiply(Transform2.translation(-at.x, -at.y))
++            .multiply(c.transform)));
++    final scaled = doc.tree[c.handle]! as InstanceNode;
++    Vector2 off(double x) => scaled.transform.transformPoint(Vector2(x, 700));
++    expect(picker.pick(off(1600), reach: 240)?.instance, c.handle,
++        reason: '100 local, 200 mm in the world');
++    expect(picker.pick(off(1650), reach: 240), isNull,
++        reason: '150 local, 300 mm in the world (review F-5)');
++  });
++
++  test(
++      'TPK13 a table whose box has a corner not finite in the world is no '
++      'candidate: a NaN translation, an infinite corner, a singular '
++      'transform (zone spec Z0)', () {
++    final doc = unitPlan();
++    final kept = placeTurned(doc, trapezoidTable, Vector2(40000, -27000));
++    final nan = placeTurned(doc, tableSymbol(), Vector2(-38000, 26000));
++    final far = placeTurned(doc, tableSymbol(), Vector2(41000, 27500));
++    final flat = placeTurned(doc, stoolSymbol, Vector2(-39000, -26000));
++    doc.commands.execute(TransformNodeCommand(
++        nan.handle, Transform2(0.8, 0.6, -0.6, 0.8, double.nan, 26000)));
++    // det 1, finite; x' = 1e306 * x overflows for every x of the box.
++    doc.commands.execute(TransformNodeCommand(
++        far.handle, const Transform2(1e306, 0, 0, 1e-306, 41000, 27500)));
++    doc.commands.execute(TransformNodeCommand(
++        flat.handle, const Transform2(1, 2, 2, 4, -39000, -26000)));
++    expect(
++        UnitPicker.candidatesOf(doc, unitsOf(doc).current,
++                boxes: {}, leaves: doc.leavesByOwner)
++            .map((c) => c.unit.instance),
++        [kept.handle]);
++    expect(pickerOf(doc).candidates.map((c) => c.unit.instance), [kept.handle]);
++  });
++
++  test(
++      'TPK14 a pick allocates nothing per table in any pass (CLAUDE.md; '
++      'Task 4 review R-5): on a top, on a box off its top, within a reach, '
++      'a miss with and without one', () {
++    // 20 trapezoid tables 40 m off the origin, turned 37 degrees and
++    // mirrored; each base point (900, 650) at its row's place.
++    final doc = rowOfTables(20);
++    final made = Tally();
++    final inverses = <CountingTransform>[];
++    final picker = pickerOf(doc, invert: (m) {
++      final inverse = CountingTransform(m.invert(), made);
++      inverses.add(inverse);
++      return inverse;
++    });
++    final placed = [
++      for (final t in unitsOf(doc).current.units)
++        (t.instance, (doc.tree[t.instance]! as InstanceNode).transform)
++    ];
++    Vector2 on(Transform2 m, double x, double y) =>
++        Vector2(m.a * x + m.c * y + m.e, m.b * x + m.d * y + m.f);
++    // Per table: (the point, the reach, the instance expected or null).
++    final cases = [
++      for (final (h, m) in placed) ...[
++        (on(m, 900, 600), 0.0, h), // the top
++        (on(m, 250, 950), 0.0, h), // the box, off the top
++        (on(m, 1700, 650), 0.0, null), // 100 mm beyond the box
++        (on(m, 1700, 650), 150.0, h), // the same, within a reach
++        // The floor 1.77 m from every base point (a box reaches under
++        // 0.79 m from its own): a miss in every pass.
++        (on(m, 900, 650) + Vector2(1250, -1250), 150.0, null),
++      ]
++    ];
++    for (final (p, reach, want) in cases) {
++      expect(picker.pick(p, reach: reach)?.instance, want,
++          reason: '$p, reach $reach');
++    }
++    expect(inverses, hasLength(20), reason: 'one inverse per candidate');
++    made.count = 0;
++    final candidates = picker.candidates;
++    for (var pass = 0; pass < 10; pass++) {
++      for (final (p, reach, want) in cases) {
++        expect(picker.pick(p, reach: reach)?.instance, want);
++      }
++    }
++    expect(made.count, 0,
++        reason: '1000 picks asked no inverse for a new object');
++    expect(inverses, hasLength(20), reason: 'no inverse built anew');
++    expect(identical(picker.candidates, candidates), isTrue,
++        reason: 'the candidates are cached');
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/support/unit_editor_fixture.dart b/packages/jet_cad_2d_plan/test/support/unit_editor_fixture.dart
+new file mode 100644
+index 00000000..b701b591
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/support/unit_editor_fixture.dart
+@@ -0,0 +1,263 @@
++// The editor fixture of jet_cad_floor_plan (test/host/editor_fixture.dart),
++// ported for the units-only selection tests (2b Task 8; Task 10's
++// inspector tests reuse it): the embedding fixture's hand-made table (its
++// box off its base point, an asymmetric top) placed as `1` (turned 30
++// degrees) and `2` (mirrored at exactly 90 degrees) beside the north wall,
++// `7` and ` 7 ` sharing a label, an unlabelled table, `5` on a hidden and `L`
++// on a locked layer; a root-level group of two lines, turned and off the
++// origin; a free line; a TEXT; and a chair, a symbol that is no unit.
++// The startup flat (sub-project 3's walls and rooms) is not ported: two
++// root-level lines stand for the north wall and its inner face, a closed
++// square for the column, and a line through table 1's top for the parquet
++// hairline (fixture changes, A12). Same world coordinates, same camera
++// (0.37 px/mm, y up, panned): never the identity.
++import 'dart:math' as math;
++import 'dart:ui' as ui;
++
++import 'package:flutter/material.dart';
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
++    show InteractionLayer, ViewportTransform;
++import 'package:jet_cad_2d_kit/authoring.dart'
++    show CatalogPolyline, CatalogSymbol, CatalogUnit;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show PlanKit, UnitKinds;
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:jet_cad_2d_plan/src/kits/locks.dart' show LockSet;
++import 'package:jet_cad_2d_plan/src/units/unit_index.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import 'harness.dart' show planText;
++import 'unit_fixtures.dart';
++
++/// The window every editor test runs in.
++const Size kEditorSurface = Size(2400, 1500);
++
++const String kEmbeddingHidden = 'Hidden';
++const String kEmbeddingLocked = 'Locked';
++
++/// The embedding fixture's table (four seats): its top an asymmetric
++/// quadrilateral; its base point the definition's origin, outside its box.
++const CatalogSymbol embeddingTable = CatalogSymbol(
++  key: 'fx.embedding.four',
++  name: 'Test embedding table',
++  category: 'Tests',
++  tags: ['table', 'test'],
++  unit: CatalogUnit(kind: UnitKinds.table, capacity: 4),
++  base: (0, 0),
++  shapes: [
++    CatalogPolyline([(300, -200), (1100, -200), (900, 400), (300, 250)],
++        closed: true),
++  ],
++);
++
++/// [embeddingTable]'s box in definition space: its centre (700, 100) is not
++/// its base point (0, 0).
++const Aabb2 embeddingBox = Aabb2.raw(300, -200, 1100, 400);
++
++/// A chair: no unit, its base point (0, 0) off its seat.
++const CatalogSymbol editorChair = CatalogSymbol(
++  key: 'fx.chair.plain',
++  name: 'Test chair',
++  category: 'Tests',
++  tags: ['chair', 'test'],
++  base: (0, 0),
++  shapes: [
++    CatalogPolyline([(50, 50), (500, 50), (500, 430), (50, 430)], closed: true),
++    CatalogPolyline([(50, 430), (500, 430), (500, 500), (50, 500)],
++        closed: true),
++  ],
++);
++
++/// `translate(x, y) · R(theta) · diag(sx, sy)`, written out.
++Transform2 embeddingPlacement(double x, double y, double degrees,
++    {double sx = 1, double sy = 1}) {
++  final t = degrees * math.pi / 180;
++  final cos = math.cos(t), sin = math.sin(t);
++  return Transform2(sx * cos, sx * sin, -sy * sin, sy * cos, x, y);
++}
++
++/// One table of the fixture, as the test knows it.
++final class EditorTable {
++  const EditorTable(this.label, this.transform, {this.layer = '0'});
++
++  /// The label written, or null for an unlabelled table.
++  final String? label;
++  final Transform2 transform;
++  final String layer;
++}
++
++/// The fixture's tables in placement order (ascending by handle), as
++/// today's `editorTables` (editor_fixture.dart:75-87).
++final List<EditorTable> editorTables = [
++  EditorTable('1', embeddingPlacement(21650, 15800, 30)),
++  const EditorTable('2', Transform2(0, 1, 1, 0, 23100, 15600)),
++  EditorTable('7', embeddingPlacement(22900, 14550, 60)),
++  EditorTable(' 7 ', embeddingPlacement(25000, 15250, -150, sy: -1)),
++  EditorTable(null, embeddingPlacement(21550, 14800, 15)),
++  EditorTable('5', embeddingPlacement(24600, 13350, 45),
++      layer: kEmbeddingHidden),
++  EditorTable('L', embeddingPlacement(25200, 15500, 120, sy: -1),
++      layer: kEmbeddingLocked),
++];
++
++final Transform2 editorChairPlacement = embeddingPlacement(23800, 16100, 10);
++final Transform2 editorGroupPlacement = embeddingPlacement(21600, 13450, 20);
++final (Vector2, Vector2) editorFreeLine =
++    (Vector2(22700, 13400), Vector2(23300, 14300));
++final Vector2 editorTextAt = Vector2(21700, 14250);
++const double editorTextHeight = 200;
++const String editorTextWords = 'Bar';
++
++/// The north wall's stand-in, its inner face's, and the parquet hairline
++/// through table 1's top (local (500, 0) of `1` is (22,083, 16,050)).
++final (Vector2, Vector2) editorNorthWall =
++    (Vector2(21400, 16850), Vector2(26400, 16850));
++final (Vector2, Vector2) editorInnerFace =
++    (Vector2(21400, 16750), Vector2(26400, 16750));
++final (Vector2, Vector2) editorHairline =
++    (Vector2(21900, 16050), Vector2(22300, 16050));
++
++/// The column: a 400 x 400 square, its west edge through (23,500, 14,000).
++const List<(double, double)> editorColumn = [
++  (23500, 13800),
++  (23900, 13800),
++  (23900, 14200),
++  (23500, 14200),
++];
++
++/// The fixture's plan, as a plan file over [fxKit].
++String unitEditorPlanJson() => planText([fxKit()], (doc) {
++      final zero = ReservedHandles.layerZero;
++      final hidden = addLayer(doc, kEmbeddingHidden, visible: false);
++      final locked = addLayer(doc, kEmbeddingLocked, locked: true);
++      for (final t in editorTables) {
++        final h = placeUnit(doc, embeddingTable,
++            transform: t.transform,
++            layer: switch (t.layer) {
++              kEmbeddingHidden => hidden,
++              kEmbeddingLocked => locked,
++              _ => zero,
++            });
++        if (t.label case final label?) addUnitLabel(doc, h, label);
++      }
++      final group = doc.handleSeed.next();
++      doc.commands.execute(AddNodeCommand(GroupNode(
++          handle: group,
++          parent: doc.rootHandle,
++          transform: editorGroupPlacement,
++          children: const [])));
++      for (final (a, b) in [
++        (Vector2(100, 100), Vector2(900, 400)),
++        (Vector2(100, 400), Vector2(900, 100)),
++      ]) {
++        doc.commands.execute(AddEntityCommand(
++            record: draftRecord(doc.handleSeed.next(), group, EntityKind.line,
++                layer: zero),
++            payload: linePayload(a, b)));
++      }
++      for (final (a, b) in [
++        editorFreeLine,
++        editorNorthWall,
++        editorInnerFace,
++        editorHairline,
++      ]) {
++        doc.commands.execute(
++            addDrafted(doc, EntityKind.line, linePayload(a, b), layer: zero));
++      }
++      doc.commands.execute(addDrafted(
++          doc,
++          EntityKind.polyline,
++          polylinePayload([for (final (x, y) in editorColumn) Vector2(x, y)],
++              closed: true),
++          layer: zero));
++      doc.commands.execute(addDrafted(
++          doc, EntityKind.text, textPayload(editorTextAt, editorTextHeight),
++          layer: zero, text: editorTextWords));
++      placeUnit(doc, editorChair, transform: editorChairPlacement);
++      doc.commands.clearHistory();
++    });
++
++/// The camera every editor test runs under: 0.37 px/mm, y flipped, panned
++/// so world (21,400, 17,070) is the canvas's top left.
++ViewportTransform editorCamera() => ViewportTransform(
++    worldToScreenMatrix: Transform2(0.37, 0, 0, -0.37, -7918, 6315.9));
++
++/// The editor over [unitEditorPlanJson] under [permissions], in
++/// [kEditorSurface], under [editorCamera]. The controller is disposed at
++/// tear-down.
++Future<PlanController> mountUnitEditor(WidgetTester tester,
++    {PlanPermissions permissions = PlanPermissions.full}) async {
++  final c = PlanController(kits: [fxKit()], json: unitEditorPlanJson());
++  addTearDown(c.dispose);
++  c.permissions = permissions;
++  await tester.binding.setSurfaceSize(kEditorSurface);
++  addTearDown(() => tester.binding.setSurfaceSize(null));
++  await tester
++      .pumpWidget(MaterialApp(home: Scaffold(body: PlanEditor(controller: c))));
++  await tester.pump();
++  await tester.pump();
++  c.camera.value = editorCamera();
++  await tester.pump();
++  return c;
++}
++
++/// Today's `setCaps`: the permissions changed at runtime, one pump.
++Future<void> setPermissions(
++    WidgetTester tester, PlanController c, PlanPermissions p) async {
++  c.permissions = p;
++  await tester.pump();
++}
++
++Offset canvasOrigin(WidgetTester tester) =>
++    tester.getTopLeft(find.byType(InteractionLayer));
++
++/// World [w] on the screen, by the camera's forward transform.
++Offset screenOf(WidgetTester tester, PlanController c, Vector2 w) {
++  final m = c.camera.value.worldToScreenMatrix;
++  return canvasOrigin(tester) +
++      Offset(m.a * w.x + m.c * w.y + m.e, m.b * w.x + m.d * w.y + m.f);
++}
++
++/// The plan's units, read now (the fixture kit loaded: nothing locked by a
++/// missing kit).
++UnitIndex unitsIn(PlanController c) => UnitIndex.of(c.document,
++    catalog: c.catalog,
++    locks: LockSet.scan(c.document, (kit) => c.kits.kitOf(kit) != null));
++
++/// Table [n]'s instance; ` 7 ` is the later of the two sevens, null the
++/// unlabelled one.
++Handle tableOf(PlanController c, String? n) {
++  final index = unitsIn(c);
++  if (n == null) return index.units.singleWhere((u) => u.text == null).instance;
++  return index.withLabel(n)[n == ' 7 ' ? 1 : 0].instance;
++}
++
++/// The world centre of table [n]'s box, by the fixture's own transform.
++Vector2 centreOf(PlanController c, String n) {
++  final node = c.document.tree[tableOf(c, n)]! as InstanceNode;
++  return node.transform.transformPoint(Vector2(700, 100));
++}
++
++Future<void> click(WidgetTester tester, Offset at) async {
++  final g = await tester.createGesture(kind: ui.PointerDeviceKind.mouse);
++  await g.addPointer(location: at - const Offset(3, 3));
++  await g.moveTo(at);
++  await tester.pump();
++  await g.down(at);
++  await tester.pump();
++  await g.up();
++  await tester.pump();
++  await g.removePointer();
++  await tester.pump();
++}
++
++Future<bool> press(WidgetTester tester, LogicalKeyboardKey key) async {
++  final handled = await tester.sendKeyEvent(key);
++  await tester.pump();
++  return handled;
++}
++
++/// The plan's kit set for a controller over [unitEditorPlanJson].
++List<PlanKit> editorKits() => [fxKit()];
+diff --git a/packages/jet_cad_2d_plan/test/support/unit_fixtures.dart b/packages/jet_cad_2d_plan/test/support/unit_fixtures.dart
+index 016e0673..94164b45 100644
+--- a/packages/jet_cad_2d_plan/test/support/unit_fixtures.dart
++++ b/packages/jet_cad_2d_plan/test/support/unit_fixtures.dart
+@@ -1,32 +1,39 @@
+-// The units' fixture (2b Task 6; Task 8 adds the picker's and the
+-// editor's helpers, and Tasks 7, 9, 10, 14 and 15 reuse it), ported from
++// The units' fixture (2b Task 6; Task 8 adds the picker's helpers, two
++// more tables, `rowOfTables` and `CountingTransform`, and Tasks 7, 9, 10,
++// 14 and 15 reuse it), ported from
+ // jet_cad_floor_plan's test/tables/table_fixture.dart: a servable table
+ // symbol, a stool, a planter, a table with one chair and a trapezoid, and a
+ // plan to place them in. A symbol is a CatalogSymbol; its SymbolEntry is
+ // built by hand, never through a library, so a unit that breaks the
+ // library's outline rule (Task 8's open table) can still be placed. The
+ // keys are under the fixture kit `fx` with two segments (K2's key rule,
+ // `isSymbolKey`; controller rulings R-10 P-1 and R-19). Base points and
+ // placements are off the origin (the degenerate-fixture rule).
+ import 'dart:math' as math;
++import 'dart:typed_data';
+ 
++import 'package:flutter/foundation.dart' show ValueNotifier;
++import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_kit/authoring.dart'
+     show
+         CatalogCircle,
+         CatalogLine,
+         CatalogPolyline,
+         CatalogSymbol,
+         CatalogUnit;
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+ import 'package:jet_cad_2d_plan/src/kits/locks.dart';
++import 'package:jet_cad_2d_plan/src/service/unit_picker.dart';
++import 'package:jet_cad_2d_plan/src/symbols/symbol_placer.dart'
++    show definitionForEntry, placementTransform;
+ import 'package:jet_cad_2d_plan/src/units/unit_index.dart';
+ import 'package:jet_cad_2d_plan/src/units/unit_label.dart';
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import 'harness.dart';
+ import 'symbol_fixtures.dart' show leafRecord;
+ 
+ /// The fixtures' kit: no type, no tool, no library. Its symbols are placed
+ /// by hand; a controller loads it so that LockSet leaves them unlocked.
+ const String fxKitId = 'fx';
+@@ -197,10 +204,209 @@ Handle labelUnit(DraftDocument doc, InstanceNode i, String text) {
+   doc.commands.execute(command);
+   return command.record.handle;
+ }
+ 
+ /// The labels of [index]'s labelled units, one per unit (today's
+ /// `TableSurvey.numbers`).
+ List<String> labelsOf(UnitIndex index) => [
+       for (final u in index.units)
+         if (u.text != null) u.text!,
+     ];
++
++/// One chair right of the top: the box spans x 300..1850.
++const CatalogSymbol sideChairTable = CatalogSymbol(
++  key: 'fx.table.side',
++  name: 'Side chair table',
++  category: 'Tests',
++  tags: ['table', 'test'],
++  unit: CatalogUnit(kind: UnitKinds.table, capacity: 1),
++  base: (900, 700),
++  shapes: [
++    CatalogPolyline([(300, 300), (1500, 300), (1500, 1100), (300, 1100)],
++        closed: true),
++    CatalogPolyline([(1400, 475), (1850, 475), (1850, 925), (1400, 925)],
++        closed: true),
++  ],
++);
++
++/// A unit whose first leaf is an open polyline: no top (R-8). A library
++/// refuses it (K3 rule 11); a plan file may hold it.
++const CatalogSymbol openTable = CatalogSymbol(
++  key: 'fx.table.open',
++  name: 'Open table',
++  category: 'Tests',
++  tags: ['table', 'test'],
++  unit: CatalogUnit(kind: UnitKinds.table, capacity: 2),
++  base: (900, 700),
++  shapes: [
++    CatalogPolyline([(300, 300), (1500, 300), (1500, 1100), (300, 1100)]),
++    CatalogPolyline([(675, -50), (1125, -50), (1125, 400), (675, 400)],
++        closed: true),
++  ],
++);
++
++/// An empty plan over [fxKit] (the page, the contract's components), in
++/// millimetres, no system installed.
++DraftDocument unitPlan() => planDocument([fxKit()]);
++
++/// Places [s] by [transform] on [layer] (layer 0 by default): its
++/// definition copied on first use (definitionForEntry), one instance, one
++/// step, **no label** (a test adds one with [addUnitLabel]). Returns the
++/// instance.
++Handle placeUnit(DraftDocument doc, CatalogSymbol s,
++    {required Transform2 transform, Handle? layer}) {
++  final made = definitionForEntry(doc, entryOf(s));
++  final h = doc.handleSeed.next();
++  doc.commands.execute(CompoundCommand([
++    ...made.commands,
++    AddNodeCommand(InstanceNode(
++        handle: h,
++        parent: doc.rootHandle,
++        definition: made.definition,
++        layer: layer ?? ReservedHandles.layerZero,
++        transform: transform)),
++  ], label: 'Place ${s.name}'));
++  return h;
++}
++
++/// [s] placed with its base point at [at], [quarterTurns] counter-clockwise
++/// and [mirrored] (the placer's transform, symbol_placer.dart:48).
++Handle placeAt(DraftDocument doc, CatalogSymbol s, Vector2 at,
++        {int quarterTurns = 0, bool mirrored = false}) =>
++    placeUnit(doc, s,
++        transform: placementTransform(
++            at: at,
++            basePoint: Vector2(s.base.$1, s.base.$2),
++            quarterTurns: quarterTurns,
++            mirrored: mirrored));
++
++/// Places [s] mirrored (by default) at [at], then turns it by 37 degrees
++/// about [at]. Returns the instance node.
++InstanceNode placeTurned(DraftDocument doc, CatalogSymbol s, Vector2 at,
++    {bool mirrored = true}) {
++  final h = placeAt(doc, s, at, mirrored: mirrored);
++  final node = doc.tree[h]! as InstanceNode;
++  final turn = Transform2.translation(at.x, at.y)
++      .multiply(Transform2.rotation(kDeg37))
++      .multiply(Transform2.translation(-at.x, -at.y));
++  doc.commands.execute(TransformNodeCommand(h, turn.multiply(node.transform)));
++  return doc.tree[h]! as InstanceNode;
++}
++
++Vector2 worldOf(InstanceNode n, double x, double y) =>
++    n.transform.transformPoint(Vector2(x, y));
++
++/// A layer [name] beside layer 0.
++Handle addLayer(DraftDocument doc, String name,
++    {bool visible = true, bool locked = false}) {
++  final zero = doc.tables.layers[ReservedHandles.layerZero]!;
++  final h = doc.handleSeed.next();
++  doc.commands.execute(AddLayerCommand(LayerRecord(
++      handle: h,
++      name: name,
++      color: const IndexedColor(4),
++      linetype: zero.linetype,
++      lineweight: zero.lineweight,
++      transparency: zero.transparency,
++      visible: visible,
++      locked: locked)));
++  return h;
++}
++
++/// Adds [text] as [instance]'s UNIT label, stamped as a placed unit's
++/// (spec S2): Task 6's [labelUnit] (`addUnitLabelCommand`: owned by the
++/// instance, layer 0, BYBLOCK, the standard text style, anchored at the
++/// definition's base point, upright in the world, today's height rule,
++/// controller ruling R-21). One step. Returns the label's handle.
++Handle addUnitLabel(DraftDocument doc, Handle instance, String text) =>
++    labelUnit(doc, doc.tree[instance]! as InstanceNode, text);
++
++/// A unit index cache over [doc] with nothing locked and no type,
++/// disposed at tear-down. Call inside a test.
++UnitIndexCache unitsOf(DraftDocument doc, {ParametricCatalog? catalog}) {
++  final locked = ValueNotifier<Set<Handle>>(const {});
++  final cache = UnitIndexCache(doc,
++      catalog: catalog ?? ParametricCatalog(),
++      locks: LockSet.scan(doc, (_) => true),
++      locked: locked);
++  addTearDown(() {
++    cache.dispose();
++    locked.dispose();
++  });
++  return cache;
++}
++
++/// A picker over [doc] ([unitsOf]); the options and seams as UnitPicker's.
++UnitPicker pickerOf(DraftDocument doc,
++        {bool skipLocked = false,
++        bool placedOnly = false,
++        Map<Handle, List<int>> Function()? leavesByOwner,
++        Transform2 Function(Transform2 transform)? invert}) =>
++    UnitPicker(doc, unitsOf(doc),
++        skipLocked: skipLocked,
++        placedOnly: placedOnly,
++        leavesByOwner: leavesByOwner,
++        invert: invert);
++
++/// [n] trapezoid tables 40 m off the origin, ten to a row 2.5 m apart,
++/// each mirrored and turned 37 degrees about its base point.
++DraftDocument rowOfTables(int n) {
++  final doc = unitPlan();
++  for (var i = 0; i < n; i++) {
++    final at = Vector2(40000.0 + 2500 * (i % 10), -27000.0 - 2500 * (i ~/ 10));
++    placeTurned(doc, trapezoidTable, at);
++  }
++  return doc;
++}
++
++final class Tally {
++  int count = 0;
++}
++
++/// A candidate's inverse that counts every new object it is asked for: a
++/// point or a direction mapped, a product, an inverse, a list, a string.
++/// The coefficients are read as fields, which build nothing.
++final class CountingTransform extends Transform2 {
++  CountingTransform(Transform2 m, this.made)
++      : super(m.a, m.b, m.c, m.d, m.e, m.f);
++
++  final Tally made;
++
++  @override
++  Vector2 transformPoint(Vector2 p) {
++    made.count++;
++    return super.transformPoint(p);
++  }
++
++  @override
++  Vector2 transformDirection(Vector2 v) {
++    made.count++;
++    return super.transformDirection(v);
++  }
++
++  @override
++  Transform2 multiply(Transform2 other) {
++    made.count++;
++    return super.multiply(other);
++  }
++
++  @override
++  Transform2 invert() {
++    made.count++;
++    return super.invert();
++  }
++
++  @override
++  List<double> toJson() {
++    made.count++;
++    return super.toJson();
++  }
++
++  @override
++  String toString() {
++    made.count++;
++    return super.toString();
++  }
++}
++
++/// [values] as a Float64List (the tops' expectations).
++Float64List f64(List<double> values) => Float64List.fromList(values);
+diff --git a/packages/jet_cad_2d_plan/test/tools/design_selection_test.dart b/packages/jet_cad_2d_plan/test/tools/design_selection_test.dart
+new file mode 100644
+index 00000000..c603c159
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/tools/design_selection_test.dart
+@@ -0,0 +1,386 @@
++// 2b Task 8, spec S2 "In design, a generated unit stands for its object"
++// and decision 9; S4 selectUnitsOnly, relabel, the profiles. plan.select is
++// driven without a canvas (tool_events.dart) under the rotated, flipped,
++// off-origin test camera, over Task 5's service fixture: a turned, mirrored
++// table off the origin and two seats-only rows off the origin, one turned,
++// one curved.
++import 'package:flutter/foundation.dart' show ValueNotifier;
++import 'package:flutter/gestures.dart' show kPrimaryButton;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:jet_cad_2d_plan/src/kits/locks.dart' show LockSet;
++import 'package:jet_cad_2d_plan/src/service/unit_picker.dart';
++import 'package:jet_cad_2d_plan/src/symbols/symbol_placer.dart'
++    show definitionForEntry;
++import 'package:jet_cad_2d_plan/src/units/unit_index.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/harness.dart';
++import '../support/test_kit.dart';
++import '../support/service_fixture.dart' show serviceFixture;
++import '../support/tool_events.dart';
++import '../support/unit_editor_fixture.dart' show editorChair;
++import '../support/unit_fixtures.dart'
++    show
++        addLayer,
++        entryOf,
++        fxKit,
++        pickerOf,
++        placeTurned,
++        tableSymbol,
++        unitPlan,
++        worldOf;
++
++/// Task 5's fixture's plan text.
++String fixtureText() => serviceFixture().json;
++
++PlanController design({List<PlanKit>? kits}) {
++  final c = controllerFor(kits: kits ?? [unitKit()], json: fixtureText());
++  useTestCamera(c);
++  return c;
++}
++
++/// The root-level objects of the test kit's row type, ascending.
++List<Handle> rowsOf(PlanController c) {
++  final d = c.document;
++  final root = d.tree[d.rootHandle]! as GroupNode;
++  return [
++    for (final h in d.tree.childNodesOf(root.children))
++      if (d.components.unknownOf(h).isNotEmpty ||
++          c.catalog.typeIdOf(d, h) != null)
++        if (d.tree[h] is GroupNode) h,
++  ]..sort((a, b) => a.value.compareTo(b.value));
++}
++
++/// The seats of [row], ascending.
++List<Handle> seatsOf(PlanController c, Handle row) {
++  final d = c.document;
++  final g = d.tree[row]! as GroupNode;
++  return [
++    for (final h in d.tree.childNodesOf(g.children))
++      if (d.tree[h] is InstanceNode) h,
++  ]..sort((a, b) => a.value.compareTo(b.value));
++}
++
++/// The placed table: the root-level instance of a unit definition.
++Handle tableIn(PlanController c) {
++  final d = c.document;
++  final root = d.tree[d.rootHandle]! as GroupNode;
++  return d.tree.childNodesOf(root.children).singleWhere((h) =>
++      d.tree[h] is InstanceNode &&
++      d.components
++              .get<UnitComponent>((d.tree[h]! as InstanceNode).definition) !=
++          null);
++}
++
++/// [seat]'s outline's first vertex (its definition's lowest-handle leaf)
++/// in the world.
++Vector2 seatCorner(PlanController c, Handle seat) {
++  final d = c.document;
++  final def = (d.tree[seat]! as InstanceNode).definition;
++  final leaf = d.entities.liveSlots
++      .where((s) => d.entities.ownerAt(s) == def)
++      .reduce((a, b) =>
++          d.entities.handleAt(a).value < d.entities.handleAt(b).value ? a : b);
++  final p = d.geometry.read(d.entities.geomIndexAt(leaf)).coords;
++  return d.tree.accumulatedTransform(seat).transformPoint(Vector2(p[0], p[1]));
++}
++
++/// [seat]'s UNIT label's anchor in the world.
++Vector2 seatLabel(PlanController c, Handle seat) {
++  final d = c.document;
++  final slot = d.entities.liveSlots.firstWhere((s) =>
++      d.entities.ownerAt(s) == seat &&
++      d.entities.kindAt(s) == EntityKind.attrib);
++  final p = d.geometry.read(d.entities.geomIndexAt(slot)).coords;
++  return d.tree.accumulatedTransform(seat).transformPoint(Vector2(p[0], p[1]));
++}
++
++/// The world box of [row]'s seats (their definitions' boxes through their
++/// world transforms).
++Aabb2 rowBox(PlanController c, Handle row) {
++  final d = c.document;
++  var box = Aabb2.empty();
++  for (final s in seatsOf(c, row)) {
++    final def = (d.tree[s]! as InstanceNode).definition;
++    box = box.union(d
++        .definitionBounds(def, d.leavesByOwner())
++        .transformedBy(d.tree.accumulatedTransform(s)));
++  }
++  return box;
++}
++
++/// A band drag around [box] inflated by [pad] screen pixels: a window
++/// (screen left to right) or a crossing (right to left).
++void band(PlanController c, Aabb2 box, {required bool window, double pad = 8}) {
++  final cam = c.toolController.context.camera.value;
++  final corners = [
++    for (final (x, y) in [
++      (box.minX, box.minY),
++      (box.maxX, box.minY),
++      (box.maxX, box.maxY),
++      (box.minX, box.maxY),
++    ])
++      cam.worldToScreen(Vector2(x, y)),
++  ];
++  final xs = corners.map((p) => p.x), ys = corners.map((p) => p.y);
++  final a = Vector2(xs.reduce((p, q) => p < q ? p : q) - pad,
++      ys.reduce((p, q) => p < q ? p : q) - pad);
++  final b = Vector2(xs.reduce((p, q) => p > q ? p : q) + pad,
++      ys.reduce((p, q) => p > q ? p : q) + pad);
++  final from = cam.screenToWorld(window ? a : b);
++  final to = cam.screenToWorld(window ? b : a);
++  dragFrom(c, from, to);
++}
++
++Set<SelectionKey> selected(PlanController c) => {...c.selection.keys};
++
++void main() {
++  test('DS-0 premise: two rows of seats, a table, the camera off identity', () {
++    final c = design();
++    expect(rowsOf(c), hasLength(2));
++    for (final row in rowsOf(c)) {
++      expect(seatsOf(c, row), isNotEmpty);
++      expect(c.catalog.typeIdOf(c.document, row), 'test.row');
++    }
++    expect(tableIn(c), isNotNull);
++    expect(
++        c.toolController.context.camera.value.worldToScreenMatrix.b, isNot(0));
++  });
++
++  test(
++      'DS-click-seat a click and a hover on a seat\'s outline name its row; '
++      'the gates replace the pick', () {
++    final c = design();
++    final row = rowsOf(c).first;
++    final seat = seatsOf(c, row)[1];
++    expect(c.selectGates.restrictsPick, isTrue);
++    final tools = c.toolController;
++    tools.active.onPointerMove(eventAt(c, seatCorner(c, seat)), tools.context);
++    // M-DS1: the mapping removed from `pick` (the seat's key returned).
++    expect(c.selection.hover, SelectionKey.root(row), reason: 'the hover');
++    tapAt(c, seatCorner(c, seat));
++    expect(selected(c), {SelectionKey.root(row)});
++  });
++
++  test('DS-click-attrib a click on a seat\'s label selects its row', () {
++    final c = design();
++    final row = rowsOf(c).last;
++    final seat = seatsOf(c, row).first;
++    tapAt(c, seatLabel(c, seat));
++    // M-DS2: `resolveHit` replaced by the hit's own entity in `pick`.
++    expect(selected(c), {SelectionKey.root(row)});
++  });
++
++  test(
++      'DS-crossing a crossing band over a seats-only row takes the row, no '
++      'seat', () {
++    final c = design();
++    final row = rowsOf(c).first;
++    band(c, rowBox(c, row), window: false);
++    // M-DS3: `bandAccepts` answering true (the seats' keys let through).
++    expect(selected(c), {SelectionKey.root(row)});
++  });
++
++  test(
++      'DS-window a window band over a seats-only row selects nothing, no '
++      'seat included (decision 9, a known limit)', () {
++    final c = design();
++    final row = rowsOf(c).first;
++    band(c, rowBox(c, row), window: true);
++    // M-DS3: `bandAccepts` answering true lets every seat in.
++    expect(selected(c), isEmpty);
++  });
++
++  test(
++      'DS-locked-object a row whose kit is missing: a click on a seat names '
++      'the row (a lock-set object)', () {
++    final c = design(kits: const []);
++    final row = rowsOf(c).first;
++    expect(c.locked.value, contains(row), reason: 'premise: held');
++    expect(c.catalog.typeIdOf(c.document, row), isNull, reason: 'premise');
++    tapAt(c, seatCorner(c, seatsOf(c, row).first));
++    // M-DS4: `|| locked.contains(current)` dropped from the mapping.
++    expect(selected(c), {SelectionKey.root(row)});
++  });
++
++  test(
++      'DS-plain-group a table inside a plain group: the click and the band '
++      'select what the bare select tool selects (today\'s selection)', () {
++    final text = planText([testKit(), fxKit()], (d) {
++      final g = d.handleSeed.next();
++      d.commands.execute(AddNodeCommand(GroupNode(
++          handle: g,
++          parent: d.rootHandle,
++          transform: Transform2.translation(4100.5, -1250.25)
++              .multiply(Transform2.rotation(0.4)),
++          children: const [])));
++      final made = definitionForEntry(d, entryOf(tableSymbol()));
++      final t = d.handleSeed.next();
++      d.commands.execute(CompoundCommand([
++        ...made.commands,
++        AddNodeCommand(InstanceNode(
++            handle: t,
++            parent: g,
++            definition: made.definition,
++            layer: ReservedHandles.layerZero,
++            transform: Transform2.translation(300.25, 200.5))),
++      ], label: 'Place a table'));
++    });
++    final c = controllerFor(kits: [testKit(), fxKit()], json: text);
++    useTestCamera(c);
++    final d = c.document;
++    final table = d.tree.nodes.whereType<InstanceNode>().single.handle;
++    final corner =
++        d.tree.accumulatedTransform(table).transformPoint(Vector2(300, 300));
++    // The bare tool on its own selection, the same document and camera.
++    final bareSelection = SelectionController(d);
++    addTearDown(bareSelection.dispose);
++    final bare = SelectTool();
++    final ctx = ToolContext(
++        document: d,
++        index: c.index,
++        camera: c.toolController.context.camera,
++        selection: bareSelection,
++        page: c.page,
++        snap: SnapSettings());
++    bare.onPointerDown(eventAt(c, corner, buttons: kPrimaryButton), ctx);
++    bare.onPointerUp(eventAt(c, corner), ctx);
++    tapAt(c, corner);
++    // M-DS5: the type and lock condition dropped (every root group maps).
++    expect(selected(c), {...bareSelection.keys});
++    expect(selected(c), {SelectionKey.root(table)});
++  });
++
++  test(
++      'DS-units-only selectUnitsOnly: a seat is passed over, the table\'s '
++      'top selects it, a crossing band over everything keeps the table '
++      'alone', () {
++    final c = design();
++    c.permissions = PlanPermissions.unitsOnly;
++    final row = rowsOf(c).first;
++    tapAt(c, seatCorner(c, seatsOf(c, row).first));
++    // M-DS6: the session's picker built without `placedOnly`.
++    expect(selected(c), isEmpty, reason: 'a seat is no placed unit');
++    final table = tableIn(c);
++    final node = c.document.tree[table]! as InstanceNode;
++    // The centre of the table's top (its first leaf, a closed outline):
++    // inside the top, away from its lines.
++    final top = c.document
++        .definitionBounds(node.definition, c.document.leavesByOwner());
++    tapAt(
++        c,
++        node.transform.transformPoint(
++            Vector2((top.minX + top.maxX) / 2, (top.minY + top.maxY) / 2)));
++    expect(selected(c), {SelectionKey.root(table)});
++    c.selection.clear();
++    var all = Aabb2.empty();
++    for (final r in rowsOf(c)) {
++      all = all.union(rowBox(c, r));
++    }
++    all = all.union(c.document
++        .definitionBounds(node.definition, c.document.leavesByOwner())
++        .transformedBy(node.transform));
++    band(c, all, window: false, pad: 40);
++    // M-DS7: the selectUnitsOnly branch of `bandAccepts` removed.
++    expect(selected(c), {SelectionKey.root(table)});
++  });
++
++  test(
++      'DS-prune selectUnitsOnly turned on keeps only the selection\'s placed '
++      'units', () {
++    final c = design();
++    final row = rowsOf(c).first;
++    final table = tableIn(c);
++    final line =
++        addLine(c.document, Vector2(-900.5, 300.25), Vector2(-200.75, 950.5));
++    c.selection.replace([
++      SelectionKey.root(table),
++      SelectionKey.root(row),
++      SelectionKey.root(line),
++    ]);
++    c.permissions = PlanPermissions.unitsOnly;
++    // M-DS8: the prune in the permissions setter removed.
++    expect(selected(c), {SelectionKey.root(table)});
++  });
++
++  test(
++      'DS-picker-seat the picker finds a generated seat by its top in the '
++      'world (group × instance), not at its local place', () {
++    final c = design();
++    final row = rowsOf(c).first;
++    final seat = seatsOf(c, row)[2];
++    final locked = ValueNotifier<Set<Handle>>(const {});
++    addTearDown(locked.dispose);
++    final units = UnitIndexCache(c.document,
++        catalog: c.catalog,
++        locks: LockSet.scan(c.document, (k) => c.kits.kitOf(k) != null),
++        locked: locked);
++    addTearDown(units.dispose);
++    final picker = UnitPicker(c.document, units);
++    final d = c.document;
++    final def = (d.tree[seat]! as InstanceNode).definition;
++    final box = d.definitionBounds(def, d.leavesByOwner());
++    final centre =
++        Vector2((box.minX + box.maxX) / 2, (box.minY + box.maxY) / 2);
++    final world = d.tree.accumulatedTransform(seat).transformPoint(centre);
++    // M-DS9: candidatesOf reads the instance's own transform, not toWorld.
++    expect(picker.pick(world)?.instance, seat);
++    expect(picker.pick(world)?.generated, isTrue);
++    expect(UnitPicker(c.document, units, placedOnly: true).pick(world), isNull);
++  });
++
++  test(
++      'DS-perm relabel is an edit and readOnly turns it off; the service '
++      'flags are not edits; isUnitSymbol admits any unit, a seat included', () {
++    expect(PlanPermissions.readOnly.relabel, isFalse);
++    // M-DS10: `relabel ||` dropped from `edits`.
++    expect(PlanPermissions.readOnly.copyWith(relabel: true).edits, isTrue);
++    expect(
++        PlanPermissions.readOnly
++            .copyWith(
++                serviceMove: true, serviceMerge: true, selectUnitsOnly: true)
++            .draft,
++        same(DraftPermissions.readOnly));
++    PlanSymbol symbol(SymbolEntry e) =>
++        PlanSymbol(kitId: 'fx', names: KitNames.empty, entry: e);
++    final seat = entryOf(tableSymbol(key: 'fx.seat.single', seats: 1));
++    final seatEntry = SymbolEntry(
++        symbol: seat.symbol,
++        unit: UnitComponent(
++            kind: UnitKinds.seat,
++            capacity: 1,
++            labelling: UnitLabelling.assigned),
++        definition: seat.definition,
++        leaves: seat.leaves);
++    expect(isUnitSymbol(symbol(entryOf(tableSymbol()))), isTrue);
++    // M-DS11: isUnitSymbol reading `unit?.kind == UnitKinds.table`.
++    expect(isUnitSymbol(symbol(seatEntry)), isTrue);
++    expect(isUnitSymbol(symbol(entryOf(editorChair))), isFalse);
++  });
++
++  test(
++      'DS-layer a unit\'s layer locked in the layer table, no command run: '
++      'the units-only picker passes it over at the next pick (Task 6\'s '
++      'cache key and lock rule, carried)', () {
++    final doc = unitPlan();
++    final layer = addLayer(doc, 'Tables');
++    final t = placeTurned(doc, tableSymbol(), Vector2(-4100.5, 2700.25));
++    doc.commands.execute(SetInstanceLayerCommand(t.handle, layer));
++    final picker = pickerOf(doc, skipLocked: true, placedOnly: true);
++    final inside = worldOf(t, 900, 700);
++    expect(picker.pick(inside)?.instance, t.handle, reason: 'premise');
++    final state = doc.commands.stateId;
++    final record = doc.tables.layers[layer]!;
++    doc.tables.layers
++      ..remove(layer)
++      ..add(record.copyWith(locked: true));
++    expect(doc.commands.stateId, state, reason: 'premise: no state moved');
++    // M-DS12: UnitIndexCache.current's `revision == _revision` dropped.
++    // M-DS13: isLockedUnit's layer check answering false.
++    expect(picker.pick(inside), isNull);
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/tools/plan_select_gates_test.dart b/packages/jet_cad_2d_plan/test/tools/plan_select_gates_test.dart
+index d4ba6b3e..ac6a2380 100644
+--- a/packages/jet_cad_2d_plan/test/tools/plan_select_gates_test.dart
++++ b/packages/jet_cad_2d_plan/test/tools/plan_select_gates_test.dart
+@@ -3,50 +3,66 @@
+ // read the permissions live, and the selection's lock state from a cache
+ // recomputed on a selection or a lock notification. Fixtures: lines off the
+ // origin; a nested key whose chain names a locked group.
+ import 'dart:typed_data';
+ 
+ import 'package:flutter/foundation.dart' show ValueNotifier;
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:jet_cad_2d_plan/src/kits/locks.dart' show LockSet;
++import 'package:jet_cad_2d_plan/src/service/unit_picker.dart';
+ import 'package:jet_cad_2d_plan/src/tools/plan_select_gates.dart';
++import 'package:jet_cad_2d_plan/src/units/unit_index.dart';
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ final class Rig {
+   Rig() {
+     document = DraftDocument.empty();
+     for (final (a, b) in [
+       (Vector2(4100.5, -1250.25), Vector2(4700.75, -980.5)),
+       (Vector2(5200.25, -1610.75), Vector2(5900.5, -1300.25)),
+     ]) {
+       final cmd = addDrafted(document, EntityKind.line, linePayload(a, b),
+           layer: ReservedHandles.layerZero);
+       document.commands.execute(cmd);
+       lines.add(cmd.record.handle);
+     }
+     selection = SelectionController(document);
++    final units = UnitIndexCache(document,
++        catalog: catalog,
++        locks: LockSet.scan(document, (_) => true),
++        locked: locked);
++    final picker =
++        UnitPicker(document, units, skipLocked: true, placedOnly: true);
+     gates = PlanSelectGates(
+-        permissions: () => permissions, selection: selection, locked: locked);
++        permissions: () => permissions,
++        selection: selection,
++        locked: locked,
++        catalog: catalog,
++        picker: () => picker,
++        units: () => units.current);
+     addTearDown(() {
+       gates.dispose();
++      units.dispose();
+       selection.dispose();
+       locked.dispose();
+     });
+   }
+ 
+   late final DraftDocument document;
+   late final SelectionController selection;
+   late final PlanSelectGates gates;
+   final List<Handle> lines = [];
+   final ValueNotifier<Set<Handle>> locked = ValueNotifier(const {});
++  final ParametricCatalog catalog = ParametricCatalog();
+   PlanPermissions permissions = PlanPermissions.full;
+ 
+   Map<String, bool> get open => {
+         'move': gates.move,
+         'rotate': gates.rotate,
+         'reshape': gates.reshape,
+         'delete': gates.delete,
+       };
+ }
+ 
+@@ -75,22 +91,22 @@ void main() {
+         _ => PlanPermissions.full.copyWith(delete: false),
+       };
+       // M-PM8: `PlanSelectGates.delete` drops `_permissions().delete &&`.
+       expect(r.open, {...kAllOpen, name: false}, reason: name);
+     }
+     r.permissions = PlanPermissions.readOnly;
+     expect(r.open, kAllShut);
+     expect(r.gates.idleKeys, isTrue, reason: 'the keys are the shortcuts');
+     r.gates.idleKeys = false;
+     expect(r.gates.idleKeys, isFalse);
+-    // The pick and the band are the select tool's own.
+-    expect(r.gates.restrictsPick, isFalse);
++    // 2b S2: the design's pick maps a generated unit to its object.
++    expect(r.gates.restrictsPick, isTrue);
+   });
+ 
+   test(
+       'PM-9 a selection holding a locked object shuts every gate; a lock '
+       'change or a selection change recomputes it', () {
+     final r = Rig();
+     r.selection.replace([SelectionKey.root(r.lines[0])]);
+     expect(r.open, kAllOpen);
+     // M-PM9a: `_locked.addListener(_recompute)` dropped: the lock arrives
+     // after the selection.
+@@ -120,25 +136,39 @@ void main() {
+     r.selection.replace([nested]);
+     // M-PM10: the chain loop of `_recompute` dropped.
+     expect(r.gates.selectionLocked, isTrue);
+     expect(r.open, kAllShut);
+   });
+ 
+   test('PM-11 dispose removes both listeners', () {
+     final document = DraftDocument.empty();
+     final selection = SelectionController(document);
+     final locked = ValueNotifier<Set<Handle>>(const {});
++    // The cache listens to a notifier of its own: [locked] is the gates'
++    // alone, so its listener count reads theirs.
++    final cacheLocked = ValueNotifier<Set<Handle>>(const {});
++    final units = UnitIndexCache(document,
++        catalog: ParametricCatalog(),
++        locks: LockSet.scan(document, (_) => true),
++        locked: cacheLocked);
++    final picker =
++        UnitPicker(document, units, skipLocked: true, placedOnly: true);
+     final gates = PlanSelectGates(
+         permissions: () => PlanPermissions.full,
+         selection: selection,
+-        locked: locked);
++        locked: locked,
++        catalog: ParametricCatalog(),
++        picker: () => picker,
++        units: () => units.current);
+     gates.dispose();
+     // A disposed gates object left as a listener would recompute here; the
+     // notifiers report no listener instead.
+     // ignore: invalid_use_of_protected_member
+     expect(selection.hasListeners, isFalse);
+     // ignore: invalid_use_of_protected_member
+     expect(locked.hasListeners, isFalse);
+     selection.dispose();
+     locked.dispose();
++    units.dispose();
++    cacheLocked.dispose();
+   });
+ }

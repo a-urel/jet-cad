@@ -7,9 +7,10 @@ import 'package:meta/meta.dart';
 import 'symbol_component.dart';
 
 /// A kit's words by locale. Word ids: `symbol:<key>`,
-/// `category:<kit id>/<English category>`, and sub-project 2's
-/// `tool:<tool id>`, `type:<type id>`, `property:<type id>.<property>`.
-/// Every id carries its kit's id, so two kits never share one.
+/// `category:<kit id>/<English category>`, sub-project 2's
+/// `tool:<tool id>`, `type:<type id>`, `property:<type id>.<property>`, and
+/// 2b's `unit:<kit id>/<unit kind>`. Every id carries its kit's id, so two
+/// kits never share one.
 @immutable
 final class KitNames {
   const KitNames(this.words);

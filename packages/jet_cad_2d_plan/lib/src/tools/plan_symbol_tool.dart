@@ -32,6 +32,7 @@ import '../symbols/plan_symbol.dart';
 import '../symbols/symbol_box.dart';
 import '../symbols/symbol_ghost.dart';
 import '../symbols/symbol_placer.dart';
+import '../units/unit_index.dart' show UnitIndex;
 import 'generic_tools.dart' show PlanToolIds;
 
 /// The half-size of the ghost's base-point cross, in screen pixels.
@@ -68,7 +69,7 @@ const double kAttachPixels = 16.0;
 ///   verbatim and the marker is drawn at its marker; M mirrors in place.
 class PlanSymbolTool extends Tool {
   PlanSymbolTool(this.armed,
-      {this.attachments, this.canRotate, this.canMirror}) {
+      {this.attachments, this.canRotate, this.canMirror, this.units}) {
     armed.addListener(_onArmed);
     _syncPath();
   }
@@ -86,6 +87,10 @@ class PlanSymbolTool extends Tool {
   /// Whether `M` mirrors the next placement (the permissions' `mirror`),
   /// read at each use; null allows.
   final bool Function()? canMirror;
+
+  /// The plan's units, read at each placement: a numbered unit takes the
+  /// next number (spec 2b S2). Null places no label.
+  final UnitIndex Function()? units;
 
   final DragPoint _at = DragPoint();
   final SnapResult _scratch = SnapResult();
@@ -445,7 +450,8 @@ class PlanSymbolTool extends Tool {
         at: _at.point,
         quarterTurns: _turns,
         mirrored: _mirror,
-        transform: _attached?.transform));
+        transform: _attached?.transform,
+        units: units?.call()));
   }
 
   /// The snap marker, in screen space; attached, the nearest glyph at the

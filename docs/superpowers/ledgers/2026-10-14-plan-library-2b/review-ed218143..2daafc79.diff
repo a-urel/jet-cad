@@ -1,0 +1,315 @@
+# Review package: ed218143..HEAD
+
+## Commits
+2daafc79 test(plan): pin TF3's fill count and the group caption's lead (2b Task 15)
+
+## Files changed
+ .../lib/src/service/paint/unit_focus_painter.dart  |  7 +++---
+ .../lib/src/service/paint/unit_group_painter.dart  |  7 +++---
+ .../lib/src/service/paint/unit_status_painter.dart |  8 +++---
+ .../test/export/unit_colour_export_test.dart       |  3 +++
+ .../test/service/paint/unit_fill_test.dart         |  3 +++
+ .../test/service/paint/unit_paint_test.dart        | 29 ++++++++++++++++++++--
+ 6 files changed, 44 insertions(+), 13 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_plan/lib/src/service/paint/unit_focus_painter.dart b/packages/jet_cad_2d_plan/lib/src/service/paint/unit_focus_painter.dart
+index 4d198a45..46513f96 100644
+--- a/packages/jet_cad_2d_plan/lib/src/service/paint/unit_focus_painter.dart
++++ b/packages/jet_cad_2d_plan/lib/src/service/paint/unit_focus_painter.dart
+@@ -44,24 +44,23 @@ Color focusVeilColour(int paper, PlanTheme? theme) {
+ /// Each unit contributes its quad, the four world corners of its
+ /// definition box, reversed when its transform mirrors, so that every quad
+ /// winds counter-clockwise and overlapping quads add up instead of
+ /// cancelling. The veil is the union of the faded quads minus the union of
+ /// the focused ones, one `Path.combine` per rebuild, so a focused unit is
+ /// never veiled where a faded neighbour overlaps it. It is filled with the
+ /// RGB of [paper] (its alpha ignored, as the paper is opaque) at
+ /// [kUnitFocusVeilAlpha], or as [theme] sets it ([focusVeilColour]).
+ ///
+ /// Rebuilt only when [units] gives a new index (a state, layer or lock
+-/// change), or the focus is replaced; a paper or a theme change only recolours the
+-/// [Paint]. Each
+-/// frame then draws the one prebuilt path with one reused [Paint] under one
+-/// reused matrix: nothing per unit (Z16).
++/// change), or the focus is replaced; a paper or a theme change only
++/// recolours the [Paint]. Each frame then draws the one prebuilt path with
++/// one reused [Paint] under one reused matrix: nothing per unit (Z16).
+ class UnitFocusPainter extends CustomPainter {
+   UnitFocusPainter({
+     required this.document,
+     required this.units,
+     required this.camera,
+     required this.focus,
+     required this.paper,
+     this.theme,
+     required Listenable repaint,
+   }) : super(repaint: repaint) {
+diff --git a/packages/jet_cad_2d_plan/lib/src/service/paint/unit_group_painter.dart b/packages/jet_cad_2d_plan/lib/src/service/paint/unit_group_painter.dart
+index 914ea660..852fa494 100644
+--- a/packages/jet_cad_2d_plan/lib/src/service/paint/unit_group_painter.dart
++++ b/packages/jet_cad_2d_plan/lib/src/service/paint/unit_group_painter.dart
+@@ -193,24 +193,25 @@ final class _Group {
+   final RRect? rrect;
+ }
+ 
+ /// Paints [layer] of the groups of [groups] over [document]'s units
+ /// through [camera] (G3).
+ ///
+ /// A group with two or more visible members gets a frame: the convex hull
+ /// of the four corners of each such member's definition box through its
+ /// world transform (the [UnitPicker.candidatesOf] candidates of [units]
+ /// and their cached `box`: a member on a hidden layer, with a singular
+-/// transform or an empty box is skipped, as the picker skips it), offset by [kGroupFrameMarginMm] with round joins,
+-/// stroked [kGroupFrameStrokePixels] screen pixels wide in the paper set's
++/// transform or an empty box is skipped, as the picker skips it), offset
++/// by [kGroupFrameMarginMm] with round joins, stroked
++/// [kGroupFrameStrokePixels] screen pixels wide in the paper set's
+ /// `gripMove`, never filled; and a chip outside the frame, centred on the
+-/// frame bounds' centre x with its bottom edge on their top line (unit
++/// frame bounds' centre x with its bottom edge on their top line (table
+ /// groups fixes X3: it then covers no member of its own group at any
+ /// zoom), filled `gripMove`, with [groupLabel] in the status caption's size
+ /// and the ink [foregroundFor] picks on `gripMove`. A chip is skipped when
+ /// the frame is narrower on screen than it.
+ ///
+ /// The groups follow the host's focus, [unitFocus] (zone spec Z14): a
+ /// group with no visible member in a non-null focus has its frame stroked
+ /// with one prebuilt faded [Paint], `gripMove` at its alpha times
+ /// 1 - [kUnitFocusVeilAlpha], and its chip drawn as before, then its
+ /// [RRect] again in the veil's paint, the paper's RGB at
+diff --git a/packages/jet_cad_2d_plan/lib/src/service/paint/unit_status_painter.dart b/packages/jet_cad_2d_plan/lib/src/service/paint/unit_status_painter.dart
+index 14483995..b3d589a2 100644
+--- a/packages/jet_cad_2d_plan/lib/src/service/paint/unit_status_painter.dart
++++ b/packages/jet_cad_2d_plan/lib/src/service/paint/unit_status_painter.dart
+@@ -29,32 +29,32 @@ final class _Fill {
+ 
+   final Handle instance;
+ 
+   /// Definition space to world: the unit's, captured at rebuild (a seat's
+   /// is its row's group × its instance).
+   final Transform2 toWorld;
+   final Path path;
+   final Paint paint;
+   final ui.Paragraph? caption;
+ 
+-  /// The label label's anchor and half its height, in definition space:
++  /// The unit label's anchor and half its height, in definition space:
+   /// the caption goes below the label (S7, review F-5).
+   final double lx, ly, half;
+ 
+   /// The top's smaller side, in definition space.
+   final double size;
+ }
+ 
+ /// The caption's height in logical pixels (S7).
+ const double kStatusCaptionSize = 11;
+ 
+-/// The gap between the label label's bottom and the caption, in logical
++/// The gap between the unit label's bottom and the caption, in logical
+ /// pixels.
+ const double kStatusCaptionGap = 2;
+ 
+ /// [colour] composited onto [paper]'s RGB (dark theme spec D6c), as
+ /// `0xRRGGBB`: straight alpha, per channel `round(a * s + (1 - a) * p)`
+ /// with `a` the colour's alpha over 255. The paper's own alpha is ignored:
+ /// the paper is opaque.
+ int over(Color colour, int paper) {
+   final argb = colour.toARGB32();
+   final a = ((argb >> 24) & 0xFF) / 255;
+@@ -142,21 +142,21 @@ class UnitStatusPainter extends CustomPainter {
+   }) : super(repaint: repaint);
+ 
+   final DraftDocument document;
+ 
+   /// The document's units, as the session's cache holds them.
+   final UnitIndexCache units;
+ 
+   final ValueListenable<ViewportTransform> camera;
+   final ValueListenable<Map<String, UnitStatus>> statuses;
+ 
+-  /// The host's groups and their statuses, as `FloorPlanController`'s
++  /// The host's groups and their statuses, as `PlanController`'s
+   /// `unitGroups` and `groupStatuses` hold them (ids trimmed).
+   final ValueListenable<Map<String, UnitGroup>> unitGroups;
+   final ValueListenable<Map<String, UnitStatus>> groupStatuses;
+ 
+   /// The paper under the statuses, ARGB: the page's background, or the
+   /// theme's surface with no page (D4, D6c).
+   final ValueListenable<int> paper;
+ 
+   /// The resolved look (host embedding API spec T-3); null, or a null
+   /// value, is today's. The host puts it in [repaint] too, so a theme
+@@ -304,21 +304,21 @@ class UnitStatusPainter extends CustomPainter {
+     fills.sort((a, b) => a.instance.value.compareTo(b.instance.value));
+     _fills = fills;
+     // Paints and captions no fill holds are dropped (review F-8): a host
+     // whose captions change ("12 min", "13 min") does not grow the caches.
+     final paints = {for (final f in fills) f.paint};
+     final captions = {for (final f in fills) f.caption};
+     _paints.removeWhere((_, p) => !paints.contains(p));
+     _captions.removeWhere((_, p) => !captions.contains(p));
+   }
+ 
+-  /// The anchor and half height of the label label [label], in the
++  /// The anchor and half height of the unit label [label], in the
+   /// instance's space; null when there is none.
+   ({double x, double y, double half})? _labelOf(Handle? label) {
+     if (label == null) return null;
+     final e = document.entities;
+     final slot = e.slotOf(label);
+     if (slot == null) return null;
+     final payload = document.geometry.read(e.geomIndexAt(slot));
+     if (payload.coords.length < 2 || payload.scalars.isEmpty) return null;
+     return (
+       x: payload.coords[0],
+diff --git a/packages/jet_cad_2d_plan/test/export/unit_colour_export_test.dart b/packages/jet_cad_2d_plan/test/export/unit_colour_export_test.dart
+index 093c8d04..d4b7193f 100644
+--- a/packages/jet_cad_2d_plan/test/export/unit_colour_export_test.dart
++++ b/packages/jet_cad_2d_plan/test/export/unit_colour_export_test.dart
+@@ -125,20 +125,23 @@ void expectRgb(Img img, PageComponent page, Vector2 w, int want, String why) {
+ }
+ 
+ /// The tables the underlay fills, in ascending instance order: the
+ /// coloured ones of a known hue on a visible layer.
+ final List<Spec> filled = [
+   for (final k in ['A', 'B', 'C', 'U', 'K']) spec(k),
+ ];
+ 
+ void main() {
+   test('the fixture premises: the tables the underlay fills', () {
++    // The source's key list without R (sub-project 3, R-16).
++    expect([for (final s in specs) s.key],
++        ['A', 'B', 'C', 'N', 'U', 'K', 'H', 'M']);
+     expect(spec('H').layer, 'Hidden');
+     expect(spec('K').layer, 'Locked');
+     expect(spec('M').color, 'magenta');
+     expect(spec('N').color, isNull);
+     expect(spec('U').label, isNull);
+     for (final s in specs) {
+       final t = placementOf(s);
+       expect(t.a * t.d - t.b * t.c, closeTo(-1, 1e-12), reason: s.key);
+       expect(t.b.abs(), greaterThan(0.1), reason: '${s.key} turned');
+     }
+diff --git a/packages/jet_cad_2d_plan/test/service/paint/unit_fill_test.dart b/packages/jet_cad_2d_plan/test/service/paint/unit_fill_test.dart
+index bfa563a5..471bc04b 100644
+--- a/packages/jet_cad_2d_plan/test/service/paint/unit_fill_test.dart
++++ b/packages/jet_cad_2d_plan/test/service/paint/unit_fill_test.dart
+@@ -523,20 +523,23 @@ void main() {
+   testWidgets(
+       'TF3 M-C6 M-C21 a coloured table on the hidden layer and one '
+       'carrying "magenta" draw nothing', (tester) async {
+     final doc = fillDoc(const InsertionPointMeasurer());
+     addTearDown(doc.dispose);
+     final (painter, _) = painterOver(doc);
+     final spy = record(painter);
+     expect(spy.fillOf(spec('H')), isNull, reason: 'hidden');
+     expect(spy.fillOf(spec('M')), isNull, reason: 'unknown name');
+     expect(spy.fillOf(spec('N')), isNull, reason: 'no colour');
++    // The source's `hasLength(6), reason: 'A, B, C, U, K and R'`: R went
++    // with the room (R-16); the count stays pinned (controller ruling).
++    expect(spy.fills, hasLength(5), reason: 'A, B, C, U and K');
+     final shot = await render(tester, painter);
+     for (final k in ['H', 'M', 'N']) {
+       expectPixel(shot, painterPixel(insideTop(spec(k))), whitePaper, k);
+     }
+   });
+ 
+   testWidgets(
+       'TF4 M-C19 M-C20 the unnumbered table and the one on the locked layer '
+       'are filled', (tester) async {
+     final doc = fillDoc(const InsertionPointMeasurer());
+diff --git a/packages/jet_cad_2d_plan/test/service/paint/unit_paint_test.dart b/packages/jet_cad_2d_plan/test/service/paint/unit_paint_test.dart
+index cf9a0863..b4e4f6a1 100644
+--- a/packages/jet_cad_2d_plan/test/service/paint/unit_paint_test.dart
++++ b/packages/jet_cad_2d_plan/test/service/paint/unit_paint_test.dart
+@@ -29,27 +29,28 @@ import '../../support/service_fixture.dart';
+ import '../../support/service_paint.dart';
+ import '../../support/service_rig.dart' show parts;
+ import '../../support/test_kit.dart';
+ 
+ /// Records the matrices and paths a painter hands the canvas.
+ class Spy implements ui.Canvas {
+   final List<Float64List> matrices = [];
+   final List<ui.Path> paths = [];
+   final List<Color> colours = [];
+   final List<ui.Paragraph> paragraphs = [];
++  final List<ui.Offset> translations = [];
+ 
+   @override
+   void save() {}
+   @override
+   void restore() {}
+   @override
+-  void translate(double dx, double dy) {}
++  void translate(double dx, double dy) => translations.add(ui.Offset(dx, dy));
+   @override
+   void transform(Float64List m) => matrices.add(Float64List.fromList(m));
+   @override
+   void drawPath(ui.Path path, ui.Paint paint) {
+     paths.add(path);
+     // A Paint keeps its colour in float32: read back through its ARGB, so
+     // a 0xAARRGGBB colour compares equal to the one handed in.
+     colours.add(Color(paint.color.toARGB32()));
+   }
+ 
+@@ -117,34 +118,58 @@ void main() {
+     final got = abcdef(spy.matrices.single);
+     final want = matrixOf(world);
+     for (var i = 0; i < 6; i++) {
+       expect(got[i], closeTo(want[i], 1e-9), reason: 'coefficient $i');
+     }
+   });
+ 
+   test(
+       'SP-group-mixed a group of the table and two seats with a group '
+       'status: three fills in its colour, one caption, under the lead; a '
+-      'frame round all three, and one chip (M-SP-frame)', () {
++      'frame round all three, and one chip (M-SP-frame, M-SP-lead)', () {
+     final f = serviceFixture();
+     final s = service(f.json);
+     final table = s.c.unitIndex[f.table]!.text!;
+     expect(table.compareTo('A1'), lessThan(0),
+         reason: 'premise: the table\'s number leads the plain label order');
+     s.c.setUnitGroups({
+       'g': UnitGroup(members: {table, 'A1', 'A2'})
+     });
+     s.c.setGroupStatus({'g': UnitStatus(color: blue, caption: 'Gr')});
+ 
+     final fills = frame(s.layers.statuses);
+     expect(fills.colours, [blue, blue, blue]);
+     expect(fills.paragraphs, hasLength(1), reason: 'one caption');
++    // The caption is centred under the lead's label: the table's anchor,
++    // its definition-space point through the table's world transform and
++    // the camera, computed here.
++    final doc = s.c.serviceSession!.document;
++    (double, double) anchorOf(Handle label, Transform2 toWorld) {
++      final slot = doc.entities.slotOf(label)!;
++      final p = doc.geometry.read(doc.entities.geomIndexAt(slot)).coords;
++      final w = toWorld.transformPoint(Vector2(p[0], p[1]));
++      return (
++        cam.a * w.x + cam.c * w.y + cam.e,
++        cam.b * w.x + cam.d * w.y + cam.f
++      );
++    }
++
++    final (lx, ly) =
++        anchorOf(f.tableLabel, (doc.tree[f.table]! as InstanceNode).transform);
++    final a2 = s.c.unitIndex.withLabel('A2').single;
++    final (ox, _) = anchorOf(a2.label!, a2.toWorld);
++    expect((ox - lx).abs(), greaterThan(50),
++        reason: 'premise: another member\'s anchor is elsewhere');
++    final t = fills.translations.single;
++    expect(t.dx + fills.paragraphs.single.width / 2, closeTo(lx, 1e-6),
++        reason: 'centred under the table\'s label');
++    expect(t.dy, greaterThan(ly), reason: 'below the table\'s label');
+     final frames = frame(s.layers.frames);
+     expect(frames.paths, hasLength(1), reason: 'one frame');
+     expect(s.layers.chips.debugChipTexts, isEmpty,
+         reason: 'premise: no chip before a chips frame');
+     frame(s.layers.chips);
+     expect(s.layers.chips.debugChipTexts, ['$table+A1+A2']);
+   });
+ 
+   test(
+       'SP-locked-status Review Focus 4: the rows\' kit missing, a group '

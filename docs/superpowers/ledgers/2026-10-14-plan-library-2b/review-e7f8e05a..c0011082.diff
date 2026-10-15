@@ -1,0 +1,539 @@
+# Review package: e7f8e05a..HEAD
+
+## Commits
+c0011082 test(plan): pin the copy's E3 path, the tool reset and E4 in the copy (2b Task 11 fix 1)
+
+## Files changed
+ .../lib/src/controller/plan_controller.dart        |  62 +++---
+ .../test/controller/unit_changes_test.dart         |  15 +-
+ .../test/service/service_session_test.dart         | 239 ++++++++++++++++++++-
+ 3 files changed, 281 insertions(+), 35 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart b/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
+index 3f0b90a4..b08ba790 100644
+--- a/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
++++ b/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
+@@ -637,29 +637,39 @@ class PlanController extends ChangeNotifier {
+   /// locked symbol's definition. The property panel shows no section for
+   /// it; the pickers refuse it.
+   bool isLocked(Handle handle) => _session.locks.covers(document, handle);
+ 
+   /// Locks [objects] in the middle of a session (spec P4: a type's code
+   /// failed, Task 11): adds them to the lock set, clears the undo history
+   /// so no earlier edit can be undone onto them, and tells the listeners.
+   ///
+   /// A lock is no edit (it moves no state id): by itself it moves neither
+   /// [revision] nor [unitChanges], though [unitDetails] reads the new
+-  /// `locked` at once (spec 2b S3 names edits, undo, redo, a mode switch,
+-  /// [load] and [newPlan] for both). When the edit that froze the objects
+-  /// applies on its retry, that edit reports the lock with it; when the
+-  /// retry is refused, the lock is reported with the next design change.
++  /// `locked` at once. Neither member names a lock: [unitChanges] reports
++  /// design edits, undos and redos, [load] and [newPlan] (spec 2b S3), and
++  /// [revision] is today's (spec S5), whose doc names an edit, an undo or a
++  /// redo, a mode switch, `load`, `newPlan` and `resetLayout`
++  /// (jet_cad_floor_plan's floor_plan_controller.dart:570-573). When the
++  /// edit that froze the objects applies on its retry, that edit reports
++  /// the lock with it; when the retry is refused, the lock is reported with
++  /// the next design change.
+   @internal
+-  void lockBroken(Set<Handle> objects) {
++  void lockBroken(Set<Handle> objects) => _lock(objects, document.commands);
++
++  /// [objects] join the design's lock set (refreshed over the design, whose
++  /// handles a service copy shares), [history]'s undo history is cleared
++  /// so no earlier step is undone onto them, and the listeners are told:
++  /// [lockBroken] clears the design's, the copy's boundary the copy's.
++  void _lock(Set<Handle> objects, CommandDispatcher history) {
+     if (objects.isEmpty) return;
+     _session.locks.addBroken(document, objects);
+-    document.commands.clearHistory();
++    history.clearHistory();
+     _locked.value = _session.locks.objects;
+     // clearHistory emits no change: refresh the undo listenables here.
+     _refreshFlags();
+     grips.gatesChanged();
+     notifyListeners();
+   }
+ 
+   /// Set when an edit is refused because it would change a locked object;
+   /// the canvas shows a short hint and clears it (Task 15).
+   final ValueNotifier<bool> lockHint = ValueNotifier(false);
+@@ -1411,31 +1421,38 @@ class PlanController extends ChangeNotifier {
+     final design = _session;
+     final measurer = FlutterTextMeasurer();
+     final DraftDocument copy;
+     try {
+       copy = serviceCopyOf(design.document,
+           register: _registerComponents, measurer: measurer);
+     } catch (_) {
+       measurer.clear();
+       rethrow;
+     }
+-    return ServiceSession(
+-        document: copy,
+-        measurer: measurer,
+-        catalog: catalog,
+-        camera: camera,
+-        locks: design.locks,
+-        frozen: design.frozen,
+-        locked: _locked,
+-        log: _diagnostics,
+-        lock: _lockFromCopy,
+-        damage: _damageCopy);
++    try {
++      return ServiceSession(
++          document: copy,
++          measurer: measurer,
++          catalog: catalog,
++          camera: camera,
++          locks: design.locks,
++          frozen: design.frozen,
++          locked: _locked,
++          log: _diagnostics,
++          lock: _lockFromCopy,
++          damage: _damageCopy);
++    } catch (_) {
++      // The decoded copy is let go as the decode failure's measurer is.
++      unawaited(copy.dispose());
++      measurer.clear();
++      rethrow;
++    }
+   }
+ 
+   /// The controller listens to [s]: its changes and its selection.
+   void _attachService(ServiceSession s) {
+     s.history = s.document.commands.changes.listen((_) {
+       if (_disposed || !identical(s, _service)) return;
+       _onServiceChanged();
+     });
+     void onSelection() {
+       if (!_disposed && identical(s, _service)) _refreshSelected();
+@@ -1463,29 +1480,22 @@ class PlanController extends ChangeNotifier {
+       })
+       ..ensureVisualUpdate();
+   }
+ 
+   /// The copy's boundary froze [objects] (spec S3): they join the design's
+   /// lock set (refreshed over the design, whose handles the copy shares),
+   /// the copy's history is cleared so no earlier service step is undone
+   /// onto them, and the listeners are told. The design's history is never
+   /// touched (Risks, B3). As [lockBroken], it moves neither [revision] nor
+   /// [unitChanges] by itself.
+-  void _lockFromCopy(ServiceSession s, Set<Handle> objects) {
+-    if (objects.isEmpty) return;
+-    _session.locks.addBroken(document, objects);
+-    s.document.commands.clearHistory();
+-    _locked.value = _session.locks.objects;
+-    _refreshFlags();
+-    grips.gatesChanged();
+-    notifyListeners();
+-  }
++  void _lockFromCopy(ServiceSession s, Set<Handle> objects) =>
++      _lock(objects, s.document.commands);
+ 
+   /// E3 in the copy: a rollback threw there. The copy is rebuilt from
+   /// what it holds (its history cleared); the design is not touched.
+   void _damageCopy(ServiceSession s, PartialMutationError error) {
+     s.document.commands.notifyLoaded();
+     _refreshFlags();
+     notifyListeners();
+   }
+ 
+   /// [dirty] reads the design; the history flags the active document.
+diff --git a/packages/jet_cad_2d_plan/test/controller/unit_changes_test.dart b/packages/jet_cad_2d_plan/test/controller/unit_changes_test.dart
+index 570659e8..2d52eca9 100644
+--- a/packages/jet_cad_2d_plan/test/controller/unit_changes_test.dart
++++ b/packages/jet_cad_2d_plan/test/controller/unit_changes_test.dart
+@@ -1,15 +1,15 @@
+ // Ported from jet_cad_floor_plan test/host/design_changes_test.dart (2b
+ // Task 9, spec S3 `unitChanges`, S5): the design's unit changes. DC10 and
+-// DC16 (the service mode) are Task 11's; DC7 and DC15 read Task 13's
+-// `serviceEdited` (DC7 also its record and reset, and a service drag), so
+-// they wait for it. DC8, DC9,
++// DC16 (the service mode) are Task 11's; DC15 reads Task 13's
++// `serviceEdited`, so Task 13 ports it; DC7 also reads Task 13's record and
++// reset and drags with the service tool, so Task 14 ports it. DC8, DC9,
+ // DC11, DC12, DC13 and DC17 were ported by 2a for the object-level
+ // `changes` stream (plan_change_test.dart); they are ported again here for
+ // `unitChanges`, whose code is its own (controller ruling R-13, F-T9c).
+ // Today's header follows.
+ //
+ // Host embedding API spec E-5 (Slice 2 plan, Task 3): the controller's
+ // unitChanges -- a design edit, undo or redo reported as the tables
+ // added, removed and changed, by instance, in ascending instance order;
+ // PlanUnitsReplaced on load and newPlan in either mode, after the old
+ // design's last changes; nothing from the selection mode; nothing read while
+@@ -307,22 +307,23 @@ void main() {
+         expect(change.before, before, reason: '"$label"');
+         expectNear(change.after.center,
+             boxCentre(shift.multiply(fixture.transform)), 'moved by the shift');
+         expect(change.after.mirrored, mirrored);
+         expect(change.after.rotation, closeTo(before.rotation, 1e-12));
+         expect(change.after.unit, before.unit);
+         expect(change.after, detailOf(c, instance));
+       }
+     });
+ 
+-    // DC7 (service moves report nothing) reads Task 13's serviceEdited,
+-    // record and reset, and drags with the service tool: not ported here.
++    // DC7 (service moves report nothing): Task 14 ports it (it reads Task
++    // 13's serviceEdited, record and reset, and drags with the service
++    // tool).
+ 
+     testWidgets(
+         'DC8 newPlan: exactly [PlanUnitsReplaced()], no Removed per '
+         'table; a load: the same', (tester) async {
+       final c = await mounted(tester);
+       final seen = listen(c);
+       c.newPlan();
+       await tester.pump();
+       expect(seen, [const PlanUnitsReplaced()]);
+       expect(c.unitDetails, isEmpty, reason: 'premise: an empty plan');
+@@ -546,22 +547,22 @@ void main() {
+         [t('7'), t(null), t('8'), t('7', layer: 'B')]);
+     expect(changes, [
+       PlanUnitRemoved(t('7')),
+       PlanUnitChanged(t('8'), t('7')),
+       PlanUnitAdded(t('8')),
+       PlanUnitChanged(t('7'), t('7', layer: 'B')),
+     ]);
+     expect(diffUnitDetails(const [], const [], const [], const []), isEmpty);
+   });
+ 
+-  // DC15 (a listen in service after a service move) reads Task 13's
+-  // serviceEdited as a premise: not ported here.
++  // DC15 (a listen in service after a service move): Task 13 ports it (it
++  // reads Task 13's serviceEdited as a premise).
+ 
+   testWidgets(
+       'DC16 M-H29(service moves), the trigger alone: an edit then '
+       'setMode(service) in one synchronous step is reported at the next '
+       'pump, not withheld until the design moves again', (tester) async {
+     final c = fixtureController();
+     final b2 = detailOf(c, instancesOf(c, '2').single);
+     final seen = listen(c);
+ 
+     expect(c.setUnitData('2', hostData()), isTrue);
+diff --git a/packages/jet_cad_2d_plan/test/service/service_session_test.dart b/packages/jet_cad_2d_plan/test/service/service_session_test.dart
+index ac878735..668bfb58 100644
+--- a/packages/jet_cad_2d_plan/test/service/service_session_test.dart
++++ b/packages/jet_cad_2d_plan/test/service/service_session_test.dart
+@@ -1,52 +1,170 @@
+ // Spec 2b S3 "Mode and copy": the service copy in a ServiceSession of its
+ // own, with its own lock expander over the design's lock set and its own
+ // failure boundary (its freeze clears the copy's history only, then
+ // retries once); which members stay on the design and which switch on
+ // `mode`; execute and the design writes refused in service; the copy's
+-// lifetime.
++// lifetime; E3 in the copy (its rollback failing) the copy's alone; the
++// design's tool back to plan.select on entering service; a component the
++// design keeps raw (E4) kept raw in the copy.
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ // box_kit.dart and test_kit.dart both declare `addObject` and `DiscType`;
+ // box_kit.dart and harness.dart both declare `addLine`: only what is used
+ // is shown.
+ import '../support/box_kit.dart'
+     show
+         Switches,
+         SquareParams,
+         DiscParams,
+         boxKit,
+         ringKit,
+         addObject,
+         atSquare,
++        componentsText,
+         nearSquare;
+-import '../support/harness.dart' show controllerFor;
++import '../support/harness.dart' show controllerFor, pointerAt;
+ import '../support/recording_exporters.dart';
+ import '../support/service_plans.dart';
+ import '../support/test_kit.dart' show testKit, unitKit;
+ 
+ List<KitDiagnostic> failuresOf(PlanController c) => [
+       for (final d in c.diagnostics.value)
+         if (d.code == KitDiagnosticCode.hookFailed) d
+     ];
+ 
+ Transform2 transformOf(DraftDocument d, Handle h) => switch (d.tree[h]) {
+       final InstanceNode n => n.transform,
+       final GroupNode n => n.transform,
+       _ => throw StateError('no node ${h.toHex()}'),
+     };
+ 
++List<KitDiagnostic> rollbacksOf(PlanController c) => [
++      for (final d in c.diagnostics.value)
++        if (d.code == KitDiagnosticCode.rollbackFailed) d
++    ];
++
++// The E3 commands of 2a's failure_flow_test.dart (F-6, F-14, F-14b).
++
++/// Applies [inner], then hands back an inverse that throws: the engine's
++/// rollback of a failed edit throws, E3's PartialMutationError.
++final class _Sabotage extends DraftCommand {
++  _Sabotage(this.inner);
++  final DraftCommand inner;
++  @override
++  Capability get capability => inner.capability;
++  @override
++  Set<Capability> get capabilities => inner.capabilities;
++  @override
++  String get label => 'Sabotage';
++  @override
++  CommandResult apply(CommandTarget target) {
++    final r = inner.apply(target);
++    return CommandResult(inverse: _Throwing(), touched: r.touched);
++  }
++}
++
++final class _Throwing extends DraftCommand {
++  @override
++  Capability get capability => Capability.components;
++  @override
++  String get label => 'Throwing';
++  @override
++  CommandResult apply(CommandTarget target) =>
++      throw StateError('this inverse refuses');
++}
++
++/// Applies [inner]; its undo applies [inner]'s inverse and then throws
++/// E3's error.
++final class _HalfUndone extends DraftCommand {
++  _HalfUndone(this.inner);
++  final DraftCommand inner;
++  @override
++  Capability get capability => inner.capability;
++  @override
++  Set<Capability> get capabilities => inner.capabilities;
++  @override
++  String get label => 'Half undone';
++  @override
++  CommandResult apply(CommandTarget target) {
++    final r = inner.apply(target);
++    return CommandResult(inverse: _ThenThrow(r.inverse), touched: r.touched);
++  }
++}
++
++/// [inner] applied, then E3's error.
++final class _ThenThrow extends DraftCommand {
++  _ThenThrow(this.inner);
++  final DraftCommand inner;
++  @override
++  Capability get capability => inner.capability;
++  @override
++  Set<Capability> get capabilities => inner.capabilities;
++  @override
++  String get label => 'Then throw';
++  @override
++  CommandResult apply(CommandTarget target) {
++    inner.apply(target);
++    throw PartialMutationError('forced: the step applied, then failed');
++  }
++}
++
++/// Applies [inner]; its undo is [inner]'s inverse, whose own inverse (the
++/// redo) applies and then throws E3's error.
++final class _HalfRedone extends DraftCommand {
++  _HalfRedone(this.inner);
++  final DraftCommand inner;
++  @override
++  Capability get capability => inner.capability;
++  @override
++  Set<Capability> get capabilities => inner.capabilities;
++  @override
++  String get label => 'Half redone';
++  @override
++  CommandResult apply(CommandTarget target) {
++    final r = inner.apply(target);
++    return CommandResult(inverse: _UndoThen(r.inverse), touched: r.touched);
++  }
++}
++
++/// [inner] applied; its own inverse (the redo) throws after applying.
++final class _UndoThen extends DraftCommand {
++  _UndoThen(this.inner);
++  final DraftCommand inner;
++  @override
++  Capability get capability => inner.capability;
++  @override
++  Set<Capability> get capabilities => inner.capabilities;
++  @override
++  String get label => 'Undo then';
++  @override
++  CommandResult apply(CommandTarget target) {
++    final r = inner.apply(target);
++    return CommandResult(inverse: _ThenThrow(r.inverse), touched: r.touched);
++  }
++}
++
++/// A design over the box kit with a square off the origin, turned, and one
++/// step in its history, in service: the controller and the square.
++({PlanController c, Handle square}) boxInService(Switches sw) {
++  final c = controllerFor(kits: [boxKit(sw)]);
++  final square =
++      addObject(c.document, atSquare, const SquareParams(side: 1200));
++  c.setMode(PlanMode.service);
++  return (c: c, square: square);
++}
++
+ void main() {
+   testWidgets(
+       'SM-members document, selection, index, page, outlines, parametric, '
+       'frozen and the kits\' services stay on the design in service; '
+       'activeDocument and activeSelection are the copy\'s, runtime, with '
+       'the design\'s handles; back in design both are the design\'s',
+       (tester) async {
+     final c = controllerFor(kits: [testKit()], json: servicePlanText());
+     final design = c.document;
+     final selection = c.selection;
+@@ -338,26 +456,143 @@ void main() {
+         addObject(d2, atSquare, const SquareParams(side: 1200, poisoned: true));
+     final disc = addObject(d2, nearSquare(-3000.5, 2500.25, 0.5),
+         const DiscParams(radius: 400, poisoned: true));
+     expect(square2.value < disc.value, isTrue,
+         reason: 'premise: the square is surveyed first');
+     final table2 = unitDefinition(d2, key: 'box.table.square.four');
+     final t2 = placeDef(d2, table2, turned(table2, 2300.75, -1700.5, -kDeg37),
+         label: '1');
+     c2.setMode(PlanMode.service);
+     final copy2 = c2.activeDocument;
++    final designDepth = c2.document.commands.undoDepth;
++    expect(designDepth, greaterThan(0), reason: 'premise: design steps');
+     final before = DraftDocumentCodec.encodeToString(copy2);
+     sw2.failing.add('reach');
+     expect(
+         () => copy2.commands.execute(TransformNodeCommand(
+             t2,
+             Transform2.translation(640.375, 12.5)
+                 .multiply(transformOf(copy2, t2)))),
+         throwsA(isA<KitHookFailure>()));
+     expect(DraftDocumentCodec.encodeToString(copy2), before,
+         reason: 'refused: nothing applied');
+     expect(c2.frozen, {square2},
+         reason: 'the first type froze; the second failed on the retry');
+     expect(copy2.commands.canUndo, isFalse);
++    expect(c2.document.commands.undoDepth, designDepth,
++        reason: 'the design\'s history is kept');
++    final failures2 = failuresOf(c2);
++    expect(failures2, hasLength(1),
++        reason: 'the first failure is reported; the retry\'s is rethrown');
++    expect((failures2.single.kitId, failures2.single.subject),
++        ('box', SquareParams.id));
++    await tester.pump();
++  });
++
++  testWidgets(
++      'SM-copy-damage a rollback that throws in the copy (E3) is the copy\'s '
++      'alone, on an edit, an undo and a redo: one rollbackFailed '
++      'diagnostic, the copy\'s history cleared, the design neither damaged '
++      'nor its history touched', (tester) async {
++    // An edit whose rollback throws (2a's F-6 in the copy).
++    final sw = Switches();
++    final a = boxInService(sw);
++    final copy = a.c.activeDocument;
++    final depth = a.c.document.commands.undoDepth;
++    expect(depth, greaterThan(0), reason: 'premise: a design step');
++    final at = transformOf(copy, a.square);
++    copy.commands.execute(TransformNodeCommand(
++        a.square, Transform2.translation(310.5, -45.25).multiply(at)));
++    expect(copy.commands.canUndo, isTrue, reason: 'premise: a service step');
++    sw.failing.add('reach');
++    expect(
++        () => copy.commands.execute(_Sabotage(SetComponentCommand<SquareParams>(
++            a.square, const SquareParams(side: 1300, poisoned: true)))),
++        throwsA(isA<PartialMutationError>()));
++    expect(rollbacksOf(a.c), hasLength(1));
++    // M-SM19: `_damageCopy` rebuilds the design instead of the copy.
++    expect(copy.commands.canUndo, isFalse, reason: 'the copy rebuilt');
++    expect(a.c.canUndo.value, isFalse);
++    expect(a.c.document.commands.undoDepth, depth,
++        reason: 'the design\'s history is never touched');
++    expect(a.c.damaged.value, isFalse, reason: 'the design is not damaged');
++
++    // An undo that half-applies in the copy (2a's F-14 in the copy).
++    final b = boxInService(Switches());
++    final copyB = b.c.activeDocument;
++    final depthB = b.c.document.commands.undoDepth;
++    final atB = transformOf(copyB, b.square);
++    copyB.commands.execute(_HalfUndone(TransformNodeCommand(
++        b.square, Transform2.translation(-220.75, 130.5).multiply(atB))));
++    expect(copyB.commands.canUndo, isTrue, reason: 'premise: a service step');
++    // M-SM20: undo routes the copy's E3 to the design's boundary.
++    expect(b.c.undo, returnsNormally);
++    expect(rollbacksOf(b.c), hasLength(1));
++    expect(b.c.damaged.value, isFalse);
++    expect(b.c.document.commands.undoDepth, depthB);
++    expect(copyB.commands.canUndo, isFalse);
++    expect(copyB.commands.canRedo, isFalse);
++    expect(b.c.canUndo.value, isFalse);
++
++    // A redo that half-applies in the copy (2a's F-14b in the copy).
++    final r = boxInService(Switches());
++    final copyR = r.c.activeDocument;
++    final depthR = r.c.document.commands.undoDepth;
++    final atR = transformOf(copyR, r.square);
++    copyR.commands.execute(_HalfRedone(TransformNodeCommand(
++        r.square, Transform2.translation(95.25, 405.5).multiply(atR))));
++    r.c.undo();
++    expect(copyR.commands.canRedo, isTrue, reason: 'premise');
++    // M-SM21: redo routes the copy's E3 to the design's boundary.
++    expect(r.c.redo, returnsNormally);
++    expect(rollbacksOf(r.c), hasLength(1));
++    expect(r.c.damaged.value, isFalse);
++    expect(r.c.document.commands.undoDepth, depthR);
++    expect(copyR.commands.canRedo, isFalse);
++    expect(r.c.canRedo.value, isFalse);
++    await tester.pump();
++  });
++
++  testWidgets(
++      'SM-tool-reset entering service cancels a design tool part-way through '
++      'a shape and arms plan.select', (tester) async {
++    final c = controllerFor(kits: [testKit()], json: servicePlanText());
++    expect(c.selectTool('test.slab'), isTrue);
++    final tool = c.toolFor('test.slab')!;
++    tool.onPointerDown(pointerAt(Vector2(1250.5, -730.25)), c.toolContext);
++    expect(tool.isMidShape, isTrue, reason: 'premise');
++    c.setMode(PlanMode.service);
++    // M-SM22: setMode does not activate plan.select.
++    expect(c.activeTool.value, 'plan.select');
++    expect(tool.isMidShape, isFalse, reason: 'the shape cancelled');
++    c.setMode(PlanMode.design);
++    expect(c.activeTool.value, 'plan.select');
++    await tester.pump();
++  });
++
++  testWidgets(
++      'SM-copy-unreadable a component the design keeps raw (E4) is kept raw '
++      'in the copy, written back as read', (tester) async {
++    final sw = Switches();
++    final a = controllerFor(kits: [boxKit(sw)]);
++    final broken = addObject(
++        a.document, atSquare, const SquareParams(side: 1200, poisoned: true));
++    addObject(a.document, nearSquare(4000.5, -500.25, 0.25),
++        const SquareParams(side: 500));
++    final json = a.save();
++    sw.failing.add('fromJson');
++    final c = controllerFor(kits: [boxKit(sw)], json: json);
++    final kept = c.document.components.unknownOf(broken);
++    expect(kept, isNotEmpty, reason: 'premise: E4 kept it raw');
++    // M-SM23: the copy decoded without keepUnreadableComponents.
++    expect(() => c.setMode(PlanMode.service), returnsNormally);
++    final copy = c.activeDocument;
++    expect(copy, isNot(same(c.document)));
++    expect(copy.components.unknownOf(broken), kept);
++    expect(
++        componentsText(
++            DraftDocumentCodec.encodeToString(copy), SquareParams.id),
++        componentsText(
++            DraftDocumentCodec.encodeToString(c.document), SquareParams.id));
+     await tester.pump();
+   });
+ }

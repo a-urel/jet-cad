@@ -12,7 +12,8 @@
 // unturned; today's wall becomes a plain line. The hues under test are
 // `teal` and `purple`, never the first of the palette, and `magenta`, a
 // name no release knows. CP2 (tint pixels) is the room's (sub-project 3);
-// CP7 to CP12 are tables (2b).
+// CP7 to CP12 are tables (2b Task 10): placed units, three of the fixture's
+// `tableSymbol(seats: 4)` labelled 1, 2 and 7.
 import 'dart:convert' show jsonEncode;
 
 import 'package:flutter/material.dart';
@@ -23,9 +24,15 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show PlanSwatch;
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 import 'package:jet_cad_2d_plan/src/panels/colour_row.dart';
+import 'package:jet_cad_2d_plan/src/units/unit_components.dart' show UnitColour;
+import 'package:jet_cad_2d_plan/src/units/unit_index.dart' show UnitIndex;
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../support/panel_kits.dart';
+import '../support/service_fixture.dart' show serviceFixture;
+import '../support/test_kit.dart' show unitKit;
+import '../support/unit_fixtures.dart'
+    show addUnitLabel, fxKit, placeAt, tableSymbol;
 
 Finder swatch(String name) => find.byKey(Key('color-swatch-$name'));
 Finder get picker => find.byKey(const Key('color-picker'));
@@ -74,14 +81,19 @@ typedef Boxes = ({
   DraftDocument doc,
   Handle a,
   Handle b,
-  Handle line
+  Handle line,
+  Handle one,
+  Handle two,
+  Handle seven
 });
 
 /// Two boxes and a plain line over the box and disc kits: A (120 x 70) in a
 /// group of its own turned 0.61 rad, B (90 x 60) at the identity, the line
-/// on layer 0. The history cleared.
+/// on layer 0; three units of `tableSymbol(seats: 4)` labelled 1 (turned),
+/// 2 (mirrored) and 7 (turned three quarters), off the origin. The history
+/// cleared.
 Boxes boxesPlan() {
-  final c = boxController(kits: [boxKit, discKit]);
+  final c = boxController(kits: [boxKit, discKit, fxKit()]);
   final a = addBox(c, Vector2(7010.25, 3020.5),
       const BoxParams(120, 70, label: 'A', count: 2),
       turn: 0.61);
@@ -91,8 +103,28 @@ Boxes boxesPlan() {
       linePayload(Vector2(7210.5, 3300.25), Vector2(7390.75, 3360.5)),
       layer: ReservedHandles.layerZero);
   c.document.commands.execute(add);
+  Handle unit(String label, Vector2 at,
+      {int quarterTurns = 0, bool mirrored = false}) {
+    final h = placeAt(c.document, tableSymbol(seats: 4), at,
+        quarterTurns: quarterTurns, mirrored: mirrored);
+    addUnitLabel(c.document, h, label);
+    return h;
+  }
+
+  final one = unit('1', Vector2(7210.25, 3150.5), quarterTurns: 1);
+  final two = unit('2', Vector2(7050.75, 3400.25), mirrored: true);
+  final seven = unit('7', Vector2(7600.5, 3300.75), quarterTurns: 3);
   c.document.commands.clearHistory();
-  return (c: c, doc: c.document, a: a, b: b, line: add.record.handle);
+  return (
+    c: c,
+    doc: c.document,
+    a: a,
+    b: b,
+    line: add.record.handle,
+    one: one,
+    two: two,
+    seven: seven
+  );
 }
 
 BoxParams boxOf(DraftDocument doc, Handle h) =>
@@ -102,6 +134,28 @@ BoxParams boxOf(DraftDocument doc, Handle h) =>
 /// step.
 void paint(DraftDocument doc, Handle box, String? name) => doc.commands.execute(
     SetComponentCommand<BoxParams>(box, boxOf(doc, box).withColour(name)));
+
+/// The unit labelled [label]'s detail.
+PlanUnitDetail detailOf(PlanController c, String label) =>
+    c.unitDetails.singleWhere((d) => d.unit.label == label);
+
+/// The unit labelled [label]'s colour as the host reads it.
+PlanSwatch? colourOf(PlanController c, String label) =>
+    detailOf(c, label).colour;
+
+/// The stored `jetcad.unit_colour` of [unit].
+UnitColour? storedOf(DraftDocument doc, Handle unit) =>
+    doc.components.get<UnitColour>(unit);
+
+/// The labels of the steps applied from now on.
+List<String> appliedLabels(DraftDocument doc) {
+  final labels = <String>[];
+  final sub = doc.changes.listen((ch) {
+    if (ch is CommandApplied) labels.add(ch.label);
+  });
+  addTearDown(sub.cancel);
+  return labels;
+}
 
 /// The composition over [r]: the canvas and, on the right, the property
 /// panel.
@@ -393,5 +447,318 @@ void main() {
         0xFF000000 | darkCanvasTone(0x00897B, kDarkCanvasPaper));
     expect(
         swatchColor(0x00897B, kDarkCanvasPaper).toARGB32(), isNot(0xFF00897B));
+  });
+
+  testWidgets(
+      'CP7 a tap on teal with two units and a room selected: one undo step '
+      'labelled Colour, the units\' details read teal, the room is teal, '
+      'the others untouched; one Ctrl+Z takes all three back (M-C12 tables)',
+      (tester) async {
+    final r = boxesPlan();
+    final c = r.c;
+    final doc = r.doc;
+    final rig = await Rig.pump(tester, r);
+    final labels = appliedLabels(doc);
+    for (final n in ['1', '2', '7']) {
+      expect(colourOf(c, n), isNull, reason: 'premise: table $n');
+    }
+    await rig.select([r.one, r.two, r.a]);
+    expect(picker, findsOneWidget);
+    expect(marked(tester), 'none', reason: 'two bare tables and a bare room');
+    final depth = doc.commands.undoDepth;
+
+    await tester.tap(swatch('teal'));
+    await tester.pump();
+    expect(doc.commands.undoDepth, depth + 1, reason: 'one undo step');
+    expect(labels, ['Colour']);
+    expect(colourOf(c, '1'), PlanSwatch.teal);
+    expect(colourOf(c, '2'), PlanSwatch.teal);
+    expect(storedOf(doc, r.one), UnitColour(PlanSwatch.teal));
+    expect(boxOf(doc, r.a).colour, 'teal');
+    expect(colourOf(c, '7'), isNull, reason: 'an unselected table');
+    expect(storedOf(doc, r.seven), isNull);
+    expect(marked(tester), 'teal');
+
+    await tester.tap(swatch('purple'));
+    await tester.pump();
+    expect(labels, ['Colour', 'Colour']);
+    expect(colourOf(c, '1'), PlanSwatch.purple);
+    expect(colourOf(c, '2'), PlanSwatch.purple);
+    expect(boxOf(doc, r.a).colour, 'purple');
+    expect(doc.commands.undoDepth, depth + 2);
+
+    c.undo();
+    await tester.pump();
+    expect(colourOf(c, '1'), PlanSwatch.teal);
+    expect(boxOf(doc, r.a).colour, 'teal');
+    c.undo();
+    await tester.pump();
+    expect(doc.commands.undoDepth, depth);
+    expect(colourOf(c, '1'), isNull);
+    expect(colourOf(c, '2'), isNull);
+    expect(storedOf(doc, r.one), isNull, reason: 'the component is gone');
+    expect(boxOf(doc, r.a).colour, isNull);
+
+    // None clears the tables, and a table already bare is no edit.
+    await tester.tap(swatch('teal'));
+    await tester.pump();
+    final after = doc.commands.undoDepth;
+    await rig.select([r.one, r.seven]);
+    await tester.tap(swatch('none'));
+    await tester.pump();
+    expect(colourOf(c, '1'), isNull);
+    expect(doc.commands.undoDepth, after + 1);
+    await tester.tap(swatch('none'));
+    await tester.pump();
+    expect(doc.commands.undoDepth, after + 1, reason: 'none, twice');
+    expect(recolourCommand(c, [k(r.seven)], null), isNull,
+        reason: 'a bare table, none');
+    expect(recolourCommand(c, [k(r.seven)], PlanSwatch.teal),
+        isA<CompoundCommand>());
+  });
+
+  testWidgets(
+      'CP8 marking: two teal tables mark teal; a teal table and a purple '
+      'room mark nothing; a table with a kept payload marks nothing, alone '
+      'or beside a bare table (M-PC9-t)', (tester) async {
+    final r = boxesPlan();
+    final c = r.c;
+    final doc = r.doc;
+    final rig = await Rig.pump(tester, r);
+    expect(
+        c.setUnitsColour({'1': PlanSwatch.teal, '2': PlanSwatch.teal}), isTrue);
+    await rig.select([r.one, r.two]);
+    expect(marked(tester), 'teal', reason: 'two teal tables');
+    await rig.select([r.one]);
+    expect(marked(tester), 'teal');
+
+    paint(doc, r.a, 'purple');
+    await rig.select([r.one, r.a]);
+    expect(marked(tester), isNull, reason: 'a teal table and a purple room');
+    await rig.select([r.one, r.seven]);
+    expect(marked(tester), isNull, reason: 'a teal table and a bare one');
+
+    // A payload of another shape is kept verbatim: it reads as no colour,
+    // and as no colour that a bare table has either.
+    doc.commands.execute(SetComponentCommand<UnitColour>(
+        r.seven, UnitColour.fromJson(const {'color': 7})));
+    expect(storedOf(doc, r.seven)!.isKept, isTrue, reason: 'premise');
+    expect(colourOf(c, '7'), isNull);
+    await rig.select([r.seven]);
+    expect(picker, findsOneWidget);
+    expect(marked(tester), isNull, reason: 'a kept payload marks no swatch');
+    await rig.select([r.seven, r.two]);
+    expect(marked(tester), isNull, reason: 'a kept payload and a teal table');
+    // An unknown name marks nothing either.
+    doc.commands.execute(SetComponentCommand<UnitColour>(
+        r.two, UnitColour.fromJson(const {'color': 'magenta'})));
+    await rig.select([r.two]);
+    expect(marked(tester), isNull, reason: 'magenta equals no swatch');
+    expect(storedOf(doc, r.two)!.name, 'magenta');
+
+    // A tap replaces the kept payload; None removes it.
+    await rig.select([r.seven, r.two]);
+    await tester.tap(swatch('teal'));
+    await tester.pump();
+    expect(storedOf(doc, r.seven), UnitColour(PlanSwatch.teal));
+    expect(storedOf(doc, r.two), UnitColour(PlanSwatch.teal));
+    expect(marked(tester), 'teal');
+    doc.commands.execute(SetComponentCommand<UnitColour>(
+        r.seven, UnitColour.fromJson(const {'hue': 'teal'})));
+    await rig.select([r.seven]);
+    await tester.tap(swatch('none'));
+    await tester.pump();
+    expect(storedOf(doc, r.seven), isNull, reason: 'none drops a kept payload');
+  });
+
+  testWidgets(
+      'CP9 unitsOnly: the row shows for a selected table and acts; with '
+      'recolor false it shows read-only and says why', (tester) async {
+    final r = boxesPlan();
+    final c = r.c;
+    final doc = r.doc;
+    final rig =
+        await Rig.pump(tester, r, permissions: PlanPermissions.unitsOnly);
+    await rig.select([r.one, r.two]);
+    expect(picker, findsOneWidget);
+    expect(find.byKey(const Key('layer-picker')), findsNothing,
+        reason: 'premise: unitsOnly has no layer picker');
+    final labels = appliedLabels(doc);
+    await tester.tap(swatch('purple'));
+    await tester.pump();
+    expect(labels, ['Colour']);
+    expect(colourOf(c, '1'), PlanSwatch.purple);
+    expect(colourOf(c, '2'), PlanSwatch.purple);
+    expect(marked(tester), 'purple');
+
+    c.permissions = PlanPermissions.unitsOnly.copyWith(recolor: false);
+    await tester.pump();
+    expect(picker, findsOneWidget, reason: 'read-only, still shown');
+    expect(marked(tester), 'purple');
+    final before = canon(doc);
+    final depth = doc.commands.undoDepth;
+    await tester.tap(swatch('teal'));
+    await tester.pump();
+    await tester.tap(swatch('none'));
+    await tester.pump();
+    expect(canon(doc), before);
+    expect(doc.commands.undoDepth, depth);
+    expect(colourOf(c, '1'), PlanSwatch.purple);
+    expect(tooltipOf(tester, 'teal'), const PlanStringsEn().colorRefused);
+    expect(semanticsOf(tester, 'teal').properties.enabled, isFalse);
+
+    c.permissions = PlanPermissions.unitsOnly;
+    await tester.pump();
+    await tester.tap(swatch('teal'));
+    await tester.pump();
+    expect(colourOf(c, '1'), PlanSwatch.teal, reason: 'allowed again');
+  });
+
+  testWidgets(
+      'CP10 permissions: without components the row is read-only for a '
+      'table selection, with the readOnlyDocument tooltip; restored, it acts',
+      (tester) async {
+    final r = boxesPlan();
+    final c = r.c;
+    final doc = r.doc;
+    final rig = await Rig.pump(tester, r);
+    expect(c.setUnitColour('1', PlanSwatch.teal), isTrue);
+    await rig.select([r.one]);
+    expect(picker, findsOneWidget);
+    doc.commands.permissions = const DraftPermissions(
+        transform: true, components: false, geometry: true, structure: true);
+    await rig.select([r.two]);
+    await rig.select([r.one]);
+    expect(picker, findsOneWidget, reason: 'read-only, still shown');
+    expect(marked(tester), 'teal');
+    final before = canon(doc);
+    final depth = doc.commands.undoDepth;
+    await tester.tap(swatch('purple'));
+    await tester.pump();
+    await tester.tap(swatch('none'));
+    await tester.pump();
+    expect(canon(doc), before);
+    expect(doc.commands.undoDepth, depth);
+    expect(tooltipOf(tester, 'purple'), const PlanStringsEn().readOnlyDocument);
+    expect(semanticsOf(tester, 'purple').properties.enabled, isFalse);
+
+    doc.commands.permissions = DraftPermissions.all;
+    await rig.select([r.two]);
+    await rig.select([r.one]);
+    await tester.tap(swatch('purple'));
+    await tester.pump();
+    expect(colourOf(c, '1'), PlanSwatch.purple, reason: 'allowed again');
+  });
+
+  testWidgets(
+      'CP11 a table selected under the active Disc tool: the tool is still '
+      'the disc, the selection holds the table, and the Colour row is '
+      'absent (M-PC9-tool)', (tester) async {
+    final r = boxesPlan();
+    final c = r.c;
+    final rig = await Rig.pump(tester, r);
+    await rig.select([r.one]);
+    expect(picker, findsOneWidget, reason: 'the select tool: the row shows');
+
+    expect(c.selectTool('disc.draw'), isTrue);
+    await tester.pump();
+    expect(c.activeTool.value, 'disc.draw');
+    expect(find.byKey(const Key('settings-disc.draw')), findsOneWidget,
+        reason: 'the Disc tool\'s settings show');
+    // Activating a tool clears the selection; select the table afterwards.
+    c.select({'1'});
+    await tester.pump();
+    expect({...c.selection.keys}, {k(r.one)},
+        reason: 'premise: the table is selected');
+    expect(c.activeTool.value, 'disc.draw',
+        reason: 'premise: selecting did not leave the Disc tool');
+    expect(picker, findsNothing, reason: 'no Colour row under a tool');
+
+    expect(c.selectTool('plan.select'), isTrue);
+    await tester.pump();
+    c.select({'1'});
+    await tester.pump();
+    expect(picker, findsOneWidget, reason: 'back on the select tool');
+  });
+
+  testWidgets(
+      'CP12 hover notifications over a selection of two tables and a room '
+      'rebuild the panel and the Colour row without surveying the document '
+      '(14a review R-7; the panel keeps its survey per document change)',
+      (tester) async {
+    final r = boxesPlan();
+    final c = r.c;
+    final rig = await Rig.pump(tester, r);
+    await rig.select([r.one, r.two, r.a]);
+    expect(picker, findsOneWidget);
+    final keys = [k(r.one), k(r.seven), k(r.a)];
+    // Warm: one hover so any first-use work is behind us.
+    c.selection.setHover(keys.first);
+    await tester.pump();
+    final before = UnitIndex.debugBuilds;
+    for (final key in [...keys, null, ...keys.reversed, null]) {
+      c.selection.setHover(key);
+      await tester.pump();
+      expect(picker, findsOneWidget);
+    }
+    expect(UnitIndex.debugBuilds, before,
+        reason: 'a hover rebuild rescanned the document');
+    // The picker's own reads are survey-free, empty selection included.
+    pickedColours(c, const []);
+    pickedColours(c, keys);
+    recolourCommand(c, keys, PlanSwatch.teal);
+    expect(UnitIndex.debugBuilds, before);
+    // And they agree with the index: the placed-unit check is its rule.
+    expect(pickedColours(c, keys), hasLength(3));
+    bool isTable(Handle h) => c.unitIndex[h]?.generated == false;
+    for (final h in [r.one, r.two, r.seven]) {
+      expect(isTable(h), isTrue, reason: h.toHex());
+    }
+    expect(isTable(r.a), isFalse);
+    expect(isTable(r.doc.rootHandle), isFalse);
+    expect(isTable(const Handle(0x7FFFFFF)), isFalse, reason: 'no node');
+  });
+
+  testWidgets(
+      'CP13 a locked unit (its kit missing) is no colour target: selected, '
+      'no picker shows and recolourCommand is null; with its kit loaded the '
+      'same unit is one (M-UW14)', (tester) async {
+    final f = serviceFixture();
+    final locked = PlanController(kits: const [], json: f.json);
+    addTearDown(locked.dispose);
+    final open = PlanController(kits: [unitKit()], json: f.json);
+    addTearDown(open.dispose);
+    expect(open.isLocked(f.table), isFalse, reason: 'premise');
+    expect(unitColourTargets(open, [k(f.table)]), [f.table],
+        reason: 'premise: the control');
+    expect(locked.isLocked(f.table), isTrue, reason: 'premise');
+    expect(locked.unitIndex[f.table]?.generated, isFalse, reason: 'premise');
+    await tester.binding.setSurfaceSize(const Size(1440, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: SingleChildScrollView(
+                child: PlanPropertyPanel(controller: locked)))));
+    locked.selection.replace([k(f.table)]);
+    await tester.pump();
+    // M-UW14: `!c.isLocked(h)` deleted from unitColourTargets.
+    expect(unitColourTargets(locked, [k(f.table)]), isEmpty);
+    expect(picker, findsNothing);
+    expect(recolourCommand(locked, [k(f.table)], PlanSwatch.teal), isNull);
+  });
+
+  test(
+      'CP14 a generated seat is no colour target through unitColourTargets, '
+      'its placed table beside it is (M-UW15)', () {
+    final f = serviceFixture();
+    final c = PlanController(kits: [unitKit()], json: f.json);
+    addTearDown(c.dispose);
+    final seat = f.seatsA.first;
+    expect(c.unitIndex[seat]?.generated, isTrue, reason: 'premise');
+    expect(c.isLocked(seat), isFalse, reason: 'premise: not the lock');
+    // M-UW15: `index[h]?.generated == false` reduced to `index[h] != null`.
+    expect(unitColourTargets(c, [k(seat)]), isEmpty);
+    expect(unitColourTargets(c, [k(seat), k(f.table)]), [f.table]);
+    expect(recolourCommand(c, [k(seat)], PlanSwatch.teal), isNull);
   });
 }

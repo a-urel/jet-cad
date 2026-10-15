@@ -1,0 +1,1884 @@
+# Review package: c0011082..HEAD
+
+## Commits
+352b3936 feat(plan): unit statuses, groups and focus by label (2b S3)
+
+## Files changed
+ packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart  |   1 +
+ .../lib/src/controller/plan_controller.dart        | 188 +++++++-
+ .../lib/src/service/service_state.dart             | 344 ++++++++++++++
+ packages/jet_cad_2d_plan/test/barrel_test.dart     |   2 +
+ .../controller/service_state_controller_test.dart  | 143 ++++++
+ .../controller/unit_groups_controller_test.dart    | 523 +++++++++++++++++++++
+ .../test/service/service_state_test.dart           | 284 +++++++++++
+ .../test/support/service_plans.dart                |  93 +++-
+ 8 files changed, 1570 insertions(+), 8 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart b/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart
+index ffceff4c..bdf6abb3 100644
+--- a/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart
++++ b/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart
+@@ -58,20 +58,21 @@ export 'src/l10n/localizations.dart'
+     show PlanLocalizations, planLocalizationsDelegates, planSupportedLocales;
+ export 'src/l10n/strings.dart' show PlanStrings;
+ export 'src/l10n/strings_de.dart' show PlanStringsDe;
+ export 'src/l10n/strings_en.dart' show PlanStringsEn;
+ export 'src/l10n/strings_tr.dart' show PlanStringsTr;
+ export 'src/panels/plan_layer_panel.dart' show PlanLayerPanel;
+ export 'src/panels/plan_page_panel.dart' show PlanPagePanel;
+ export 'src/panels/plan_property_panel.dart' show PlanPropertyPanel;
+ export 'src/panels/plan_symbol_gallery.dart' show PlanSymbolGallery;
+ export 'src/service/service_session.dart' show PlanMode;
++export 'src/service/service_state.dart' show UnitGroup, UnitStatus;
+ export 'src/shortcuts/plan_shortcut_guard.dart' show PlanShortcutGuard;
+ export 'src/shortcuts/plan_shortcuts.dart' show PlanShortcuts;
+ export 'src/symbols/plan_symbol.dart' show PlanSymbol;
+ export 'src/symbols/plan_symbol_loader.dart'
+     show PlanSymbolLoad, PlanSymbolLoader;
+ export 'src/theme/plan_theme.dart' show PlanTheme;
+ export 'src/units/unit_detail.dart'
+     show
+         PlanUnit,
+         PlanUnitAdded,
+diff --git a/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart b/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
+index b08ba790..34df4133 100644
+--- a/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
++++ b/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
+@@ -20,20 +20,21 @@ import '../file/plan_file.dart';
+ import '../file/plan_format_exception.dart';
+ import '../kits/guard.dart';
+ import '../kits/kit_set.dart';
+ import '../kits/locks.dart';
+ import '../l10n/document_separator.dart';
+ import '../l10n/strings.dart';
+ import '../export/page_flows.dart';
+ import '../export/page_printer.dart';
+ import '../export/registries.dart';
+ import '../service/service_session.dart';
++import '../service/service_state.dart';
+ import '../service/unit_picker.dart';
+ import '../shortcuts/tool_letters.dart';
+ import '../symbols/plan_symbol.dart';
+ import '../symbols/plan_symbol_loader.dart';
+ import '../tools/generic_tools.dart';
+ import '../tools/move_resolver.dart';
+ import '../tools/plan_select_gates.dart';
+ import '../tools/plan_symbol_tool.dart';
+ import '../units/unit_components.dart';
+ import '../units/unit_detail.dart';
+@@ -53,20 +54,35 @@ import 'tool_settings_store.dart';
+ 
+ /// The thumbnail capacity of a controller's own cache (today's
+ /// `kFloorPlanThumbnailCapacity`).
+ const int kPlanThumbnailCapacity = 128;
+ 
+ /// A bump-only notifier: each [bump] is one request.
+ final class _Requests extends ChangeNotifier {
+   void bump() => notifyListeners();
+ }
+ 
++/// The unit focus: each [replace] notifies, an equal set or a second null
++/// included.
++final class _Focus extends ChangeNotifier
++    implements ValueListenable<Set<String>?> {
++  Set<String>? _value;
++
++  @override
++  Set<String>? get value => _value;
++
++  void replace(Set<String>? next) {
++    _value = next;
++    notifyListeners();
++  }
++}
++
+ /// What a requested fit frames: a centring or some units.
+ sealed class _FitTarget {
+   const _FitTarget();
+ }
+ 
+ /// A queued centring (today's `_Centre`): [world] at the canvas's centre.
+ final class _Centre extends _FitTarget {
+   const _Centre(this.world, this.scale, {required this.pageScale});
+ 
+   final Offset world;
+@@ -777,24 +793,20 @@ class PlanController extends ChangeNotifier {
+   bool get _inDesign => _service == null;
+ 
+   /// Throws a [StateError] naming [who] in service: a design write is
+   /// refused there (spec S3, today's P-5). Nothing in design.
+   void _requireDesign(String who) {
+     if (_service != null) {
+       throw StateError('$who needs the design mode (P-5)');
+     }
+   }
+ 
+-  /// [labels], each label of a group replaced by its members in service
+-  /// (Task 12). The labels as given in design.
+-  Set<String> _expandLabels(Set<String> labels) => labels;
+-
+   /// The active document's unit index (`@internal`): the panels, the
+   /// inspector and the tests read it.
+   @internal
+   UnitIndex get unitIndex => _activeUnits.current;
+ 
+   final ValueNotifier<int> _revision = ValueNotifier(0);
+ 
+   /// Moves whenever the active plan changes: an edit, an undo or a redo of
+   /// it (the design's in design, the copy's in service), a mode switch,
+   /// [load], [newPlan] (Task 13 adds the reset and the restore). A host
+@@ -936,21 +948,22 @@ class PlanController extends ChangeNotifier {
+     final reach = kind == PointerDeviceKind.touch
+         ? kTouchPickRadiusPixels / cam.scale
+         : 0.0;
+     return picker.pick(world, reach: reach)?.text;
+   }
+ 
+   /// Selects every unit carrying one of [labels] that the selection can
+   /// hold -- visible, not locked -- replacing the selection (today's
+   /// `select`, :1834-1870). A label two units share selects both; an
+   /// unknown one is ignored. In design, placed units only (the design's
+-  /// selection holds root objects).
++  /// selection holds root objects). In service a label in a group stands
++  /// for the group's selectable members (the same filter).
+   void select(Set<String> labels) {
+     settlePendingInput();
+     _select(labels);
+   }
+ 
+   void _select(Set<String> labels) {
+     final index = _activeUnits.current;
+     final placedOnly = _inDesign;
+     final keys = <SelectionKey>[];
+     for (final l in _expandLabels(labels)) {
+@@ -987,20 +1000,179 @@ class PlanController extends ChangeNotifier {
+         if (k.chain.isEmpty)
+           if (index[k.target]?.text case final t?) t,
+     };
+     if (!setEquals(labels, _selectedUnits.value)) {
+       _selectedUnits.value = Set.unmodifiable(labels);
+     }
+     final editor = _inDesign ? _selectedUnits.value : const <String>{};
+     if (!setEquals(editor, _editorSelected.value)) {
+       _editorSelected.value = editor;
+     }
++    _refreshSelectedGroup();
++  }
++
++  // ---------------------------------------------------------------------
++  // Service state (spec 2b S3 "Service state"), by label. Kept for the
++  // controller's life: across mode switches, resetService, restoreService,
++  // load and newPlan. Not document state: no command, undo step, dirty or
++  // revision; never saved, exported or printed.
++
++  final ValueNotifier<Map<String, UnitStatus>> _statuses =
++      ValueNotifier(const <String, UnitStatus>{});
++  final ValueNotifier<Map<String, UnitGroup>> _groups =
++      ValueNotifier(const <String, UnitGroup>{});
++  final ValueNotifier<Map<String, UnitStatus>> _groupStatuses =
++      ValueNotifier(const <String, UnitStatus>{});
++  final ValueNotifier<String?> _selectedGroup = ValueNotifier(null);
++  final ValueNotifier<Set<String>?> _mergeCandidate = ValueNotifier(null);
++  final _Focus _focus = _Focus();
++
++  /// The units' statuses by label, as [setUnitStatus] last set them; drawn
++  /// in service only, on every live, visible unit carrying the label.
++  ValueListenable<Map<String, UnitStatus>> get unitStatuses => _statuses;
++
++  /// Replaces every status at once: labels trimmed.
++  void setUnitStatus(Map<String, UnitStatus> statuses) {
++    _statuses.value = Map.unmodifiable(
++        {for (final e in statuses.entries) e.key.trim(): e.value});
++  }
++
++  /// The unit groups by trimmed id, as [setUnitGroups] last set them; they
++  /// act in service only.
++  ValueListenable<Map<String, UnitGroup>> get unitGroups => _groups;
++
++  /// Replaces every group at once: ids trimmed. Throws an [ArgumentError]
++  /// for a blank id, two ids the same after trimming, a group with no
++  /// member after trimming, or a label in two groups; then nothing is
++  /// assigned and no listener is notified. A member label with no live
++  /// unit is kept; a shared label is allowed; a group may mix kinds.
++  void setUnitGroups(Map<String, UnitGroup> groups) {
++    final valid = validateUnitGroups(groups);
++    _groups.value = valid;
++    _refreshSelectedGroup();
++  }
++
++  /// The groups' statuses by trimmed id, as [setGroupStatus] last set them.
++  ValueListenable<Map<String, UnitStatus>> get groupStatuses => _groupStatuses;
++
++  /// Replaces every group status at once: ids trimmed. A group's status
++  /// fills every visible member and overrides each member's own status
++  /// while it is set. A status whose id has no group is kept, draws
++  /// nothing, and applies again when a group with that id comes back.
++  void setGroupStatus(Map<String, UnitStatus> statuses) {
++    _groupStatuses.value = Map.unmodifiable(
++        {for (final e in statuses.entries) e.key.trim(): e.value});
++  }
++
++  /// The labels in focus, as [setUnitFocus] last set them: null for none.
++  /// In service every unit outside a focus lies under a veil.
++  ValueListenable<Set<String>?> get unitFocus => _focus;
++
++  /// Replaces the focus: null for none, else [labels] trimmed, blanks
++  /// dropped, copied into an unmodifiable set, so `{}` and `{''}` are a
++  /// focus with no unit. Every call notifies [unitFocus], an equal set
++  /// included. Presentation only: no command, undo step, dirty, revision,
++  /// service change or notification of this controller.
++  void setUnitFocus(Set<String>? labels) {
++    _focus.replace(labels == null
++        ? null
++        : Set<String>.unmodifiable({
++            for (final l in labels)
++              if (l.trim() case final t when t.isNotEmpty) t,
++          }));
++  }
++
++  /// The id of the group the selection is exactly (the Split rule): the
++  /// selected labels are that group's selectable members' labels, and no
++  /// unlabelled unit is selected. Null otherwise, and always in design.
++  /// It updates after [selectedUnits] and [unitGroups] have notified.
++  ValueListenable<String?> get selectedGroup => _selectedGroup;
++
++  /// The labels the service bar's Merge would send: in service
++  /// [selectedUnits], unmodifiable, when they span two or more groups or
++  /// ungrouped labels; null otherwise, and always in design.
++  ValueListenable<Set<String>?> get mergeCandidate => _mergeCandidate;
++
++  /// The labels of group [groupId]'s (trimmed) selectable members in the
++  /// active document: its live members on a shown layer that no lock
++  /// covers. A label several units carry is in it once. Empty for an
++  /// unknown id; unmodifiable; valid in both modes, fresh at every call.
++  Set<String> selectableMembers(String groupId) => Set.unmodifiable({
++        for (final u in _groupLookup.selectableMembers(groupId.trim()))
++          u.label!,
++      });
++
++  /// The groups resolved against the active document's units (Tasks
++  /// 14-16).
++  @internal
++  UnitGroupLookup get groupLookup => _groupLookup;
++
++  /// The status [unit] shows (Tasks 15-16): its group's over its own.
++  @internal
++  UnitStatus? statusOf(UnitInfo unit) => statusOfUnit(unit.text,
++      statuses: _statuses.value,
++      groupStatuses: _groupStatuses.value,
++      groupByLabel: _groupLookup.byLabel);
++
++  UnitGroupLookup? _lookup;
++  UnitIndex? _lookupUnits;
++  Map<String, UnitGroup>? _lookupGroups;
++
++  /// The groups resolved against the active units, made again when the
++  /// unit index (a state, layer or lock change) or the groups move.
++  UnitGroupLookup get _groupLookup {
++    final units = _activeUnits.current;
++    final groups = _groups.value;
++    if (_lookup == null ||
++        !identical(_lookupUnits, units) ||
++        !identical(_lookupGroups, groups)) {
++      _lookup = UnitGroupLookup(groups, groupUnitsOf(units));
++      _lookupUnits = units;
++      _lookupGroups = groups;
++    }
++    return _lookup!;
++  }
++
++  /// [labels], each label of a group replaced by all its members: in
++  /// service only, where groups act. (Task 9's seam, given its body here.)
++  Set<String> _expandLabels(Set<String> labels) {
++    final groups = _groups.value;
++    if (_service == null || groups.isEmpty) return labels;
++    final lookup = _groupLookup;
++    return {
++      for (final l in labels)
++        ...switch (lookup.groupOf(l)) {
++          null => [l],
++          final id => groups[id]!.members,
++        }
++    };
++  }
++
++  /// [selectedGroup] and [mergeCandidate] over the active document.
++  void _refreshSelectedGroup() {
++    final service = _service != null;
++    String? id;
++    if (service && _groups.value.isNotEmpty) {
++      final keys = activeSelection.keys;
++      final unlabelled = _activeUnits.current.units.any((u) =>
++          u.text == null && keys.contains(SelectionKey.root(u.instance)));
++      id = _groupLookup.splitGroup(_selectedUnits.value,
++          unlabelledSelected: unlabelled);
++    }
++    _selectedGroup.value = id;
++    final selected = _selectedUnits.value;
++    final candidate =
++        service && mergeQualifies(selected, _groups.value) ? selected : null;
++    final last = _mergeCandidate.value;
++    if (candidate == null ? last != null : !setEquals(candidate, last)) {
++      _mergeCandidate.value = candidate;
++    }
+   }
+ 
+   /// Frames the units of the active plan carrying one of [labels] (today's
+   /// `fitToTables`, :2068-2093): labels trimmed, blanks dropped; a label
+   /// two units share frames both; a unit on a hidden layer is not framed,
+   /// a locked one is; an unlabelled unit never matches. The world framed is
+   /// the bound of each unit's box at its place, grown by [kUnitFitMarginMm]
+   /// per side and to at least [kUnitFitMinSpanMm] per axis. Returns whether
+   /// one such unit exists now; when none does, nothing changes. Not
+   /// document state.
+@@ -2120,20 +2292,26 @@ class PlanController extends ChangeNotifier {
+     _diagnostics.dispose();
+     _locale.dispose();
+     _symbolsState.dispose();
+     _dirty.dispose();
+     _canUndo.dispose();
+     _canRedo.dispose();
+     _activeTool.dispose();
+     _fill.dispose();
+     _locked.dispose();
+     _mode.dispose();
++    _statuses.dispose();
++    _groups.dispose();
++    _groupStatuses.dispose();
++    _selectedGroup.dispose();
++    _mergeCandidate.dispose();
++    _focus.dispose();
+     lockHint.dispose();
+     _damaged.dispose();
+     _canvasRect.dispose();
+     _fits.dispose();
+     _revision.dispose();
+     _selectedUnits.dispose();
+     _editorSelected.dispose();
+     _unitBaseline = null;
+     _snap.dispose();
+     _snapping.dispose();
+diff --git a/packages/jet_cad_2d_plan/lib/src/service/service_state.dart b/packages/jet_cad_2d_plan/lib/src/service/service_state.dart
+new file mode 100644
+index 00000000..c3dd0d80
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/service/service_state.dart
+@@ -0,0 +1,344 @@
++// Service state (spec 2b S3 "Service state"): a unit's status, a group of
++// units, the validation of a host's groups, and the group rules the
++// controller, the service tool, the painters and the service bar share, so
++// each applies one rule. Ported from jet_cad_floor_plan's
++// lib/src/host/floor_plan_types.dart (TableStatus :128-159, TableGroup
++// :244-300) and lib/src/service/table_groups.dart (whole file), keyed by
++// label instead of number; a unit's lock is `isLockedUnit` (spec S2
++// "Locked units"), not its layer's alone.
++import 'package:flutter/foundation.dart' show immutable, setEquals;
++import 'package:flutter/widgets.dart' show Color, StringCharacters;
++import 'package:jet_cad_2d/jet_cad_2d.dart' show Handle;
++
++import '../units/unit_index.dart';
++
++/// A unit's status as the host colours it in service (spec S3): a fill
++/// under the drafting and an optional short caption. Not document state:
++/// never saved, exported, printed or undone.
++@immutable
++final class UnitStatus {
++  /// [caption] is cut to [maxCaption] characters (grapheme clusters).
++  UnitStatus({required this.color, String? caption})
++      : caption = caption?.characters.take(maxCaption).toString();
++
++  /// The longest caption, in characters.
++  static const int maxCaption = 12;
++
++  /// The fill, drawn as given: a translucent colour lets the paper show.
++  final Color color;
++
++  final String? caption;
++
++  @override
++  bool operator ==(Object other) =>
++      other is UnitStatus && other.color == color && other.caption == caption;
++
++  @override
++  int get hashCode => Object.hash(color, caption);
++
++  @override
++  String toString() => 'UnitStatus($color, $caption)';
++}
++
++/// A group of units the host merged (spec S3): in service its members are
++/// framed, labelled, selected and moved as one. Addressed by the host's
++/// group id. Not document state.
++@immutable
++final class UnitGroup {
++  /// [members] are unit labels, each trimmed, a blank one dropped. [label]
++  /// is trimmed, a blank one meaning none, then cut to [maxLabel]
++  /// characters (grapheme clusters).
++  UnitGroup({required Set<String> members, String? label})
++      : members = Set.unmodifiable(<String>{
++          for (final m in members)
++            if (m.trim().isNotEmpty) m.trim()
++        }),
++        label = switch (label?.trim()) {
++          null || '' => null,
++          final l => l.characters.take(maxLabel).toString(),
++        };
++
++  /// The longest label, in characters.
++  static const int maxLabel = 24;
++
++  /// The member labels, trimmed, none blank; unmodifiable. A label with no
++  /// live unit is kept and resolves once such a unit exists.
++  final Set<String> members;
++
++  /// The host's text for the group's chip, or null for its labels.
++  final String? label;
++
++  @override
++  bool operator ==(Object other) =>
++      other is UnitGroup &&
++      other.label == label &&
++      setEquals(other.members, members);
++
++  @override
++  int get hashCode => Object.hash(Object.hashAllUnordered(members), label);
++
++  @override
++  String toString() => 'UnitGroup($members, $label)';
++}
++
++/// [groups] with their ids trimmed, in their given order, unmodifiable.
++///
++/// Throws an [ArgumentError], before anything is returned, for an empty or
++/// blank id, for two ids that are the same after trimming, for a group
++/// with no member (a [UnitGroup] drops blank members), and for a label in
++/// two groups; the message names the label and both ids.
++Map<String, UnitGroup> validateUnitGroups(Map<String, UnitGroup> groups) {
++  final out = <String, UnitGroup>{};
++  final owner = <String, String>{};
++  for (final MapEntry(key: raw, value: group) in groups.entries) {
++    final id = raw.trim();
++    if (id.isEmpty) {
++      throw ArgumentError.value(raw, 'groups', 'A group id is blank');
++    }
++    if (out.containsKey(id)) {
++      throw ArgumentError.value(
++          raw, 'groups', 'Two group ids are "$id" after trimming');
++    }
++    if (group.members.isEmpty) {
++      throw ArgumentError.value(raw, 'groups', 'Group "$id" has no member');
++    }
++    for (final l in group.members) {
++      final other = owner[l];
++      if (other != null) {
++        throw ArgumentError.value(raw, 'groups',
++            'Unit label "$l" is in two groups, "$other" and "$id"');
++      }
++      owner[l] = id;
++    }
++    out[id] = group;
++  }
++  return Map.unmodifiable(out);
++}
++
++/// The id of the group each member label of [groups] belongs to; [groups]
++/// as [validateUnitGroups] returns them, so a label has one group.
++Map<String, String> groupIdsByLabel(Map<String, UnitGroup> groups) => {
++      for (final MapEntry(key: id, value: g) in groups.entries)
++        for (final l in g.members) l: id,
++    };
++
++/// One unit as the group rules see it.
++final class GroupUnit {
++  const GroupUnit(
++      {required this.handle,
++      required this.label,
++      required this.visible,
++      required this.locked,
++      this.generated = false});
++
++  /// The unit's instance.
++  final Handle handle;
++
++  /// Its label, trimmed, or null while it has none.
++  final String? label;
++
++  /// On a shown layer (a hidden unit counts for nothing).
++  final bool visible;
++
++  /// `isLockedUnit`: shown and tapped, never selected (spec S2).
++  final bool locked;
++
++  /// Made by its object's type: never dragged (spec S4).
++  final bool generated;
++
++  /// Visible and unlocked: what a selection may hold.
++  bool get selectable => visible && !locked;
++
++  @override
++  String toString() => 'GroupUnit(${handle.toHex()}, $label'
++      '${visible ? '' : ', hidden'}${locked ? ', locked' : ''}'
++      '${generated ? ', generated' : ''})';
++}
++
++/// [index]'s units as the group rules see them.
++List<GroupUnit> groupUnitsOf(UnitIndex index) => [
++      for (final u in index.units)
++        GroupUnit(
++            handle: u.instance,
++            label: u.text,
++            visible: u.visible,
++            locked: u.locked,
++            generated: u.generated),
++    ];
++
++/// The groups resolved against one document's units. Built at
++/// document-change or groups-change rate, never per frame or per pointer
++/// event.
++final class UnitGroupLookup {
++  /// [groups] as [validateUnitGroups] returns them; [units] in any order.
++  factory UnitGroupLookup(
++      Map<String, UnitGroup> groups, Iterable<GroupUnit> units) {
++    final byLabel = groupIdsByLabel(groups);
++    final sorted = units.toList()
++      ..sort((a, b) => a.handle.value.compareTo(b.handle.value));
++    final visible = <String, List<GroupUnit>>{};
++    for (final u in sorted) {
++      final l = u.label;
++      if (l == null || !u.visible) continue;
++      final id = byLabel[l];
++      if (id != null) (visible[id] ??= []).add(u);
++    }
++    return UnitGroupLookup._(
++      groups,
++      Map.unmodifiable(byLabel),
++      {
++        for (final MapEntry(key: id, value: list) in visible.entries)
++          id: List.unmodifiable(list),
++      },
++      {
++        for (final MapEntry(key: id, value: list) in visible.entries)
++          id: List.unmodifiable([
++            for (final u in list)
++              if (u.selectable) u
++          ]),
++      },
++      {
++        for (final MapEntry(key: id, value: list) in visible.entries)
++          if (list.any((u) => u.locked)) id,
++      },
++      {
++        for (final MapEntry(key: id, value: list) in visible.entries)
++          if (list.any((u) => u.generated)) id,
++      },
++    );
++  }
++
++  UnitGroupLookup._(this.groups, this.byLabel, this._visible, this._selectable,
++      this._locked, this._generated);
++
++  /// The groups this lookup resolves.
++  final Map<String, UnitGroup> groups;
++
++  /// The id of each member label's group; unmodifiable.
++  final Map<String, String> byLabel;
++
++  final Map<String, List<GroupUnit>> _visible;
++  final Map<String, List<GroupUnit>> _selectable;
++  final Set<String> _locked;
++  final Set<String> _generated;
++
++  /// The id of the group [label] (trimmed) belongs to, or null.
++  String? groupOf(String label) => byLabel[label.trim()];
++
++  /// The group's members on a shown layer, a locked one included,
++  /// ascending by handle; every unit carrying a member label counts (a
++  /// shared label gives several). Empty for an unknown id.
++  List<GroupUnit> visibleMembers(String id) => _visible[id] ?? const [];
++
++  /// The group's visible, unlocked members, ascending by handle: what a
++  /// tap, a drag or a selection by label may select.
++  List<GroupUnit> selectableMembers(String id) => _selectable[id] ?? const [];
++
++  /// Whether a visible member of the group is locked: the group is then
++  /// never dragged. A locked member on a hidden layer does not count.
++  bool hasLockedVisibleMember(String id) => _locked.contains(id);
++
++  /// Whether a visible member of the group is generated (a seat): the
++  /// group is then never dragged (spec S4 "A drag").
++  bool hasGeneratedVisibleMember(String id) => _generated.contains(id);
++
++  /// The Split rule, the id `PlanController.selectedGroup` holds: the group
++  /// whose selectable members' labels are exactly [selectedLabels], when
++  /// that set is not empty and no unlabelled unit is selected
++  /// ([unlabelledSelected]); else null.
++  String? splitGroup(Set<String> selectedLabels,
++      {required bool unlabelledSelected}) {
++    if (unlabelledSelected || selectedLabels.isEmpty) return null;
++    // A label is in one group at most, so only the first's can match.
++    final id = groupOf(selectedLabels.first);
++    if (id == null) return null;
++    final labels = <String>{
++      for (final u in selectableMembers(id)) u.label!,
++    };
++    final selected = <String>{for (final l in selectedLabels) l.trim()};
++    if (labels.length != selected.length || !labels.containsAll(selected)) {
++      return null;
++    }
++    return id;
++  }
++}
++
++/// The Merge rule: whether [selectedLabels] span two or more units of
++/// merging, each a group of [groups] or a selected label in no group. One
++/// unit, two units sharing one label, and exactly one group do not;
++/// unlabelled units carry no label and count for nothing.
++bool mergeQualifies(Set<String> selectedLabels, Map<String, UnitGroup> groups) {
++  final byLabel = groupIdsByLabel(groups);
++  final parts = <(bool, String)>{};
++  for (final raw in selectedLabels) {
++    final l = raw.trim();
++    if (l.isEmpty) continue;
++    final id = byLabel[l];
++    parts.add(id == null ? (false, l) : (true, id));
++    if (parts.length >= 2) return true;
++  }
++  return false;
++}
++
++/// The lead order over [labels]: numeric when every one is all ASCII
++/// digits -- (length after stripping leading zeros, then that string,
++/// then the label as written), never `int.parse`, so any length compares
++/// -- else plain string order.
++Comparator<String> unitLabelOrder(Iterable<String> labels) {
++  if (labels.isNotEmpty && labels.every(_digits.hasMatch)) return _numeric;
++  return _plain;
++}
++
++final RegExp _digits = RegExp(r'^[0-9]+$');
++
++int _plain(String a, String b) => a.compareTo(b);
++
++int _numeric(String a, String b) {
++  final sa = _stripZeros(a), sb = _stripZeros(b);
++  final byLength = sa.length.compareTo(sb.length);
++  if (byLength != 0) return byLength;
++  final byValue = sa.compareTo(sb);
++  if (byValue != 0) return byValue;
++  return a.compareTo(b);
++}
++
++String _stripZeros(String s) {
++  var i = 0;
++  while (i < s.length && s.codeUnitAt(i) == 0x30) {
++    i++;
++  }
++  return s.substring(i);
++}
++
++/// The labelled units of [members] in lead order: by [unitLabelOrder] over
++/// their labels, ties (a shared label) to the lowest handle. The first is
++/// the lead.
++List<GroupUnit> inLeadOrder(Iterable<GroupUnit> members) {
++  final list = [
++    for (final u in members)
++      if (u.label != null) u
++  ];
++  final order = unitLabelOrder([for (final u in list) u.label!]);
++  list.sort((a, b) {
++    final byLabel = order(a.label!, b.label!);
++    if (byLabel != 0) return byLabel;
++    return a.handle.value.compareTo(b.handle.value);
++  });
++  return list;
++}
++
++/// The status a unit labelled [label] shows: its group's when the group
++/// has one, else its own; none for an unlabelled unit (today's
++/// `TableStatusPainter` order, group over table).
++UnitStatus? statusOfUnit(String? label,
++    {required Map<String, UnitStatus> statuses,
++    required Map<String, UnitStatus> groupStatuses,
++    required Map<String, String> groupByLabel}) {
++  if (label == null) return null;
++  final id = groupByLabel[label];
++  if (id != null) {
++    final group = groupStatuses[id];
++    if (group != null) return group;
++  }
++  return statuses[label];
++}
+diff --git a/packages/jet_cad_2d_plan/test/barrel_test.dart b/packages/jet_cad_2d_plan/test/barrel_test.dart
+index c7aff989..70890658 100644
+--- a/packages/jet_cad_2d_plan/test/barrel_test.dart
++++ b/packages/jet_cad_2d_plan/test/barrel_test.dart
+@@ -60,20 +60,22 @@ void main() {
+       // Task 20
+       'PlanEditor', 'PlanEditorBar', 'PlanEditorAction', 'PlanFileCallback',
+       // 2b Task 8
+       'isUnitSymbol',
+       // 2b Task 9
+       'BadLabel', 'DuplicateLabel', 'PlanCamera', 'PlanUnit', 'PlanUnitAdded',
+       'PlanUnitChange', 'PlanUnitChanged', 'PlanUnitDetail', 'PlanUnitRemoved',
+       'PlanUnitsReplaced', 'Unlabelled', 'UnitLabelProblem', 'UnitLabelWarning',
+       // 2b Task 11
+       'PlanMode',
++      // 2b Task 12
++      'UnitGroup', 'UnitStatus',
+     });
+   });
+ 
+   testWidgets('ED-9b the editor\'s names, through the barrel alone',
+       (tester) async {
+     final c = PlanController(kits: const []);
+     addTearDown(c.dispose);
+     PlanExport? last;
+     const PagePrinter printer = PrintingPagePrinter();
+     await tester.pumpWidget(MaterialApp(
+diff --git a/packages/jet_cad_2d_plan/test/controller/service_state_controller_test.dart b/packages/jet_cad_2d_plan/test/controller/service_state_controller_test.dart
+new file mode 100644
+index 00000000..accbe0ae
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/controller/service_state_controller_test.dart
+@@ -0,0 +1,143 @@
++// Ported from jet_cad_floor_plan's test/host/controller_test.dart (2b Task
++// 12, spec S3 "Service state"): the units' statuses (C15) and the focus
++// (zone spec Z10: CF1, CF2, CF5), by label; the new SS-dup-label-status
++// pins a status on a label two units share and none on an unlabelled
++// unit (spec S2 "Unlabelled, duplicate and bad labels"). The plan is
++// `servicePlanText`: tables turned and mirrored off the origin; the focus
++// tests stand under a camera off the identity.
++import 'dart:ui' show Color;
++
++import 'package:flutter/foundation.dart' show ChangeNotifier;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
++    show ViewportTransform;
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++
++import '../support/harness.dart' show controllerFor;
++import '../support/service_plans.dart';
++import '../support/test_kit.dart' show testKit;
++
++/// Today's `zoned`: the plan under a camera off the identity, as
++/// `zoneCamera()` was.
++PlanController zoned(WidgetTester tester) {
++  final c = controllerFor(kits: [testKit()], json: servicePlanText());
++  c.camera.value = ViewportTransform(
++      worldToScreenMatrix:
++          const Transform2(0.0375, 0, 0, -0.0375, 612.5, 431.25));
++  return c;
++}
++
++void main() {
++  testWidgets(
++      'SS-C15 statuses are not plan state: no revision, dirty, history or '
++      'json change; labels trimmed; kept across a switch and a load (M-14d)',
++      (tester) async {
++    final c = controllerFor(kits: [testKit()], json: servicePlanText());
++    final json = c.save();
++    final revision = c.revision.value;
++    var heard = 0;
++    c.unitStatuses.addListener(() => heard++);
++    c.setUnitStatus({' 1 ': UnitStatus(color: const Color(0xFFE53935))});
++    await tester.pump();
++    expect(heard, 1);
++    expect(c.unitStatuses.value.keys, ['1']);
++    expect(c.revision.value, revision);
++    expect(c.dirty.value, isFalse);
++    expect(c.canUndo.value, isFalse);
++    expect(c.save(), json);
++    c.setMode(PlanMode.service);
++    c.load(servicePlanText());
++    expect(c.unitStatuses.value.keys, ['1']);
++    await tester.pump();
++  });
++
++  // Zone spec Z10: the focus.
++
++  testWidgets(
++      'SS-CF1 setUnitFocus trims, drops blanks and copies into an '
++      'unmodifiable set; {} and {\'\'} are a focus with no unit, not none; '
++      'every call notifies, an equal set or a second null included (M-Z34, '
++      'M-Z26)', (tester) async {
++    final c = zoned(tester);
++    expect(c.unitFocus.value, isNull, reason: 'no focus at first');
++    var heard = 0;
++    c.unitFocus.addListener(() => heard++);
++    c.setUnitFocus({' 7 ', '', '  ', '3'});
++    expect(c.unitFocus.value, {'7', '3'});
++    expect(() => c.unitFocus.value!.add('2'), throwsUnsupportedError);
++    c.setUnitFocus({'3', '7'});
++    expect(heard, 2, reason: 'an equal set notifies');
++    for (final none in [
++      <String>{},
++      {''},
++      {' ', ''}
++    ]) {
++      c.setUnitFocus(none);
++      expect(c.unitFocus.value, isNotNull, reason: '$none is a focus');
++      expect(c.unitFocus.value, isEmpty, reason: '$none');
++    }
++    c.setUnitFocus(null);
++    c.setUnitFocus(null);
++    expect(c.unitFocus.value, isNull);
++    expect(heard, 7, reason: 'every call');
++  });
++
++  testWidgets(
++      'SS-CF2 the host\'s set is copied: changing it after the call changes '
++      'nothing (M-Z35)', (tester) async {
++    final c = zoned(tester);
++    final mine = {'7', '3'};
++    c.setUnitFocus(mine);
++    mine
++      ..remove('7')
++      ..add('A1');
++    expect(c.unitFocus.value, {'7', '3'});
++  });
++
++  testWidgets('SS-CF5 the focus is disposed with the controller',
++      (tester) async {
++    final c = PlanController(kits: [testKit()], json: servicePlanText());
++    final focus = c.unitFocus as ChangeNotifier;
++    c.dispose();
++    expect(() => focus.addListener(() {}), throwsFlutterError);
++  });
++
++  testWidgets(
++      'SS-dup-label-status a label two units share: a status on each, the '
++      'group\'s over it, none for an unlabelled unit; a group lists the '
++      'label once and select takes both', (tester) async {
++    final c = controllerFor(
++        kits: [testKit()],
++        json: servicePlanText(duplicate: true, unlabelled: true));
++    final red = UnitStatus(color: const Color(0xFFE53935), caption: 'Bill');
++    final blue = UnitStatus(color: const Color(0x801E88E5));
++    c.setUnitStatus({'2': red, '': blue});
++    c.setMode(PlanMode.service);
++    final twos = [
++      for (final u in c.unitIndex.units)
++        if (u.text == '2') u
++    ];
++    expect(twos, hasLength(2), reason: 'premise: a label two units share');
++    for (final u in twos) {
++      expect(c.statusOf(u), red);
++    }
++    final bare = c.unitIndex.units.singleWhere((u) => u.text == null);
++    // M-SS3: `statusOfUnit` reads an unlabelled unit as ''.
++    expect(c.statusOf(bare), isNull);
++    c.setUnitGroups({
++      'g': UnitGroup(members: {'2', '1'})
++    });
++    c.setGroupStatus({'g': blue});
++    // M-SS4: the unit's own status wins over its group's.
++    for (final u in twos) {
++      expect(c.statusOf(u), blue);
++    }
++    expect(c.selectableMembers('g'), {'1', '2'},
++        reason: 'a shared label listed once');
++    c.select({'2'});
++    expect(c.activeSelection.keys, hasLength(3), reason: '1 and both 2s');
++    expect(c.selectedUnits.value, {'1', '2'});
++    await tester.pump();
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/controller/unit_groups_controller_test.dart b/packages/jet_cad_2d_plan/test/controller/unit_groups_controller_test.dart
+new file mode 100644
+index 00000000..9a60c58c
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/controller/unit_groups_controller_test.dart
+@@ -0,0 +1,523 @@
++// Ported from jet_cad_floor_plan's test/host/table_groups_controller_test
++// .dart (2b Task 12, spec S3 "Service state"): table-groups spec G1, G2, G4
++// (selecting by label) and G5 (the Split rule, through `selectedGroup`):
++// the controller's groups. Units are placed off the origin, turned and
++// mirrored, labelled out of handle order (`G7` holds 12, 3 and 7); one sits
++// on a locked layer and one on a hidden layer; one is unlabelled; a variant
++// carries a label twice (a hand-edited file). The new SS- tests add the
++// rows' seats (Task 5's hall) and a unit locked by a missing kit.
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++
++import '../support/harness.dart' show controllerFor;
++import '../support/service_fixture.dart' show seatsOf;
++import '../support/service_plans.dart';
++import '../support/test_kit.dart' show testKit, unitKit;
++
++void main() {
++  testWidgets(
++      'TG-C1 an overlap throws, trimmed numbers included, keeping the old '
++      'groups and notifying no one (M-TG-1)', (tester) async {
++    final c = controllerFor(kits: [testKit()], json: groupsPlanText());
++    c.setMode(PlanMode.service);
++    c.setUnitGroups({
++      'G7': UnitGroup(members: {'12', '3', '7'})
++    });
++    c.select({'3'});
++    final kept = c.unitGroups.value;
++    expect(c.selectedGroup.value, 'G7');
++    var heardGroups = 0, heardSelected = 0;
++    c.unitGroups.addListener(() => heardGroups++);
++    c.selectedGroup.addListener(() => heardSelected++);
++
++    expect(
++        () => c.setUnitGroups({
++              'G4': UnitGroup(members: {'20', '5'}),
++              'G5': UnitGroup(members: {' 5 ', '8'}),
++            }),
++        throwsA(isA<ArgumentError>().having((e) => e.toString(), 'message',
++            stringContainsInOrder(['"5"', '"G4"', '"G5"']))));
++    expect(c.unitGroups.value, same(kept));
++    expect(c.selectedGroup.value, 'G7');
++    expect(heardGroups, 0);
++    expect(heardSelected, 0);
++    await tester.pump();
++  });
++
++  testWidgets(
++      'TG-C2 a blank id, ids the same after trimming and a group with no '
++      'member after trimming throw, keeping the old groups, notifying no '
++      'one (G2)', (tester) async {
++    final c = controllerFor(kits: [testKit()], json: groupsPlanText());
++    c.setUnitGroups({
++      'G7': UnitGroup(members: {'12', '3', '7'})
++    });
++    final kept = c.unitGroups.value;
++    var heard = 0;
++    c.unitGroups.addListener(() => heard++);
++    for (final bad in <Map<String, UnitGroup>>[
++      {
++        '': UnitGroup(members: {'5'})
++      },
++      {
++        '  ': UnitGroup(members: {'5'})
++      },
++      {
++        'G1': UnitGroup(members: {'5'}),
++        ' G1 ': UnitGroup(members: {'20'})
++      },
++      {
++        'G1': UnitGroup(members: {' ', ''})
++      },
++    ]) {
++      expect(() => c.setUnitGroups(bad), throwsArgumentError, reason: '$bad');
++      expect(c.unitGroups.value, same(kept), reason: '$bad');
++    }
++    expect(heard, 0);
++    await tester.pump();
++  });
++
++  testWidgets(
++      'TG-C3 ids and numbers are trimmed: " G1 " and " 5 " are G1 and 5, '
++      'for the groups and the group statuses (M-TG-2)', (tester) async {
++    final c = controllerFor(kits: [testKit()], json: groupsPlanText());
++    c.setMode(PlanMode.service);
++    c.setUnitGroups({
++      ' G1 ': UnitGroup(members: {' 5 ', '20 '})
++    });
++    expect(c.unitGroups.value.keys, ['G1']);
++    expect(c.unitGroups.value['G1']!.members, {'5', '20'});
++    c.select({'5'});
++    expect(c.selectedUnits.value, {'5', '20'});
++    expect(c.selectedGroup.value, 'G1');
++    c.setGroupStatus({' G1 ': bill});
++    expect(c.groupStatuses.value.keys, ['G1']);
++    expect(c.groupStatuses.value['G1'], bill);
++    await tester.pump();
++  });
++
++  testWidgets(
++      'TG-C4 a group status with no group is kept, and a groups change '
++      'leaves the statuses alone; neither is plan state (G2)', (tester) async {
++    final c = controllerFor(kits: [testKit()], json: groupsPlanText());
++    final json = c.save();
++    final revision = c.revision.value;
++    var heard = 0;
++    c.groupStatuses.addListener(() => heard++);
++    c.setGroupStatus({'G9': bill});
++    expect(heard, 1);
++    c.setUnitGroups({
++      'G7': UnitGroup(members: {'12', '3', '7'})
++    });
++    c.setUnitGroups(const {});
++    expect(c.groupStatuses.value, {'G9': bill});
++    expect(heard, 1);
++    expect(c.unitStatuses.value, isEmpty,
++        reason: 'the two status maps are apart');
++    expect(c.revision.value, revision);
++    expect(c.dirty.value, isFalse);
++    expect(c.canUndo.value, isFalse);
++    expect(c.save(), json);
++    await tester.pump();
++  });
++
++  testWidgets(
++      'TG-C5 in the selection mode a number selects its whole group; in '
++      'the design mode it does not (M-TG-9)', (tester) async {
++    final c = controllerFor(kits: [testKit()], json: groupsPlanText());
++    c.setUnitGroups({
++      'G7': UnitGroup(members: {'12', '3', '7'})
++    });
++    c.select({'3'});
++    expect(c.selectedUnits.value, {'3'}, reason: 'the design mode');
++    expect(c.activeSelection.keys, keysOf(c, {'3'}));
++
++    c.setMode(PlanMode.service);
++    expect(c.selectedUnits.value, {'3', '7', '12'},
++        reason: 'the switch selects by number again');
++    c.select(const {});
++    c.select({'12', '20'});
++    expect(c.selectedUnits.value, {'3', '7', '12', '20'});
++    expect(c.activeSelection.keys, keysOf(c, {'3', '7', '12', '20'}));
++    await tester.pump();
++  });
++
++  testWidgets(
++      'TG-C6 the expansion selects every table of a member number, a file '
++      'duplicate included (G2, M-TG-9)', (tester) async {
++    final c =
++        controllerFor(kits: [testKit()], json: groupsPlanText(duplicate: true));
++    c.setMode(PlanMode.service);
++    c.setUnitGroups({
++      'G7': UnitGroup(members: {'12', '3', '7'})
++    });
++    c.select({'7'});
++    expect(c.selectedUnits.value, {'3', '7', '12'});
++    expect(c.activeSelection.keys, hasLength(4));
++    expect(c.selectedGroup.value, 'G7');
++    await tester.pump();
++  });
++
++  testWidgets(
++      'TG-C7 the expansion never selects a member on a locked or a hidden '
++      'layer (M-TG-9b)', (tester) async {
++    final c = controllerFor(kits: [testKit()], json: groupsPlanText());
++    c.setMode(PlanMode.service);
++    c.setUnitGroups({
++      'G7': UnitGroup(members: {'12', '3', '7', '8', '9'})
++    });
++    c.select({'3'});
++    expect(c.selectedUnits.value, {'3', '7', '12'});
++    expect(c.activeSelection.keys, keysOf(c, {'3', '7', '12'}));
++    c.select({'8'});
++    expect(c.selectedUnits.value, {'3', '7', '12'},
++        reason: 'a locked member stands for its group');
++    expect(c.selectedGroup.value, 'G7',
++        reason: 'the locked and the hidden member are never selected');
++    await tester.pump();
++  });
++
++  testWidgets(
++      'TG-C8 selectedGroup: exactly one group\'s selectable members, a '
++      'locked third member and a single visible member included; not a '
++      'group plus a table, part of one, or a group plus an unnumbered '
++      'table (M-TG-17)', (tester) async {
++    final c = controllerFor(kits: [testKit()], json: groupsPlanText());
++    c.setMode(PlanMode.service);
++    c.setUnitGroups({
++      'G7': UnitGroup(members: {'12', '3', '8'}),
++      'G9': UnitGroup(members: {'9', '5'}),
++    });
++    final selection = c.activeSelection;
++    selection.replace(keysOf(c, {'3', '12'}));
++    await tester.pump();
++    expect(c.selectedGroup.value, 'G7', reason: 'its locked 8 is not needed');
++
++    selection.replace(keysOf(c, {'3', '12', '20'}));
++    await tester.pump();
++    expect(c.selectedGroup.value, isNull, reason: 'a group plus a table');
++
++    selection.replace(keysOf(c, {'12'}));
++    await tester.pump();
++    expect(c.selectedGroup.value, isNull, reason: 'part of a group');
++
++    selection.replace({
++      ...keysOf(c, {'3', '12'}),
++      unlabelledKey(c)
++    });
++    await tester.pump();
++    expect(c.selectedUnits.value, {'3', '12'});
++    expect(c.selectedGroup.value, isNull,
++        reason: 'a group plus an unnumbered table');
++
++    selection.replace(keysOf(c, {'5'}));
++    await tester.pump();
++    expect(c.selectedGroup.value, 'G9', reason: 'its 9 is hidden');
++
++    selection.replace(keysOf(c, {'20'}));
++    await tester.pump();
++    expect(c.selectedGroup.value, isNull, reason: 'in no group');
++  });
++
++  testWidgets(
++      'TG-C9 selectedGroup follows the groups with the selection unchanged, '
++      'and is null in the design mode (M-TG-17b, M-C1-15)', (tester) async {
++    final c = controllerFor(kits: [testKit()], json: groupsPlanText());
++    c.setMode(PlanMode.service);
++    c.select({'3', '20'});
++    expect(c.selectedGroup.value, isNull);
++    final heard = <String?>[];
++    c.selectedGroup.addListener(() => heard.add(c.selectedGroup.value));
++    c.setUnitGroups({
++      'G2': UnitGroup(members: {'20', '3'})
++    });
++    expect(c.selectedUnits.value, {'3', '20'});
++    expect(c.selectedGroup.value, 'G2');
++    c.setUnitGroups({
++      'G2': UnitGroup(members: {'20', '3', '7'})
++    });
++    expect(c.selectedGroup.value, isNull, reason: 'now part of G2');
++    c.setUnitGroups({
++      'G2': UnitGroup(members: {'20', '3'})
++    });
++    c.setMode(PlanMode.design);
++    expect(c.selectedUnits.value, {'3', '20'});
++    expect(c.selectedGroup.value, isNull, reason: 'groups do not act here');
++    expect(heard, ['G2', null, 'G2', null]);
++    await tester.pump();
++  });
++
++  testWidgets(
++      'TG-C12 selectedGroup reads the active plan as it is: after a load of '
++      'another plan, and after a layer edit that made no command (M-C1-16, '
++      'M-C1-17)', (tester) async {
++    final c = controllerFor(kits: [testKit()], json: groupsPlanText());
++    c.setMode(PlanMode.service);
++    c.setUnitGroups({
++      'G9': UnitGroup(members: {'9', '5'})
++    });
++    c.select({'5'});
++    expect(c.selectedUnits.value, {'5'});
++    expect(c.selectedGroup.value, 'G9', reason: 'its 9 is hidden');
++
++    c.load(groupsPlanText(hideNine: false));
++    c.select({'5'});
++    expect(c.selectedUnits.value, {'5', '9'});
++    expect(c.selectedGroup.value, 'G9', reason: 'its 9 is visible now');
++
++    c.load(groupsPlanText());
++    c.select({'5'});
++    expect(c.selectedGroup.value, 'G9');
++    // Layer `Hidden` shown through its table section: no command, no state
++    // change, only the tables' revision.
++    final layers = c.activeDocument.tables.layers;
++    final hidden = c.activeDocument.tables.layers.byName('Hidden')!;
++    layers
++      ..remove(hidden.handle)
++      ..add(hidden.copyWith(visible: true));
++    c.select({'5'});
++    expect(c.selectedUnits.value, {'5', '9'});
++    expect(c.selectedGroup.value, 'G9');
++    await tester.pump();
++  });
++
++  // Table-groups fixes spec X1: `selectableMembers`, the host's view of the
++  // rule Merge and Split use.
++
++  testWidgets(
++      'TG-C13 selectableMembers gives the visible, unlocked members\' '
++      'numbers, in both modes; a group of only a locked and a hidden member '
++      'gives none; the set is unmodifiable (M-TGF-1)', (tester) async {
++    final c = controllerFor(kits: [testKit()], json: groupsPlanText());
++    c.setUnitGroups({
++      'G7': UnitGroup(members: {'12', '3', '8', '9'}),
++      'G2': UnitGroup(members: {'20', '5'}),
++    });
++    expect(c.selectableMembers('G7'), {'12', '3'}, reason: 'the design mode');
++    c.setMode(PlanMode.service);
++    expect(c.selectableMembers('G7'), {'12', '3'},
++        reason: '8 is locked, 9 hidden');
++    expect(c.selectableMembers('G2'), {'20', '5'});
++    expect(() => c.selectableMembers('G2').add('7'), throwsUnsupportedError);
++    c.setUnitGroups({
++      'G9': UnitGroup(members: {'8', '9'})
++    });
++    expect(c.selectableMembers('G9'), isEmpty);
++    await tester.pump();
++  });
++
++  testWidgets(
++      'TG-C14 selectableMembers trims the id; an unknown id gives the empty '
++      'set (M-TGF-2)', (tester) async {
++    final c = controllerFor(kits: [testKit()], json: groupsPlanText());
++    c.setMode(PlanMode.service);
++    c.setUnitGroups({
++      'G7': UnitGroup(members: {'12', '3', '8', '9'})
++    });
++    expect(c.selectableMembers(' G7 '), {'12', '3'});
++    expect(c.selectableMembers('G8'), isEmpty);
++    expect(c.selectableMembers('12'), isEmpty, reason: 'a number is no id');
++    await tester.pump();
++  });
++
++  testWidgets(
++      'TG-C15 a number carried by an unlocked and a locked table is '
++      'selectable, whichever comes first in handle order (M-TGF-3)',
++      (tester) async {
++    for (final lockFive in [false, true]) {
++      final c = controllerFor(
++          kits: [testKit()],
++          json: groupsPlanText(eightTwice: true, lockFive: lockFive));
++      c.setMode(PlanMode.service);
++      c.setUnitGroups({
++        'G7': UnitGroup(members: {'12', '3', '8'})
++      });
++      final eights = unitNodes(c.activeDocument, '8');
++      expect(eights, hasLength(2), reason: 'premise: 8 twice');
++      expect(c.selectableMembers('G7'), {'12', '3', '8'},
++          reason: 'lockFive: $lockFive');
++    }
++    await tester.pump();
++  });
++
++  testWidgets(
++      'TG-C16 selectableMembers is fresh after setUnitGroups with the same '
++      'id, after a design layer was locked and the mode switched, and after '
++      'a layer edit that made no command (M-TGF-10)', (tester) async {
++    final c = controllerFor(kits: [testKit()], json: groupsPlanText());
++    c.setUnitGroups({
++      'G7': UnitGroup(members: {'12', '3', '7'})
++    });
++    expect(c.selectableMembers('G7'), {'12', '3', '7'});
++    c.setUnitGroups({
++      'G7': UnitGroup(members: {'20', '12', '5', '8'})
++    });
++    expect(c.selectableMembers('G7'), {'20', '12', '5'},
++        reason: 'the same id, new members');
++
++    // Layer 0, which carries 20, 12 and 5, locked in the design through its
++    // table section: no command.
++    void setZeroLocked(bool locked) {
++      final layers = c.activeDocument.tables.layers;
++      final zero = layers[ReservedHandles.layerZero]!;
++      layers
++        ..remove(zero.handle)
++        ..add(zero.copyWith(locked: locked));
++    }
++
++    setZeroLocked(true);
++    c.setMode(PlanMode.service);
++    expect(c.selectableMembers('G7'), isEmpty,
++        reason: 'the service copy carries the locked layer');
++
++    setZeroLocked(false);
++    expect(c.selectableMembers('G7'), {'20', '12', '5'},
++        reason: 'only the layers\' revision moved');
++    await tester.pump();
++  });
++
++  testWidgets(
++      'SS-mixed-group a group may mix a table and seats: in service a seat\'s '
++      'label selects the whole group, seats included; the Split and Merge '
++      'rules count the seats; a group holding a seat is never dragged',
++      (tester) async {
++    final h = hall();
++    final c = controllerFor(kits: [unitKit()], json: h.json);
++    final d = c.document;
++    final table = labelOf(d, h.table)!;
++    final a1 = labelOf(d, h.seats[0][0])!;
++    final a2 = labelOf(d, h.seats[0][1])!;
++    final b1 = labelOf(d, h.seats[1][0])!;
++    c.setUnitGroups({
++      'party': UnitGroup(members: {table, a1, a2}, label: 'Smith')
++    });
++    c.setMode(PlanMode.service);
++    c.select({a2});
++    // M-SS7: `groupUnitsOf` leaves the generated units out.
++    expect(c.activeSelection.keys, {
++      SelectionKey.root(h.table),
++      SelectionKey.root(h.seats[0][0]),
++      SelectionKey.root(h.seats[0][1]),
++    });
++    expect(c.selectedUnits.value, {table, a1, a2});
++    expect(c.selectedGroup.value, 'party');
++    expect(c.selectableMembers('party'), {table, a1, a2});
++    // M-SS8: `hasGeneratedVisibleMember` answers false.
++    expect(c.groupLookup.hasGeneratedVisibleMember('party'), isTrue);
++    expect(c.groupLookup.hasLockedVisibleMember('party'), isFalse);
++    c.select({a2, b1});
++    expect(c.selectedGroup.value, isNull, reason: 'a group plus a seat');
++    expect(c.mergeCandidate.value, {table, a1, a2, b1});
++    await tester.pump();
++  });
++
++  testWidgets(
++      'SS-shrink-group (Review Focus 1) a row shrunk from 12 seats to 10 '
++      'while seats 11 and 12 are grouped and given a status: the group keeps '
++      'their labels as members naming no unit, its selectable members drop '
++      'them, the status is kept; undo brings them back into the group',
++      (tester) async {
++    final h = hall();
++    final c = controllerFor(kits: [unitKit()], json: h.json);
++    final row = h.rows[0];
++    setRowCount(c, row, 12);
++    final seats = seatsOf(c.document, row);
++    expect(seats, hasLength(12), reason: 'premise');
++    final table = labelOf(c.document, h.table)!;
++    final two = labelOf(c.document, seats[1])!;
++    final eleven = labelOf(c.document, seats[10])!;
++    final twelve = labelOf(c.document, seats[11])!;
++    c.setUnitGroups({
++      'g': UnitGroup(members: {table, two, eleven, twelve})
++    });
++    c.setUnitStatus({eleven: bill});
++    c.setGroupStatus({'g': bill});
++    expect(c.selectableMembers('g'), {table, two, eleven, twelve});
++
++    setRowCount(c, row, 10);
++    expect(seatsOf(c.document, row), seats.sublist(0, 10),
++        reason: 'premise: E5 keeps seats 1-10 under their handles');
++    expect(c.unitGroups.value['g']!.members, {table, two, eleven, twelve},
++        reason: 'a member naming no unit is kept (today\'s setTableGroups)');
++    // M-SS2: the lookup's cache ignores the unit index.
++    expect(c.selectableMembers('g'), {table, two});
++    expect(c.unitStatuses.value.keys, [eleven]);
++    expect(c.groupStatuses.value.keys, ['g']);
++
++    c.setMode(PlanMode.service);
++    c.select({two});
++    expect(c.selectedUnits.value, {table, two});
++    expect(c.selectedGroup.value, 'g',
++        reason: 'exactly the selectable members, 11 and 12 gone');
++    c.setMode(PlanMode.design);
++    c.undo();
++    expect(seatsOf(c.document, row), seats);
++    expect(c.selectableMembers('g'), {table, two, eleven, twelve});
++    c.setMode(PlanMode.service);
++    c.select({eleven});
++    expect(c.selectedUnits.value, {table, two, eleven, twelve});
++    expect(c.selectedGroup.value, 'g');
++    await tester.pump();
++  });
++
++  testWidgets(
++      'SS-locked-not-selected a table of a missing kit is a locked unit: '
++      'grouped, its group\'s status its own, never selected by select; its '
++      'label stands for its group\'s selectable members', (tester) async {
++    final c = controllerFor(kits: [testKit()], json: lockedPlanText());
++    final gone = unitNode(c.document, '5').handle;
++    expect(c.unitIndex[gone]!.locked, isTrue, reason: 'premise: isLockedUnit');
++    expect(c.document.tables.layers[unitNode(c.document, '5').layer]!.locked,
++        isFalse,
++        reason: 'premise: its layer is not locked');
++    c.setUnitGroups({
++      'g': UnitGroup(members: {'1', '5'})
++    });
++    c.setMode(PlanMode.service);
++    c.select({'5'});
++    // M-SS5: `groupUnitsOf` reads no lock.
++    expect(c.activeSelection.keys, keysOf(c, {'1'}));
++    expect(c.selectedUnits.value, {'1'});
++    expect(c.selectableMembers('g'), {'1'});
++    expect(c.groupLookup.hasLockedVisibleMember('g'), isTrue);
++    expect(c.selectedGroup.value, 'g');
++    c.setGroupStatus({'g': bill});
++    expect(c.statusOf(c.unitIndex[gone]!), bill,
++        reason: 'its group\'s status paints on it');
++    c.setUnitGroups(const {});
++    // M-SS6: `_select` skips no locked unit.
++    c.select({'5'});
++    expect(c.activeSelection.keys, isEmpty);
++    expect(c.selectedUnits.value, isEmpty);
++    await tester.pump();
++  });
++
++  testWidgets(
++      'SS-relabel a relabelled unit leaves its group, its status and the '
++      'focus behind, keyed by its old label (spec S2 "A changed label")',
++      (tester) async {
++    final h = hall();
++    final c = controllerFor(kits: [unitKit()], json: h.json);
++    final d = c.document;
++    final table = labelOf(d, h.table)!;
++    final a1 = labelOf(d, h.seats[0][0])!;
++    c.setUnitGroups({
++      'g': UnitGroup(members: {table, a1})
++    });
++    c.setUnitStatus({table: bill});
++    c.setUnitFocus({table});
++    expect(c.selectableMembers('g'), {table, a1}, reason: 'premise');
++
++    expect(c.setUnitLabel(table, '99'), isTrue);
++    expect(labelOf(d, h.table), '99', reason: 'premise: relabelled');
++    expect(c.unitGroups.value['g']!.members, {table, a1});
++    // M-SS2: the lookup's cache ignores the unit index.
++    expect(c.selectableMembers('g'), {a1});
++    expect(c.unitStatuses.value.keys, [table]);
++    expect(c.statusOf(c.unitIndex[h.table]!), isNull);
++    expect(c.unitFocus.value, {table});
++    await tester.pump();
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/service/service_state_test.dart b/packages/jet_cad_2d_plan/test/service/service_state_test.dart
+new file mode 100644
+index 00000000..e1c00e6a
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/service/service_state_test.dart
+@@ -0,0 +1,284 @@
++// Ported from jet_cad_floor_plan's test/service/table_groups_test.dart (2b
++// Task 12, spec S3 "Service state"): table-groups spec G1, G2, G3 (the lead
++// order), G4 (the lookup) and G5 (the Merge and Split rules), with no plan:
++// `UnitGroup`, the validation, and the lookup over unit facts, keyed by
++// label. Ids and labels are deliberately not sorted (`G7` holds 12, 3 and
++// 7), handles are given out of order, and the facts carry a file
++// duplicate, a locked member and a hidden one.
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart' show Handle;
++import 'package:jet_cad_2d_plan/src/service/service_state.dart';
++
++UnitGroup g(Set<String> members, [String? label]) =>
++    UnitGroup(members: members, label: label);
++
++GroupUnit u(int handle, String? label,
++        {bool visible = true, bool locked = false}) =>
++    GroupUnit(
++        handle: Handle(handle),
++        label: label,
++        visible: visible,
++        locked: locked,
++        generated: false);
++
++/// Handles out of order: 0x51 carries 12, 0x2A carries 3, 0x77 carries 7,
++/// 0x13 carries 20, 0x64 and 0x1F both carry 5 (a file duplicate), 0x88
++/// carries 8 on a locked layer, 0x90 carries 9 on a hidden layer, 0x99
++/// carries 10 on a layer both hidden and locked, 0x40 has no label.
++final List<GroupUnit> facts = [
++  u(0x77, '7'),
++  u(0x51, '12'),
++  u(0x88, '8', locked: true),
++  u(0x2A, '3'),
++  u(0x13, '20'),
++  u(0x64, '5'),
++  u(0x90, '9', visible: false),
++  u(0x1F, '5'),
++  u(0x99, '10', visible: false, locked: true),
++  u(0x40, null),
++];
++
++List<int> handles(Iterable<GroupUnit> list) =>
++    [for (final x in list) x.handle.value];
++
++Matcher argumentError(List<String> parts) => throwsA(isA<ArgumentError>()
++    .having((e) => e.toString(), 'message', stringContainsInOrder(parts)));
++
++void main() {
++  group('UnitGroup (G1, G2)', () {
++    test(
++        'TG-U1 members are trimmed, a blank one dropped, and the set is '
++        'unmodifiable (M-TG-2, M-C1-14)', () {
++      final group = g({' 12 ', '3', '  ', '', '7\t'});
++      expect(group.members, {'12', '3', '7'});
++      expect(() => group.members.add('9'), throwsUnsupportedError);
++    });
++
++    test(
++        'TG-U2 the label is trimmed, a blank one is none, and it is cut to '
++        '24 characters, counted as grapheme clusters (M-C1-1, M-C1-2)', () {
++      expect(g({'1'}, '  Window bay  ').label, 'Window bay');
++      expect(g({'1'}, '   ').label, isNull);
++      expect(g({'1'}, '').label, isNull);
++      expect(g({'1'}).label, isNull);
++      expect(UnitGroup.maxLabel, 24);
++      final long = '${'a' * 20}bcdefgh';
++      expect(g({'1'}, '  $long ').label, '${'a' * 20}bcde');
++      // Each family emoji is one character of several code units.
++      const family = '\u{1F468}‍\u{1F469}‍\u{1F467}';
++      final label = g({'1'}, family * 30).label!;
++      expect(label, family * 24);
++    });
++
++    test(
++        'TG-U3 equality is by value: the members as a set, the label '
++        '(M-C1-3)', () {
++      expect(g({'12', '3', '7'}, 'Bay'), g({'7', ' 3', '12'}, 'Bay '));
++      expect(g({'12', '3', '7'}).hashCode, g({'7', '3', '12'}).hashCode);
++      expect(g({'12', '3', '7'}), isNot(g({'12', '3'})));
++      expect(g({'12', '3', '7'}), isNot(g({'12', '3', '7'}, 'Bay')));
++    });
++  });
++
++  group('validateUnitGroups (G2)', () {
++    test(
++        'TG-U4 ids are trimmed, in the given order, and the map is '
++        'unmodifiable (M-TG-2, M-C1-13)', () {
++      final out = validateUnitGroups({
++        ' G7 ': g({'12', '3', '7'}),
++        'G2': g({'20'}),
++      });
++      expect(out.keys, ['G7', 'G2']);
++      expect(out['G7'], g({'12', '3', '7'}));
++      expect(() => out['G9'] = g({'1'}), throwsUnsupportedError);
++    });
++
++    test(
++        'TG-U5 a label in two groups throws, naming it and both ids, '
++        'trimmed labels included (M-TG-1)', () {
++      expect(
++          () => validateUnitGroups({
++                'G7': g({'12', '5'}),
++                'G2': g({'20', ' 5 '}),
++              }),
++          argumentError(['"5"', '"G7"', '"G2"']));
++    });
++
++    test(
++        'TG-U6 a blank id, two ids the same after trimming, and a group '
++        'with no member after trimming throw (G2)', () {
++      expect(
++          () => validateUnitGroups({
++                '': g({'1'})
++              }),
++          argumentError(['blank']));
++      expect(
++          () => validateUnitGroups({
++                '   ': g({'1'})
++              }),
++          argumentError(['blank']));
++      expect(
++          () => validateUnitGroups({
++                'G1': g({'1'}),
++                ' G1 ': g({'2'}),
++              }),
++          argumentError(['"G1"']));
++      expect(
++          () => validateUnitGroups({
++                'G1': g({' ', ''})
++              }),
++          argumentError(['"G1"', 'no member']));
++      expect(validateUnitGroups(const {}), isEmpty);
++    });
++  });
++
++  group('UnitGroupLookup (G2, G4)', () {
++    final lookup = UnitGroupLookup(
++        validateUnitGroups({
++          'G7': g({'12', '3', '7'}),
++          'G5': g({'5', '8', '10', '99'}),
++          'G9': g({'9'}),
++        }),
++        facts);
++
++    test(
++        'TG-U7 a label resolves to its group, trimmed; an unknown member '
++        'label is kept (G2, M-C1-12)', () {
++      expect(lookup.groupOf('12'), 'G7');
++      expect(lookup.groupOf(' 3 '), 'G7');
++      expect(lookup.groupOf('99'), 'G5');
++      expect(lookup.groupOf('20'), isNull);
++      expect(lookup.groupOf('missing'), isNull);
++    });
++
++    test(
++        'TG-U8 visible members ascending by handle: a duplicate gives both, '
++        'a locked one counts, a hidden one does not (M-C1-4, M-C1-5)', () {
++      expect(handles(lookup.visibleMembers('G7')), [0x2A, 0x51, 0x77]);
++      expect(handles(lookup.visibleMembers('G5')), [0x1F, 0x64, 0x88]);
++      expect(lookup.visibleMembers('G9'), isEmpty);
++      expect(lookup.visibleMembers('nope'), isEmpty);
++    });
++
++    test(
++        'TG-U9 selectable members drop the locked one; a locked member '
++        'counts as locked only on a visible layer (M-C1-6, M-C1-7)', () {
++      expect(handles(lookup.selectableMembers('G7')), [0x2A, 0x51, 0x77]);
++      expect(handles(lookup.selectableMembers('G5')), [0x1F, 0x64]);
++      expect(lookup.hasLockedVisibleMember('G5'), isTrue);
++      expect(lookup.hasLockedVisibleMember('G7'), isFalse);
++      // 10 is locked but hidden: it does not count.
++      final hiddenLocked = UnitGroupLookup(
++          validateUnitGroups({
++            'G1': g({'3', '10'})
++          }),
++          facts);
++      expect(hiddenLocked.hasLockedVisibleMember('G1'), isFalse);
++      expect(handles(hiddenLocked.selectableMembers('G1')), [0x2A]);
++    });
++  });
++
++  group('the Merge rule (G5)', () {
++    final groups = validateUnitGroups({
++      'G7': g({'12', '3', '7'}),
++      'G2': g({'20', '8'}),
++    });
++
++    test(
++        'TG-U10 disabled for one unit, two unlabelled units, two units '
++        'sharing one label, one whole group and part of one (M-TG-16)', () {
++      expect(mergeQualifies({'5'}, groups), isFalse,
++          reason: 'one unit, or both units carrying 5');
++      expect(mergeQualifies(const {}, groups), isFalse,
++          reason: 'unlabelled units report no label');
++      expect(mergeQualifies({'12', '3', '7'}, groups), isFalse,
++          reason: 'exactly one group');
++      expect(mergeQualifies({'3', '7'}, groups), isFalse);
++      expect(mergeQualifies({'5', ' ', ''}, groups), isFalse);
++    });
++
++    test(
++        'TG-U11 enabled for two labelled units, a group and a unit, two '
++        'groups (M-TG-16)', () {
++      expect(mergeQualifies({'5', '30'}, groups), isTrue);
++      expect(mergeQualifies({'5', '30'}, const {}), isTrue);
++      expect(mergeQualifies({'12', '3', '7', '5'}, groups), isTrue);
++      expect(mergeQualifies({'3', '20'}, groups), isTrue);
++      // A group id equal to an ungrouped label (a POS naming groups "1",
++      // "2"): group 1 and unit 1 are still two units (review 1).
++      expect(
++          mergeQualifies(
++              {'3', '7', '1'},
++              validateUnitGroups({
++                '1': g({'3', '7'})
++              })),
++          isTrue);
++    });
++  });
++
++  group('the Split rule (G5)', () {
++    final lookup = UnitGroupLookup(
++        validateUnitGroups({
++          'G7': g({'12', '3', '7', '8'}),
++          'G9': g({'9', '20'}),
++        }),
++        facts);
++    String? split(Set<String> labels, {bool unlabelled = false}) =>
++        lookup.splitGroup(labels, unlabelledSelected: unlabelled);
++
++    test(
++        'TG-U12 exactly one group\'s selectable members qualify, a group '
++        'with a locked member and one with a single visible member '
++        'included (M-TG-17)', () {
++      expect(split({'7', '12', '3'}), 'G7',
++          reason: 'its locked 8 is never selected');
++      expect(split({' 20 '}), 'G9', reason: 'its 9 is hidden');
++    });
++
++    test(
++        'TG-U13 a group plus a unit, part of a group, a group plus an '
++        'unlabelled unit, nothing, and units in no group do not '
++        '(M-TG-17)', () {
++      expect(split({'7', '12', '3', '5'}), isNull);
++      expect(split({'5', '7', '12', '3'}), isNull);
++      expect(split({'7', '12'}), isNull);
++      expect(split({'7', '12', '3'}, unlabelled: true), isNull);
++      expect(split(const {}), isNull);
++      expect(split({'5'}), isNull);
++      expect(split({'7', '12', '3', '8'}), isNull,
++          reason: 'a locked member is never selectable');
++    });
++  });
++
++  group('the lead order (G3)', () {
++    List<String> sorted(List<String> labels) =>
++        [...labels]..sort(unitLabelOrder(labels));
++
++    test(
++        'TG-U14 all digits sort numerically by (length after leading '
++        'zeros, then string), never int.parse; otherwise by string '
++        '(M-C1-8, M-C1-9, M-C1-10)', () {
++      expect(sorted(['12', '3', '7']), ['3', '7', '12']);
++      expect(sorted(['10', '007', '9']), ['007', '9', '10']);
++      expect(sorted(['7', '07', '6']), ['6', '07', '7']);
++      const big = '123456789012345678901234567890';
++      expect(sorted([big, '99', '0']), ['0', '99', big]);
++      expect(sorted(['12', '3', '5A']), ['12', '3', '5A']);
++      expect(sorted(['12', '3', '-7']), ['-7', '12', '3']);
++    });
++
++    test(
++        'TG-U15 inLeadOrder: by label, a duplicate to the lowest handle, '
++        'an unlabelled unit dropped (M-C1-11)', () {
++      final order = inLeadOrder([
++        u(0x77, '7'),
++        u(0x64, '5'),
++        u(0x51, '12'),
++        u(0x40, null),
++        u(0x1F, '5'),
++      ]);
++      expect(handles(order), [0x1F, 0x64, 0x77, 0x51]);
++      expect(handles(inLeadOrder([u(0x64, '5'), u(0x1F, '5')])), [0x1F, 0x64]);
++    });
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/support/service_plans.dart b/packages/jet_cad_2d_plan/test/support/service_plans.dart
+index 0f7229a6..7e2e12c0 100644
+--- a/packages/jet_cad_2d_plan/test/support/service_plans.dart
++++ b/packages/jet_cad_2d_plan/test/support/service_plans.dart
+@@ -1,28 +1,31 @@
+ // Plans for the service-mode tests (2b Tasks 11-13). A placed unit is built
+ // by engine commands, independent of any symbol library: a definition
+ // carrying `jetcad.symbol` and `jetcad.unit` with one closed leaf off the
+ // origin, and an instance carrying its UNIT label (`unitLabelAttrib`, Task
+ // 3). Every placement is off the origin, turned, most mirrored (CLAUDE.md).
+ // The helpers are today's (jet_cad_floor_plan's
+ // test/host/controller_test.dart:26-79): `move`, `drawLine`, `parts`.
++import 'dart:ui' show Color;
++
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+ import 'package:jet_cad_2d_plan/src/symbols/symbol_placer.dart'
+     show placementTransform;
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import 'harness.dart';
+ import 'service_fixture.dart' show serviceFixture;
+ import 'test_kit.dart';
+-import 'unit_fixtures.dart' show kDeg37;
++import 'unit_fixtures.dart' show addLayer, kDeg37;
+ 
+ // One owner per helper (controller ruling R-19): `kDeg37` and `addLayer`
+ // are the units' fixture's (Tasks 6 and 8), re-exported for Tasks 11-13.
+ export 'unit_fixtures.dart' show addLayer, kDeg37;
+ 
+ /// A unit definition made by [unitDefinition]: its handle, its base point
+ /// and its first leaf's box (the served top).
+ typedef UnitDef = ({Handle handle, Vector2 base, Aabb2 top});
+ 
+ /// The table's leaf: a closed 1200 x 800 rectangle off the origin; the base
+@@ -123,22 +126,24 @@ Handle placeDef(DraftDocument d, UnitDef def, Transform2 at,
+ Transform2 turned(UnitDef def, double x, double y, double angle,
+         {bool mirrored = false}) =>
+     Transform2.translation(x, y)
+         .multiply(Transform2.rotation(angle))
+         .multiply(Transform2.scale(mirrored ? -1 : 1, 1))
+         .multiply(Transform2.translation(-def.base.x, -def.base.y));
+ 
+ /// Today's `planJson` (controller_test.dart:26-43), saved: tables 1
+ /// (a quarter turn, mirrored) and 2, a stool 3 (capacity 1, half-turned)
+ /// and a planter (a symbol that is no unit). [duplicate] labels the stool
+-/// "2"; [secondAt] moves table 2.
+-String servicePlanText({bool duplicate = false, Vector2? secondAt}) =>
++/// "2"; [secondAt] moves table 2; [unlabelled] adds a fourth table, with no
++/// label, after the planter (today's C13 placement).
++String servicePlanText(
++        {bool duplicate = false, Vector2? secondAt, bool unlabelled = false}) =>
+     planText([testKit()], (d) {
+       final table = unitDefinition(d, key: 'test.table.square.four');
+       final stool = unitDefinition(d,
+           key: 'test.stool.round.one', name: 'Stool', capacity: 1, round: true);
+       final planter = unitDefinition(d,
+           key: 'test.planter.square.one', name: 'Planter', unit: false);
+       placeDef(
+           d,
+           table,
+           placementTransform(
+@@ -154,20 +159,27 @@ String servicePlanText({bool duplicate = false, Vector2? secondAt}) =>
+               at: secondAt ?? Vector2(2300, 1400), basePoint: table.base),
+           label: '2');
+       placeDef(
+           d,
+           stool,
+           placementTransform(
+               at: Vector2(300, -2100), basePoint: stool.base, quarterTurns: 2),
+           label: duplicate ? '2' : '3');
+       placeDef(d, planter,
+           placementTransform(at: Vector2(4100, -900), basePoint: planter.base));
++      if (unlabelled) {
++        placeDef(
++            d,
++            table,
++            placementTransform(
++                at: Vector2(-4000, -3000), basePoint: table.base));
++      }
+     });
+ 
+ /// A saved plan with tables 1 and 2 of the test kit and a table 5 whose
+ /// symbol's kit (`gone`) the host does not load: locked (spec S2 "Locked
+ /// units").
+ String lockedPlanText() => planText([testKit()], (d) {
+       final table = unitDefinition(d, key: 'test.table.square.four');
+       final gone = unitDefinition(d, key: 'gone.table.square.four');
+       placeDef(
+           d, table, turned(table, -2600.25, 1400.5, kDeg37, mirrored: true),
+@@ -238,10 +250,85 @@ void drawLine(PlanController c) =>
+ ({String json, Handle table, List<Handle> rows, List<List<Handle>> seats})
+     hall() {
+   final f = serviceFixture();
+   return (
+     json: f.json,
+     table: f.table,
+     rows: [f.rowA, f.rowB],
+     seats: [f.seatsA, f.seatsB],
+   );
+ }
++
++/// The labels given to the tables in handle order: not sorted.
++const List<String> kGroupLabels = ['12', '3', '7', '20', '5', '8', '9'];
++
++/// Today's `groupsPlanJson` (table_groups_controller_test.dart:23-85),
++/// saved: tables labelled [kGroupLabels] in handle order, each off the
++/// origin, turned or mirrored; table 8 on a visible locked layer, table 9
++/// on a hidden one; an unlabelled table last. [duplicate] labels table 5
++/// "3"; [hideNine] false leaves table 9 on layer 0. [eightTwice] labels
++/// table 5 "8", so 8 is carried by table 5's unlocked table and the locked
++/// one; [lockFive] then puts table 5's table on the locked layer instead,
++/// so the locked carrier of 8 comes first in handle order.
++String groupsPlanText(
++        {bool duplicate = false,
++        bool hideNine = true,
++        bool eightTwice = false,
++        bool lockFive = false}) =>
++    planText([testKit()], (d) {
++      final locked = addLayer(d, 'Locked', visible: true, locked: true);
++      final hidden = addLayer(d, 'Hidden', visible: false, locked: false);
++      final table = unitDefinition(d, key: 'test.table.square.four');
++      final placements = [
++        turned(table, -2600, 1400, kDeg37, mirrored: true),
++        turned(table, 2300, 1700, kDeg37 * 2),
++        turned(table, 5100, -900, -kDeg37, mirrored: true),
++        turned(table, -4300, -2600, 0, mirrored: true),
++        turned(table, 800, -3300, kDeg37),
++        turned(table, 7400, 2200, kDeg37 * 3),
++        turned(table, -7100, 3900, -kDeg37 * 2, mirrored: true),
++      ];
++      final units = <Handle>[];
++      for (var i = 0; i < placements.length; i++) {
++        final label = switch (kGroupLabels[i]) {
++          '5' when duplicate => '3',
++          '5' when eightTwice => '8',
++          final l => l,
++        };
++        units.add(placeDef(d, table, placements[i], label: label));
++      }
++      placeDef(
++          d,
++          table,
++          placementTransform(
++              at: Vector2(3600, 5200), basePoint: table.base, quarterTurns: 3));
++      d.commands
++          .execute(SetInstanceLayerCommand(units[lockFive ? 4 : 5], locked));
++      if (hideNine) {
++        d.commands.execute(SetInstanceLayerCommand(units[6], hidden));
++      }
++    });
++
++/// The selection keys of the units labelled [labels] in the active
++/// document (today's `keysOf`).
++Set<SelectionKey> keysOf(PlanController c, Set<String> labels) => {
++      for (final l in labels)
++        for (final n in unitNodes(c.activeDocument, l))
++          SelectionKey.root(n.handle),
++    };
++
++/// The key of the unlabelled unit of the active document.
++SelectionKey unlabelledKey(PlanController c) => SelectionKey.root(
++    c.unitIndex.units.firstWhere((u) => u.text == null).instance);
++
++/// One design edit: [row]'s seat count set to [count] (Task 5's row).
++void setRowCount(PlanController c, Handle row, int count) {
++  final r = c.document.components.get<RowComponent>(row)!;
++  if (!c.execute(
++      SetComponentCommand<RowComponent>(row, r.copyWith(count: count)))) {
++    throw StateError('the row edit was refused');
++  }
++}
++
++/// Today's `bill` (table_groups_controller_test.dart:109-110).
++final UnitStatus bill =
++    UnitStatus(color: const Color(0x80E53935), caption: 'Bill');

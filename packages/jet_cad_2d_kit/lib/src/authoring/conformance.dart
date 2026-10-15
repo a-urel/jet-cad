@@ -11,6 +11,7 @@ import '../model/kit_ids.dart';
 import '../model/kit_names.dart';
 import '../model/kit_problem.dart';
 import '../model/symbol_library.dart';
+import '../model/unit_component.dart' show UnitKinds;
 import 'builder.dart';
 import 'catalog.dart';
 import 'snapshot.dart';
@@ -26,6 +27,9 @@ import 'snapshot.dart';
 /// `property:<id>`) must have English and a word in every declared locale.
 /// A code-side word that names none of them is not reported: a kit may pass
 /// a part of its ids.
+///
+/// A unit kind the contract does not name ([UnitKinds]) needs an English
+/// `unit:<kit>/<kind>` word ([KitProblemCode.unitKindWord], spec 2b S4).
 ///
 /// Throws [ArgumentError] when [locales] lists English: English is always
 /// required, by stored text or by words.
@@ -75,7 +79,31 @@ List<KitProblem> conformance({
   problems
     ..addAll(_snapshotProblems(catalog, committedSnapshot))
     ..addAll(code.problems)
+    ..addAll(_unitKindProblems(catalog, names))
     ..addAll(_wordProblems(catalog, names, locales, sameAsEnglish, code.words));
+  return problems;
+}
+
+/// Spec 2b S4: every unit kind the catalog carries that the contract does
+/// not name ([UnitKinds]) has an English `unit:<kit>/<kind>` word; one
+/// problem per kind. The declared locales are not held to it.
+List<KitProblem> _unitKindProblems(Catalog catalog, KitNames names) {
+  final english = names.words[KitNames.english] ?? const <String, String>{};
+  final problems = <KitProblem>[];
+  final asked = <String>{};
+  for (final s in catalog.symbols) {
+    final kind = s.unit?.kind;
+    if (kind == null || kind == UnitKinds.table || kind == UnitKinds.seat) {
+      continue;
+    }
+    final wordId = 'unit:${catalog.kit}/$kind';
+    if (asked.add(wordId) && !english.containsKey(wordId)) {
+      problems.add(KitProblem(
+          KitProblemCode.unitKindWord,
+          '"$wordId" has no English word: the unit kind "$kind" is not one '
+          'the contract names'));
+    }
+  }
   return problems;
 }
 

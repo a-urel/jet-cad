@@ -1,0 +1,1538 @@
+# Review package: bcf4d6b8..HEAD
+
+## Commits
+b71ab4c8 feat(kit): the contract's 2b additions (spec 2b S2, S4)
+
+## Files changed
+ packages/jet_cad_2d_kit/CHANGELOG.md               |   9 ++
+ packages/jet_cad_2d_kit/lib/jet_cad_2d_kit.dart    |   3 +
+ .../lib/src/authoring/conformance.dart             |  28 ++++
+ .../jet_cad_2d_kit/lib/src/kit/host_words.dart     |  43 ++++++
+ packages/jet_cad_2d_kit/lib/src/kit/plan_kit.dart  |   5 +-
+ .../jet_cad_2d_kit/lib/src/kit/plan_services.dart  |  50 +++++-
+ .../jet_cad_2d_kit/lib/src/kit/properties.dart     |   3 +
+ .../jet_cad_2d_kit/lib/src/kit/symbols_state.dart  |  18 +++
+ .../jet_cad_2d_kit/lib/src/kit/unit_label.dart     |  96 ++++++++++++
+ .../jet_cad_2d_kit/lib/src/model/kit_names.dart    |   7 +-
+ .../jet_cad_2d_kit/lib/src/model/kit_problem.dart  |   4 +
+ .../lib/src/model/unit_component.dart              |   3 +-
+ .../test/authoring/conformance_test.dart           |  59 ++++++++
+ .../test/invariants/purity_test.dart               |  16 ++
+ .../jet_cad_2d_kit/test/kit/host_words_test.dart   |  66 ++++++++
+ .../jet_cad_2d_kit/test/kit/plan_kit_test.dart     |  26 ++++
+ .../test/kit/plan_services_test.dart               |  25 +++
+ .../jet_cad_2d_kit/test/kit/properties_test.dart   |   1 +
+ .../jet_cad_2d_kit/test/kit/unit_label_test.dart   | 167 +++++++++++++++++++++
+ .../jet_cad_2d_kit/test/support/placements.dart    |  39 +++++
+ .../lib/src/controller/permissions.dart            |  16 +-
+ .../lib/src/controller/services.dart               |   9 ++
+ .../test/controller/permissions_test.dart          |  15 +-
+ 23 files changed, 693 insertions(+), 15 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_kit/CHANGELOG.md b/packages/jet_cad_2d_kit/CHANGELOG.md
+index 385aa065..537b44a4 100644
+--- a/packages/jet_cad_2d_kit/CHANGELOG.md
++++ b/packages/jet_cad_2d_kit/CHANGELOG.md
+@@ -17,10 +17,19 @@
+   `PlanTool`, `PlanToolSettings`, `PlanServices`, `KitWords`,
+   `KitNamesWords`, `Disposable`, the attachment types and `KitDiagnostic`.
+   `PlanKit` gains `types`, `tools`, `attachments` and `propertyIds`, and
+   `validate` checks them; seven `KitProblemCode`s for the code side and the
+   kit set; `isCodeId`. The contract depends on `jet_cad_2d_flutter`.
+ - `retired` on `jetcad.symbol` and `CatalogSymbol`, written only when true;
+   `conformance` takes `typeIds`, `toolIds` and `propertyIds`; rule 11
+   refuses a unit outline by its width, 2·area/perimeter, not by its area.
+ - `PlanSwatch`, the plan's eight-colour palette, and `planSwatchNamed`:
+   kits name a swatch without depending on the plan library.
++- Sub-project 2b: `PlanServices.symbolDefinition` (`SymbolDefinitionRef`)
++  and `symbolsState`; `SymbolsState`, moved from the plan library; a unit's
++  label (`kUnitLabelTag`, `unitLabelHeight`, `unitLabelStamp`,
++  `unitLabelPayload`, `unitLabelAttrib`, which builds a generated unit's
++  label as an E5 `GeneratedAttrib`); `PlanGate.relabel`; the `unit:` word
++  namespace and `validateHostWords`; `KitProblemCode.unitKindWord`, which
++  conformance reports for a unit kind the contract does not name without
++  an English word. `UnitLabelling.assigned`: the label comes from a kit's
++  type, the property panel or the host.
+diff --git a/packages/jet_cad_2d_kit/lib/jet_cad_2d_kit.dart b/packages/jet_cad_2d_kit/lib/jet_cad_2d_kit.dart
+index b31e7b15..b4720853 100644
+--- a/packages/jet_cad_2d_kit/lib/jet_cad_2d_kit.dart
++++ b/packages/jet_cad_2d_kit/lib/jet_cad_2d_kit.dart
+@@ -5,19 +5,22 @@
+ /// its `PlanKit` descriptor.
+ ///
+ /// A Flutter library: it reads bundled assets and builds on the Flutter
+ /// layer's tools and grips. The model it exports is pure Dart and is shared
+ /// with `package:jet_cad_2d_kit/authoring.dart`.
+ library;
+ 
+ export 'src/kit/attachment.dart';
+ export 'src/kit/bundled_library.dart';
+ export 'src/kit/colour.dart';
++export 'src/kit/host_words.dart';
+ export 'src/kit/kit_diagnostic.dart';
+ export 'src/kit/plan_kit.dart';
+ export 'src/kit/plan_services.dart';
+ export 'src/kit/plan_tool.dart';
+ export 'src/kit/plan_type.dart';
+ export 'src/kit/properties.dart';
+ export 'src/kit/swatch.dart';
+ export 'src/kit/symbol_library_source.dart';
++export 'src/kit/symbols_state.dart';
++export 'src/kit/unit_label.dart';
+ export 'src/model/model.dart';
+diff --git a/packages/jet_cad_2d_kit/lib/src/authoring/conformance.dart b/packages/jet_cad_2d_kit/lib/src/authoring/conformance.dart
+index 7ab15af1..e5742cf8 100644
+--- a/packages/jet_cad_2d_kit/lib/src/authoring/conformance.dart
++++ b/packages/jet_cad_2d_kit/lib/src/authoring/conformance.dart
+@@ -4,36 +4,40 @@
+ //
+ // Pure Dart: no Flutter, no dart:io.
+ import 'dart:typed_data';
+ 
+ import 'package:jet_cad_2d/jet_cad_2d.dart' show listEquals;
+ 
+ import '../model/kit_ids.dart';
+ import '../model/kit_names.dart';
+ import '../model/kit_problem.dart';
+ import '../model/symbol_library.dart';
++import '../model/unit_component.dart' show UnitKinds;
+ import 'builder.dart';
+ import 'catalog.dart';
+ import 'snapshot.dart';
+ 
+ /// The problems of a kit: its [catalog], its [committedLibrary] bytes, its
+ /// [committedSnapshot] text, its [names] and its declared non-English
+ /// [locales]. [sameAsEnglish] lists, per locale, the word ids whose right
+ /// word is the English one. Empty when the kit conforms.
+ ///
+ /// The code side (contract R3): [typeIds], [toolIds] and [propertyIds] (a
+ /// `PlanKit`'s `propertyIds`, without the `property:` prefix) must be under
+ /// the kit's id, and each one's word (`type:<id>`, `tool:<id>`,
+ /// `property:<id>`) must have English and a word in every declared locale.
+ /// A code-side word that names none of them is not reported: a kit may pass
+ /// a part of its ids.
+ ///
++/// A unit kind the contract does not name ([UnitKinds]) needs an English
++/// `unit:<kit>/<kind>` word ([KitProblemCode.unitKindWord], spec 2b S4).
++///
+ /// Throws [ArgumentError] when [locales] lists English: English is always
+ /// required, by stored text or by words.
+ List<KitProblem> conformance({
+   required Catalog catalog,
+   required Uint8List committedLibrary,
+   required String committedSnapshot,
+   required KitNames names,
+   required List<String> locales,
+   Map<String, Set<String>> sameAsEnglish = const {},
+   Iterable<String> typeIds = const [],
+@@ -68,24 +72,48 @@ List<KitProblem> conformance({
+           '"${catalog.kit}"'));
+     }
+   } on SymbolLibraryError catch (e) {
+     problems.add(KitProblem(KitProblemCode.libraryInvalid,
+         'the committed library is refused, rule ${e.rule}: ${e.message}'));
+   }
+   final code = _codeIds(catalog.kit, typeIds, toolIds, propertyIds);
+   problems
+     ..addAll(_snapshotProblems(catalog, committedSnapshot))
+     ..addAll(code.problems)
++    ..addAll(_unitKindProblems(catalog, names))
+     ..addAll(_wordProblems(catalog, names, locales, sameAsEnglish, code.words));
+   return problems;
+ }
+ 
++/// Spec 2b S4: every unit kind the catalog carries that the contract does
++/// not name ([UnitKinds]) has an English `unit:<kit>/<kind>` word; one
++/// problem per kind. The declared locales are not held to it.
++List<KitProblem> _unitKindProblems(Catalog catalog, KitNames names) {
++  final english = names.words[KitNames.english] ?? const <String, String>{};
++  final problems = <KitProblem>[];
++  final asked = <String>{};
++  for (final s in catalog.symbols) {
++    final kind = s.unit?.kind;
++    if (kind == null || kind == UnitKinds.table || kind == UnitKinds.seat) {
++      continue;
++    }
++    final wordId = 'unit:${catalog.kit}/$kind';
++    if (asked.add(wordId) && !english.containsKey(wordId)) {
++      problems.add(KitProblem(
++          KitProblemCode.unitKindWord,
++          '"$wordId" has no English word: the unit kind "$kind" is not one '
++          'the contract names'));
++    }
++  }
++  return problems;
++}
++
+ /// Contract R3: type and tool ids are `<kit>.<name>` (spec 2a P1), a
+ /// property id is under the kit. The words of those that are.
+ ({List<KitProblem> problems, Set<String> words}) _codeIds(
+     String kit,
+     Iterable<String> typeIds,
+     Iterable<String> toolIds,
+     Iterable<String> propertyIds) {
+   final problems = <KitProblem>[];
+   final words = <String>{};
+   void check(String what, Iterable<String> ids, KitProblemCode outside,
+diff --git a/packages/jet_cad_2d_kit/lib/src/kit/host_words.dart b/packages/jet_cad_2d_kit/lib/src/kit/host_words.dart
+new file mode 100644
+index 00000000..992c3fce
+--- /dev/null
++++ b/packages/jet_cad_2d_kit/lib/src/kit/host_words.dart
+@@ -0,0 +1,43 @@
++// A host's words (spec 2b S4 "Words"): the KitNames a host gives
++// PlanController(words:), merged before each kit's own. Checked here, so
++// the plan library refuses a word no kit could ever read.
++//
++// Pure Dart: no Flutter, no dart:io.
++import '../model/kit_ids.dart';
++import '../model/kit_names.dart';
++import '../model/kit_problem.dart';
++
++/// The problems of a host's [words], in their order (locale, then word
++/// id): an id in no known namespace (`symbol:`, `category:`, `tool:`,
++/// `type:`, `property:`, `unit:`) is [KitProblemCode.unknownWordId]; one
++/// that names no kit is [KitProblemCode.foreignWordId]. Any kit will do: a
++/// host's word may be for a kit it has not loaded. A `category:` or `unit:`
++/// id names its kit before a `/`, the others before their first `.`.
++/// Empty when sound.
++List<KitProblem> validateHostWords(KitNames words) {
++  final problems = <KitProblem>[];
++  for (final MapEntry(key: locale, value: map) in words.words.entries) {
++    for (final wordId in map.keys) {
++      final colon = wordId.indexOf(':');
++      final namespace = colon < 0 ? '' : wordId.substring(0, colon);
++      final rest = wordId.substring(colon + 1);
++      final bool named;
++      switch (namespace) {
++        case 'category' || 'unit':
++          final slash = rest.indexOf('/');
++          named = slash > 0 && isKitId(rest.substring(0, slash));
++        case 'symbol' || 'tool' || 'type' || 'property':
++          named = rest.contains('.') && isKitId(kitOfKey(rest));
++        default:
++          problems.add(KitProblem(KitProblemCode.unknownWordId,
++              '$locale: "$wordId" is in no known namespace'));
++          continue;
++      }
++      if (!named) {
++        problems.add(KitProblem(
++            KitProblemCode.foreignWordId, '$locale: "$wordId" names no kit'));
++      }
++    }
++  }
++  return problems;
++}
+diff --git a/packages/jet_cad_2d_kit/lib/src/kit/plan_kit.dart b/packages/jet_cad_2d_kit/lib/src/kit/plan_kit.dart
+index 9a0be785..c9c89e41 100644
+--- a/packages/jet_cad_2d_kit/lib/src/kit/plan_kit.dart
++++ b/packages/jet_cad_2d_kit/lib/src/kit/plan_kit.dart
+@@ -45,21 +45,22 @@ final class PlanKit {
+   /// `<tool id>.<spec id>` for each tool's settings, and for a choice also
+   /// `<owner id>.<spec id>.<value>` per value. Pass it to `conformance`.
+   List<String> get propertyIds => [
+         for (final type in types) ..._specIds(type.id, type.properties),
+         for (final tool in tools)
+           if (tool.settings case final settings?)
+             ..._specIds(tool.id, settings.specs),
+       ];
+ 
+   /// The descriptor's problems: a bad id, an empty version, a word under
+-  /// another kit's id or in no known namespace; a type or tool id that is not
++  /// another kit's id or in no known namespace (a `category:` or `unit:` word
++  /// names the kit before its `/`); a type or tool id that is not
+   /// `<this kit's id>.<name>` or is repeated; a word with no stored English
+   /// missing from English, for every word a type, tool or property needs.
+   /// Empty when sound. Problems across kits are the plan library's.
+   List<KitProblem> validate() {
+     final problems = <KitProblem>[];
+     if (!isKitId(id)) {
+       problems.add(KitProblem(
+           KitProblemCode.badKitId,
+           '"$id" is not a kit id: a lower-case letter, then lower-case '
+           'letters and digits'));
+@@ -70,21 +71,21 @@ final class PlanKit {
+     }
+     // Word ids under this kit that need an English word, in order.
+     final needEnglish = <String>{};
+     for (final MapEntry(key: locale, value: words) in names.words.entries) {
+       for (final wordId in words.keys) {
+         final colon = wordId.indexOf(':');
+         final namespace = colon < 0 ? '' : wordId.substring(0, colon);
+         final rest = wordId.substring(colon + 1);
+         var foreign = false;
+         switch (namespace) {
+-          case 'category':
++          case 'category' || 'unit':
+             final slash = rest.indexOf('/');
+             foreign = slash < 0 || rest.substring(0, slash) != id;
+           case 'symbol' || 'tool' || 'type' || 'property':
+             foreign = !rest.contains('.') || kitOfKey(rest) != id;
+             if (!foreign && namespace != 'symbol') needEnglish.add(wordId);
+           default:
+             problems.add(KitProblem(KitProblemCode.unknownWordId,
+                 '$locale: "$wordId" is in no known namespace'));
+         }
+         if (foreign) {
+diff --git a/packages/jet_cad_2d_kit/lib/src/kit/plan_services.dart b/packages/jet_cad_2d_kit/lib/src/kit/plan_services.dart
+index c7c2ae69..088a74b5 100644
+--- a/packages/jet_cad_2d_kit/lib/src/kit/plan_services.dart
++++ b/packages/jet_cad_2d_kit/lib/src/kit/plan_services.dart
+@@ -1,21 +1,25 @@
+ // The live view a kit's tools, grip providers and attachment providers get
+ // of one plan (spec 2a P1): one per kit per controller, implemented by the
+-// plan library. And a kit's words at the plan's locale.
++// plan library. And a kit's words at the plan's locale, and (spec 2b S2) the
++// symbol definitions a kit's types place.
+ import 'dart:ui' show Locale;
+ 
++import 'package:flutter/foundation.dart' show ValueListenable;
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
+     show CameraController;
++import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import '../model/kit_names.dart';
+ import 'attachment.dart';
++import 'symbols_state.dart';
+ 
+ /// A kit's words at the plan's current locale (spec 2a P5).
+ abstract interface class KitWords {
+   /// The word [wordId] in the locale, else in English, else [wordId] itself
+   /// (a missing word shows its id, never nothing).
+   String word(String wordId);
+ 
+   /// The word [wordId] in the locale, else in English, else null.
+   String? maybe(String wordId);
+ 
+@@ -43,20 +47,49 @@ final class KitNamesWords implements KitWords {
+ 
+ /// What a kit's `shared` object implements to be released with its
+ /// document (spec 2a P1, lifetimes).
+ abstract interface class Disposable {
+   void dispose();
+ }
+ 
+ /// One plan, as a kit's code sees it. Every member reads the current
+ /// document: a kit's factories run once per document (spec 2a P1,
+ /// lifetimes), so what they keep never outlives it.
++/// A symbol definition a kit's code uses (spec 2b S2): a parametric type
++/// generates instances of it (E5), a tool places it. Every value is in the
++/// definition's space.
++final class SymbolDefinitionRef {
++  const SymbolDefinitionRef(
++      {required this.handle,
++      required this.add,
++      required this.basePoint,
++      required this.top});
++
++  /// The definition's handle in the current document: a definition it
++  /// holds, or the one [add] adds.
++  final Handle handle;
++
++  /// One command that adds the definition, its leaves and its
++  /// `jetcad.symbol` and `jetcad.unit` (the plan's symbol placer's), or
++  /// null when the document holds the definition. Executed once, before
++  /// or with the first command that uses [handle].
++  final DraftCommand? add;
++
++  /// The definition's base point.
++  final Vector2 basePoint;
++
++  /// The definition's first leaf's box when that leaf is a closed
++  /// polyline or a circle (a unit's served top), else the definition's
++  /// box. `unitLabelAttrib`'s `top`.
++  final Aabb2 top;
++}
++
+ abstract interface class PlanServices {
+   /// The current document.
+   DraftDocument get document;
+ 
+   /// Its spatial index.
+   SpatialIndex get index;
+ 
+   /// The camera, for apertures in world units.
+   CameraController get camera;
+ 
+@@ -72,11 +105,26 @@ abstract interface class PlanServices {
+   /// The current settings of the tool [toolId] (one of this kit's tools
+   /// with settings). Throws [ArgumentError] for another id or an `S` the
+   /// settings are not.
+   S settingsOf<S extends Object>(String toolId);
+ 
+   /// This kit's one [T] for the current document: [create] runs on the
+   /// first call, later calls return the same instance. A [T] that is a
+   /// [Disposable] is disposed with its document. Keyed by (kit, `T`), so two
+   /// kits asking for the same type get one each.
+   T shared<T extends Object>(T Function(PlanServices) create);
++
++  /// The symbol [key], a full versioned key (`kit.kind.variant@N`), as a
++  /// definition of the current document: the one it holds, or one to add.
++  /// Null when no loaded library has [key], or while the libraries load or
++  /// after they failed ([symbolsState] tells which).
++  ///
++  /// A ref with an `add` took its handles from the document's seed, one
++  /// per definition and per leaf: call this once per placement, never per
++  /// preview. A second call for [key] before that `add` executes returns
++  /// the same ref, `add` included (spec 2b S2): execute it once.
++  SymbolDefinitionRef? symbolDefinition(String key);
++
++  /// The symbol libraries' state: the plan's own listenable, so a tool can
++  /// wait for `ready`.
++  ValueListenable<SymbolsState> get symbolsState;
+ }
+diff --git a/packages/jet_cad_2d_kit/lib/src/kit/properties.dart b/packages/jet_cad_2d_kit/lib/src/kit/properties.dart
+index f88b0c36..a8aa8fd1 100644
+--- a/packages/jet_cad_2d_kit/lib/src/kit/properties.dart
++++ b/packages/jet_cad_2d_kit/lib/src/kit/properties.dart
+@@ -10,20 +10,23 @@
+ enum PlanGate {
+   move,
+   rotate,
+   mirror,
+   reshape,
+   delete,
+   changeLayer,
+   recolor,
+   editLayers,
+   editPage,
++
++  /// A unit's label (spec 2b S4; today's `renumber`).
++  relabel,
+ }
+ 
+ /// How a [ValueDisplay] prints its number: a length in mm, an area in mm²,
+ /// an angle in radians, or a plain number.
+ enum ValueUnit { length, area, angle, none }
+ 
+ final RegExp _specId = RegExp(r'^[a-z][a-z0-9-]*$');
+ 
+ /// One field of an owner `T`: a type's component or a tool's settings.
+ ///
+diff --git a/packages/jet_cad_2d_kit/lib/src/kit/symbols_state.dart b/packages/jet_cad_2d_kit/lib/src/kit/symbols_state.dart
+new file mode 100644
+index 00000000..24d3878d
+--- /dev/null
++++ b/packages/jet_cad_2d_kit/lib/src/kit/symbols_state.dart
+@@ -0,0 +1,18 @@
++// The symbol libraries' state (spec 2b S2), moved from jet_cad_2d_plan
++// (2a's PlanSymbolsState): a kit's tool reads it through
++// PlanServices.symbolsState to tell a key no loaded library has from
++// libraries still loading or failed.
++//
++// Pure Dart: no Flutter, no dart:io.
++
++/// Whether a plan's symbol libraries are loading, ready or failed.
++enum SymbolsState {
++  /// A library has not settled yet.
++  loading,
++
++  /// Every library settled and one at least was read, or there is none.
++  ready,
++
++  /// There was a library and every one failed.
++  failed,
++}
+diff --git a/packages/jet_cad_2d_kit/lib/src/kit/unit_label.dart b/packages/jet_cad_2d_kit/lib/src/kit/unit_label.dart
+new file mode 100644
+index 00000000..0d049331
+--- /dev/null
++++ b/packages/jet_cad_2d_kit/lib/src/kit/unit_label.dart
+@@ -0,0 +1,96 @@
++// A unit's label, drawn (spec 2b S2 "The label"): an ATTRIB tagged `UNIT`
++// owned by the unit's instance, its text the label, anchored at the
++// definition's base point and stamped so it reads upright and unmirrored in
++// the world whatever the instance's rotation and mirror. Ported from
++// jet_cad_floor_plan's tables/table_label.dart (spec 14a T2, T8, T10): the
++// tag, the height rule, the stamp, the text attributes and the payload; the
++// height now reads the top's box. unitLabelAttrib is new: a kit's
++// parametric type gives a generated unit its label with it (E5).
++//
++// Pure Dart: no Flutter, no dart:io.
++import 'dart:math' as math;
++import 'dart:typed_data';
++
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++/// The tag of the ATTRIB that holds a unit's label (today's `TABLE`).
++const String kUnitLabelTag = 'UNIT';
++
++/// The label's height on a top whose smaller side is 500 and more, in
++/// drawing units (T8).
++const double kUnitLabelMaxHeight = 200;
++
++/// The share of the top's smaller side a label may take (T8).
++const double kUnitLabelTopShare = 0.4;
++
++/// `min(200, 0.4 × min(w, h))`, where `w × h` is [top], the served top's
++/// box in definition space (`SymbolDefinitionRef.top`). An empty [top] (no
++/// served top) gives the full height: today's rule for a definition whose
++/// first leaf is neither a closed polyline nor a circle.
++double unitLabelHeight(Aabb2 top) {
++  if (top.isEmpty) return kUnitLabelMaxHeight;
++  final side = math.min(top.maxX - top.minX, top.maxY - top.minY);
++  return math.min(kUnitLabelMaxHeight, kUnitLabelTopShare * side);
++}
++
++/// The rotation and width factor that make a label owned by an instance
++/// whose definition-to-world map is [instanceToWorld] read left to right,
++/// unmirrored, along world +x (T10). The only place this is computed.
++///
++/// With the linear part's columns `(a, b)`, `(c, d)`, `φ = atan2(b, a)`:
++/// a proper map (`det > 0`) takes rotation `−φ` and width factor `+1`; a
++/// mirrored one takes `φ + π` and `−1`, since a reflection is
++/// `R(φ) · diag(1, −1)` and the text's own map is `R(rot) · diag(wf, 1)`.
++/// The rotation is normalised to `(−π, π]`, and `0.0` is stored for `−0.0`.
++({double rotation, double widthFactor}) unitLabelStamp(
++    Transform2 instanceToWorld) {
++  final phi = math.atan2(instanceToWorld.b, instanceToWorld.a);
++  final det = instanceToWorld.a * instanceToWorld.d -
++      instanceToWorld.b * instanceToWorld.c;
++  final mirrored = det < 0;
++  var rotation = mirrored ? phi + math.pi : -phi;
++  if (rotation > math.pi) rotation -= 2 * math.pi;
++  if (rotation <= -math.pi) rotation += 2 * math.pi;
++  if (rotation == 0) rotation = 0.0;
++  return (rotation: rotation, widthFactor: mirrored ? -1.0 : 1.0);
++}
++
++/// `textAttrs` of every unit label: centred on its anchor both ways, the
++/// width factor its own (bit 8), so a mirror can be undone by `−1`.
++final int kUnitLabelTextAttrs = packTextAttrs(
++    h: TextJustifyH.centre, v: TextJustifyV.middle, overrideWidthFactor: true);
++
++/// The label payload, in definition space: [anchor], then
++/// `[height, rotation, widthFactor]` stamped for [instanceToWorld].
++GeometryPayload unitLabelPayload(
++    {required Vector2 anchor,
++    required double height,
++    required Transform2 instanceToWorld}) {
++  final s = unitLabelStamp(instanceToWorld);
++  return GeometryPayload(
++    coords: Float64List.fromList([anchor.x, anchor.y]),
++    scalars: Float64List.fromList([height, s.rotation, s.widthFactor]),
++  );
++}
++
++/// A generated unit's label (spec 2b S2, E5): [text] tagged
++/// [kUnitLabelTag], anchored at [anchor] (the definition's base point),
++/// its height from [top] (the definition's top box) and its stamp from
++/// [instanceToWorld] (the object's world map times the instance's
++/// transform, `view.toWorld(self).multiply(instanceTransform)`). The
++/// payload is in the instance's local (definition) space, so a kit never
++/// re-derives it. The text is not checked: a label outside the text rule
++/// is the plan library's `unit.bad_label`.
++GeneratedAttrib unitLabelAttrib(String text,
++        {required Transform2 instanceToWorld,
++        required Vector2 anchor,
++        required Aabb2 top}) =>
++    GeneratedAttrib(
++        kUnitLabelTag,
++        text,
++        unitLabelPayload(
++            anchor: anchor,
++            height: unitLabelHeight(top),
++            instanceToWorld: instanceToWorld),
++        textAttrs: kUnitLabelTextAttrs);
+diff --git a/packages/jet_cad_2d_kit/lib/src/model/kit_names.dart b/packages/jet_cad_2d_kit/lib/src/model/kit_names.dart
+index 19b274fd..da15dfea 100644
+--- a/packages/jet_cad_2d_kit/lib/src/model/kit_names.dart
++++ b/packages/jet_cad_2d_kit/lib/src/model/kit_names.dart
+@@ -1,22 +1,23 @@
+ // A kit's words (spec K4): one flat map per locale, from a namespaced word
+ // id to the word. Replaces jet_cad_floor_plan's SymbolNames.
+ //
+ // Pure Dart: no Flutter, no dart:io.
+ import 'package:meta/meta.dart';
+ 
+ import 'symbol_component.dart';
+ 
+ /// A kit's words by locale. Word ids: `symbol:<key>`,
+-/// `category:<kit id>/<English category>`, and sub-project 2's
+-/// `tool:<tool id>`, `type:<type id>`, `property:<type id>.<property>`.
+-/// Every id carries its kit's id, so two kits never share one.
++/// `category:<kit id>/<English category>`, sub-project 2's
++/// `tool:<tool id>`, `type:<type id>`, `property:<type id>.<property>`, and
++/// 2b's `unit:<kit id>/<unit kind>`. Every id carries its kit's id, so two
++/// kits never share one.
+ @immutable
+ final class KitNames {
+   const KitNames(this.words);
+ 
+   /// No words: every symbol and category shows its stored English.
+   static const KitNames empty = KitNames({});
+ 
+   /// English, the fallback locale.
+   static const String english = 'en';
+ 
+diff --git a/packages/jet_cad_2d_kit/lib/src/model/kit_problem.dart b/packages/jet_cad_2d_kit/lib/src/model/kit_problem.dart
+index cddf2b2c..667bfbc7 100644
+--- a/packages/jet_cad_2d_kit/lib/src/model/kit_problem.dart
++++ b/packages/jet_cad_2d_kit/lib/src/model/kit_problem.dart
+@@ -29,20 +29,24 @@ enum KitProblemCode {
+   // The code side and the kit set (spec 2a P4, contract R4): PlanKit.validate
+   // and conformance report the type and tool ones, the plan library's
+   // kit-set validation the others.
+   duplicateKit,
+   duplicateType,
+   duplicateTool,
+   reservedKitId,
+   typeOutsideKit,
+   toolOutsideKit,
+   typePlaceConflict,
++
++  // Spec 2b S4: conformance, a unit kind the contract does not name with no
++  // English `unit:<kit>/<kind>` word.
++  unitKindWord,
+ }
+ 
+ @immutable
+ final class KitProblem {
+   const KitProblem(this.code, this.message);
+ 
+   final KitProblemCode code;
+   final String message;
+ 
+   @override
+diff --git a/packages/jet_cad_2d_kit/lib/src/model/unit_component.dart b/packages/jet_cad_2d_kit/lib/src/model/unit_component.dart
+index 750a6413..b4daf8d8 100644
+--- a/packages/jet_cad_2d_kit/lib/src/model/unit_component.dart
++++ b/packages/jet_cad_2d_kit/lib/src/model/unit_component.dart
+@@ -8,21 +8,22 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:meta/meta.dart';
+ 
+ import 'json_fields.dart';
+ import 'kit_ids.dart';
+ 
+ /// How a placed unit's label is formed.
+ enum UnitLabelling {
+   /// The plan gives a placed unit the next free number (a table).
+   numbered,
+ 
+-  /// A kit's type sets the label (a seat in a row).
++  /// The label comes from a kit's type (a seat in a row), the property
++  /// panel or the host; the plan gives no number.
+   assigned,
+ }
+ 
+ /// The unit kinds the contract names. Others are allowed.
+ abstract final class UnitKinds {
+   static const String table = 'table';
+   static const String seat = 'seat';
+ }
+ 
+ /// A served unit: its [kind], its [capacity] and its [labelling].
+diff --git a/packages/jet_cad_2d_kit/test/authoring/conformance_test.dart b/packages/jet_cad_2d_kit/test/authoring/conformance_test.dart
+index 89ff621f..8c0fe7b3 100644
+--- a/packages/jet_cad_2d_kit/test/authoring/conformance_test.dart
++++ b/packages/jet_cad_2d_kit/test/authoring/conformance_test.dart
+@@ -85,20 +85,21 @@ KitNames editing(KitNames names, String locale, Map<String, String?> edits) {
+ /// The library and the snapshot a kit's generator would write for [catalog]
+ /// over the committed snapshot.
+ ({Uint8List library, String snapshot}) generated(Catalog catalog) => (
+       library: encodeLibrary(catalog),
+       snapshot: encodeSnapshot(updateSnapshot(
+           parseSnapshot(committedSnapshot()), geometrySnapshot(catalog))),
+     );
+ 
+ void main() {
+   test('F0 the sample kit conforms', () {
++    // M-K2B-14: the UnitKinds exemption dropped: the sample's tables and stool need a unit word.
+     expect(problems(), isEmpty);
+   });
+ 
+   test('F0b premise: the committed files are the sample kit', () {
+     final library = SymbolLibrary.decode(committedLibrary());
+     expect(library.kits, ['sample']);
+     expect([
+       for (final e in library.entries) e.id
+     ], [
+       'sample.table.round-four@1',
+@@ -476,11 +477,69 @@ void main() {
+             catalog: sampleCatalog,
+             committedLibrary: committedLibrary(),
+             committedSnapshot: committedSnapshot(),
+             names: codeNames(german: const {}),
+             locales: sampleLocales,
+             sameAsEnglish: sampleSameAsEnglish,
+           ),
+           isEmpty);
+     });
+   });
++
++  group('unit kinds (spec 2b S4)', () {
++    // Two booths: a kind the contract does not name. New keys, so the
++    // generator writes them into the library and the snapshot.
++    CatalogSymbol booth(String key, String name, double x) => CatalogSymbol(
++          key: key,
++          name: name,
++          category: tables,
++          tags: const ['booth'],
++          unit: const CatalogUnit(kind: 'booth', capacity: 6),
++          base: (x + 900, 2450),
++          shapes: [rect(x, 2000, 1800, 900)],
++        );
++    final catalog = Catalog(kit: 'sample', symbols: [
++      ...sampleSymbols,
++      booth('sample.booth.corner', 'Corner booth', 3000),
++      booth('sample.booth.long', 'Long booth', 5200),
++    ]);
++    final g = generated(catalog);
++
++    /// The sample's words, the booths' symbol words in its two locales, and
++    /// [english] (none when empty).
++    KitNames named(Map<String, String> english) => KitNames({
++          ...sampleNames.words,
++          'de': {
++            ...sampleNames.words['de']!,
++            'symbol:sample.booth.corner': 'Eckbank',
++            'symbol:sample.booth.long': 'Lange Bank',
++          },
++          'tr': {
++            ...sampleNames.words['tr']!,
++            'symbol:sample.booth.corner': 'Köşe koltuk',
++            'symbol:sample.booth.long': 'Uzun koltuk',
++          },
++          if (english.isNotEmpty) 'en': english,
++        });
++
++    List<KitProblem> boothProblems(KitNames names) => problems(
++        catalog: catalog,
++        library: g.library,
++        snapshot: g.snapshot,
++        names: names);
++
++    test(
++        'K2B-conf a kind outside UnitKinds needs an English unit word, once '
++        'per kind; the declared locales are not held to it', () {
++      // M-K2B-12: the unit kind check not called.
++      final found = boothProblems(named(const {}));
++      // M-K2B-13: the once-per-kind set dropped (two problems).
++      expect(codes(found), [KitProblemCode.unitKindWord]);
++      expect(found.single.message, contains('"unit:sample/booth"'));
++      expect(
++          boothProblems(named(const {'unit:sample/booth': 'Booth'})), isEmpty);
++      expect(codes(boothProblems(named(const {'unit:other/booth': 'Booth'}))),
++          [KitProblemCode.unitKindWord],
++          reason: "another kit's word does not count");
++    });
++  });
+ }
+diff --git a/packages/jet_cad_2d_kit/test/invariants/purity_test.dart b/packages/jet_cad_2d_kit/test/invariants/purity_test.dart
+index 73500f6f..61f827de 100644
+--- a/packages/jet_cad_2d_kit/test/invariants/purity_test.dart
++++ b/packages/jet_cad_2d_kit/test/invariants/purity_test.dart
+@@ -35,20 +35,36 @@ void main() {
+ 
+   test('P9 the property specs and the colour target reach no Flutter', () {
+     // Spec 2a P3: nothing in them draws, so they stay pure. M-P9: import
+     // package:flutter/foundation.dart in colour.dart.
+     const files = ['lib/src/kit/properties.dart', 'lib/src/kit/colour.dart'];
+     final walk = walkImports('.', 'jet_cad_2d_kit', files);
+     expect(walk.violations, isEmpty);
+     expect(walk.visited, containsAll(files));
+   });
+ 
++  test(
++      'K2B-pure the unit label, the host words and SymbolsState reach no '
++      'Flutter', () {
++    // Spec 2b S2: a kit's parametric type (pure Dart) builds its labels with
++    // unitLabelAttrib. M-K2B-15: import package:flutter/foundation.dart in
++    // unit_label.dart.
++    const files = [
++      'lib/src/kit/unit_label.dart',
++      'lib/src/kit/host_words.dart',
++      'lib/src/kit/symbols_state.dart',
++    ];
++    final walk = walkImports('.', 'jet_cad_2d_kit', files);
++    expect(walk.violations, isEmpty);
++    expect(walk.visited, containsAll(files));
++  });
++
+   test('P2 a Flutter import two hops away is found', () {
+     final root = tree({
+       'lib/authoring.dart': "export 'src/model/a.dart';\n",
+       'lib/src/model/a.dart': "import 'b.dart';\n",
+       'lib/src/model/b.dart': "import 'package:flutter/foundation.dart';\n",
+     });
+     final walk = walkImports(root, 'kit', ['lib/authoring.dart']);
+     expect(walk.violations,
+         ['lib/src/model/b.dart: package:flutter/foundation.dart']);
+     expect(walk.visited, {
+diff --git a/packages/jet_cad_2d_kit/test/kit/host_words_test.dart b/packages/jet_cad_2d_kit/test/kit/host_words_test.dart
+new file mode 100644
+index 00000000..b9fb3134
+--- /dev/null
++++ b/packages/jet_cad_2d_kit/test/kit/host_words_test.dart
+@@ -0,0 +1,66 @@
++// Spec 2b S4 "Words": a host's words (PlanController(words:)) are checked by
++// validateHostWords: every id in a known namespace, naming a kit, any kit.
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++
++List<KitProblemCode> codes(List<KitProblem> problems) =>
++    [for (final p in problems) p.code];
++
++void main() {
++  test(
++      'K2B-host-1 a word in every namespace, under any kit (loaded or not), '
++      'in any locale, is sound', () {
++    const words = KitNames({
++      'en': {
++        'symbol:acme.table.round': 'Round table',
++        'category:acme/Tables': 'Tables',
++        'tool:acme.wall': 'Wall',
++        'type:acme.wall': 'Wall',
++        'property:acme.wall.height': 'Height',
++        'unit:acme/booth': 'Booth',
++      },
++      'fr': {'tool:other.door': 'Porte', 'unit:other/seat': 'Siège'},
++    });
++    // M-K2B-7: `'unit'` left out of the slash namespaces (unknownWordId).
++    expect(validateHostWords(words), isEmpty);
++    expect(validateHostWords(KitNames.empty), isEmpty);
++  });
++
++  test('K2B-host-2 a word in no known namespace, in the words\' order', () {
++    final found = validateHostWords(const KitNames({
++      'en': {'label:acme.x': 'x', 'acme.table.round': 'y'},
++      'de': {'tool:wall': 'z'},
++    }));
++    // M-K2B-8: the default branch reporting nothing.
++    expect(codes(found), [
++      KitProblemCode.unknownWordId,
++      KitProblemCode.unknownWordId,
++      KitProblemCode.foreignWordId,
++    ]);
++    expect(found[0].message, contains('"label:acme.x"'));
++    expect(found[0].message, startsWith('en: '));
++    expect(found[1].message, contains('"acme.table.round"'));
++    expect(found[2].message, startsWith('de: '));
++  });
++
++  test('K2B-host-3 a word that names no kit', () {
++    for (final id in [
++      'tool:wall',
++      'type:Acme.wall',
++      'symbol:acme',
++      'property:acme',
++      'category:Tables',
++      'category:/Tables',
++      'unit:booth',
++      'unit:Acme/booth',
++    ]) {
++      final found = validateHostWords(KitNames({
++        'de': {id: 'x'},
++      }));
++      // M-K2B-9: the kit check dropped (every id in a known namespace
++      // passes).
++      expect(codes(found), [KitProblemCode.foreignWordId], reason: id);
++      expect(found.single.message, contains('"$id"'));
++    }
++  });
++}
+diff --git a/packages/jet_cad_2d_kit/test/kit/plan_kit_test.dart b/packages/jet_cad_2d_kit/test/kit/plan_kit_test.dart
+index 87a84759..c9770697 100644
+--- a/packages/jet_cad_2d_kit/test/kit/plan_kit_test.dart
++++ b/packages/jet_cad_2d_kit/test/kit/plan_kit_test.dart
+@@ -97,20 +97,46 @@ void main() {
+             'tool:sample.wall': 'Duvar',
+             'symbol:sample.table.round': 'Yuvarlak masa',
+             'category:sample/Tables': 'Masalar',
+           },
+         }));
+     // M-K6: drop the English check; a symbol or category word needs none.
+     expect(codes(kit), [KitProblemCode.missingEnglish]);
+     expect(kit.validate().single.message, contains('tool:sample.wall'));
+   });
+ 
++  test(
++      'K2B-validate a unit kind word under the kit is sound; under another '
++      'kit, under none, or dotted, it is foreign', () {
++    const sound = PlanKit(
++        id: 'sample',
++        version: '0.1.0',
++        names: KitNames({
++          'en': {'unit:sample/booth': 'Booth'},
++          'tr': {'unit:sample/booth': 'Loca'},
++        }));
++    // M-K2B-10: `'unit'` left out of the slash branch (unknownWordId).
++    expect(sound.validate(), isEmpty);
++    for (final id in ['unit:other/booth', 'unit:booth', 'unit:sample.booth']) {
++      final kit = PlanKit(
++          id: 'sample',
++          version: '0.1.0',
++          names: KitNames({
++            'en': {id: 'x'},
++          }));
++      // M-K2B-11: `'unit'` in the dot branch instead ('unit:sample/booth'
++      // is then foreign, and 'unit:sample.booth' sound).
++      expect(codes(kit), [KitProblemCode.foreignWordId], reason: id);
++      expect(kit.validate().single.message, contains(id));
++    }
++  });
++
+   group('the code side (spec 2a P1)', () {
+     /// Every word the code kit needs, in English, and some in Turkish.
+     const Map<String, String> english = {
+       'type:test.slab': 'Slab',
+       'type:test.slab.raised': 'Raised slab',
+       'type:test.post': 'Post',
+       'tool:test.slab': 'Slab',
+       'tool:test.post': 'Post',
+       'property:test.slab.width': 'Width',
+       'property:test.slab.turn': 'Turn',
+diff --git a/packages/jet_cad_2d_kit/test/kit/plan_services_test.dart b/packages/jet_cad_2d_kit/test/kit/plan_services_test.dart
+index 08ac6517..38b55a47 100644
+--- a/packages/jet_cad_2d_kit/test/kit/plan_services_test.dart
++++ b/packages/jet_cad_2d_kit/test/kit/plan_services_test.dart
+@@ -1,15 +1,17 @@
+ // Spec 2a P5: a kit's words at the plan's locale, read live.
+ import 'dart:ui' show Locale;
+ 
+ import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ /// A kit's shared cache, written against the barrel alone.
+ final class Bands implements Disposable {
+   int disposed = 0;
+ 
+   @override
+   void dispose() => disposed++;
+ }
+ 
+ const KitNames names = KitNames({
+@@ -33,11 +35,34 @@ void main() {
+     expect(words.word('type:test.slab'), 'Slab');
+     expect(identical(words.names, names), isTrue);
+   });
+ 
+   test('PT24 Disposable is exported for kits to implement', () {
+     // A premise of the export list, exempt from the mutation rule: without
+     // the export this file does not compile.
+     final Disposable bands = Bands()..dispose();
+     expect((bands as Bands).disposed, 1);
+   });
++
++  test(
++      'K2B-ref SymbolDefinitionRef holds its four fields; SymbolsState '
++      'lists its three states', () {
++    // A premise of the declarations, exempt from the mutation rule.
++    final add = AddDefinitionCommand(Definition(
++        handle: const Handle(0x4A2),
++        name: 'Booth',
++        basePoint: Vector2(2100.5, 1300.25),
++        children: const []));
++    final ref = SymbolDefinitionRef(
++        handle: const Handle(0x4A2),
++        add: add,
++        basePoint: Vector2(2100.5, 1300.25),
++        top: const Aabb2.raw(1650.5, 850.25, 2550.5, 1750.25));
++    expect(ref.handle, const Handle(0x4A2));
++    expect(identical(ref.add, add), isTrue);
++    expect(ref.basePoint, Vector2(2100.5, 1300.25));
++    expect([ref.top.minX, ref.top.minY, ref.top.maxX, ref.top.maxY],
++        [1650.5, 850.25, 2550.5, 1750.25]);
++    expect(
++        SymbolsState.values.map((s) => s.name), ['loading', 'ready', 'failed']);
++  });
+ }
+diff --git a/packages/jet_cad_2d_kit/test/kit/properties_test.dart b/packages/jet_cad_2d_kit/test/kit/properties_test.dart
+index 079355fe..29d996be 100644
+--- a/packages/jet_cad_2d_kit/test/kit/properties_test.dart
++++ b/packages/jet_cad_2d_kit/test/kit/properties_test.dart
+@@ -314,18 +314,19 @@ void main() {
+     expect(PlanGate.values.map((g) => g.name), [
+       'move',
+       'rotate',
+       'mirror',
+       'reshape',
+       'delete',
+       'changeLayer',
+       'recolor',
+       'editLayers',
+       'editPage',
++      'relabel',
+     ]);
+   });
+ }
+ 
+ String? _swatch(Slab s) => s.swatch;
+ 
+ Slab _recolour(Slab s, String? swatch) =>
+     s.copyWith(swatch: swatch, clearSwatch: swatch == null);
+diff --git a/packages/jet_cad_2d_kit/test/kit/unit_label_test.dart b/packages/jet_cad_2d_kit/test/kit/unit_label_test.dart
+new file mode 100644
+index 00000000..12723b0b
+--- /dev/null
++++ b/packages/jet_cad_2d_kit/test/kit/unit_label_test.dart
+@@ -0,0 +1,167 @@
++// Spec 2b S2 "The label": a unit's label stamp, height and payload, and
++// unitLabelAttrib, a generated unit's label (E5). TL1, TL2 and TL4 are
++// ported from jet_cad_floor_plan's test/tables/table_label_test.dart (spec
++// 14a T8, T10), assertions unchanged: table -> unit, the height read from
++// the top's box. The stamp is checked the way it is drawn: the label's
++// world linear map is the instance's linear part times the text's own,
++// `R(rotation) · diag(widthFactor, 1)`, and must be the identity.
++import 'dart:math' as math;
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/placements.dart';
++
++/// The label's world linear map under [placement], from [rotation] and
++/// [widthFactor] (the stamp's, by default).
++Transform2 worldLinear(Transform2 placement,
++    {double? rotation, double? widthFactor}) {
++  final s = unitLabelStamp(placement);
++  final linear =
++      Transform2(placement.a, placement.b, placement.c, placement.d, 0, 0);
++  return linear
++      .multiply(Transform2.rotation(rotation ?? s.rotation))
++      .multiply(Transform2.scale(widthFactor ?? s.widthFactor, 1));
++}
++
++void expectIdentity(Transform2 w) {
++  expect(w.a, closeTo(1, 1e-12));
++  expect(w.b, closeTo(0, 1e-12));
++  expect(w.c, closeTo(0, 1e-12));
++  expect(w.d, closeTo(1, 1e-12));
++}
++
++void main() {
++  group('unitLabelStamp (T10)', () {
++    const degrees = [0.0, 37.0, 90.0, 180.0, -123.0, 270.0, 179.0];
++    for (final mirrored in [false, true]) {
++      for (final deg in degrees) {
++        test(
++            'TL1 ${mirrored ? 'mirrored, ' : ''}$deg°: the label reads '
++            'upright in world (M-14a-7, M-14a-8)', () {
++          final p =
++              placementAt(-4321, 2468, deg * math.pi / 180, mirrored: mirrored);
++          final w = worldLinear(p);
++          expect(w.a, closeTo(1, 1e-12));
++          expect(w.b, closeTo(0, 1e-12));
++          expect(w.c, closeTo(0, 1e-12));
++          expect(w.d, closeTo(1, 1e-12));
++          final s = unitLabelStamp(p);
++          expect(s.rotation, greaterThan(-math.pi));
++          expect(s.rotation, lessThanOrEqualTo(math.pi));
++          expect(s.widthFactor, mirrored ? -1.0 : 1.0);
++        });
++      }
++    }
++
++    test('TL2 placements store clean values: no −0.0, exact quarter turns', () {
++      final bp = Vector2(900, 700);
++      final plain = unitLabelStamp(
++          placementTransform(at: Vector2(3000, -1200), basePoint: bp));
++      expect((plain.rotation, plain.widthFactor), (0.0, 1.0));
++      expect(plain.rotation.isNegative, isFalse);
++
++      final mirrored = unitLabelStamp(placementTransform(
++          at: Vector2(3000, -1200), basePoint: bp, mirrored: true));
++      expect((mirrored.rotation, mirrored.widthFactor), (0.0, -1.0));
++      expect(mirrored.rotation.isNegative, isFalse);
++
++      final quarter = unitLabelStamp(placementTransform(
++          at: Vector2(3000, -1200), basePoint: bp, quarterTurns: 1));
++      expect((quarter.rotation, quarter.widthFactor), (-math.pi / 2, 1.0));
++
++      final half = unitLabelStamp(placementTransform(
++          at: Vector2(3000, -1200), basePoint: bp, quarterTurns: 2));
++      expect((half.rotation, half.widthFactor), (math.pi, 1.0));
++
++      final threeMirrored = unitLabelStamp(placementTransform(
++          at: Vector2(3000, -1200),
++          basePoint: bp,
++          quarterTurns: 3,
++          mirrored: true));
++      expect((threeMirrored.rotation, threeMirrored.widthFactor),
++          (-math.pi / 2, -1.0));
++    });
++  });
++
++  group('unitLabelHeight (T8, M-14a-14)', () {
++    // The boxes of today's circle (centre (400, 300)) and box payloads.
++    Aabb2 circle(double r) => Aabb2.raw(400 - r, 300 - r, 400 + r, 300 + r);
++    Aabb2 box(double w, double h) => Aabb2.raw(100, 200, 100 + w, 200 + h);
++
++    test('TL4 written out by hand', () {
++      expect(unitLabelHeight(circle(190)), 152);
++      expect(unitLabelHeight(circle(300)), 200);
++      expect(unitLabelHeight(box(2000, 400)), 160);
++      expect(unitLabelHeight(box(1200, 750)), 200);
++      expect(unitLabelHeight(box(450, 600)), 180);
++      expect(unitLabelHeight(Aabb2.empty()), 200);
++    });
++  });
++
++  group('the generated label (spec 2b S2)', () {
++    // A seat turned three quarters and mirrored, in a row turned 37° far
++    // off the origin: the instance-to-world map is neither the identity,
++    // nor a rotation, nor the seat's own transform.
++    final row = Transform2.translation(-41250.5, 17320.25)
++        .multiply(Transform2.rotation(37 * math.pi / 180));
++    final seat = placementTransform(
++        at: Vector2(1200.5, -350.25),
++        basePoint: Vector2(225, 190),
++        quarterTurns: 3,
++        mirrored: true);
++    final toWorld = row.multiply(seat);
++    final anchor = Vector2(225, 190);
++    // The served top: 380 × 450, so 0.4 × 380 = 152.
++    const top = Aabb2.raw(35, 0, 415, 450);
++
++    test(
++        'K2B-payload the payload holds the anchor as given and [height, '
++        'rotation, widthFactor] stamped for the instance-to-world map', () {
++      final p = unitLabelPayload(
++          anchor: anchor, height: 152, instanceToWorld: toWorld);
++      final s = unitLabelStamp(toWorld);
++      expect(s.widthFactor, -1.0, reason: 'premise: the map mirrors');
++      // M-K2B-1: unitLabelPayload stamping the identity instead.
++      expect(p.coords, [225, 190]);
++      expect(p.scalars, [152, s.rotation, s.widthFactor]);
++    });
++
++    test(
++        'K2B-attrib unitLabelAttrib: tag UNIT, the text, centred with its '
++        'own width factor, the payload in definition space, upright and '
++        'unmirrored in the world', () {
++      final a = unitLabelAttrib('B12',
++          instanceToWorld: toWorld, anchor: anchor, top: top);
++      expect(kUnitLabelTag, 'UNIT');
++      // M-K2B-2: the attribute tagged '' (or 'TABLE').
++      expect(a.tag, 'UNIT');
++      expect(a.text, 'B12');
++      // M-K2B-3: `textAttrs:` left out (0).
++      expect(a.textAttrs, kUnitLabelTextAttrs);
++      expect(a.textAttrs & 0xF, TextJustifyH.centre.index);
++      expect((a.textAttrs >> 4) & 0xF, TextJustifyV.middle.index);
++      expect(a.textAttrs & (1 << 8), isNot(0),
++          reason: 'the width factor is read only with bit 8');
++      // M-K2B-4: the anchor mapped into the world before it is stored.
++      expect(a.payload.coords, [225, 190], reason: 'definition space');
++      expect(a.payload.scalars[0], 152);
++      // M-K2B-5: the stamp taken for another map: no longer upright.
++      expectIdentity(worldLinear(toWorld,
++          rotation: a.payload.scalars[1], widthFactor: a.payload.scalars[2]));
++    });
++
++    test('K2B-attrib-empty a definition with no served top: the full height',
++        () {
++      // M-K2B-6: unitLabelHeight without its empty-box check (an inverted
++      // box gives -infinity).
++      final a = unitLabelAttrib('7',
++          instanceToWorld: toWorld, anchor: anchor, top: Aabb2.empty());
++      expect(a.payload.scalars[0], kUnitLabelMaxHeight);
++      expect(kUnitLabelMaxHeight, 200);
++      expect(kUnitLabelTopShare, 0.4);
++    });
++  });
++}
+diff --git a/packages/jet_cad_2d_kit/test/support/placements.dart b/packages/jet_cad_2d_kit/test/support/placements.dart
+new file mode 100644
+index 00000000..7942e27c
+--- /dev/null
++++ b/packages/jet_cad_2d_kit/test/support/placements.dart
+@@ -0,0 +1,39 @@
++// Two placements, copied for the label tests ported in 2b Task 3: today's
++// fixture placement (jet_cad_floor_plan/test/tables/table_fixture.dart:
++// 72-78) and the placer's quarter-turn form (jet_cad_floor_plan/lib/src/
++// symbols/symbol_placer.dart:51-78, the `rotation` form left out). The kit
++// depends on neither package.
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++/// `translate(at) · R(theta) · (mirror x) · translate(-base)`.
++Transform2 placementAt(double x, double y, double theta,
++        {bool mirrored = false, double baseX = 900, double baseY = 700}) =>
++    Transform2.translation(x, y)
++        .multiply(Transform2.rotation(theta))
++        .multiply(Transform2.scale(mirrored ? -1 : 1, 1))
++        .multiply(Transform2.translation(-baseX, -baseY));
++
++/// `translation(at) · rotation · scale(mirrored ? -1 : 1, 1) ·
++/// translation(-basePoint)`, the rotation [quarterTurns] counter-clockwise
++/// with exact cosine and sine, and no stored `-0.0`.
++Transform2 placementTransform({
++  required Vector2 at,
++  required Vector2 basePoint,
++  int quarterTurns = 0,
++  bool mirrored = false,
++}) {
++  final (cos, sin) = const [
++    (1.0, 0.0),
++    (0.0, 1.0),
++    (-1.0, 0.0),
++    (0.0, -1.0)
++  ][((quarterTurns % 4) + 4) % 4];
++  final m = Transform2.translation(at.x, at.y)
++      .multiply(Transform2(cos, sin, -sin, cos, 0, 0))
++      .multiply(Transform2.scale(mirrored ? -1 : 1, 1))
++      .multiply(Transform2.translation(-basePoint.x, -basePoint.y));
++  double clean(double v) => v == 0 ? 0.0 : v;
++  return Transform2(
++      clean(m.a), clean(m.b), clean(m.c), clean(m.d), clean(m.e), clean(m.f));
++}
+diff --git a/packages/jet_cad_2d_plan/lib/src/controller/permissions.dart b/packages/jet_cad_2d_plan/lib/src/controller/permissions.dart
+index 28e8eed7..3835cc9a 100644
+--- a/packages/jet_cad_2d_plan/lib/src/controller/permissions.dart
++++ b/packages/jet_cad_2d_plan/lib/src/controller/permissions.dart
+@@ -9,37 +9,39 @@ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show PlanGate;
+ /// The editor's permissions (spec P2).
+ ///
+ /// - [tools]: the tool ids offered (the palette, the letters,
+ ///   `PlanController.selectTool`); null offers every tool. `plan.select` is
+ ///   always offered, whatever the set says. [copyWith] copies the set it
+ ///   is given, unmodifiable; the `const` constructor keeps the set as
+ ///   given.
+ /// - [move], [rotate], [mirror], [reshape], [delete]: the select tool's
+ ///   gates and the panel's matching fields; [changeLayer], [recolor]: the
+ ///   panel's layer field and colour row; [editLayers], [editPage]: the
+-///   Layer and Page panels; [undo]: the Undo and Redo buttons and chords;
+-///   [export], [print]: theirs. A property spec's `gate` names one of the
+-///   first nine ([allows]).
++///   Layer and Page panels; [relabel]: a unit's label field (2b's unit
++///   section) and the property specs gated by it; [undo]: the Undo and
++///   Redo buttons and chords; [export], [print]: theirs. A property
++///   spec's `gate` names one of the first ten ([allows]).
+ /// - [draft]: what the document's own `DraftPermissions` become.
+ @immutable
+ final class PlanPermissions {
+   const PlanPermissions({
+     this.tools,
+     this.move = true,
+     this.rotate = true,
+     this.mirror = true,
+     this.reshape = true,
+     this.delete = true,
+     this.changeLayer = true,
+     this.recolor = true,
+     this.editLayers = true,
+     this.editPage = true,
++    this.relabel = true,
+     this.undo = true,
+     this.export = true,
+     this.print = true,
+   });
+ 
+   /// Every tool, every flag on: today's editor.
+   static const PlanPermissions full = PlanPermissions();
+ 
+   /// Select, pan and zoom; no edit, no undo. Export and print stay: neither
+   /// is an edit.
+@@ -47,59 +49,62 @@ final class PlanPermissions {
+     tools: {_select},
+     move: false,
+     rotate: false,
+     mirror: false,
+     reshape: false,
+     delete: false,
+     changeLayer: false,
+     recolor: false,
+     editLayers: false,
+     editPage: false,
++    relabel: false,
+     undo: false,
+   );
+ 
+   static const String _select = 'plan.select';
+ 
+   final Set<String>? tools;
+   final bool move, rotate, mirror, reshape, delete;
+-  final bool changeLayer, recolor, editLayers, editPage;
++  final bool changeLayer, recolor, editLayers, editPage, relabel;
+   final bool undo, export, print;
+ 
+   /// Whether the tool [id] is offered: `plan.select` always, else by
+   /// [tools] (null: every id).
+   bool allowsTool(String id) => id == _select || (tools?.contains(id) ?? true);
+ 
+   /// Whether [gate]'s flag is on.
+   bool allows(PlanGate gate) => switch (gate) {
+         PlanGate.move => move,
+         PlanGate.rotate => rotate,
+         PlanGate.mirror => mirror,
+         PlanGate.reshape => reshape,
+         PlanGate.delete => delete,
+         PlanGate.changeLayer => changeLayer,
+         PlanGate.recolor => recolor,
+         PlanGate.editLayers => editLayers,
+         PlanGate.editPage => editPage,
++        PlanGate.relabel => relabel,
+       };
+ 
+   /// Whether anything may be edited: an edit flag, or a tool other than
+   /// `plan.select` (a drawing tool or a kit's).
+   bool get edits =>
+       move ||
+       rotate ||
+       mirror ||
+       reshape ||
+       delete ||
+       changeLayer ||
+       recolor ||
+       editLayers ||
+       editPage ||
++      relabel ||
+       (tools?.any((id) => id != _select) ?? true);
+ 
+   /// The document's engine permissions: [DraftPermissions.readOnly] when
+   /// nothing may be edited ([edits] false), else [DraftPermissions.all].
+   /// An engine group maps onto several flags, so it closes only when every
+   /// one of them is off.
+   DraftPermissions get draft =>
+       edits ? DraftPermissions.all : DraftPermissions.readOnly;
+ 
+   /// A copy with the given fields replaced; a null argument keeps the
+@@ -109,51 +114,54 @@ final class PlanPermissions {
+     Set<String>? tools,
+     bool? move,
+     bool? rotate,
+     bool? mirror,
+     bool? reshape,
+     bool? delete,
+     bool? changeLayer,
+     bool? recolor,
+     bool? editLayers,
+     bool? editPage,
++    bool? relabel,
+     bool? undo,
+     bool? export,
+     bool? print,
+   }) =>
+       PlanPermissions(
+         tools: tools == null ? this.tools : Set.unmodifiable(tools),
+         move: move ?? this.move,
+         rotate: rotate ?? this.rotate,
+         mirror: mirror ?? this.mirror,
+         reshape: reshape ?? this.reshape,
+         delete: delete ?? this.delete,
+         changeLayer: changeLayer ?? this.changeLayer,
+         recolor: recolor ?? this.recolor,
+         editLayers: editLayers ?? this.editLayers,
+         editPage: editPage ?? this.editPage,
++        relabel: relabel ?? this.relabel,
+         undo: undo ?? this.undo,
+         export: export ?? this.export,
+         print: print ?? this.print,
+       );
+ 
+   /// The flags, in declaration order, by name.
+   List<(String, bool)> get _flags => [
+         ('move', move),
+         ('rotate', rotate),
+         ('mirror', mirror),
+         ('reshape', reshape),
+         ('delete', delete),
+         ('changeLayer', changeLayer),
+         ('recolor', recolor),
+         ('editLayers', editLayers),
+         ('editPage', editPage),
++        ('relabel', relabel),
+         ('undo', undo),
+         ('export', export),
+         ('print', print),
+       ];
+ 
+   @override
+   bool operator ==(Object other) {
+     if (other is! PlanPermissions || !setEquals(other.tools, tools)) {
+       return false;
+     }
+diff --git a/packages/jet_cad_2d_plan/lib/src/controller/services.dart b/packages/jet_cad_2d_plan/lib/src/controller/services.dart
+index 140a5a2f..917a054e 100644
+--- a/packages/jet_cad_2d_plan/lib/src/controller/services.dart
++++ b/packages/jet_cad_2d_plan/lib/src/controller/services.dart
+@@ -55,20 +55,29 @@ final class KitServices implements PlanServices {
+     if (value is! S) {
+       throw ArgumentError.value(
+           toolId, 'toolId', 'has settings of ${value.runtimeType}, not $S');
+     }
+     return value;
+   }
+ 
+   @override
+   T shared<T extends Object>(T Function(PlanServices) create) =>
+       _host.session.shared.get<T>(kit.id, this, create);
++
++  // Spec 2b S2. Task 4 implements both; no kit calls them before it.
++  @override
++  SymbolDefinitionRef? symbolDefinition(String key) =>
++      throw UnimplementedError('KitServices.symbolDefinition (2b Task 4)');
++
++  @override
++  ValueListenable<SymbolsState> get symbolsState =>
++      throw UnimplementedError('KitServices.symbolsState (2b Task 4)');
+ }
+ 
+ /// The attachment registry until Task 14: no kind, no attachment.
+ final class NoAttachments implements AttachmentRegistry {
+   const NoAttachments();
+ 
+   @override
+   Attachment? attach(List<String> kinds, AttachmentQuery query) => null;
+ 
+   @override
+diff --git a/packages/jet_cad_2d_plan/test/controller/permissions_test.dart b/packages/jet_cad_2d_plan/test/controller/permissions_test.dart
+index 1b9d8e0b..4fa1a528 100644
+--- a/packages/jet_cad_2d_plan/test/controller/permissions_test.dart
++++ b/packages/jet_cad_2d_plan/test/controller/permissions_test.dart
+@@ -14,80 +14,85 @@ typedef P = PlanPermissions;
+ const List<String> kFlagNames = [
+   'move',
+   'rotate',
+   'mirror',
+   'reshape',
+   'delete',
+   'changeLayer',
+   'recolor',
+   'editLayers',
+   'editPage',
++  'relabel',
+   'undo',
+   'export',
+   'print',
+ ];
+ 
+ Map<String, bool> flagsOf(P p) => {
+       'move': p.move,
+       'rotate': p.rotate,
+       'mirror': p.mirror,
+       'reshape': p.reshape,
+       'delete': p.delete,
+       'changeLayer': p.changeLayer,
+       'recolor': p.recolor,
+       'editLayers': p.editLayers,
+       'editPage': p.editPage,
++      'relabel': p.relabel,
+       'undo': p.undo,
+       'export': p.export,
+       'print': p.print,
+     };
+ 
+ P copyFlag(P p, String name, bool v) => switch (name) {
+       'move' => p.copyWith(move: v),
+       'rotate' => p.copyWith(rotate: v),
+       'mirror' => p.copyWith(mirror: v),
+       'reshape' => p.copyWith(reshape: v),
+       'delete' => p.copyWith(delete: v),
+       'changeLayer' => p.copyWith(changeLayer: v),
+       'recolor' => p.copyWith(recolor: v),
+       'editLayers' => p.copyWith(editLayers: v),
+       'editPage' => p.copyWith(editPage: v),
++      'relabel' => p.copyWith(relabel: v),
+       'undo' => p.copyWith(undo: v),
+       'export' => p.copyWith(export: v),
+       'print' => p.copyWith(print: v),
+       _ => throw ArgumentError(name),
+     };
+ 
+ /// The flag each gate reads (spec P3: a gate names a PlanPermissions flag).
+ const Map<PlanGate, String> kGateFlag = {
+   PlanGate.move: 'move',
+   PlanGate.rotate: 'rotate',
+   PlanGate.mirror: 'mirror',
+   PlanGate.reshape: 'reshape',
+   PlanGate.delete: 'delete',
+   PlanGate.changeLayer: 'changeLayer',
+   PlanGate.recolor: 'recolor',
+   PlanGate.editLayers: 'editLayers',
+   PlanGate.editPage: 'editPage',
++  PlanGate.relabel: 'relabel',
+ };
+ 
+ /// readOnly's flags, as spec P2 and today's S-12 list them.
+ const Map<String, bool> kReadOnly = {
+   'move': false,
+   'rotate': false,
+   'mirror': false,
+   'reshape': false,
+   'delete': false,
+   'changeLayer': false,
+   'recolor': false,
+   'editLayers': false,
+   'editPage': false,
++  'relabel': false,
+   'undo': false,
+   'export': true,
+   'print': true,
+ };
+ 
+ void main() {
+   test('PM-1 full and readOnly, field by field', () {
+     expect(P.full.tools, isNull, reason: 'every tool');
+     expect(flagsOf(P.full), {for (final n in kFlagNames) n: true});
+     expect(const P(), P.full);
+@@ -169,22 +174,22 @@ void main() {
+         reason: 'premise: every gate is listed');
+   });
+ 
+   test(
+       'PM-6 draft: no edit flag and no tool but select is the engine\'s '
+       'readOnly; any edit flag or any other tool opens every group', () {
+     // M-PM6a: `draft` always DraftPermissions.all.
+     expect(P.readOnly.draft, same(DraftPermissions.readOnly));
+     expect(P.readOnly.edits, isFalse);
+     expect(P.full.draft, same(DraftPermissions.all));
+-    for (final name in kFlagNames.take(9)) {
+-      // move .. editPage: each alone is an edit.
++    for (final name in kFlagNames.take(10)) {
++      // move .. relabel: each alone is an edit.
+       final one = copyFlag(P.readOnly, name, true);
+       expect(one.edits, isTrue, reason: name);
+       expect(one.draft, same(DraftPermissions.all), reason: name);
+     }
+     for (final name in ['undo', 'export', 'print']) {
+       final one = copyFlag(P.readOnly, name, true);
+       expect(one.draft, same(DraftPermissions.readOnly),
+           reason: '$name is not an edit');
+     }
+     // M-PM6b: the tools term dropped from `edits`.
+@@ -192,32 +197,34 @@ void main() {
+     expect(drawing.draft, same(DraftPermissions.all));
+     final everyTool = const P(
+         move: false,
+         rotate: false,
+         mirror: false,
+         reshape: false,
+         delete: false,
+         changeLayer: false,
+         recolor: false,
+         editLayers: false,
+-        editPage: false);
++        editPage: false,
++        relabel: false);
+     expect(everyTool.tools, isNull);
+     expect(everyTool.draft, same(DraftPermissions.all),
+         reason: 'null tools allows the drawing tools');
+   });
+ 
+   test('PM-7 toString names the fields that differ from full', () {
+     expect(P.full.toString(), 'PlanPermissions()');
+     expect(P.full.copyWith(reshape: false).toString(),
+         'PlanPermissions(reshape: false)');
+     expect(P.full.copyWith(undo: false, move: false).toString(),
+         'PlanPermissions(move: false, undo: false)');
+     expect(
+         P.readOnly.toString(),
+         'PlanPermissions(tools: {plan.select}, move: false, rotate: false, '
+         'mirror: false, reshape: false, delete: false, changeLayer: false, '
+-        'recolor: false, editLayers: false, editPage: false, undo: false)');
++        'recolor: false, editLayers: false, editPage: false, relabel: false, '
++        'undo: false)');
+     // The tools sorted, so the text is stable whatever the set's order.
+     expect(P.full.copyWith(tools: {'plan.text', 'acme.x'}).toString(),
+         'PlanPermissions(tools: {acme.x, plan.text})');
+   });
+ }

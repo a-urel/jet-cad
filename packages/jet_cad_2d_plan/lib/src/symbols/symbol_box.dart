@@ -126,6 +126,25 @@ SymbolBox? boxOfEntry(SymbolEntry entry) =>
             [for (final l in entry.leaves) (l.record.kind, l.payload)])))
         .box;
 
+/// The served top of [entry] in its definition's coordinates (spec 2b S2,
+/// `SymbolDefinitionRef.top`): its first leaf's box when that leaf is a
+/// circle or a closed polyline (today's `tableTopOf`,
+/// jet_cad_floor_plan/lib/src/service/table_picker.dart:92-110), else the
+/// symbol's box ([boxOfEntry]); empty when no leaf draws. The entry's
+/// leaves are ascending by handle, so the first is the lowest.
+Aabb2 servedTopOfEntry(SymbolEntry entry) {
+  final all = boxOfEntry(entry);
+  final whole = all == null ? Aabb2.empty() : footprintOf(all);
+  if (entry.leaves.isEmpty) return whole;
+  final first = entry.leaves.first;
+  final kind = first.record.kind;
+  final served = kind == EntityKind.circle ||
+      (kind == EntityKind.polyline && isClosedPolyline(first.payload));
+  if (!served) return whole;
+  final top = boxOfLeaves([(kind, first.payload)]);
+  return top == null ? whole : footprintOf(top);
+}
+
 /// The local box of the definition [definition] in [doc], from its **live**
 /// leaves (the entities it owns); null when [definition] names no definition
 /// or none of its leaves draws.

@@ -43,7 +43,7 @@ void main() {
     expect(c.dirty.value, isFalse);
     expect(c.activeTool.value, 'plan.select');
     expect(c.missingKits, isEmpty);
-    expect(c.symbolsState.value, PlanSymbolsState.ready);
+    expect(c.symbolsState.value, SymbolsState.ready);
     expect(c.diagnostics.value, isEmpty);
     expect(manifestOf(d), isNull, reason: 'a new plan has none until saved');
     await tester.pump();

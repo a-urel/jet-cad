@@ -26,6 +26,29 @@
   on a handle that is not a live root-level group (a frozen object
   included). It names the `handle` and the `typeId`. A caller catching
   `StateError` is unaffected.
+- `ParametricType.instances(view, self)` (default: none) lets a type
+  generate symbol instances beside its entities. Each
+  `GeneratedInstance(definition, transform, attributes: […])` becomes an
+  `InstanceNode` child of the object's group, on the object's layer, and
+  each `GeneratedAttrib(tag, text, payload)` an ATTRIB the instance owns,
+  on layer 0, BYBLOCK. The planner matches instances by position and
+  ATTRIBs by tag, so a regeneration keeps a seat's handle and everything
+  on it, and an unchanged output plans nothing. An output naming no live
+  definition throws `GeneratedDefinitionError` while planning: the edit is
+  refused, `probe` returns it and `drift()` throws it. Every
+  `InstanceNode` child of an object's group is now that object's
+  generated instance: a type that generates none removes it on its next
+  regeneration.
+- The edit guard covers generated instances. Moving, removing,
+  re-pointing or re-layering one, or editing or removing its ATTRIBs, is
+  refused with `GeneratedGeometryError`. A components-only write on one
+  passes and regenerates nothing. Any node or entity added into a live
+  object by anything but the planner is refused, and so is an entity added
+  onto one of its generated instances. This includes a `GroupNode`: until
+  now a group added into an object passed. A nested group a file brought in
+  stays editable. Removing an object's subtree (a dissolve, a reference
+  cascade) also removes the entities its instances own, so no ATTRIB is
+  left behind.
 
 ## 0.7.2
 

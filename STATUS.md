@@ -1,6 +1,6 @@
 # jet-cad — project status
 
-**Last updated:** 2026-10-14. **`main` carries release 0.7.0** (tag
+**Last updated:** 2026-10-15. **`main` carries release 0.7.0** (tag
 `v0.7.0` → `0fa649e`, after `v0.6.0` →
 `3bf64a7`, `v0.5.1` → `3f8f7ad`, `v0.5.0` → `2fbb9c0`, `v0.4.0` → `8367010`, `v0.3.0` → `1b0c37a`, `v0.2.0` → `7355c00` and `v0.1.0` → `22206f5`) and everything since; the three packages are on pub.dev at 0.7.2 (published 2026-10-13); the kit architecture is in flight (below). The history of every plan
 before this point — its records, reviews and resume points — is in
@@ -425,10 +425,23 @@ with 0.7.0 (below).
   Every task reviewed, whole-branch Opus review with one fix wave, re-review
   clean; **merged into `main` at `4130ebc`** on the human's *"1"* (local merge;
   on the merged tree `jet_cad_2d_plan` +735, `jet_cad_2d_kit` +314, analyze
-  clean); not pushed. One
-  host-API difference awaits the human's word (A14): `selectTool` works with
-  no view mounted (today it answers false). Next: 2b, the service mode, from
-  a brainstorm. The human asked to be told when
+  clean); not pushed. Its one
+  host-API difference (A14: `selectTool` works with no view mounted; today it
+  answers false) is settled by 2b spec decision 9 (true kept). **2b, the plan library in service
+  mode** (`jet_cad_2d_plan` 0.8.0 still unreleased, the contract's 2b
+  additions, engine seam E5): spec
+  [2026-10-14-plan-library-service-mode-design.md](docs/superpowers/specs/2026-10-14-plan-library-service-mode-design.md)
+  (rev 4, approved), plan
+  [2026-10-14-plan-library-2b.md](docs/superpowers/plans/2026-10-14-plan-library-2b.md)
+  (17 tasks), results
+  [2026-10-14-plan-library-2b-results.md](docs/superpowers/notes/2026-10-14-plan-library-2b-results.md),
+  on `feat/plan-library-2b` (worktree `.claude/worktrees/plan-library-2b`).
+  Every task done and reviewed, the exit gate passed at `2ca9c84f`; the
+  whole-branch Opus review (no Critical, four Important) and its fix wave
+  are done (the results note's "Final fix wave": the design read-only in
+  service, view_palette's tests ported, restore's notifications and the
+  seat drag's spend pinned). **2b is complete on its branch**; not merged,
+  not pushed. The human asked to be told when
   `apps/architecture_demo` runs on the new packages (the end of
   sub-project 3) and to have everything tested after sub-project 4.
 
@@ -562,9 +575,14 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 
 **In flight: the kit architecture. Sub-project 1 (`jet_cad_2d_kit`) is
 merged (PR #11 `bc705be`, PR #12 `27244bf`). Sub-project 2a (the plan library
-in design mode) is merged at `4130ebc`, not pushed. Next: 2b (the service
-mode), from a brainstorm** (In flight). Open for the human: A14's
-`selectTool`-without-a-view difference.
+in design mode) is merged at `4130ebc`, not pushed. 2b (the service mode) is
+complete on `feat/plan-library-2b` after the whole-branch Opus review and its
+fix wave; not merged, not pushed. Next: the human's word on the merge.** (In
+flight). Open for the human: F-1 of `chrome_change_test.dart` (design-only, a
+2a port gap). Where 2b stands, its gaps and rulings: the results note's
+[Spec gaps](docs/superpowers/notes/2026-10-14-plan-library-2b-results.md#spec-gaps-and-interface-problems-found-while-executing)
+section and its "Final fix wave". A14's `selectTool` difference was settled
+by the human (2b spec decision 9: true kept).
 
 **Done 2026-10-13: 0.7.2 of the three packages**, published by the human in
 order (spec D11): `jet_cad_2d`, `jet_cad_2d_flutter`, `jet_cad_floor_plan`,

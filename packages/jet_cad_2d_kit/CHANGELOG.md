@@ -24,3 +24,13 @@
   refuses a unit outline by its width, 2·area/perimeter, not by its area.
 - `PlanSwatch`, the plan's eight-colour palette, and `planSwatchNamed`:
   kits name a swatch without depending on the plan library.
+- Sub-project 2b: `PlanServices.symbolDefinition` (`SymbolDefinitionRef`)
+  and `symbolsState`; `SymbolsState`, moved from the plan library; a unit's
+  label (`kUnitLabelTag`, `unitLabelHeight`, `unitLabelStamp`,
+  `unitLabelPayload`, `unitLabelAttrib`, which builds a generated unit's
+  label as an E5 `GeneratedAttrib`, and the label's constants
+  `kUnitLabelMaxHeight`, `kUnitLabelTopShare` and `kUnitLabelTextAttrs`); `PlanGate.relabel`; the `unit:` word
+  namespace and `validateHostWords`; `KitProblemCode.unitKindWord`, which
+  conformance reports for a unit kind the contract does not name without
+  an English word. `UnitLabelling.assigned`: the label comes from a kit's
+  type, the property panel or the host.

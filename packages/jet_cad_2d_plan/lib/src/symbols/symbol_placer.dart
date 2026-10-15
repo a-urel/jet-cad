@@ -1,16 +1,27 @@
 // The symbol placer (spec 09 D6), ported from jet_cad_floor_plan's
 // symbol_placer.dart (2a Task 13): one command that copies a library symbol
 // into a document on first use and adds an instance of it. The copy carries
-// the entry's whole `jetcad.symbol` and its `jetcad.unit`; the table number
-// goes to 2b with the units.
+// the entry's whole `jetcad.symbol` and its `jetcad.unit`; a placed `numbered`
+// unit gets the plan's next number as its UNIT label in the same command
+// (spec 2b S2).
 //
 // No Flutter import and no `dart:io`. It writes no table record (a symbol
 // uses only reserved handles) and never touches `DraftDocument.purge`.
 
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart'
-    show SymbolComponent, SymbolEntry, UnitComponent;
+    show
+        SymbolComponent,
+        SymbolEntry,
+        UnitComponent,
+        UnitLabelling,
+        unitLabelHeight,
+        unitLabelPayload;
 import 'package:vector_math/vector_math_64.dart' show Vector2;
+
+import '../units/unit_index.dart' show UnitIndex;
+import '../units/unit_label.dart' show placedLabelTop, unitLabelRecord;
+import '../units/unit_numbers.dart' show nextUnitNumber;
 
 /// The instance fields a placement imposes on the symbol's BYBLOCK contents.
 /// The defaults are [InstanceNode]'s own.
@@ -148,6 +159,13 @@ bool _ascending(List<({EntityRecord record, GeometryPayload payload})> leaves) {
 /// (`drawingLayer`) and [style]; [transform], when given, is used as is
 /// (an attachment's), else [placementTransform] of [at], [quarterTurns]
 /// and [mirrored].
+///
+/// With [units] (the plan's index), a `numbered` unit gets
+/// `nextUnitNumber(units)` as its `UNIT` label after the instance, anchored
+/// at the base point, the height of its top, stamped upright for the
+/// placement (spec 2b S2). The number is fixed here, with the handles, so
+/// a redo replays the same one. An `assigned` unit, and any placement
+/// without [units] (a thumbnail), gets no label.
 CompoundCommand placeSymbol(
   DraftDocument doc,
   SymbolEntry entry, {
@@ -156,27 +174,48 @@ CompoundCommand placeSymbol(
   bool mirrored = false,
   Transform2? transform,
   InstanceStyle style = const InstanceStyle(),
+  UnitIndex? units,
 }) {
   final made = definitionForEntry(doc, entry);
   final commands = <DraftCommand>[...made.commands];
+  final instance = doc.handleSeed.next();
+  final placement = transform ??
+      placementTransform(
+        at: at,
+        basePoint: entry.definition.basePoint,
+        quarterTurns: quarterTurns,
+        mirrored: mirrored,
+      );
   commands.add(AddNodeCommand(InstanceNode(
-    handle: doc.handleSeed.next(),
+    handle: instance,
     parent: doc.rootHandle,
     definition: made.definition,
     layer: drawingLayer(doc),
-    transform: transform ??
-        placementTransform(
-          at: at,
-          basePoint: entry.definition.basePoint,
-          quarterTurns: quarterTurns,
-          mirrored: mirrored,
-        ),
+    transform: placement,
     color: style.color,
     lineweight: style.lineweight,
     transparency: style.transparency,
     linetype: style.linetype,
     linetypeScale: style.linetypeScale,
   )));
+  final unit = entry.unit;
+  if (units != null &&
+      unit != null &&
+      unit.labelling == UnitLabelling.numbered) {
+    commands.add(AddEntityCommand(
+      record: unitLabelRecord(
+          handle: doc.handleSeed.next(),
+          instance: instance,
+          text: nextUnitNumber(units)),
+      payload: unitLabelPayload(
+        anchor: entry.definition.basePoint,
+        height: unitLabelHeight(placedLabelTop([
+          for (final leaf in entry.leaves) (leaf.record.kind, leaf.payload),
+        ])),
+        instanceToWorld: placement,
+      ),
+    ));
+  }
   return CompoundCommand(commands, label: 'Place ${entry.symbol.name}');
 }
 

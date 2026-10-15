@@ -9,6 +9,7 @@
 // the view itself (PlanCanvasView, planner_view.dart). New: the one-canvas
 // rule, the controller's document swap, the locale push, the snapping
 // option and the lock hint (spec P4, "Where PlanLocked is caught").
+// 2b: the unit colours under the drafting (plan colours spec PC-5).
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -19,6 +20,8 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import '../controller/plan_controller.dart';
 import '../l10n/locale_scope.dart';
 import '../l10n/strings.dart';
+import '../service/paint/unit_status_painter.dart' show UnitStatusPainter;
+import '../service/service_state.dart' show UnitGroup, UnitStatus;
 import '../theme/plan_theme.dart' show PlanTheme, planPaperPaletteFor;
 import '../tools/generic_tools.dart' show PlanToolIds;
 import 'plan_canvas_view.dart';
@@ -46,6 +49,7 @@ class PlanCanvas extends StatefulWidget {
     this.grid = true,
     this.snapping = true,
     this.autofocus = true,
+    this.unitOverlays,
   });
 
   final PlanController controller;
@@ -53,6 +57,12 @@ class PlanCanvas extends StatefulWidget {
   final bool grid;
   final bool snapping;
   final bool autofocus;
+
+  /// Above everything on the canvas, inside its input listeners, clipped
+  /// (2b spec S4 "Unit overlays"): `PlanEditor`'s unit overlays for
+  /// `PlanMode.design`. Handed down as given, so a rebuild of this canvas
+  /// alone builds no overlay. Null: none.
+  final Widget? unitOverlays;
 
   @override
   State<PlanCanvas> createState() => _PlanCanvasState();
@@ -127,6 +137,21 @@ class _PlanCanvasState extends State<PlanCanvas> {
 
   Timer? _hintTimer;
 
+  /// Plan colours spec PC-5 (planner_shell.dart:745-766): the unit colour
+  /// fills, under the drafting, in design: no status and no group; they
+  /// repaint on the camera, every document change, the paper and the
+  /// theme. Built per document in [_bind].
+  final ValueNotifier<int> _fillPaper = ValueNotifier<int>(0xFFFFFFFF);
+  final ValueNotifier<PlanTheme?> _fillTheme = ValueNotifier<PlanTheme?>(null);
+  final _Bump _documentChanged = _Bump();
+  StreamSubscription<DocChange>? _documentChanges;
+  late UnitStatusPainter _colourPainter;
+
+  static final ValueNotifier<Map<String, UnitStatus>> _noStatuses =
+      ValueNotifier(const <String, UnitStatus>{});
+  static final ValueNotifier<Map<String, UnitGroup>> _noGroups =
+      ValueNotifier(const <String, UnitGroup>{});
+
   @override
   void initState() {
     super.initState();
@@ -151,6 +176,8 @@ class _PlanCanvasState extends State<PlanCanvas> {
     // A build follows, so no setState: only a key change builds a new
     // resolver (planner_shell.dart:371-382).
     if (_nextResolver() case final next?) _resolver = next;
+    _fillTheme.value = _theme;
+    _fillPaper.value = _paperArgb();
     PlanLocaleScope.push(context, _c);
   }
 
@@ -163,6 +190,12 @@ class _PlanCanvasState extends State<PlanCanvas> {
       // RV6: the old controller is shown by no canvas now (unless another
       // shows it): its shape in progress does not stay part-way.
       _withdrawTool(old);
+      // 2a's parked final-review item (2b Task 16): this canvas no longer
+      // speaks for the old controller's object snap, so its own setting
+      // alone counts again (today's snap was the shell's, never the
+      // controller's). Only here, where the order is the swap's: a canvas
+      // replaced by another in one frame is not undone by its dispose.
+      if (!old.isDisposed) old.snappingAllowed = true;
       old.removeListener(_onController);
       old.lockHint.removeListener(_onHint);
       _hintTimer?.cancel();
@@ -186,6 +219,10 @@ class _PlanCanvasState extends State<PlanCanvas> {
     _c.lockHint.removeListener(_onHint);
     _page?.removeListener(_onPage);
     _hintTimer?.cancel();
+    _documentChanges?.cancel();
+    _documentChanged.dispose();
+    _fillPaper.dispose();
+    _fillTheme.dispose();
     super.dispose();
   }
 
@@ -222,10 +259,26 @@ class _PlanCanvasState extends State<PlanCanvas> {
     }());
   }
 
-  /// Binds the page listener to the controller's current document.
+  /// Binds the page listener, the document's change bump and the colour
+  /// painter to the controller's current document.
   void _bind() {
-    _document = _c.document;
+    final document = _document = _c.document;
     _page = _c.page..addListener(_onPage);
+    _documentChanges?.cancel();
+    _documentChanges = document.changes.listen((_) => _documentChanged.bump());
+    _colourPainter = UnitStatusPainter(
+      document: document,
+      units: _c.documentUnits,
+      camera: _c.camera,
+      statuses: _noStatuses,
+      unitGroups: _noGroups,
+      groupStatuses: _noStatuses,
+      paper: _fillPaper,
+      theme: _fillTheme,
+      darkCanvas: () => _darkCanvas,
+      repaint: Listenable.merge(
+          [_c.camera, _documentChanged, _fillPaper, _fillTheme]),
+    );
   }
 
   /// A new document (load, newPlan, import) or a new controller: the page
@@ -244,9 +297,12 @@ class _PlanCanvasState extends State<PlanCanvas> {
     setState(_rebind);
   }
 
-  /// planner_shell.dart:344-363, less the table fills (2b): a page change
-  /// that moves the resolver's key rebuilds with a new resolver.
+  /// planner_shell.dart:344-363: the fills' paper on every page change
+  /// (one that keeps the resolver's key still changes the paper, PC-5); a
+  /// page change that moves the resolver's key rebuilds with a new
+  /// resolver.
   void _onPage() {
+    _fillPaper.value = _paperArgb();
     final next = _nextResolver();
     if (next == null) return;
     setState(() => _resolver = next);
@@ -334,6 +390,15 @@ class _PlanCanvasState extends State<PlanCanvas> {
             selectionStrokePixels:
                 _theme?.selectionWidth ?? kSelectionStrokePixels,
             sheetArgb: _darkCanvas ? paper : null,
+            // Plan colours spec PC-5: the unit colours, under the drafting
+            // and the selection.
+            underlay: RepaintBoundary(
+              child: CustomPaint(
+                key: const Key('unit-colour-layer'),
+                painter: _colourPainter,
+                size: Size.infinite,
+              ),
+            ),
             grips: c.grips,
             textTool: c.textTool,
             fitRequests: c.fitRequests,
@@ -346,6 +411,7 @@ class _PlanCanvasState extends State<PlanCanvas> {
             rulers: widget.rulers,
             grid: widget.grid,
             autofocus: widget.autofocus,
+            unitOverlays: widget.unitOverlays,
           ),
           ValueListenableBuilder<bool>(
             valueListenable: c.lockHint,
@@ -373,4 +439,9 @@ class _PlanCanvasState extends State<PlanCanvas> {
       ),
     );
   }
+}
+
+/// A notifier whose every [bump] is one notification.
+final class _Bump extends ChangeNotifier {
+  void bump() => notifyListeners();
 }
