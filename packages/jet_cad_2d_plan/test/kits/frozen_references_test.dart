@@ -3,13 +3,19 @@
 // cascade partner, as a frozen opening references its host wall): the
 // partner can be neither edited nor deleted, up front or on commit, with
 // PlanLocked's hint; a square nothing frozen references still edits and
-// deletes. Squares off the origin, turned.
+// deletes. A frozen square whose own `references` throws is locked alone,
+// and the edit that froze it is still refused, not thrown (FL-throw); a
+// square frozen in service locks its partner as well (FL-service). Squares
+// off the origin, turned.
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 
 import '../support/box_kit.dart';
+import '../support/harness.dart' show controllerFor;
+import '../support/service_plans.dart'
+    show kDeg37, placeDef, turned, unitDefinition;
 
 /// A host square, a poisoned square referencing it, and a third square;
 /// the poisoned one frozen by one refused move (its reach throws); the
@@ -87,5 +93,62 @@ void main() {
     expect(d.tree[s.host], isNotNull);
     expect(c.execute(deleteOf(d, s.other)), isTrue, reason: 'positive control');
     expect(d.tree[s.other], isNull);
+  });
+
+  test(
+      "FL-throw a frozen square whose own references throws: the edit that "
+      'froze it is refused, not thrown; the square frozen and locked alone; '
+      'one diagnostic', () {
+    final sw = Switches();
+    final c = PlanController(kits: [boxKit(sw)]);
+    addTearDown(c.dispose);
+    final d = c.document;
+    final host = addObject(
+        d, nearSquare(2600.5, -900.25, 0.4), const SquareParams(side: 900));
+    final referrer = addObject(
+        d, atSquare, SquareParams(side: 1200, poisoned: true, partner: host));
+    sw.failing.addAll(['reach', 'references']);
+    // M-FL-4: `_referencesOf` without its try/catch: the freeze throws, the
+    // edit escapes `execute`, and nothing is locked.
+    expect(
+        c.execute(TransformNodeCommand(referrer, nearSquare(100.5, 50.25, 0))),
+        isFalse);
+    expect(c.frozen, {referrer});
+    expect(c.locked.value, {referrer});
+    expect(c.diagnostics.value, hasLength(1));
+  });
+
+  testWidgets(
+      "FL-service a square frozen by the service copy's boundary locks its "
+      'partner with it', (tester) async {
+    final sw = Switches();
+    final c = controllerFor(kits: [boxKit(sw), ringKit(sw)]);
+    final d = c.document;
+    final host = addObject(
+        d, nearSquare(2600.5, -900.25, 0.4), const SquareParams(side: 900));
+    final square = addObject(
+        d, atSquare, SquareParams(side: 1200, poisoned: true, partner: host));
+    final table = unitDefinition(d, key: 'box.table.square.four');
+    final t = placeDef(
+        d, table, turned(table, -2600.25, 1400.5, kDeg37, mirrored: true),
+        label: '1');
+    await tester.pump();
+    c.setMode(PlanMode.service);
+    final copy = c.activeDocument;
+    sw.failing.add('reach');
+    final at = (copy.tree[t]! as InstanceNode).transform;
+    copy.commands.execute(TransformNodeCommand(
+        t, Transform2.translation(750.5, -250.25).multiply(at)));
+    expect(c.frozen, {square}, reason: 'premise: frozen in service');
+    // M-FL-5: `_buildService` without `referencesOf: _referencesOf,`.
+    expect(c.locked.value, {square, host});
+    expect(
+        () => copy.commands.execute(TransformNodeCommand(
+            host,
+            Transform2.translation(10.5, 0)
+                .multiply((copy.tree[host]! as GroupNode).transform))),
+        throwsA(isA<PlanLocked>()),
+        reason: 'the partner locked in the copy');
+    c.setMode(PlanMode.design);
   });
 }
