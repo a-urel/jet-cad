@@ -359,7 +359,8 @@ class ServiceTool extends Tool {
           notifyListeners();
           return;
         } else if (!_startDrag(hit, ctx)) {
-          // A group with a locked member is never moved (G4).
+          // Nothing placed to move (seats only, or a drag from a seat), or
+          // a group with a locked or generated visible member (G4): spent.
           _gesture = _Gesture.spent;
           notifyListeners();
           return;

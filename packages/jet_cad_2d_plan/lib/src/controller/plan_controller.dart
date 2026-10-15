@@ -2467,7 +2467,8 @@ class PlanController extends ChangeNotifier {
   void fitted() => _fitPending = false;
 
   /// The camera a fit sets in a canvas of [viewport]: null for the page,
-  /// else the queued centring. Not finite: none.
+  /// else the queued centring or the queued units' framing. Not finite:
+  /// none.
   @internal
   ViewportTransform? framingFor(Size viewport) {
     final ViewportTransform framing;

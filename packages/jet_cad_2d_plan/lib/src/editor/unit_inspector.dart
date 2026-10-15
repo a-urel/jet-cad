@@ -15,6 +15,8 @@ import '../controller/plan_controller.dart';
 import '../panels/frame_safe_relay.dart';
 import '../units/unit_detail.dart';
 
+/// The host's inspector under the property panel: [builder] for the one
+/// selected placed unit whose label no other unit has, nothing otherwise.
 class UnitInspector extends StatefulWidget {
   const UnitInspector(
       {super.key, required this.controller, required this.builder});

@@ -171,7 +171,9 @@ void main() {
     final row = rowsOf(c).last;
     final seat = seatsOf(c, row).first;
     tapAt(c, seatLabel(c, seat));
-    // M-DS2: `resolveHit` replaced by the hit's own entity in `pick`.
+    // A positive control: `resolveHit` already maps a seat's ATTRIB to the
+    // row, so M-DS2 (the hit's own entity in `pick`) leaves this green; it
+    // is killed by DS-click-seat, DS-locked-object and DS-plain-group.
     expect(selected(c), {SelectionKey.root(row)});
   });
 

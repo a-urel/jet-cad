@@ -23,12 +23,12 @@ final class HookBoom implements Exception {
 
 /// The hooks made to throw, by name: `reach`, `references`, `generate`,
 /// `instances`, `diagnose`, `dissolves`, `placeBox`, `placeInput`,
-/// `readBox` (per object, for a poisoned one); `editCapability`, `referencePolicy`, `pageKey`,
-/// `contributesPlace`, `readsPlaces`, `create` (type level); `fromJson` (a
-/// poisoned component's factory). Not a throw: `openRegion` makes a
-/// poisoned square's `generate` add an open region, which the engine's
-/// planner refuses outside any hook (an `ArgumentError`, no
-/// KitHookFailure).
+/// `readBox` (per object, for a poisoned one); `editCapability`,
+/// `referencePolicy`, `pageKey`, `contributesPlace`, `readsPlaces`,
+/// `create` (type level); `fromJson` (a poisoned component's factory). Not
+/// a throw: `openRegion` makes a poisoned square's `generate` add an open
+/// region, which the engine's planner refuses outside any hook (an
+/// `ArgumentError`, no KitHookFailure).
 final class Switches {
   final Set<String> failing = {};
 

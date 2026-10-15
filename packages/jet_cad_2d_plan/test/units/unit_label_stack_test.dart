@@ -15,11 +15,11 @@ import 'package:jet_cad_2d_plan/src/units/unit_rotate.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../support/harness.dart';
-import '../support/unit_fixtures.dart' show kDeg37, plan, unitIndexOf;
 import '../support/service_fixture.dart';
 import '../support/symbol_fixtures.dart' show settle;
 import '../support/test_kit.dart';
 import '../support/tool_events.dart';
+import '../support/unit_fixtures.dart' show kDeg37, plan, unitIndexOf;
 
 const Tolerance exact = Tolerance(linear: 0, angular: 0);
 
