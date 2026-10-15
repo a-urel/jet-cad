@@ -41,6 +41,8 @@ const Set<String> boomHooks = {
   'colourWrite', 'title',
   // Spec 3a C1.1, C1.7: a text display's read, a length's range, a spec's visible.
   'display', 'range', 'visible',
+  // The kit's document preparation (spec 3a C1.3).
+  'prepare',
 };
 
 /// What a failing hook throws: not an `Error`, as a kit's own exception
@@ -79,6 +81,7 @@ final class ThrowingKit {
   late final PlanKit kit = PlanKit(
     id: 'boom',
     version: '0.3.0',
+    prepare: (document) => check('prepare'),
     types: [
       PlanType<BlockComponent>(
         id: BlockComponent.componentTypeId,

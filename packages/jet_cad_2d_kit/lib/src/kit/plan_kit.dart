@@ -1,6 +1,6 @@
 // A kit's descriptor (spec K5, grown by spec 2a P1): its symbols, its
 // parametric types, its tools, its attachment providers and its words.
-import 'package:jet_cad_2d/jet_cad_2d.dart' show Component;
+import 'package:jet_cad_2d/jet_cad_2d.dart' show Component, DraftDocument;
 import 'package:meta/meta.dart';
 
 import '../model/kit_ids.dart';
@@ -23,6 +23,7 @@ final class PlanKit {
     this.tools = const [],
     this.attachments = const [],
     this.names = KitNames.empty,
+    this.prepare,
   });
 
   /// A kit id (K2): the first segment of the kit's keys, type and tool ids.
@@ -39,6 +40,15 @@ final class PlanKit {
   final List<AttachmentProvider Function(PlanServices)> attachments;
 
   final KitNames names;
+
+  /// Prepares a document the plan library makes (spec 3a C1.3): the
+  /// constructor's plan without json and every `newPlan`, never a loaded or
+  /// imported one, so a plan without what it adds is never changed. Called
+  /// once per new document, in kit load order, before any parametric system
+  /// is installed; the history is cleared after it. It must be idempotent.
+  /// A throw is a `hookFailed` diagnostic and the plan opens. The
+  /// separator's DASHED linetype record is its first user.
+  final void Function(DraftDocument document)? prepare;
 
   /// Every property word id of the kit without its `property:` prefix, in
   /// declaration order: `<type id>.<spec id>` for each type's specs,

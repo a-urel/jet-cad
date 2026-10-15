@@ -445,6 +445,10 @@ Each line is written by the 3a task that lands it (the 3a spec,
 - **Tool notices** (3a C1.2): the surface gains `ToolNotice`, a kit tool's
   `ValueListenable<KitText?> notice`, which the plan library reads through
   its guard and shows on the status line.
+- **Preparing and building a plan** (3a C1.3, C1.9): `PlanKit.prepare`
+  (`void Function(DraftDocument)?`) prepares every document the plan
+  library makes, never a loaded one; `PlanBuild` (`void
+  Function(DraftDocument, KitWords)`) is a host's build of a new plan.
 
 ## Inputs for sub-project 2
 

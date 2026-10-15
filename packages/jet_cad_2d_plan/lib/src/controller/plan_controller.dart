@@ -250,6 +250,11 @@ class PlanController extends ChangeNotifier {
   /// [words] are the host's words (spec 2b S4): each kit reads them before
   /// its own, per locale; an id in no known namespace or naming no kit is an
   /// [ArgumentError] naming the first problem (`validateHostWords`).
+  ///
+  /// The empty plan is prepared by every kit (`PlanKit.prepare`, spec 3a
+  /// C1.3); a loaded one never is. [build] (spec 3a C1.9) then fills it
+  /// over the plan's own system, and it opens clean, with nothing to undo;
+  /// [build] is ignored with [json].
   factory PlanController({
     required List<PlanKit> kits,
     String? json,
@@ -261,6 +266,7 @@ class PlanController extends ChangeNotifier {
     double maxScale = kPlanMaxScale,
     PlanPermissions permissions = PlanPermissions.full,
     KitNames words = KitNames.empty,
+    PlanBuild? build,
   }) {
     final set = validateKitSet(kits);
     final wordProblems = validateHostWords(words);
@@ -296,6 +302,8 @@ class PlanController extends ChangeNotifier {
     }
     return PlanController._(set, catalog, document, measurer,
         unsettled: json == null,
+        made: json == null,
+        build: json == null ? build : null,
         loadDiagnostics: diagnostics,
         symbols: symbols,
         thumbnails: thumbnails,
@@ -310,6 +318,8 @@ class PlanController extends ChangeNotifier {
   PlanController._(this.kits, this.catalog, DraftDocument document,
       FlutterTextMeasurer measurer,
       {required bool unsettled,
+      required bool made,
+      required PlanBuild? build,
       required List<Diagnostic> loadDiagnostics,
       required PlanSymbolLoader? symbols,
       required SymbolThumbnails? thumbnails,
@@ -361,7 +371,9 @@ class PlanController extends ChangeNotifier {
                 // Spec 3a C1.6: the UI language's separator, live.
                 decimalSeparator: () => planStrings.decimalSeparator)),
     };
-    _open(document, measurer, loadDiagnostics);
+    // Spec 3a C1.3: only a document the plan library made is prepared.
+    if (made) _prepare(document);
+    _open(document, measurer, loadDiagnostics, build: build);
     _savedState = document.commands.stateId;
     if (unsettled) _unsettled = (document: document, at: _savedState);
     _placeNominally();
@@ -698,7 +710,8 @@ class PlanController extends ChangeNotifier {
   /// or `,`; any other is an [ArgumentError], and nothing changes); without
   /// one, the separator of the locale last reported, or, with none
   /// reported yet, point and unsettled, as the constructor's plan.
-  void newPlan({String? decimalSeparator}) {
+  /// Every kit prepares it (spec 3a C1.3); [build] fills it (C1.9).
+  void newPlan({String? decimalSeparator, PlanBuild? build}) {
     final DecimalSeparator? given = switch (decimalSeparator) {
       null => null,
       '.' => DecimalSeparator.point,
@@ -711,11 +724,69 @@ class PlanController extends ChangeNotifier {
     final separator = given ??
         (reported == null ? DecimalSeparator.point : _separatorOf(reported));
     final measurer = FlutterTextMeasurer();
-    _replace(
-        newPlanDocument(measurer,
-            register: _registerComponents, decimalSeparator: separator),
-        measurer,
-        unsettled: given == null && reported == null);
+    final made = newPlanDocument(measurer,
+        register: _registerComponents, decimalSeparator: separator);
+    _prepare(made);
+    _replace(made, measurer,
+        unsettled: given == null && reported == null, build: build);
+  }
+
+  /// Every loaded kit's `prepare` on [document], a document the plan
+  /// library made (spec 3a C1.3): in load order, with no system installed,
+  /// then the history cleared, so the plan is prepared outside history. A
+  /// prepare that throws is a `hookFailed` diagnostic of its kit (subject
+  /// `prepare`); the later kits still run, and the plan opens. Never on a
+  /// loaded or imported plan: Open adds nothing (today's R-3).
+  void _prepare(DraftDocument document) {
+    for (final kit in kits.kits) {
+      final prepare = kit.prepare;
+      if (prepare == null) continue;
+      try {
+        prepare(document);
+      } catch (error) {
+        _diagnostics.add(KitDiagnostic(
+            kitId: kit.id,
+            subject: 'prepare',
+            code: KitDiagnosticCode.hookFailed,
+            message: 'prepare: $error',
+            error: error));
+      }
+    }
+    document.commands.clearHistory();
+  }
+
+  /// A [PlanBuild]'s words (spec 3a C1.9): every loaded kit's, the host's
+  /// first (spec 2b S4), then each kit's in load order; at the controller's
+  /// locale, read live, with the UI language's separator.
+  late final KitWords _buildWords = KitNamesWords(
+      kits.kits
+          .fold<KitNames>(_hostWords, (names, kit) => names.merge(kit.names)),
+      () => _locale.value,
+      decimalSeparator: () => planStrings.decimalSeparator);
+
+  /// [build] run on [document] over the plan's own system (spec 3a C1.9),
+  /// unrestricted (the host's construction, not an edit), then the history
+  /// cleared: the built plan opens with nothing to undo. A build that
+  /// throws leaves the empty plan: every step still in the history is
+  /// undone, and it is one `hookFailed` (kit `plan`, subject `build`).
+  void _runBuild(DraftDocument document, PlanBuild build) {
+    final commands = document.commands;
+    try {
+      _unrestricted(commands, () => build(document, _buildWords));
+    } catch (error) {
+      _unrestricted(commands, () {
+        while (commands.canUndo) {
+          commands.undo();
+        }
+      });
+      _diagnostics.add(KitDiagnostic(
+          kitId: 'plan',
+          subject: 'build',
+          code: KitDiagnosticCode.hookFailed,
+          message: 'build: $error',
+          error: error));
+    }
+    commands.clearHistory();
   }
 
   /// The kits the plan names or uses that are not loaded (spec P4).
@@ -1488,7 +1559,8 @@ class PlanController extends ChangeNotifier {
   // Opening and replacing documents.
 
   void _open(DraftDocument document, FlutterTextMeasurer measurer,
-      List<Diagnostic> loadDiagnostics) {
+      List<Diagnostic> loadDiagnostics,
+      {PlanBuild? build}) {
     _pendingDefinitions.clear();
     _damaged.value = false;
     _disabledTools.clear();
@@ -1543,6 +1615,10 @@ class PlanController extends ChangeNotifier {
       ..onRefusedEdit = session.boundary.recoverRefused
       ..onRetryFailed = session.boundary.retryFailed;
     session.runKitFactories(kits, _services, _disabledTools);
+    // Spec 3a C1.9: the host's build, over this session's system, before
+    // the views listen, the change tracker takes its baseline and the save
+    // point is taken.
+    if (build != null) _runBuild(document, build);
     session.tools.addListener(_onTools);
     session.history = document.commands.changes.listen((_) {
       if (!_disposed) _onDesignChange();
@@ -1577,9 +1653,12 @@ class PlanController extends ChangeNotifier {
   /// [document] becomes the plan (spec P1 lifetimes): 1. the active tool
   /// cancelled and select armed; the old plan's owed changes reported;
   /// 2. the old document's kit products disposed; 3. the factories run
-  /// over the new document. The old views go after the next frame.
+  /// over the new document, prepared and built when the plan library made
+  /// it. The old views go after the next frame.
   void _replace(DraftDocument document, FlutterTextMeasurer measurer,
-      {required bool unsettled, List<Diagnostic> loadDiagnostics = const []}) {
+      {required bool unsettled,
+      List<Diagnostic> loadDiagnostics = const [],
+      PlanBuild? build}) {
     final old = _session;
     old.tools.activate(old.toolById(planSelectToolId)!);
     old.tools.removeListener(_onTools);
@@ -1588,7 +1667,7 @@ class PlanController extends ChangeNotifier {
     old.selection.removeListener(_onDesignSelection);
     old.disposeKitProducts();
     old.detach();
-    _open(document, measurer, loadDiagnostics);
+    _open(document, measurer, loadDiagnostics, build: build);
     // In service the copy is rebuilt from the new design, the mode kept
     // (today's `_replaceDesign`).
     final service = _service;

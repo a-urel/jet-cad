@@ -849,6 +849,18 @@ From the 3a spec
   in the current locale). `PlanEditor`'s status line is the tool's label,
   then ` — n selected` with a selection, then ` — <notice>`, worded when
   it is read, so a language switch re-words it at once.
+- **P4, a new plan and the kit's `prepare`** (3a C1.3): the constructor's
+  plan without json and `newPlan` are prepared by every loaded kit, in
+  load order, before any system is installed, then the history is
+  cleared, before the save point and the unsettled baseline; a load or an
+  import never is. A prepare that throws is a `hookFailed`, and the plan
+  opens.
+- **P2, the controller's `build`** (3a C1.9): `PlanController(build:)`
+  (ignored with `json`) and `newPlan(build:)` run a `PlanBuild` on the new
+  plan once its system is installed, unrestricted, then clear the history,
+  so the built plan opens clean and still unsettled; its words are every
+  loaded kit's, the host's first. A build that throws leaves the empty
+  plan and is a `hookFailed` of the kit `plan`.
 
 ## Risks
 

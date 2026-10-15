@@ -347,7 +347,13 @@ final PlanKit cafeCodeKit = PlanKit(
 words. Its factories (a tool's `create`, a type's `grips`, the
 `attachments`) run **once per document**: when the plan is replaced
 (`load`, `newPlan`, an import), the plan library disposes what they made
-and runs them again, so nothing a kit holds outlives its document.
+and runs them again, so nothing a kit holds outlives its document. A
+kit's prepare (a void Function(DraftDocument)) sets up each plan the plan
+library makes, the empty plan of a new controller and every newPlan,
+before any edit and outside history: the records its types draw with (the
+separator's DASHED linetype). A loaded or imported plan is never prepared,
+so a file is saved back as it was read. A host may fill a new plan in code
+with a PlanBuild (PlanController(build:), newPlan(build:)).
 
 ### 10.2 A parametric type
 
@@ -492,6 +498,7 @@ once per subject and code:
 | a tool's event or painting | the tool is cancelled and selection is armed |
 | a spec's `write` or `apply` | the field shows its stored value |
 | a section | a small "section failed" box in its place |
+| a kit's `prepare` | the plan opens without what it would have added |
 
 A plan that names a kit the host did not load opens: that kit's objects
 draw, are locked, and are saved back unchanged (`kitMissing`). A plan saved
