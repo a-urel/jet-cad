@@ -2283,7 +2283,9 @@ class PlanController extends ChangeNotifier {
 
   /// [symbols] named with the host's words first (spec 2b S4): each wrapped
   /// again with its kit's merged words; as loaded when the host gave none
-  /// (a loader may serve several controllers).
+  /// (a loader may serve several controllers). With host words, every load
+  /// and retry makes new [PlanSymbol] objects: key a cache by the symbol's
+  /// id, never by identity.
   List<PlanSymbol> _named(List<PlanSymbol> symbols) => _hostWords.words.isEmpty
       ? symbols
       : List.unmodifiable([
