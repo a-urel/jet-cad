@@ -61,7 +61,8 @@ The service mode (sub-project 2b).
   fit), `worldToGlobal` and `globalToWorld`.
 - The unit colours in output: `export` and `print` take
   `unitColourOpacity` (default `kUnitColourOpacity`, 0.35), and
-  `PlanExportRequest.unitColourOpacity` carries it to every exporter.
+  `PlanExportRequest.unitColourOpacity` carries it to every exporter. All
+  three refuse an opacity not finite or outside [0, 1] (`ArgumentError`).
 - The unit section in `PlanPropertyPanel` (the label, its duplicate
   warning, the capacity, a quarter turn either way);
   `PlanEditor(unitInspectorBuilder:)` builds a host's inspector under the
