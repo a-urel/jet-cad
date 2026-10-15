@@ -244,9 +244,10 @@ T? guardFactory<T extends Object?>(
 /// - A [KitHookFailure] is its kit's: a diagnostic, the inner cancelled,
 ///   [onFailed] (the controller arms `plan.select`).
 /// - Given [refusal] (plan.select's, spec 3a C1.8), an error the
-///   controller's `execute` refuses is a refusal: the gesture is cancelled,
-///   with no exception and no diagnostic beyond the one `execute` would
-///   report.
+///   controller's `execute` refuses, thrown by `onPointerUp` (the drop), is
+///   a refusal: the gesture is cancelled, with no exception and no
+///   diagnostic beyond the one `execute` would report. Every other event
+///   keeps the rules above.
 /// - Anything else a kit tool throws is a diagnostic of [toolId], the
 ///   inner cancelled, [onFailed]; a generic tool's (kit id `plan`) is
 ///   rethrown unchanged, as today (`select_tool.dart:546-550`).
@@ -309,7 +310,8 @@ final class GuardedTool extends Tool {
     }
   }
 
-  void _failed(Object error, StackTrace stack, ToolContext ctx) {
+  void _failed(Object error, StackTrace stack, ToolContext ctx,
+      {bool drop = false}) {
     if (error is PlanLocked || error is DanglingReferenceError) {
       lockHint.value = true;
       _cancelInner(ctx);
@@ -317,8 +319,9 @@ final class GuardedTool extends Tool {
     }
     // Spec 3a C1.8 (2): a drop refused as `execute` refuses an edit cancels
     // the drag; a StateError is no refusal and goes on below, as today.
+    // Only the drop: another event's error keeps 2a's rule.
     final refused = refusal;
-    if (refused != null && refused(error)) {
+    if (drop && refused != null && refused(error)) {
       _cancelInner(ctx);
       return;
     }
@@ -452,7 +455,7 @@ final class GuardedTool extends Tool {
     try {
       inner.onPointerUp(e, ctx);
     } catch (error, stack) {
-      _failed(error, stack, ctx);
+      _failed(error, stack, ctx, drop: true);
     }
   }
 

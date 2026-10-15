@@ -75,7 +75,7 @@ final class _Inner extends Tool {
 }
 
 final class _Rig {
-  _Rig({this.kitId = 'box', this.toolId = 'box.stamp'}) {
+  _Rig({this.kitId = 'box', this.toolId = 'box.stamp', this.refusal}) {
     final d = DraftDocument.empty();
     index = SpatialIndex(d);
     selection = SelectionController(d);
@@ -91,11 +91,13 @@ final class _Rig {
         toolId: toolId,
         log: log,
         lockHint: hint,
-        onFailed: () => failed++);
+        onFailed: () => failed++,
+        refusal: refusal);
   }
 
   final String kitId;
   final String toolId;
+  final bool Function(Object error)? refusal;
   final _Inner inner = _Inner();
   final DiagnosticsLog log = DiagnosticsLog();
   final ValueNotifier<bool> hint = ValueNotifier(false);
@@ -211,6 +213,35 @@ void main() {
     expect(r.failed, 0);
     expect(r.log.entries.value, isEmpty);
     r.dispose();
+  });
+
+  test(
+      'F-T7 plan.select\'s refusal (spec 3a C1.8 (2)) is the drop\'s alone: '
+      'an ArgumentError from any other event is rethrown, as F-T4; the '
+      'same error at the drop cancels the gesture, with no diagnostic', () {
+    for (final MapEntry(key: member, value: call) in events.entries) {
+      final r = _Rig(
+          kitId: 'plan',
+          toolId: 'plan.select',
+          refusal: (error) => error is ArgumentError);
+      r.inner.errors[member] =
+          ArgumentError.value(3.5, 'side', 'refused in $member');
+      if (member == 'onPointerUp') {
+        // M-F-T7b: `onPointerUp` without `drop: true`: the drop's refusal
+        // is rethrown.
+        expect(() => call(r.tool, r.ctx), returnsNormally, reason: member);
+        expect(r.inner.cancels, 1, reason: member);
+      } else {
+        // M-F-T7a: `_failed` consulting `refusal` for every event: the
+        // error is cancelled quietly.
+        expect(() => call(r.tool, r.ctx), throwsArgumentError, reason: member);
+        expect(r.inner.cancels, 0, reason: member);
+      }
+      expect(r.failed, 0, reason: member);
+      expect(r.log.entries.value, isEmpty, reason: member);
+      expect(r.hint.value, isFalse, reason: member);
+      r.dispose();
+    }
   });
 
   testWidgets(

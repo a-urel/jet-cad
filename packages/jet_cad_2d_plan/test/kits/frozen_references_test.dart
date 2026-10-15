@@ -3,7 +3,8 @@
 // cascade partner, as a frozen opening references its host wall): the
 // partner can be neither edited nor deleted, up front or on commit, with
 // PlanLocked's hint; a square nothing frozen references still edits and
-// deletes. A frozen square whose own `references` throws is locked alone,
+// deletes. Two referrers, each with its own partner, are frozen by one
+// probe, so every frozen object's partner is locked, not the first's alone. A frozen square whose own `references` throws is locked alone,
 // and the edit that froze it is still refused, not thrown (FL-throw); a
 // square frozen in service locks its partner as well (FL-service). Squares
 // off the origin, turned.
@@ -17,11 +18,18 @@ import '../support/harness.dart' show controllerFor;
 import '../support/service_plans.dart'
     show kDeg37, placeDef, turned, unitDefinition;
 
-/// A host square, a poisoned square referencing it, and a third square;
-/// the poisoned one frozen by one refused move (its reach throws); the
-/// hint cleared.
-({PlanController c, Handle host, Handle referrer, Handle other, String before})
-    frozenReferrer() {
+/// Two host squares, a poisoned square referencing each, and a third
+/// square; both poisoned ones frozen by one refused move (their reach
+/// throws, and one probe of the type finds both); the hint cleared.
+({
+  PlanController c,
+  Handle host,
+  Handle referrer,
+  Handle host2,
+  Handle referrer2,
+  Handle other,
+  String before
+}) frozenReferrer() {
   final sw = Switches();
   final c = PlanController(kits: [boxKit(sw)]);
   addTearDown(c.dispose);
@@ -32,12 +40,25 @@ import '../support/service_plans.dart'
       d, atSquare, SquareParams(side: 1200, poisoned: true, partner: host));
   final other = addObject(
       d, nearSquare(-3100.75, 1800.5, -0.6), const SquareParams(side: 700));
+  final host2 = addObject(
+      d, nearSquare(-1800.25, -2700.5, 1.1), const SquareParams(side: 650));
+  final referrer2 = addObject(d, nearSquare(3900.75, 2200.25, -0.9),
+      SquareParams(side: 1000, poisoned: true, partner: host2));
   sw.failing.add('reach');
   expect(c.execute(TransformNodeCommand(referrer, nearSquare(100.5, 50.25, 0))),
       isFalse);
-  expect(c.frozen, {referrer}, reason: 'fixture: the referrer is frozen');
+  expect(c.frozen, {referrer, referrer2},
+      reason: 'fixture: both referrers are frozen');
   c.lockHint.value = false;
-  return (c: c, host: host, referrer: referrer, other: other, before: canon(d));
+  return (
+    c: c,
+    host: host,
+    referrer: referrer,
+    host2: host2,
+    referrer2: referrer2,
+    other: other,
+    before: canon(d)
+  );
 }
 
 /// The select tool's delete of the group [h]: its leaves, then the group
@@ -56,7 +77,8 @@ void main() {
     final s = frozenReferrer();
     final c = s.c;
     // M-FL-1: `FailureBoundary._freeze` locking the frozen objects alone.
-    expect(c.locked.value, {s.referrer, s.host});
+    // M-FL-6: `_freeze` locking the first frozen object's referents alone.
+    expect(c.locked.value, {s.referrer, s.host, s.referrer2, s.host2});
     expect(
         c.execute(SetComponentCommand<SquareParams>(
             s.host, const SquareParams(side: 640.5))),
@@ -66,6 +88,12 @@ void main() {
     expect(
         c.execute(
             TransformNodeCommand(s.host, nearSquare(2900.5, -700.25, 0.1))),
+        isFalse);
+    expect(c.lockHint.value, isTrue);
+    c.lockHint.value = false;
+    expect(
+        c.execute(SetComponentCommand<SquareParams>(
+            s.host2, const SquareParams(side: 580.25))),
         isFalse);
     expect(c.lockHint.value, isTrue);
     expect(canon(c.document), s.before);
@@ -91,6 +119,10 @@ void main() {
     expect(c.lockHint.value, isTrue);
     expect(canon(d), s.before);
     expect(d.tree[s.host], isNotNull);
+    c.selection.replace([SelectionKey.root(s.host2)]);
+    expect(c.deleteSelection(), isFalse);
+    expect(c.execute(deleteOf(d, s.host2)), isFalse);
+    expect(canon(d), s.before);
     expect(c.execute(deleteOf(d, s.other)), isTrue, reason: 'positive control');
     expect(d.tree[s.other], isNull);
   });

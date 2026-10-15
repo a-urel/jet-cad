@@ -127,8 +127,10 @@ final class _Throwing implements ObjectGripProvider {
 /// A controller over the square with [_SideGrips], grid snap off, the
 /// square selected, the test camera. Async: the tool reads the page through
 /// a notifier fed by the document's (asynchronous) change stream, so the
-/// page edit is settled before any drag.
-Future<({PlanController c, Handle square, _SideGrips grips})> scene() async {
+/// page edit is settled before any drag. Given [sw], the square's hooks
+/// are switched by it and the `ring` kit's disc is loaded too.
+Future<({PlanController c, Handle square, _SideGrips grips})> scene(
+    [Switches? sw]) async {
   final grips = _SideGrips();
   final c = PlanController(kits: [
     PlanKit(
@@ -138,13 +140,14 @@ Future<({PlanController c, Handle square, _SideGrips grips})> scene() async {
         PlanType<SquareParams>(
             id: SquareParams.id,
             fromJson: SquareParams.fromJson,
-            parametric: SquareType(Switches()),
+            parametric: SquareType(sw ?? Switches()),
             grips: (services) => grips),
       ],
       names: const KitNames({
         'en': {'type:box.square': 'Square'},
       }),
     ),
+    if (sw != null) ringKit(sw),
   ]);
   addTearDown(c.dispose);
   final d = c.document;
@@ -279,5 +282,43 @@ void main() {
     s.grips.drop = (group, next) => _Refusing(StateError('not a refusal'));
     // M-GR-2c: `_refusal` answering true for every error.
     expect(() => dragThrough(s.c, [at(1200), at(1500)]), throwsStateError);
+  });
+
+  test(
+      "GR-drop-hook a kit hook failing at plan.select's drop, the retry "
+      'failing on a second type: the drag cancelled, no exception, nothing '
+      'changed, each failing type reported once, plan.select still armed',
+      () async {
+    final sw = Switches();
+    final s = await scene(sw);
+    final c = s.c;
+    final d = c.document;
+    // A broken square and a broken disc (a place reader), both off the
+    // origin and turned: the drop's edit fails on the square, which is
+    // frozen; its retry fails on the disc.
+    final poisoned = addObject(d, nearSquare(-2600.5, 1900.25, -0.7),
+        const SquareParams(side: 800, poisoned: true));
+    final disc = addObject(d, nearSquare(3100.75, -1500.5, 0.5),
+        const DiscParams(radius: 400, poisoned: true));
+    expect(poisoned.value < disc.value, isTrue,
+        reason: 'premise: the square is surveyed first');
+    await settleHistory();
+    final before = canon(d);
+    sw.failing.add('reach');
+    expect(() => dragThrough(c, [at(1200), at(1500)]), returnsNormally);
+    expect(c.frozen, {poisoned},
+        reason: 'premise: the first type froze; the second failed again');
+    expect(canon(d), before);
+    expect(sideOf(c, s.square), 1200);
+    // M-GR-3: `_refusal`'s KitHookFailure case without `_reportFailure`:
+    // the retry's failure (the disc's) goes unreported.
+    expect([
+      for (final f in c.diagnostics.value) (f.kitId, f.subject, f.code)
+    ], [
+      ('box', SquareParams.id, KitDiagnosticCode.hookFailed),
+      ('ring', DiscParams.id, KitDiagnosticCode.hookFailed),
+    ]);
+    expect(c.activeTool.value, 'plan.select');
+    expect(c.lockHint.value, isFalse);
   });
 }
