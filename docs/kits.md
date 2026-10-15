@@ -470,6 +470,9 @@ command; the `recolor` permission gates it.
 | `words` | `KitWords`: this kit's words at the plan's locale, falling back to English, read live |
 | `settingsOf<S>(toolId)` | a tool's current settings |
 | `shared<T>(create)` | one `T` per kit and document, made on first use: what a kit's tools, grips and providers share (a wall's bands). A `T` that implements `Disposable` is disposed with its document |
+| `liveTypeIdOf(handle)` | the type id of a live object; null for a frozen one (its code failed), a missing kit's, or anything else: what a kit's caches ask before they read an object as theirs |
+
+A kit's own tests need no plan library: `package:jet_cad_2d_kit/testing.dart`'s `FakePlanServices` is a `PlanServices` over a document, with a real spatial index, a camera at a given scale, words from `KitNames` and settings from a map. It moves with the contract, so a kit's tests compile when the contract adds a member.
 
 ### 10.7 Attachment
 

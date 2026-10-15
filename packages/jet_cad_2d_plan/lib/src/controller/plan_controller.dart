@@ -215,6 +215,9 @@ final class _Host implements ServicesHost {
   SnapSettings get snap => _c._snap;
 
   @override
+  ParametricCatalog get catalog => _c.catalog;
+
+  @override
   ToolSettingsStore get toolSettings => _c.toolSettings;
 
   @override

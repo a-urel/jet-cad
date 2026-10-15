@@ -449,6 +449,11 @@ Each line is written by the 3a task that lands it (the 3a spec,
   (`void Function(DraftDocument)?`) prepares every document the plan
   library makes, never a loaded one; `PlanBuild` (`void
   Function(DraftDocument, KitWords)`) is a host's build of a new plan.
+- **Live objects and the kit authors' double** (3a C1.5, C1.11):
+  `PlanServices.liveTypeIdOf(Handle)` answers a live object's type id and
+  null for a frozen one, a missing kit's, or anything else;
+  `package:jet_cad_2d_kit/testing.dart` exports `FakePlanServices`. Not
+  added: `isLocked`, `allows`, a settings listenable (no user today).
 
 ## Inputs for sub-project 2
 

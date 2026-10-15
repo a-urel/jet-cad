@@ -135,4 +135,17 @@ abstract interface class PlanServices {
   /// The symbol libraries' state: the plan's own listenable, so a tool can
   /// wait for `ready`.
   ValueListenable<SymbolsState> get symbolsState;
+
+  /// The type id of [handle]'s live object (spec 3a C1.5): a root-level
+  /// group a loaded kit's type names (the engine's rule) that is not frozen
+  /// (spec 2a E2). Null for a frozen object, an object of a kit that is not
+  /// loaded (its component is kept raw), and anything else: an entity, a
+  /// nested group, an instance, the root, a handle that names nothing.
+  ///
+  /// A kit's code decides "is this a live wall" here, never by a catalog
+  /// of its own: a frozen object takes part in no regeneration, so it is
+  /// then absent from a kit's caches and previews exactly as it is from
+  /// `generate`. The plan's panels and gates read the catalog's `typeIdOf`,
+  /// which answers a frozen object's id too.
+  String? liveTypeIdOf(Handle handle);
 }
