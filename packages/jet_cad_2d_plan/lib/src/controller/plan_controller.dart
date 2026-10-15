@@ -355,7 +355,11 @@ class PlanController extends ChangeNotifier {
     _services = {
       for (final kit in kits.kits)
         kit.id: KitServices(
-            kit, _host, KitNamesWords(_names[kit.id]!, () => _locale.value)),
+            kit,
+            _host,
+            KitNamesWords(_names[kit.id]!, () => _locale.value,
+                // Spec 3a C1.6: the UI language's separator, live.
+                decimalSeparator: () => planStrings.decimalSeparator)),
     };
     _open(document, measurer, loadDiagnostics);
     _savedState = document.commands.stateId;

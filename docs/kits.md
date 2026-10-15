@@ -122,6 +122,7 @@ a word id to the word.
 | `tool:<tool id>` | a tool's name in the palette (§10.5) |
 | `property:<type or tool id>.<property id>` | a field of a type, or of a tool's settings (§10.3) |
 | `property:<type or tool id>.<property id>.<value>` | a choice's value: an enum's name, else the value's text |
+| `text:<kit id>.<id>` | a message or a template (a tool's notice, a numbered name, a label): `{name}` placeholders, filled by `KitWords.text`; a choice of words is two texts, one passed to the other |
 
 Every word id carries its kit's id, so two kits never share one;
 `PlanKit.validate` reports a word under another kit's id. Lookup
@@ -129,7 +130,10 @@ Every word id carries its kit's id, so two kits never share one;
 falls back from the locale to English, then, for a symbol or a category,
 to the library's stored English. English is required for every
 word with no stored English. A kit's other locales are optional, and a kit
-that declares one declares it complete.
+that declares one declares it complete. A text's every locale carries
+English's placeholders (the conformance test's `placeholderMismatch`).
+`KitWords.decimalSeparator` is the UI language's separator, for a number a
+kit prints in the UI's words.
 
 ## 6. The descriptor
 
@@ -283,7 +287,9 @@ kit.types) t.id]`), `toolIds:` (`[for (final t in kit.tools) t.id]`) and
 (`typeOutsideKit`, `toolOutsideKit`, and `foreignWordId` for a property),
 its word must have English (`missingEnglish`), and every declared locale
 holds it like a symbol's word (`wordMissing`, `wordUntranslated`). Without
-them, the code side is not checked.
+them, the code side is not checked. A kit's `text:` words are held the
+same way, and a text whose placeholders are not English's is
+`placeholderMismatch`.
 
 ## 9. A new kit, the symbol part
 

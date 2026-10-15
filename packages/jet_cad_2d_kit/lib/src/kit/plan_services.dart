@@ -11,6 +11,7 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../model/kit_names.dart';
+import '../model/kit_text.dart';
 import '../model/plan_words.dart';
 import 'attachment.dart';
 import 'symbols_state.dart';
@@ -23,12 +24,17 @@ abstract interface class KitWords implements PlanWords {
 }
 
 /// [KitWords] over a kit's [names], at the locale [locale] answers each
-/// time it is read: a change of the plan's language shows at once.
+/// time it is read: a change of the plan's language shows at once. The
+/// separator is [decimalSeparator]'s answer at each read, `.` without one.
 final class KitNamesWords implements KitWords {
-  KitNamesWords(this.names, Locale Function() locale) : _locale = locale;
+  KitNamesWords(this.names, Locale Function() locale,
+      {String Function()? decimalSeparator})
+      : _locale = locale,
+        _separator = decimalSeparator;
 
   final KitNames names;
   final Locale Function() _locale;
+  final String Function()? _separator;
 
   @override
   Locale get locale => _locale();
@@ -38,6 +44,13 @@ final class KitNamesWords implements KitWords {
 
   @override
   String word(String wordId) => maybe(wordId) ?? wordId;
+
+  @override
+  String text(String id, [Map<String, Object> args = const {}]) =>
+      fillText(word(id), args);
+
+  @override
+  String get decimalSeparator => _separator?.call() ?? '.';
 }
 
 /// What a kit's `shared` object implements to be released with its

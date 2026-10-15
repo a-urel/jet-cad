@@ -53,7 +53,8 @@ final class PlanKit {
 
   /// The descriptor's problems: a bad id, an empty version, a word under
   /// another kit's id or in no known namespace (a `category:` or `unit:` word
-  /// names the kit before its `/`); a type or tool id that is not
+  /// names the kit before its `/`), a `text:` word without English; a type
+  /// or tool id that is not
   /// `<this kit's id>.<name>` or is repeated; a word with no stored English
   /// missing from English, for every word a type, tool or property needs.
   /// A tool's setting that reads an object (spec 3a C1.1).
@@ -82,7 +83,7 @@ final class PlanKit {
           case 'category' || 'unit':
             final slash = rest.indexOf('/');
             foreign = slash < 0 || rest.substring(0, slash) != id;
-          case 'symbol' || 'tool' || 'type' || 'property':
+          case 'symbol' || 'tool' || 'type' || 'property' || 'text':
             foreign = !rest.contains('.') || kitOfKey(rest) != id;
             if (!foreign && namespace != 'symbol') needEnglish.add(wordId);
           default:

@@ -10,6 +10,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart' show listEquals;
 import '../model/kit_ids.dart';
 import '../model/kit_names.dart';
 import '../model/kit_problem.dart';
+import '../model/kit_text.dart' show placeholdersOf;
 import '../model/symbol_library.dart';
 import '../model/unit_component.dart' show UnitKinds;
 import 'builder.dart';
@@ -30,6 +31,10 @@ import 'snapshot.dart';
 ///
 /// A unit kind the contract does not name ([UnitKinds]) needs an English
 /// `unit:<kit>/<kind>` word ([KitProblemCode.unitKindWord], spec 2b S4).
+///
+/// A kit's `text:` words (spec 3a C1.6) are held to the declared locales
+/// like its code side's, and every locale's text must carry English's
+/// placeholders ([KitProblemCode.placeholderMismatch]).
 ///
 /// Throws [ArgumentError] when [locales] lists English: English is always
 /// required, by stored text or by words.
@@ -80,7 +85,8 @@ List<KitProblem> conformance({
     ..addAll(_snapshotProblems(catalog, committedSnapshot))
     ..addAll(code.problems)
     ..addAll(_unitKindProblems(catalog, names))
-    ..addAll(_wordProblems(catalog, names, locales, sameAsEnglish, code.words));
+    ..addAll(_wordProblems(catalog, names, locales, sameAsEnglish, code.words))
+    ..addAll(_placeholderProblems(names));
   return problems;
 }
 
@@ -251,6 +257,13 @@ List<KitProblem> _wordProblems(
       english[id] = en;
     }
   }
+  // Spec 3a C1.6: the kit's texts have no stored English; every declared
+  // locale holds them like the code side's words.
+  for (final MapEntry(key: id, value: en) in stored.entries) {
+    if (id.startsWith('text:') && kitOfKey(id.substring(5)) == catalog.kit) {
+      english[id] = en;
+    }
+  }
   for (final locale in locales) {
     final words = names.words[locale] ?? const <String, String>{};
     final allowed = sameAsEnglish[locale] ?? const <String>{};
@@ -269,3 +282,29 @@ List<KitProblem> _wordProblems(
   }
   return problems;
 }
+
+/// Spec 3a C1.6: every locale's `text:` word whose id has English carries
+/// English's placeholders, no more and no fewer.
+List<KitProblem> _placeholderProblems(KitNames names) {
+  final english = names.words[KitNames.english] ?? const <String, String>{};
+  final problems = <KitProblem>[];
+  for (final MapEntry(key: locale, value: words) in names.words.entries) {
+    if (locale == KitNames.english) continue;
+    for (final MapEntry(key: id, value: word) in words.entries) {
+      final en = english[id];
+      if (!id.startsWith('text:') || en == null) continue;
+      final want = placeholdersOf(en), got = placeholdersOf(word);
+      if (got.length != want.length || !got.containsAll(want)) {
+        problems.add(KitProblem(
+            KitProblemCode.placeholderMismatch,
+            '$locale: "$id" has the placeholders ${_listed(got)}, English '
+            '${_listed(want)}'));
+      }
+    }
+  }
+  return problems;
+}
+
+String _listed(Set<String> names) => names.isEmpty
+    ? 'none'
+    : (names.toList()..sort()).map((n) => '{$n}').join(' ');

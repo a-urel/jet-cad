@@ -12,4 +12,14 @@ abstract interface class PlanWords {
 
   /// The word [wordId] in the locale, else in English, else null.
   String? maybe(String wordId);
+
+  /// The text [id] (a `text:<kit>.<id>` word) in the locale, else in
+  /// English, else [id] itself, its `{name}` placeholders filled from
+  /// [args] (spec 3a C1.6): `fillText(word(id), args)`.
+  String text(String id, [Map<String, Object> args = const {}]);
+
+  /// The decimal separator of the UI language (`.` or `,`), for a number a
+  /// kit prints in the UI's words (a dimension's axes line). A number that
+  /// follows the page (an area, a dimension's value) reads the page's.
+  String get decimalSeparator;
 }

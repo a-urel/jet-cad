@@ -430,6 +430,18 @@ Each line is written by the 3a task that lands it (the 3a spec,
   and `commitField` the kit's words, which the object carries
   (`PlanObject.words`, a `PlanWords`: the pure interface `KitWords` now
   implements, exported by both libraries).
+- **K4, texts** (3a C1.6): a fourth kind of word id, `text:<kit id>.<id>`,
+  for a kit's messages and templates, with `{name}` placeholders filled
+  when read (`KitWords.text`; a missing argument is left as written; a
+  choice of words is two texts). English is required, `validateHostWords`
+  accepts them, and the conformance test holds them to the declared
+  locales and asks every locale's text for English's placeholders
+  (`placeholderMismatch`).
+- **Words with parameters** (3a C1.6, C1.2): the surface gains `KitText`,
+  `fillText`, `placeholdersOf`, `numberedNameIndex` (moved from the plan
+  library, over patterns that name no plan type), `PlanWords.text` and
+  `PlanWords.decimalSeparator`, inherited by `KitWords` (the UI
+  language's separator, which the plan fills from its `PlanStrings`).
 
 ## Inputs for sub-project 2
 

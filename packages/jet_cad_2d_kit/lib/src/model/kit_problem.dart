@@ -44,6 +44,10 @@ enum KitProblemCode {
   // Spec 3a C1.1: PlanKit.validate, a tool's settings holding a spec that
   // reads an object (a TextDisplay, a LengthProperty with a range).
   settingsNeedObject,
+
+  // Spec 3a C1.6: conformance, a locale's `text:` word whose placeholders
+  // are not English's.
+  placeholderMismatch,
 }
 
 @immutable
