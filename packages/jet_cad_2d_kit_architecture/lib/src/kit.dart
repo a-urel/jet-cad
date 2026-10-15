@@ -6,6 +6,7 @@ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
 
 import 'box/box_plan.dart';
 import 'separator_linetype.dart';
+import 'wall/wall_plan.dart';
 import 'words/words.dart';
 
 /// The architecture kit: a host passes it to the plan library,
@@ -13,8 +14,8 @@ import 'words/words.dart';
 final PlanKit architectureKit = PlanKit(
   id: 'architecture',
   version: '0.1.0',
-  types: [boxPlanType],
-  tools: [boxPlanTool],
+  types: [boxPlanType, wallPlanType],
+  tools: [boxPlanTool, wallPlanTool],
   names: architectureNames,
   prepare: ensureDashedLinetype,
 );

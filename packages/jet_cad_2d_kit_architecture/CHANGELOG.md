@@ -9,3 +9,7 @@ The architecture kit of jet_cad_2d plans (sub-project 3a).
 - The box (`architecture.box`, `BoxParams`): a rectangle whose outline
   loses what lies inside an overlapping box; its width and height in the
   property panel; the Box tool (B).
+- The wall (`architecture.wall`, `WallParams`, `Justification`): mitred
+  joints, Ts and nodes; its two end grips, which move joined ends too; its
+  thickness and justification in the property panel; the Wall tool (W),
+  whose settings the panel edits while it is active.
