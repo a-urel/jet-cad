@@ -536,7 +536,7 @@ or the fixed word).
 the plan library now does. It adds, by command in source order (draw order
 is reading order, as today's `_Pen`), nine walls, seven doors, eight windows,
 a column, a separator, rooms named in the given words
-(`text:architecture.sample.*`, `sampleBedroom` with `{n}`), five dimensions
+(`text:architecture.sample-*`, `sample-bedroom` with `{n}`), five dimensions
 and eight furniture fills (hand-drawn fills, not library symbols, as today),
 and sets the page (A4 landscape at 1:50, the separator from
 `words.decimalSeparator`). Its users: the integration tests (C6), 3b's demo,
@@ -873,3 +873,5 @@ tests, `app_words_test`, `export_font_test` EF1-EF3, EF9-EF12): 3b.
   - 30 against-the-wall symbols.
   - Owners corrected and C7's placement rule added.
   - The missing rows, and the amendment lines for every other spec.
+- **Corrected while planning** (no change of design): the sample room words are
+  `text:architecture.sample-*`, hyphenated like the kit's other `text:` ids.
