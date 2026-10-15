@@ -874,6 +874,7 @@ class PlanController extends ChangeNotifier {
   /// `ArgumentError`, and a kit's hook failure the retry did not cure (one
   /// diagnostic). `StateError` (`PartialMutationError` included, after the
   /// damage is handled) goes on to the caller.
+  /// The rule is [_refusal]'s, which plan.select's drop shares (spec 3a C1.8).
   ///
   /// Drops the pending symbol definitions (spec 2b S2).
   ///
@@ -884,19 +885,32 @@ class PlanController extends ChangeNotifier {
     try {
       document.commands.execute(command);
       return true;
-    } on PlanLocked {
-      lockHint.value = true;
-      return false;
-    } on DanglingReferenceError {
-      return false;
-    } on PermissionDeniedError {
-      return false;
-    } on ArgumentError {
-      return false;
-    } on KitHookFailure catch (failure) {
-      _reportFailure(failure);
-      return false;
+    } catch (error) {
+      if (_refusal(error)) return false;
+      rethrow;
     }
+  }
+
+  /// Whether [error], thrown by an edit of the design, is a refusal: what
+  /// [execute] answers false for, and what cancels plan.select's drop
+  /// (spec 3a C1.8). [PlanLocked] ([lockHint] set), `DanglingReferenceError`,
+  /// `PermissionDeniedError`, `ArgumentError`, and a [KitHookFailure] the
+  /// retry did not cure (one diagnostic). Anything else, a `StateError`
+  /// (`PartialMutationError` included) above all, is the caller's.
+  bool _refusal(Object error) {
+    switch (error) {
+      case PlanLocked():
+        lockHint.value = true;
+        return true;
+      case DanglingReferenceError() ||
+            PermissionDeniedError() ||
+            ArgumentError():
+        return true;
+      case final KitHookFailure failure:
+        _reportFailure(failure);
+        return true;
+    }
+    return false;
   }
 
   void _reportFailure(KitHookFailure failure) => _diagnostics.add(KitDiagnostic(
@@ -924,6 +938,8 @@ class PlanController extends ChangeNotifier {
       toolId: toolId,
       log: _diagnostics,
       lockHint: lockHint,
+      // Spec 3a C1.8 (2): plan.select's drop is refused as execute refuses.
+      refusal: toolId == planSelectToolId ? _refusal : null,
       onFailed: () {
         if (!_disposed) selectTool(planSelectToolId);
       });
@@ -933,6 +949,31 @@ class PlanController extends ChangeNotifier {
   PlanType<Component>? typeOf(Handle object) {
     final typeId = catalog.typeIdOf(document, object);
     return typeId == null ? null : kits.typeOf(typeId);
+  }
+
+  /// The live objects [object] references in [d] (spec 3a C1.10): its
+  /// type's `references`, called on its component as stored (the pair of
+  /// its snapshot whose type id is the type's, so the call keeps the
+  /// type's own `T`), each one a loaded kit's object in [d]. Empty when no
+  /// loaded type names [object] (a missing kit's, an unreadable one's), and
+  /// when `references` throws: the type already failed, and the object is
+  /// frozen for it, with its diagnostic.
+  Set<Handle> _referencesOf(DraftDocument d, Handle object) {
+    final typeId = catalog.typeIdOf(d, object);
+    final type = typeId == null ? null : kits.typeOf(typeId);
+    if (type == null) return const {};
+    for (final (id, component) in d.components.snapshotOf(object).components) {
+      if (id != typeId) continue;
+      try {
+        return {
+          for (final h in type.parametric.references(component))
+            if (catalog.typeIdOf(d, h) != null) h,
+        };
+      } catch (_) {
+        return const {};
+      }
+    }
+    return const {};
   }
 
   // ---------------------------------------------------------------------
@@ -1611,7 +1652,8 @@ class PlanController extends ChangeNotifier {
         frozen: session.frozen,
         log: _diagnostics,
         lock: lockBroken,
-        damage: _damage);
+        damage: _damage,
+        referencesOf: _referencesOf);
     session.lockExpander
       ..onHookFailure = session.boundary.recover
       ..onPartialMutation = session.boundary.partialMutation
@@ -1809,6 +1851,7 @@ class PlanController extends ChangeNotifier {
           log: _diagnostics,
           lock: _lockFromCopy,
           damage: _damageCopy,
+          referencesOf: _referencesOf,
           groups: unitGroups,
           moves: () => permissions.serviceMove);
     } catch (_) {

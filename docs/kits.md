@@ -496,7 +496,7 @@ once per subject and code:
 |---|---|
 | a `ParametricType` hook | the edit is rolled back; the type's objects are probed, and each one whose hooks throw is frozen (treated as a plain group) and locked; the edit is tried once more. One broken object blocks one edit, once |
 | a component's `fromJson`, on load | the component is kept as stored, and its object is locked |
-| grips, an attachment provider | none for that object; no attachment |
+| grips, an attachment provider | an `ArgumentError` from a grip's `drag` or `preview` refuses that point (no move, nothing reported); anything else: no grips for that object; no attachment |
 | a tool's `create` | the tool is disabled |
 | a tool's event or painting | the tool is cancelled and selection is armed |
 | a spec's `write` or `apply` | the field shows its stored value |
@@ -506,6 +506,9 @@ once per subject and code:
 A plan that names a kit the host did not load opens: that kit's objects
 draw, are locked, and are saved back unchanged (`kitMissing`). A plan saved
 by a newer version of a loaded kit opens with a warning (`kitNewer`).
+
+A frozen object's live referents (an opening's host wall) are locked with
+it: they cannot be edited or deleted while it is frozen.
 
 ### 10.9 The engine's types, and byte equality
 

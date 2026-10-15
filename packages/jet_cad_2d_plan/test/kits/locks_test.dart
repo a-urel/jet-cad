@@ -394,17 +394,18 @@ void main() {
     addTearDown(b.dispose);
     final d = b.document;
     final before = canon(d);
-    // M-L11a: `on PlanLocked` dropped: the refusal escapes. A real move
-    // (not the square's own placement), so the rollback is observable.
+    // M-L11a: `_refusal`'s PlanLocked case dropped: the refusal escapes. A
+    // real move (not the square's own placement), so the rollback is
+    // observable.
     expect(
         b.execute(
             TransformNodeCommand(plan.square, nearSquare(310.5, -120.25, 0.2))),
         isFalse);
     expect(canon(d), before);
-    // M-L11b: `on ArgumentError` dropped.
+    // M-L11b: ArgumentError dropped from `_refusal`'s refusal case.
     expect(b.execute(_Throws(ArgumentError.value(3, 'side'))), isFalse);
-    // M-L11c: `on StateError` (or `catch (_)`) added: a StateError is the
-    // caller's.
+    // M-L11c: `_refusal` answering true for a StateError (or for anything):
+    // a StateError is the caller's.
     expect(() => b.execute(_Throws(StateError('refused'))), throwsStateError);
     expect(
         b.execute(SetEntityGeometryCommand(plan.line,
@@ -420,8 +421,8 @@ void main() {
         SquareParams(side: 450, partner: partner));
     c.frozen.add(partner);
     final state = e.commands.stateId;
-    // M-L11d: `on DanglingReferenceError` dropped: E2's refusal of a frozen
-    // object's cascade referrer escapes.
+    // M-L11d: DanglingReferenceError dropped from `_refusal`'s refusal case:
+    // E2's refusal of a frozen object's cascade referrer escapes.
     expect(
         c.execute(SetComponentCommand<SquareParams>(
             referrer, SquareParams(side: 520.5, partner: partner))),

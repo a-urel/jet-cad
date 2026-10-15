@@ -861,6 +861,14 @@ From the 3a spec
   so the built plan opens clean and still unsettled; its words are every
   loaded kit's, the host's first. A build that throws leaves the empty
   plan and is a `hookFailed` of the kit `plan`.
+- **P4, the failure boundary's grips row** (3a C1.8): an `ArgumentError`
+  from a kit grip's `drag` or `preview` refuses that point only (no move
+  for that event, no diagnostic, the grips kept); anything else keeps the
+  row. plan.select's drop is refused as `execute` refuses an edit (its
+  `false`: the drag cancelled, no exception); a `StateError` goes on.
+- **P4, the lock set** (3a C1.10, decision 6): the live objects a frozen
+  object references are locked with it, so they can be neither edited nor
+  deleted, up front or on commit (`PlanLocked`, the hint).
 
 ## Risks
 
