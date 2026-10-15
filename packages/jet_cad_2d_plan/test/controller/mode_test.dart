@@ -6,9 +6,8 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
+import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show placementTransform;
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
-import 'package:jet_cad_2d_plan/src/symbols/symbol_placer.dart'
-    show placementTransform;
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../support/harness.dart';

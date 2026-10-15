@@ -1,18 +1,13 @@
-// Spec 09c D2 (ported to the plan library, Task 14): the symbol's local
+// Spec 09c D2 (ported to the plan library, Task 14): a placed definition's
 // box. Ported from jet_cad_floor_plan's symbol_box_test.dart, assertions
-// unchanged; the furniture asset's literal boxes stay with that asset's kit
-// (sub-project 3), and the library entries are the plan library's fixture
-// library (kit "fixture"). Fixtures avoid the degenerate cases (P-2): the
-// box rules are pinned by leaves far from the origin, with every side of a
-// box set by a different kind of leaf, by an interior polyline vertex, by
-// an arc's axis extreme and by an arc's end point; arcs cross each axis
-// separately, none, from a negative start and clockwise.
-import 'dart:math' as math;
-
+// unchanged. The box functions are the contract's since 3a Task 1 (spec
+// C1.4), and so are their other tests (jet_cad_2d_kit's
+// test/model/symbol_box_test.dart); this case stays because it places
+// through the plan's placeSymbol. The furniture asset's literal boxes stay
+// with that asset's kit (3a Task 28).
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
-import 'package:jet_cad_2d_plan/src/symbols/symbol_box.dart';
 import 'package:jet_cad_2d_plan/src/symbols/symbol_placer.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
@@ -20,30 +15,6 @@ import '../support/symbol_fixtures.dart';
 
 SymbolEntry entryIn(SymbolLibrary lib, String key) =>
     lib.entries.firstWhere((e) => e.symbol.key == key);
-
-/// Far from the origin, as the plan's P-2 asks.
-const double cx = 1e5 + 37.5, cy = -7e4 + 12.25, r = 410.0;
-
-(EntityKind, GeometryPayload) arc(double start, double sweep) =>
-    (EntityKind.arc, arcPayload(Vector2(cx, cy), r, start, sweep));
-
-SymbolBox boxOfArc(double start, double sweep) =>
-    boxOfLeaves([arc(start, sweep)])!;
-
-/// The box of an arc from [start] through [sweep] by its end points only.
-({double minX, double maxX, double minY, double maxY}) ends(
-    double start, double sweep) {
-  final xs = [cx + r * math.cos(start), cx + r * math.cos(start + sweep)];
-  final ys = [cy + r * math.sin(start), cy + r * math.sin(start + sweep)];
-  return (
-    minX: math.min(xs[0], xs[1]),
-    maxX: math.max(xs[0], xs[1]),
-    minY: math.min(ys[0], ys[1]),
-    maxY: math.max(ys[0], ys[1]),
-  );
-}
-
-Matcher near(double v) => closeTo(v, 1e-9);
 
 DraftDocument target() {
   final doc = DraftDocument.empty();
@@ -63,234 +34,6 @@ Handle definitionOf(DraftDocument doc, String key) {
 }
 
 void main() {
-  group('SymbolBox', () {
-    test('width, depth and the back-centre of an off-origin box', () {
-      const b =
-          SymbolBox(left: -310.5, right: 1240.25, front: -75, back: 905.5);
-      expect(b.width, 1550.75);
-      expect(b.depth, 980.5);
-      expect(b.backCentre, Vector2(464.875, 905.5));
-    });
-
-    test('equality is exact on all four sides', () {
-      const b =
-          SymbolBox(left: -310.5, right: 1240.25, front: -75, back: 905.5);
-      // A box computed from a leaf: equal values, a distinct object (two
-      // equal `const` boxes would be one canonical object).
-      final computed = boxOfLeaves([
-        (
-          EntityKind.line,
-          linePayload(Vector2(1240.25, 905.5), Vector2(-310.5, -75))
-        )
-      ])!;
-      expect(identical(computed, b), isFalse);
-      expect(computed, b);
-      expect(computed.hashCode, b.hashCode);
-      for (final other in const [
-        SymbolBox(left: -310.4, right: 1240.25, front: -75, back: 905.5),
-        SymbolBox(left: -310.5, right: 1240.3, front: -75, back: 905.5),
-        SymbolBox(left: -310.5, right: 1240.25, front: -75.1, back: 905.5),
-        SymbolBox(left: -310.5, right: 1240.25, front: -75, back: 905.6),
-      ]) {
-        expect(b == other, isFalse, reason: '$other');
-      }
-    });
-  });
-
-  group('boxOfLeaves', () {
-    test('each side set by a different kind of leaf, far from the origin', () {
-      // left: a circle's centre − r; right: a polyline's interior vertex;
-      // front: an arc's axis extreme (3π/2); back: a line's second end.
-      final box = boxOfLeaves([
-        (
-          EntityKind.line,
-          linePayload(
-              Vector2(1e5 + 100, -7e4 + 200), Vector2(1e5 + 300, -7e4 + 950))
-        ),
-        (
-          EntityKind.polyline,
-          polylinePayload([
-            Vector2(1e5 + 50, -7e4 + 100),
-            Vector2(1e5 + 1200, -7e4 + 400),
-            Vector2(1e5 + 60, -7e4 + 700),
-          ])
-        ),
-        (EntityKind.circle, circlePayload(Vector2(1e5 - 20, -7e4 + 300), 180)),
-        (
-          EntityKind.arc,
-          arcPayload(Vector2(1e5 + 500, -7e4 + 100), 250, math.pi + 0.3, 2.5)
-        ),
-      ])!;
-      expect(
-          box,
-          const SymbolBox(
-              left: 1e5 - 200,
-              right: 1e5 + 1200,
-              front: -7e4 - 150,
-              back: -7e4 + 950));
-    });
-
-    test('a circle is its centre ± r on every side', () {
-      final box = boxOfLeaves([
-        (EntityKind.circle, circlePayload(Vector2(-2400.5, 3100.25), 72.5))
-      ])!;
-      expect(
-          box,
-          const SymbolBox(
-              left: -2473, right: -2328, front: 3027.75, back: 3172.75));
-    });
-
-    test('a closed polyline counts every vertex once, a line both ends', () {
-      final box = boxOfLeaves([
-        (
-          EntityKind.polyline,
-          polylinePayload([
-            Vector2(-50, 20),
-            Vector2(10, -40),
-            Vector2(70, 15),
-            Vector2(5, 90),
-          ], closed: true)
-        ),
-        (EntityKind.line, linePayload(Vector2(-10, 30), Vector2(95, 10))),
-      ])!;
-      expect(box, const SymbolBox(left: -50, right: 95, front: -40, back: 90));
-    });
-
-    test('no leaf has no box; a leaf of another kind draws nothing', () {
-      expect(boxOfLeaves(const []), isNull);
-      expect(
-          boxOfLeaves([
-            (
-              EntityKind.point,
-              linePayload(Vector2(9e4, 9e4), Vector2(9e4, 9e4))
-            )
-          ]),
-          isNull);
-      final box = boxOfLeaves([
-        (EntityKind.circle, circlePayload(Vector2(-2400.5, 3100.25), 72.5)),
-        (EntityKind.point, polylinePayload([Vector2(9e4, -9e4)])),
-        (EntityKind.text, textPayload(Vector2(-9e4, 9e4), 250)),
-      ])!;
-      expect(
-          box,
-          const SymbolBox(
-              left: -2473, right: -2328, front: 3027.75, back: 3172.75));
-    });
-  });
-
-  group('an arc by its true extents', () {
-    test('a sweep that crosses 0 rad only', () {
-      const s = -math.pi / 6, w = math.pi / 3;
-      final b = boxOfArc(s, w), e = ends(s, w);
-      expect(b.right, cx + r);
-      expect(b.left, near(e.minX));
-      expect(b.front, near(e.minY));
-      expect(b.back, near(e.maxY));
-    });
-
-    test('a sweep that crosses π/2 only', () {
-      const s = math.pi / 3, w = math.pi / 3;
-      final b = boxOfArc(s, w), e = ends(s, w);
-      expect(b.back, cy + r);
-      expect(b.left, near(e.minX));
-      expect(b.right, near(e.maxX));
-      expect(b.front, near(e.minY));
-    });
-
-    test('a sweep that crosses π only', () {
-      const s = 5 * math.pi / 6, w = math.pi / 3;
-      final b = boxOfArc(s, w), e = ends(s, w);
-      expect(b.left, cx - r);
-      expect(b.right, near(e.maxX));
-      expect(b.front, near(e.minY));
-      expect(b.back, near(e.maxY));
-    });
-
-    test('a sweep that crosses 3π/2 only', () {
-      const s = 4 * math.pi / 3, w = math.pi / 3;
-      final b = boxOfArc(s, w), e = ends(s, w);
-      expect(b.front, cy - r);
-      expect(b.left, near(e.minX));
-      expect(b.right, near(e.maxX));
-      expect(b.back, near(e.maxY));
-    });
-
-    test('a sweep that crosses no axis is its end points', () {
-      const s = math.pi / 12, w = math.pi / 3;
-      final b = boxOfArc(s, w), e = ends(s, w);
-      expect(b.left, near(e.minX));
-      expect(b.right, near(e.maxX));
-      expect(b.front, near(e.minY));
-      expect(b.back, near(e.maxY));
-      expect(b.right, lessThan(cx + r - 1));
-      expect(b.back, lessThan(cy + r - 1));
-    });
-
-    test('a negative start (−120° through 90°) crosses −π/2', () {
-      const s = -2 * math.pi / 3, w = math.pi / 2;
-      final b = boxOfArc(s, w), e = ends(s, w);
-      expect(b.front, cy - r);
-      expect(b.left, near(cx - r / 2));
-      expect(b.right, near(cx + r * math.cos(math.pi / 6)));
-      expect(b.back, near(cy - r / 2));
-      expect(b.left, near(e.minX));
-    });
-
-    test('a start past 2π crosses π', () {
-      const s = 2 * math.pi + 5 * math.pi / 6, w = math.pi / 3;
-      final b = boxOfArc(s, w);
-      expect(b.left, cx - r);
-      expect(b.back, near(cy + r / 2));
-      expect(b.front, near(cy - r / 2));
-    });
-
-    test('a clockwise sweep from π/3 back through 0 to −π/6', () {
-      const s = math.pi / 3, w = -math.pi / 2;
-      final b = boxOfArc(s, w), e = ends(s, w);
-      expect(b.right, cx + r);
-      expect(b.back, near(e.maxY));
-      expect(b.front, near(e.minY));
-      expect(b.left, near(e.minX));
-      expect(b.back, lessThan(cy + r - 1));
-    });
-
-    test('a full turn is the whole circle', () {
-      final b = boxOfArc(0.7, 2 * math.pi);
-      expect(b,
-          SymbolBox(left: cx - r, right: cx + r, front: cy - r, back: cy + r));
-    });
-  });
-
-  group('library entries', () {
-    test('the off-centre fixtures: back and left from an arc', () {
-      final lib = SymbolLibrary.decode(bytesOf(buildValidLibrary()));
-      // Sofa: the arc (900, 900) r 250 from 0.5 through 1.75 rad crosses
-      // π/2, so its back is 1150, beyond the polyline's 950.
-      expect(boxOfEntry(entryIn(lib, 'fixture.sofa.three')),
-          const SymbolBox(left: 120, right: 1680, front: 340, back: 1150));
-      // Armchair: the arc (500, 500) r 300 from 0.25 through 2.5 rad sets
-      // the left and right by its end points and the back by π/2; the
-      // circle (510, 480) r 120 sets the front.
-      final a = boxOfEntry(entryIn(lib, 'fixture.armchair.single'))!;
-      expect(a.left, near(500 + 300 * math.cos(2.75)));
-      expect(a.right, near(500 + 300 * math.cos(0.25)));
-      expect(a.front, 360);
-      expect(a.back, 800);
-      expect(a.backCentre.x, near((a.left + a.right) / 2));
-      expect(a.backCentre.y, 800);
-      expect(boxOfEntry(entryIn(lib, 'fixture.nightstand.single')),
-          const SymbolBox(left: 50, right: 450, front: 60, back: 410));
-    });
-
-    test('memoised per entry: the same object on every call', () {
-      final lib = SymbolLibrary.decode(bytesOf(buildValidLibrary()));
-      final toilet = entryIn(lib, 'fixture.sofa.three');
-      final tub = entryIn(lib, 'fixture.armchair.single');
-      expect(identical(boxOfEntry(toilet), boxOfEntry(toilet)), isTrue);
-      expect(boxOfEntry(tub), isNot(boxOfEntry(toilet)));
-    });
-  });
-
   group('boxOfDefinition', () {
     test('a placed definition gives the same box as its entry', () {
       final lib = SymbolLibrary.decode(bytesOf(buildValidLibrary()));
@@ -314,30 +57,6 @@ void main() {
             boxOfEntry(entryIn(lib, key)),
             reason: key);
       }
-    });
-
-    test(
-        'not a definition (the root, a leaf, nothing), or a definition '
-        'without leaves: no box', () {
-      final doc = target();
-      doc.commands.execute(AddDefinitionCommand(Definition(
-          handle: const Handle(0x7A1),
-          name: 'empty',
-          basePoint: Vector2(-40, 75),
-          children: const [])));
-      // The root owns a drawn line and a circle: it is not a definition.
-      doc.commands.execute(CompoundCommand([
-        AddEntityCommand(
-            record: leafRecord(0x7B0, doc.rootHandle, EntityKind.line),
-            payload: linePayload(Vector2(1e5, -7e4), Vector2(1e5 + 900, -7e4))),
-        AddEntityCommand(
-            record: leafRecord(0x7B1, doc.rootHandle, EntityKind.circle),
-            payload: circlePayload(Vector2(-310, 925), 60)),
-      ], label: 'Model space'));
-      expect(boxOfDefinition(doc, const Handle(0x7A1)), isNull);
-      expect(boxOfDefinition(doc, const Handle(0x7A2)), isNull);
-      expect(boxOfDefinition(doc, doc.rootHandle), isNull);
-      expect(boxOfDefinition(doc, const Handle(0x7B0)), isNull);
     });
   });
 }

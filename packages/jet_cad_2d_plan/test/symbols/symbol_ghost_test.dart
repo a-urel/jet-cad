@@ -36,7 +36,6 @@ import 'package:jet_cad_2d_kit/authoring.dart'
         encodeLibrary;
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
 import 'package:jet_cad_2d_plan/src/symbols/symbol_ghost.dart';
-import 'package:jet_cad_2d_plan/src/symbols/symbol_placer.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 /// A closed rectangle from (x0, y0) to (x1, y1).

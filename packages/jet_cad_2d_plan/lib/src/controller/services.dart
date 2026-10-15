@@ -8,7 +8,6 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
 
 import '../symbols/plan_symbol.dart';
-import '../symbols/symbol_box.dart' show servedTopOfEntry;
 import '../symbols/symbol_placer.dart' show definitionForEntry;
 import 'session.dart';
 import 'tool_settings_store.dart';

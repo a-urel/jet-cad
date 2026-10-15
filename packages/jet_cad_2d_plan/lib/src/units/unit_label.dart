@@ -7,10 +7,13 @@
 // No Flutter import: Dart over package:jet_cad_2d and the kit's model.
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart'
-    show kUnitLabelTag, kUnitLabelTextAttrs, unitLabelHeight, unitLabelPayload;
+    show
+        boxOfLeaves,
+        kUnitLabelTag,
+        kUnitLabelTextAttrs,
+        unitLabelHeight,
+        unitLabelPayload;
 import 'package:vector_math/vector_math_64.dart' show Vector2;
-
-import '../symbols/symbol_box.dart' show boxOfLeaves;
 
 /// A label's longest length, in UTF-16 code units.
 const int kUnitLabelMaxLength = 8;

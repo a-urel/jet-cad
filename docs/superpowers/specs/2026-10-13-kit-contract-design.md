@@ -409,6 +409,19 @@ version's English. The umbrella's A2 now matches K5 (words on the kit, a
   only whoever runs its tests, never a host; PR6 K6's `CatalogArc` bullet
   states the signed sweep that PR3 introduced.
 
+## Amendments from sub-project 3a (2026-10-15)
+
+Each line is written by the 3a task that lands it (the 3a spec,
+[2026-10-15-architecture-kit-design.md](2026-10-15-architecture-kit-design.md),
+"Amendments to other specs").
+
+- **The symbol box family** (3a C1.4): `SymbolBox`, `isOrthonormal`,
+  `boxOfLeaves`, `boxOfEntry`, `servedTopOfEntry`, `boxOfDefinition`,
+  `footprintOf` and `placementTransform` are the contract's, pure Dart in
+  the model (`lib/src/model/symbol_box.dart`), exported by both libraries;
+  moved unchanged from the plan library, which imports them from here and
+  keeps no copy.
+
 ## Inputs for sub-project 2
 
 The final review's API risks, none needing a breaking change if settled in

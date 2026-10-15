@@ -7,11 +7,17 @@ import 'dart:math' as math;
 
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart'
-    show SymbolComponent, SymbolEntry, UnitComponent;
+    show
+        SymbolBox,
+        SymbolComponent,
+        SymbolEntry,
+        UnitComponent,
+        boxOfDefinition,
+        boxOfEntry,
+        isOrthonormal;
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../symbols/plan_symbol.dart';
-import '../symbols/symbol_box.dart';
 import '../symbols/symbol_placer.dart' show definitionForEntry;
 
 /// [handle] is a root-level instance whose definition carries a
@@ -129,18 +135,6 @@ double rotationDegreesOf(Transform2 t) {
 
 double _clean(double v) => v == 0 ? 0.0 : v;
 
-/// Whether [g]'s linear part is orthonormal (spec 09c W-8, S-10):
-/// `|a² + b² − 1|`, `|c² + d² − 1|` and `|ac + bd|` each at most
-/// `Tolerance.standard.linear`. A mirror is orthonormal; a scale is not.
-/// Copied from jet_cad_floor_plan/lib/src/symbols/wall_attach.dart:402-407
-/// (the wall attachment is sub-project 3's).
-bool _isOrthonormal(Transform2 g) {
-  final tol = Tolerance.standard.linear;
-  return (g.a * g.a + g.b * g.b - 1).abs() <= tol &&
-      (g.c * g.c + g.d * g.d - 1).abs() <= tol &&
-      (g.a * g.c + g.b * g.d).abs() <= tol;
-}
-
 /// [t] turned so its Rotation reads [degrees] (any finite number, taken
 /// modulo 360), about the insertion point `t · basePoint` (D7): the linear
 /// part `A` becomes `R(θ' − θ)·A`, so a mirror and a file's scale are
@@ -154,7 +148,7 @@ Transform2 rotatedTo(Transform2 t, Vector2 basePoint, double degrees) {
   final cs = math.cos(delta), sn = math.sin(delta);
   var a = cs * t.a - sn * t.b, b = sn * t.a + cs * t.b;
   var c = cs * t.c - sn * t.d, d = sn * t.c + cs * t.d;
-  if (target % 90 == 0 && _isOrthonormal(Transform2(a, b, c, d, 0, 0))) {
+  if (target % 90 == 0 && isOrthonormal(Transform2(a, b, c, d, 0, 0))) {
     final (qc, qs) = _quarter(target ~/ 90);
     if (t.a * t.d - t.b * t.c < 0) {
       // R(θ')·scale(−1, 1).

@@ -29,7 +29,6 @@ import '../l10n/number_text.dart';
 import '../l10n/strings.dart';
 import '../l10n/strings_en.dart';
 import '../shortcuts/plan_shortcut_guard.dart';
-import '../symbols/symbol_box.dart';
 import '../units/unit_problems.dart' show DuplicateLabel;
 import '../units/unit_rotate.dart' show rotateUnitCommand;
 import '../units/unit_words.dart';

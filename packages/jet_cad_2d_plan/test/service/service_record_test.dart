@@ -9,8 +9,6 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
 import 'package:jet_cad_2d_plan/src/kits/locks.dart' show LockSet;
 import 'package:jet_cad_2d_plan/src/service/service_record.dart';
-import 'package:jet_cad_2d_plan/src/symbols/symbol_placer.dart'
-    show placementTransform;
 import 'package:jet_cad_2d_plan/src/units/unit_index.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
