@@ -28,7 +28,7 @@
 - **Where a ported test runs** (spec C7): in the kit when every name it uses is the kit's, the contract's, the engine's or the Flutter layer's (with `FakePlanServices` for tools and grips); in `jet_cad_2d_integration` when it uses a plan-library name. A file may split by case; each split is listed in the task.
 - **Today's code is the oracle** for every "today" in the spec (A12): `packages/jet_cad_floor_plan` and `apps/floor_planner`.
 - **Non-negotiables (CLAUDE.md):** the frame path allocates nothing per entity in steady state; draw order is ascending handle value; geometric decisions use `Tolerance`, stored-value comparisons are exact `==`.
-- **`analysis_options.yaml`.** Never stage an existing one: `flutter pub get` rewrites three of them in this workspace; restore a rewritten one with `git checkout -- <file>`. **Plan decision (needs the human's confirmation before Task 9, see the hand-off):** each new package's `analysis_options.yaml` is created and committed **once**, in Task 9, by explicit path, copied from `packages/jet_cad_2d_plan/analysis_options.yaml`, as sub-project 1 and 2a did for theirs (the human's *"Bir kez commit edilsin"*).
+- **`analysis_options.yaml`.** Never stage an existing one: `flutter pub get` rewrites three of them in this workspace; restore a rewritten one with `git checkout -- <file>`. **Plan decision (the human left it to the controller, 2026-10-15: *"kararları sana bırakıyorum"*; the controller kept 2a's precedent):** each new package's `analysis_options.yaml` is created and committed **once**, in Task 9, by explicit path, copied from `packages/jet_cad_2d_plan/analysis_options.yaml`, as sub-project 1 and 2a did for theirs (the human's *"Bir kez commit edilsin"*).
 - **Stage files by explicit path only.** Never `git add -A` or `git add .`. Run `git status --short` after every pub operation.
 - **Never synthesize test output.** Quote what commands print; reviewers re-run every claim.
 - **Mutations.** Run them on committed files only, and revert each with `git checkout -- <file>`; then `git diff --quiet -- <file>` must exit 0. **In every task, run the Commit step before the Mutation step.** Never restore from a `/tmp` copy, and never `git checkout --` a file with uncommitted work.
@@ -21402,6 +21402,8 @@ Nine writers drafted the tasks in parallel; one reconcile pass and five pre-flig
 | (reconcile) | 19, 20 | TT10 (and M-RT-7, M-RT-10) moved from Task 19 to Task 20. |
 
 ### Ported assertion lines dropped or with a changed instrument (the human's word, A14)
+
+**Decided** (2026-10-15): the human left these to the controller (*"kararları sana bırakıyorum. hemen başla."*); the controller accepts every row below with its stated reason. A further line an implementer cannot keep is a finding to report, not covered by this decision.
 
 Not C7 classes 1-3 (ids, tags to fields, widget form). Each: task, test id, the line, the reason.
 
