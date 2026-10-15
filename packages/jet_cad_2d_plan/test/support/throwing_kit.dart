@@ -4,6 +4,7 @@
 // (that hook's guard removed). Three types, so every engine hook is
 // reachable: `boom.block` (grips, properties, section, title, colour),
 // `boom.post` (contributes places) and `boom.zone` (reads them).
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/gestures.dart' show kPrimaryButton;
 import 'package:flutter/material.dart' hide Tolerance;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
@@ -30,6 +31,8 @@ const Set<String> boomHooks = {
   // (isMidShape) and its dispose.
   'toolCreate', 'toolDown', 'toolMove', 'toolUp', 'toolExit', 'toolKey',
   'toolCancel', 'toolPaint', 'toolMidShape', 'toolDispose',
+  // Spec 3a C1.2: the tool's notice getter, then its value.
+  'notice', 'noticeValue',
   // The attachment provider: its factory, then attach.
   'attachCreate', 'attach',
   // Properties, the section (its builder, then the widget it returns), the
@@ -191,6 +194,7 @@ final class ThrowingKit {
         'type:boom.post': 'Post',
         'type:boom.zone': 'Zone',
         'tool:boom.tool': 'Boom',
+        'text:boom.alert': 'Alert {n}',
         'property:boom.block.size': 'Size',
         'property:boom.block.grow': 'Grow',
         'property:boom.block.shown': 'Shown',
@@ -462,10 +466,20 @@ final class BoomGrips implements ObjectGripProvider, Disposable {
 
 /// A press places a 400 mm block at the press; every other call only
 /// checks its hook.
-final class BoomTool extends Tool {
+final class BoomTool extends Tool implements ToolNotice {
   BoomTool(this.kit);
 
   final ThrowingKit kit;
+
+  /// The notice a test sets; null by default, so no status line changes.
+  final ValueNotifier<KitText?> said = ValueNotifier(null);
+  late final BoomNotice _notice = BoomNotice(kit, said);
+
+  @override
+  ValueListenable<KitText?> get notice {
+    kit.check('notice');
+    return _notice;
+  }
 
   @override
   String get name => 'Boom';
@@ -481,6 +495,7 @@ final class BoomTool extends Tool {
 
   @override
   void dispose() {
+    said.dispose();
     kit.check('toolDispose');
     super.dispose();
   }
@@ -522,6 +537,26 @@ final class BoomTool extends Tool {
   void paintWorldOverlay(
           Canvas canvas, Vector2 origin, double scale, PaperPalette paper) =>
       kit.check('toolPaint');
+}
+
+/// The boom tool's notice: its value checks `noticeValue`.
+final class BoomNotice implements ValueListenable<KitText?> {
+  BoomNotice(this.kit, this._said);
+
+  final ThrowingKit kit;
+  final ValueNotifier<KitText?> _said;
+
+  @override
+  KitText? get value {
+    kit.check('noticeValue');
+    return _said.value;
+  }
+
+  @override
+  void addListener(VoidCallback listener) => _said.addListener(listener);
+
+  @override
+  void removeListener(VoidCallback listener) => _said.removeListener(listener);
 }
 
 /// The test edge at `y = -2000`, kind `boom-edge`, whose attach can throw.

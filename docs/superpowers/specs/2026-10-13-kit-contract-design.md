@@ -442,6 +442,9 @@ Each line is written by the 3a task that lands it (the 3a spec,
   library, over patterns that name no plan type), `PlanWords.text` and
   `PlanWords.decimalSeparator`, inherited by `KitWords` (the UI
   language's separator, which the plan fills from its `PlanStrings`).
+- **Tool notices** (3a C1.2): the surface gains `ToolNotice`, a kit tool's
+  `ValueListenable<KitText?> notice`, which the plan library reads through
+  its guard and shows on the status line.
 
 ## Inputs for sub-project 2
 

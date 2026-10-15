@@ -554,6 +554,11 @@ class PlanController extends ChangeNotifier {
   final ValueNotifier<bool> _canUndo = ValueNotifier(false);
   final ValueNotifier<bool> _canRedo = ValueNotifier(false);
   final ValueNotifier<String> _activeTool = ValueNotifier(planSelectToolId);
+
+  /// The active tool's notice, copied from its guarded listenable (spec 3a
+  /// C1.2), and the listenable it is copied from now.
+  final ValueNotifier<KitText?> _toolNotice = ValueNotifier(null);
+  ValueListenable<KitText?>? _noticeSource;
   Set<String> _missingKits = const {};
 
   late final PlanChangeTracker _tracker = PlanChangeTracker(_emit);
@@ -1552,6 +1557,7 @@ class PlanController extends ChangeNotifier {
     session.boundary.reportUnreadable(_loadDiagnostics);
     session.boundary.probeLoaded();
     _reportUnofferedKinds();
+    _rebindNotice();
   }
 
   /// What the plan's manifest says against the loaded kits (Task 7).
@@ -1979,8 +1985,39 @@ class PlanController extends ChangeNotifier {
   /// The active tool's id (`plan.select`, a kit's `<kit>.<tool>`).
   ValueListenable<String> get activeTool => _activeTool;
 
+  /// The active tool's notice (spec 3a C1.2), null when it has none: a
+  /// word id and its arguments, for [textOf] when the line is read.
+  ValueListenable<KitText?> get toolNotice => _toolNotice;
+
+  /// [text] in words (spec 3a C1.2, C1.6): the host's word first, then the
+  /// kit's the id names, in the current locale, else English; the id itself
+  /// when no one words it; its placeholders filled.
+  String textOf(KitText text) {
+    final id = text.id;
+    final names =
+        _names[kitOfKey(id.substring(id.indexOf(':') + 1))] ?? _hostWords;
+    return fillText(
+        names.word(_locale.value.languageCode, id) ?? id, text.args);
+  }
+
+  /// Follows the active tool's notice: rebinds when the tool changed,
+  /// then copies its value.
+  void _rebindNotice() {
+    final active = _session.tools.active;
+    final next = active is GuardedTool ? active.notice : null;
+    if (!identical(next, _noticeSource)) {
+      _noticeSource?.removeListener(_copyNotice);
+      _noticeSource = next;
+      next?.addListener(_copyNotice);
+    }
+    _copyNotice();
+  }
+
+  void _copyNotice() => _toolNotice.value = _noticeSource?.value;
+
   void _onTools() {
     _activeTool.value = _session.idOf(_session.tools.active);
+    _rebindNotice();
   }
 
   /// Arms the tool [id] (spec P2), as a palette tap would, and answers
@@ -2595,6 +2632,8 @@ class PlanController extends ChangeNotifier {
         ..dispose();
     }
     final session = _session;
+    _noticeSource?.removeListener(_copyNotice);
+    _noticeSource = null;
     session.tools.removeListener(_onTools);
     session.selection.removeListener(_onDesignSelection);
     session
@@ -2612,6 +2651,7 @@ class PlanController extends ChangeNotifier {
     _canUndo.dispose();
     _canRedo.dispose();
     _activeTool.dispose();
+    _toolNotice.dispose();
     _fill.dispose();
     _locked.dispose();
     _mode.dispose();

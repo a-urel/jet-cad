@@ -841,6 +841,14 @@ From the 3a spec
   `(context, PlanSection<T>)`, the section holding the value, the commit,
   the words, the object and the kit's services. `PlanKit.validate` refuses
   a `TextDisplay` or a `range` in a tool's settings (`settingsNeedObject`).
+- **P2, the status line and tool notices** (3a C1.2): a kit's `Tool` may
+  implement `ToolNotice` (a `ValueListenable<KitText?>`); the guard
+  forwards it (`GuardedTool.notice`; a throw is one `hookFailed`, then
+  null); `PlanController.toolNotice` is the active tool's notice and
+  `textOf` puts a `KitText` into words (the host's first, then the kit's,
+  in the current locale). `PlanEditor`'s status line is the tool's label,
+  then ` — n selected` with a selection, then ` — <notice>`, worded when
+  it is read, so a language switch re-words it at once.
 
 ## Risks
 

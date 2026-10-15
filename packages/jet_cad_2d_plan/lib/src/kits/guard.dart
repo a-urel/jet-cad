@@ -6,6 +6,7 @@
 // flow after a failed edit: probe the type's objects (E2), freeze and lock
 // the failing ones, retry once; and the load's check. [DiagnosticsLog]
 // keeps one diagnostic per kit, subject and code.
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
@@ -389,6 +390,28 @@ final class GuardedTool extends Tool {
     }
   }
 
+  bool _noticeRead = false;
+  _GuardedNotice? _notice;
+
+  /// The inner tool's notice when it is a [ToolNotice] (spec 3a C1.2),
+  /// through the guard: read once, then the same listenable for the tool's
+  /// life. A throwing `notice` getter is one diagnostic and no notice; a
+  /// throwing value or listener is one diagnostic, then null.
+  ValueListenable<KitText?>? get notice {
+    if (!_noticeRead) {
+      _noticeRead = true;
+      final inner = this.inner;
+      if (inner is ToolNotice) {
+        try {
+          _notice = _GuardedNotice(this, (inner as ToolNotice).notice);
+        } catch (e, s) {
+          _getterFailed(e, s);
+        }
+      }
+    }
+    return _notice;
+  }
+
   @override
   void onPointerDown(ToolPointerEvent e, ToolContext ctx) {
     try {
@@ -475,6 +498,52 @@ final class GuardedTool extends Tool {
       log.add(_diagnostic(error));
     }
     super.dispose();
+  }
+}
+
+/// A kit tool's notice read at the boundary (spec 3a C1.2): what it throws
+/// is its tool's getter failure (one diagnostic after the frame), and from
+/// then on it answers null and holds no listener.
+final class _GuardedNotice implements ValueListenable<KitText?> {
+  _GuardedNotice(this._tool, this._inner);
+
+  final GuardedTool _tool;
+  final ValueListenable<KitText?> _inner;
+  bool _failed = false;
+
+  void _fail(Object error, StackTrace stack) {
+    _failed = true;
+    _tool._getterFailed(error, stack);
+  }
+
+  @override
+  KitText? get value {
+    if (_failed) return null;
+    try {
+      return _inner.value;
+    } catch (e, s) {
+      _fail(e, s);
+      return null;
+    }
+  }
+
+  @override
+  void addListener(VoidCallback listener) {
+    if (_failed) return;
+    try {
+      _inner.addListener(listener);
+    } catch (e, s) {
+      _fail(e, s);
+    }
+  }
+
+  @override
+  void removeListener(VoidCallback listener) {
+    try {
+      _inner.removeListener(listener);
+    } catch (e, s) {
+      _fail(e, s);
+    }
   }
 }
 
