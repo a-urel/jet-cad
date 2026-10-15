@@ -25,7 +25,7 @@ import 'editor_rig.dart';
 import 'wall_fixture.dart';
 
 export 'editor_rig.dart' show globalAt, kitCatalog, press, pumpEditor, status;
-export 'wall_fixture.dart' show driftOf, enc, kids, kindOf, payloadOf;
+export 'wall_fixture.dart' show canon, driftOf, enc, kids, kindOf, payloadOf;
 
 // ---------------------------------------------------------------------------
 // The plan model, copied (room_fixture.dart:26-96).

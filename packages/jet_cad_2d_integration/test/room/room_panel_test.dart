@@ -29,6 +29,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
 import 'package:jet_cad_2d_integration/jet_cad_2d_integration.dart';
 import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
+import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart' show PlanLocked;
 
 import '../support/room_plans.dart';
 
@@ -400,15 +401,17 @@ void main() {
     expect(nameOf(doc, r.b), 'Room 2');
   });
 
-  // Skipped pending a ruling (Task 18's report): its premise cannot hold
-  // over the plan library. The plan opens this file with A frozen (its
-  // regeneration fails: its fill names B's boundary), so the raw rename
-  // throws PlanLocked, not the engine's StateError, and a frozen A shows no
-  // Room section to type into. Its assertions are today's, unchanged.
+  // RN5-open and RN5-refused replace today's "RN5 a refused edit".
+  // Decided: the old premise (an engine StateError reaching a live room)
+  // cannot exist under C1.10's freeze at open. The plan opens a room whose
+  // regeneration the engine refuses frozen, so its rename is the lock's
+  // refusal and it shows no Room section (RN5-open); the old intent, a
+  // refused edit that reverts and re-pins, is kept on a live room whose
+  // name the type refuses (RN5-refused).
   testWidgets(
-      'RN5 a refused edit (a loaded room whose tint fill names another '
-      'room\'s boundary) reverts and re-pins; no exception escapes Enter or '
-      'the focus loss', (tester) async {
+      'RN5-open a loaded room whose tint fill names another room\'s '
+      'boundary opens frozen: its rename is locked, it shows no Room '
+      'section; B is sound', (tester) async {
     final src = roomsPlan();
     final j = jsonDecode(src.p.c.save()) as Map<String, Object?>;
     final aFill = kids(src.doc, src.a)
@@ -426,27 +429,20 @@ void main() {
     addTearDown(c.dispose);
     final doc = c.document;
     await pumpEditor(tester, c);
+    expect(c.frozen, contains(src.a), reason: 'frozen at open');
+    expect(c.frozen, isNot(contains(src.b)));
     final a0 = doc.components.get<RoomParams>(src.a)!;
-    final before = enc(doc);
-    // The premise: the document itself refuses A's rename.
+    final before = canon(doc);
     expect(
         () => doc.commands.execute(
             SetComponentCommand<RoomParams>(src.a, a0.copyWith(name: 'Study'))),
-        throwsStateError);
-    expect(enc(doc), before);
+        throwsA(isA<PlanLocked>()));
+    expect(canon(doc), before);
+    expect(doc.commands.undoDepth, 0);
 
     await select(tester, c, [src.a]);
-    await enterAndSubmit(tester, 'Study');
     expect(tester.takeException(), isNull);
-    expect(fieldText(tester), 'Kitchen', reason: 'reverted');
-    expect(enc(doc), before);
-    // Re-pinned: the focus loss alone is refused alike.
-    await typeName(tester, 'Office');
-    await blur(tester);
-    expect(tester.takeException(), isNull);
-    expect(fieldText(tester), 'Kitchen');
-    expect(enc(doc), before);
-    expect(doc.commands.undoDepth, 0);
+    expect(section, findsNothing, reason: 'a frozen room has no section');
 
     // B is sound: its rename lands.
     await select(tester, c, [src.b]);
@@ -454,7 +450,39 @@ void main() {
     expect(nameOf(doc, src.b), 'Hall');
     expect(labelStrings(doc, src.b), ['Hall', '12.16 m²']);
     expect(doc.commands.undoDepth, 1);
-  }, skip: true);
+  });
+
+  testWidgets(
+      'RN5-refused a name the room type refuses reverts and re-pins; no '
+      'exception escapes Enter or the focus loss (M-RM-2)', (tester) async {
+    final r = roomsPlan();
+    final doc = r.doc;
+    await pumpEditor(tester, r.p.c);
+    final before = canon(doc);
+    await select(tester, r.p.c, [r.a]);
+
+    // The panel commits '' (its own trim): RoomParams' write throws
+    // ArgumentError, which the panel takes as a refusal.
+    await enterAndSubmit(tester, '');
+    expect(tester.takeException(), isNull);
+    expect(fieldText(tester), 'Kitchen', reason: 'reverted');
+    expect(canon(doc), before);
+    // Re-pinned: the focus loss alone is refused alike.
+    await typeName(tester, ' \t ');
+    await blur(tester);
+    expect(tester.takeException(), isNull);
+    expect(fieldText(tester), 'Kitchen');
+    expect(canon(doc), before);
+    expect(doc.commands.undoDepth, 0);
+
+    // Still A's field, and editable: a sound name lands on A, once.
+    expect(tester.widget<TextField>(name).readOnly, isFalse);
+    await enterAndSubmit(tester, 'Study');
+    expect(nameOf(doc, r.a), 'Study');
+    expect(labelStrings(doc, r.a), ['Study', '10.83 m²']);
+    expect(nameOf(doc, r.b), 'Room 2');
+    expect(doc.commands.undoDepth, 1);
+  });
 
   testWidgets(
       'RN6 the Area line shows the area label\'s string: after a page change '
