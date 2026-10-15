@@ -16,7 +16,13 @@ final PlanKit architectureKit = PlanKit(
   id: 'architecture',
   version: '0.1.0',
   types: [boxPlanType, wallPlanType, openingPlanType],
-  tools: [boxPlanTool, wallPlanTool],
+  tools: [
+    boxPlanTool,
+    wallPlanTool,
+    doorPlanTool,
+    windowPlanTool,
+    gapPlanTool,
+  ],
   names: architectureNames,
   prepare: ensureDashedLinetype,
 );

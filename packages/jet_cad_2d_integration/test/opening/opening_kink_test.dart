@@ -1,6 +1,6 @@
 // Ported from jet_cad_floor_plan/test/opening_kink_test.dart (spec 3a C6, C7):
-// KJ4 and KJ5 over architectureController in PlanEditor; KJ1, KJ1 (1e-6°),
-// KJ2 and KJ6 run in the kit, KJ3 is Task 15's.
+// KJ3 (Task 15), KJ4 and KJ5 over architectureController in PlanEditor;
+// KJ1, KJ1 (1e-6°), KJ2 and KJ6 run in the kit.
 // ignore_for_file: invalid_use_of_internal_member
 // The final review's I1 (spec 08 D8 and D9, as amended by the final fix
 // wave): an opening clamped against the end of a wall whose joint is kinked
@@ -16,6 +16,7 @@
 // plan is turned 23 degrees, and the camera of the shell tests is rotated.
 import 'dart:math' as math;
 
+import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
@@ -59,6 +60,34 @@ double bendOf(DraftDocument doc) {
 }
 
 void main() {
+  testWidgets(
+      'KJ3 (shell) the Window tool clicked near the 2°-kinked end places one '
+      'window, clamped against it, in one history entry', (tester) async {
+    final c =
+        openingController(openingPlanText(shellPage, (d) => addKink(d, 2)));
+    final doc = c.document;
+    await pumpEditor(tester, c, centre: plan(2500, 0), scale: 0.15);
+    final f = oracleFrameOf(doc, hA);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyN);
+    await tester.pump();
+    await tapWorld(tester, c, oracleAt(f, 2850, 40));
+    expect(doc.commands.undoDepth, 1, reason: 'one history entry');
+    final o = doc.components.withComponent<OpeningParams>().single;
+    final p = doc.components.get<OpeningParams>(o)!;
+    expect(p.kind, OpeningKind.window);
+    expect(p.width, 1200);
+    expect(reports(doc), isEmpty, reason: 'fits, stored where it is drawn');
+    expect(
+        p.position + 600, closeTo(OpeningOracle(c.document).span(hA).$2, 1e-6),
+        reason: 'against the end');
+    expect(fillsOf(doc, hA), hasLength(2));
+    for (final h in [hA, hB]) {
+      expect(storedPiecesTriangulate(doc, h), isTrue);
+      expect(storedPiecesSimpleCcw(doc, h), isTrue);
+    }
+    expect(driftOf(doc), isEmpty);
+  });
+
   testWidgets(
       'KJ4 (shell) a window\'s slide grip dragged to the 2°-kinked end lands '
       'one command, clamped against the end; nothing escapes pointer-up',

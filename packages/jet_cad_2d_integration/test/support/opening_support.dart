@@ -174,6 +174,39 @@ Future<void> enterAndSubmit(
 OpeningParams paramsOf(DraftDocument doc, Handle h) =>
     doc.components.get<OpeningParams>(h)!;
 
+// The opening tools (Task 15).
+
+/// The unwrapped tool [toolId] of [c]'s document (today's palette entry's
+/// tool), as the Flutter layer's placement tool: its resolved hover point.
+PlacementTool placementOf(PlanController c, String toolId) =>
+    c.toolFor(toolId)! as PlacementTool;
+
+/// The tool [toolId]'s settings as the plan holds them, through their
+/// `toString`, today's `'OpeningSettings($width)'` (R15-3).
+String settingsText(PlanController c, String toolId) =>
+    '${c.servicesOf('architecture').settingsOf<Object>(toolId)}';
+
+/// A tool's settings section (R15-4) and its width field.
+Finder toolSection(String toolId) => find.byKey(Key('settings-$toolId'));
+Finder get settingWidth => find.byKey(const Key('setting-width'));
+
+/// Every opening, ascending (today's `openings`).
+List<Handle> openings(DraftDocument doc) =>
+    doc.components.withComponent<OpeningParams>().toList();
+
+/// The one opening [doc] gained over [before] (today's `added`).
+Handle added(DraftDocument doc, List<Handle> before) =>
+    openings(doc).where((o) => !before.contains(o)).single;
+
+/// Adds a wall with a handle from the seed, as a tool would (today's
+/// `addWallFromSeed`).
+Handle addWallFromSeed(
+    DraftDocument doc, Vector2 s, Vector2 e, double t, Justification j) {
+  final h = doc.handleSeed.next();
+  doc.commands.execute(addWall(doc, h, s, e, t, j));
+  return h;
+}
+
 // Copied from jet_cad_floor_plan/test/support/wall_fixture.dart:295-301 (spec 3a R14-9).
 /// Decodes [s] with the floor planner's factories and installs its system.
 DraftDocument reload(String s) {

@@ -204,6 +204,59 @@ void main() {
   });
 
   testWidgets(
+      'OS1 under runtime the section is read-only and the flips are '
+      'disabled; D, N and G typed in a field do not switch tools; Escape '
+      'works after Enter', (tester) async {
+    final (c, p) = panelPlan();
+    final doc = c.document;
+    await pumpEditor(tester, c, centre: plan(3000, 1400), scale: 0.15);
+    final d0 = paramsOf(doc, p.door);
+    doc.commands.permissions = DraftPermissions.runtime;
+    await select(tester, c, [p.door]);
+    expect(tester.widget<TextField>(width).readOnly, isTrue);
+    expect(tester.widget<TextField>(position).readOnly, isTrue);
+    expect(tester.widget<OutlinedButton>(flipHinge).onPressed, isNull);
+    expect(tester.widget<OutlinedButton>(flipSwing).onPressed, isNull);
+    await tester.tap(flipHinge);
+    await tester.pump();
+    expect(paramsOf(doc, p.door), d0);
+    expect(doc.commands.undoDepth, 0);
+    // Components denied alone: still read-only (07 WS8).
+    doc.commands.permissions = const DraftPermissions(
+        transform: true, components: false, geometry: true, structure: true);
+    await select(tester, c, [p.e]);
+    await select(tester, c, [p.door]);
+    expect(tester.widget<TextField>(width).readOnly, isTrue);
+    expect(tester.widget<OutlinedButton>(flipSwing).onPressed, isNull);
+    doc.commands.permissions = DraftPermissions.all;
+    await select(tester, c, [p.e]);
+    await select(tester, c, [p.door]);
+    expect(tester.widget<TextField>(width).readOnly, isFalse);
+    expect(tester.widget<OutlinedButton>(flipSwing).onPressed, isNotNull);
+
+    // D, N and G in a field: no tool switch.
+    for (final f in [width, position]) {
+      await tester.tap(f);
+      await tester.pump();
+      for (final k in [
+        LogicalKeyboardKey.keyD,
+        LogicalKeyboardKey.keyN,
+        LogicalKeyboardKey.keyG,
+      ]) {
+        await press(tester, k);
+        expect(status(tester), startsWith('Select'), reason: '$k');
+      }
+    }
+    // Enter hands the focus back to the canvas: Escape clears the
+    // selection there.
+    await enterAndSubmit(tester, position, '1740');
+    expect(paramsOf(doc, p.door).position, 1740);
+    await press(tester, LogicalKeyboardKey.escape);
+    expect(c.selection.keys, isEmpty);
+    expect(section, findsNothing);
+  });
+
+  testWidgets(
       'OS2 (M-08pin) the commit target is pinned at focus gain: select A, '
       'type in Width, select B without taking the focus, blur: A changes, '
       'B does not; the same for Position; a pinned opening that dies drops '
@@ -255,6 +308,116 @@ void main() {
     await blur(tester);
     expect(paramsOf(doc, p.e), b0);
     expect(doc.commands.undoDepth, 4, reason: 'the delete alone');
+  });
+
+  testWidgets(
+      'OS3 tool mode: with D active the Width field edits the Door tool\'s '
+      'settings keystroke by keystroke, even with an opening selected; a '
+      'canvas click without Enter places a door with the typed width; N and '
+      'G have their own settings', (tester) async {
+    final (c, p) = panelPlan();
+    final doc = c.document;
+    await pumpEditor(tester, c, centre: plan(3000, 1400), scale: 0.15);
+    await press(tester, LogicalKeyboardKey.keyD);
+    expect(status(tester), 'Door');
+    expect(
+        tester.widget<Text>(toolSection(ArchitectureTools.door)).data, 'Door');
+    expect(textOf(tester, settingWidth), '900');
+    expect(position, findsNothing, reason: 'no position in tool mode');
+    expect(flipHinge, findsNothing);
+    // An opening selected under the tool: still the tool's settings.
+    final w0 = paramsOf(doc, p.window);
+    await select(tester, c, [p.window]);
+    expect(
+        tester.widget<Text>(toolSection(ArchitectureTools.door)).data, 'Door');
+    expect(textOf(tester, settingWidth), '900');
+    // Assertion changed by binding spec (2a P-panel, controller ruling on
+    // Task 15's OS3): the 2a design-mode spec's `PlanPropertyPanel` row
+    // (docs/superpowers/specs/2026-10-14-plan-library-design-mode-design.md:
+    // 345) shows the active tool's settings and, below them, the one
+    // selected object's section. Today's `expect(position, findsNothing)`
+    // becomes: the tool's width row leads, the window's section follows.
+    expect(settingWidth, findsOneWidget);
+    expect(position, findsOneWidget);
+    expect(tester.getTopLeft(position).dy,
+        greaterThan(tester.getBottomLeft(settingWidth).dy),
+        reason: 'the selected object\'s section is below the tool\'s settings');
+
+    await tester.tap(settingWidth);
+    await tester.pump();
+    for (final (typed, want) in [
+      ('7', 7.0),
+      ('75', 75.0),
+      ('750', 750.0),
+      ('750.', 750.0),
+      ('750.5', 750.5),
+      ('', 750.5), // erased: the last valid value stays
+      ('0', 750.5), // invalid: not written
+      ('640', 640.0),
+    ]) {
+      await tester.enterText(settingWidth, typed);
+      await tester.pump();
+      expect(settingsText(c, ArchitectureTools.door), 'OpeningSettings($want)',
+          reason: 'typed "$typed"');
+    }
+    expect(settingsText(c, ArchitectureTools.window), 'OpeningSettings(1200.0)',
+        reason: 'N\'s untouched');
+    expect(settingsText(c, ArchitectureTools.gap), 'OpeningSettings(900.0)',
+        reason: 'G\'s untouched');
+    expect(paramsOf(doc, p.window), w0, reason: 'the selection untouched');
+    expect(doc.commands.undoDepth, 0, reason: 'settings are not the model');
+
+    // A canvas click with no Enter: the door has the typed width.
+    final before = openings(doc);
+    final fc = oracleFrameOf(doc, p.c);
+    await tester.enterText(settingWidth, '720');
+    await tester.pump();
+    await tapWorld(tester, c, oracleAt(fc, 2300, -75));
+    final placed = openings(doc).where((h) => !before.contains(h)).toList();
+    expect(placed, hasLength(1));
+    final o = paramsOf(doc, placed.single);
+    expect([o.kind, o.width, o.host], [OpeningKind.door, 720, p.c]);
+    expect(status(tester), startsWith('Door'));
+
+    // N and G: each tool's own settings.
+    await press(tester, LogicalKeyboardKey.keyN);
+    expect(tester.widget<Text>(toolSection(ArchitectureTools.window)).data,
+        'Window');
+    expect(textOf(tester, settingWidth), '1200');
+    await tester.tap(settingWidth);
+    await tester.pump();
+    await tester.enterText(settingWidth, '1500');
+    await tester.pump();
+    expect(
+        settingsText(c, ArchitectureTools.window), 'OpeningSettings(1500.0)');
+    expect(settingsText(c, ArchitectureTools.door), 'OpeningSettings(720.0)');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+    await press(tester, LogicalKeyboardKey.keyG);
+    expect(tester.widget<Text>(toolSection(ArchitectureTools.gap)).data, 'Gap');
+    expect(textOf(tester, settingWidth), '900');
+    await tester.tap(settingWidth);
+    await tester.pump();
+    for (final (typed, want) in [
+      ('0.000003', 900.0), // not above 4 × wallJoin.linear
+      ('0.000005', 0.000005),
+      ('650', 650.0),
+    ]) {
+      await tester.enterText(settingWidth, typed);
+      await tester.pump();
+      expect(settingsText(c, ArchitectureTools.gap), 'OpeningSettings($want)',
+          reason: 'gap "$typed"');
+    }
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+    await press(tester, LogicalKeyboardKey.keyD);
+    expect(textOf(tester, settingWidth), '720');
+    // Back to Select: the section follows the selection again.
+    await press(tester, LogicalKeyboardKey.keyV);
+    expect(section, findsNothing);
+    await select(tester, c, [p.window]);
+    expect(textOf(tester, width), '1200');
+    expect(textOf(tester, position), '4100');
   });
 
   testWidgets(
