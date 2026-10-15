@@ -9,6 +9,8 @@ workspace:
   - packages/jet_cad_2d_gpu
   - packages/jet_cad_2d_kit
   - packages/jet_cad_2d_plan
+  - packages/jet_cad_2d_kit_architecture
+  - packages/jet_cad_2d_integration
   - apps/dev_harness
   - apps/dev_harness_2d
   - packages/jet_cad_floor_plan

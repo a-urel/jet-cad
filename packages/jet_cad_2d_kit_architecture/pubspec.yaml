@@ -1,0 +1,34 @@
+name: jet_cad_2d_kit_architecture
+description: >-
+  The architecture kit for jet_cad_2d plans: walls, doors, windows, gaps,
+  room separators, rooms, dimensions, boxes, a furniture library and wall
+  attachment.
+version: 0.1.0
+repository: https://github.com/a-urel/jet-cad
+issue_tracker: https://github.com/a-urel/jet-cad/issues
+funding:
+  - https://github.com/sponsors/a-urel
+  - https://buymeacoffee.com/yazemo
+topics:
+  - cad
+  - floor-plan
+  - architecture
+resolution: workspace
+
+environment:
+  sdk: ^3.6.0
+  flutter: ">=3.44.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  jet_cad_2d: ^0.7.2
+  jet_cad_2d_flutter: ^0.7.2
+  jet_cad_2d_kit: ^0.1.0
+  meta: ^1.18.0
+  vector_math: ^2.2.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  lints: ^6.1.0

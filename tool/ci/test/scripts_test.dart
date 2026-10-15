@@ -444,6 +444,26 @@ void main() {
     );
   });
 
+  // 3a Task 9: the integration package carries the paint-allocation
+  // invariant over the sample flat (spec 3a C6), which reads the VM's
+  // allocation profiler; without the flag it skips, which the standing
+  // comparison reads as red.
+  test(
+    'SC20c the integration package\'s tests run with --enable-vmservice',
+    () {
+      final entry = workflow.indexOf(
+        '- package: packages/jet_cad_2d_integration',
+      );
+      expect(entry, isNot(-1));
+      final next = workflow.indexOf('- package: ', entry + 1);
+      expect(next, isNot(-1), reason: 'premise: not the matrix\'s last entry');
+      expect(
+        workflow.substring(entry, next),
+        contains('\n            test_flags: --enable-vmservice\n'),
+      );
+    },
+  );
+
   // The script itself, run by bash in a scratch repository with the tag
   // and a stand-in `flutter` that records what it analysed.
   group('SC19 old_host_probe.sh', () {
