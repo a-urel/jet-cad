@@ -8,6 +8,7 @@
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_kit_architecture/src/box/box.dart';
 import 'package:jet_cad_2d_kit_architecture/src/opening/opening.dart';
+import 'package:jet_cad_2d_kit_architecture/src/separator/separator.dart';
 import 'package:jet_cad_2d_kit_architecture/src/wall/wall.dart';
 
 final ParametricCatalog _testCatalog = ParametricCatalog()
@@ -16,7 +17,9 @@ final ParametricCatalog _testCatalog = ParametricCatalog()
   ..register<WallParams>(
       WallParams.componentTypeId, WallParams.fromJson, const WallType())
   ..register<OpeningParams>(OpeningParams.componentTypeId,
-      OpeningParams.fromJson, const OpeningType());
+      OpeningParams.fromJson, const OpeningType())
+  ..register<SeparatorParams>(SeparatorParams.componentTypeId,
+      SeparatorParams.fromJson, const SeparatorType());
 
 /// The kit tests' catalog (ruling R-P13): the one instance above, so every
 /// call sees every registration the type tasks append to its cascade.

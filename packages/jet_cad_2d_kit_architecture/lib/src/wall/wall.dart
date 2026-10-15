@@ -4,6 +4,7 @@ import 'package:vector_math/vector_math_64.dart' show Vector2;
 import '../ids.dart';
 import '../opening/opening_geometry.dart'
     show centrelinePieces, hostCutsInView, piecesOf;
+import '../room/room_inputs.dart' show placeBoxInView, roomInputInView;
 import 'wall_geometry.dart';
 
 /// Which side of the centreline a wall's body lies on, looking from `start`
@@ -169,6 +170,25 @@ final class WallType extends ParametricType<WallParams> {
         toWorld.transformPoint(params.start),
         toWorld.transformPoint(params.end),
       ]).expandedBy(wallJoin.linear);
+
+  /// A wall is an input to rooms (spec 10 D4, D16): its uncut band.
+  @override
+  bool get contributesPlace => true;
+
+  /// The world box of [self]'s uncut band ([roomInputInView]), or null for
+  /// a degenerate wall or a band with a non-finite coordinate.
+  @override
+  Aabb2? placeBox(ParametricView view, Handle self) =>
+      placeBoxInView(view, self);
+
+  /// [self]'s uncut band in world, a [RoomInput]: its joined ring after 07's
+  /// joints, the short-wall fallback and the local-ring fallback, never its
+  /// parameters, so equal inputs mean an equal band (the engine's contract).
+  /// The engine asks only when [placeBox] is not null; a fresh `Object()`
+  /// otherwise counts as changed, which can only regenerate more.
+  @override
+  Object placeInput(ParametricView view, Handle self) =>
+      roomInputInView(view, self) ?? Object();
 
   /// A wall with no fitting cut (spec 08 D9: no openings, none that fits, or
   /// a degenerate wall) takes 07's path unchanged: in this order, fixed at
