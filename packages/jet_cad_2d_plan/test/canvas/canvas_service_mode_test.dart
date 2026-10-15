@@ -96,4 +96,18 @@ void main() {
         reason: "leaving restores the profile's, not DraftPermissions.all");
     await tester.pump();
   });
+
+  testWidgets(
+      'SM-design-readonly-profile: a profile changed in service is the one '
+      'the design takes on leaving, not the one service was entered under '
+      '(M-SM-capture)', (tester) async {
+    final c = drawController().c;
+    expect(c.document.commands.permissions, same(DraftPermissions.all),
+        reason: 'premise: entered under an editing profile');
+    c.setMode(PlanMode.service);
+    c.permissions = PlanPermissions.readOnly;
+    c.setMode(PlanMode.design);
+    expect(c.document.commands.permissions, same(DraftPermissions.readOnly));
+    await tester.pump();
+  });
 }

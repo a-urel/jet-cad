@@ -1,8 +1,8 @@
 // Spec 14d L5, L6 (revision 2): the values the engine and the planner hand
 // out instead of sentences, worded in each language (M-14d-t). Ported from
 // jet_cad_floor_plan (2a Task 9): VW1 (the layer-name problems); VW2-VW4
-// (tables, numbering, rooms) are 2b's: VW4 here (2b Task 9). W-VW5, W-VW6: the plan library's
-// own words.
+// (tables, numbering, rooms) are 2b's: VW4 here (2b Task 9). W-VW5,
+// W-VW6: the plan library's own words.
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show PlanSwatch;

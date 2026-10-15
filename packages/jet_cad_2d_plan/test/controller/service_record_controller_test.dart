@@ -648,6 +648,39 @@ void main() {
   });
 
   testWidgets(
+      'SR-group-hidden-locked a restored group whose only member names a '
+      'locked unit (a missing kit\'s table), or a unit on a hidden layer, is '
+      'kept: it names a unit of the design (spec S3, decision 7) '
+      '(M-SR-group-selectable)', (tester) async {
+    final c = controllerFor(kits: [testKit()], json: lockedPlanText());
+    final doc = c.document;
+    final hidden = addLayer(doc, 'Hidden', visible: false, locked: false);
+    doc.commands
+        .execute(SetInstanceLayerCommand(unitNode(doc, '2').handle, hidden));
+    expect(c.unitIndex.withLabel('2').single.visible, isFalse,
+        reason: 'premise: 2 is hidden');
+    expect(c.unitIndex.withLabel('5').single.locked, isTrue,
+        reason: 'premise: 5 is locked');
+    c.setMode(PlanMode.service);
+    final r = c.restoreService(record(groups: [
+      {
+        'id': 'gL',
+        'members': ['5'],
+        'label': null
+      },
+      {
+        'id': 'gH',
+        'members': ['2'],
+        'label': null
+      },
+    ]));
+    expect(r.appliedGroups, ['gL', 'gH']);
+    expect(r.droppedGroups, isEmpty);
+    expect(c.unitGroups.value.keys, ['gL', 'gH']);
+    await tester.pump();
+  });
+
+  testWidgets(
       'SR-old-format-refused today\'s jet_cad.service_layout text, and that '
       'format with the new keys, are FormatExceptions; nothing changes',
       (tester) async {

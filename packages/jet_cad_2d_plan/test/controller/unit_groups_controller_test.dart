@@ -452,13 +452,13 @@ void main() {
     });
     c.setMode(PlanMode.service);
     c.select({a2});
-    // M-SS7: `groupUnitsOf` leaves the generated units out.
     expect(c.activeSelection.keys, {
       SelectionKey.root(h.table),
       SelectionKey.root(h.seats[0][0]),
       SelectionKey.root(h.seats[0][1]),
     });
     expect(c.selectedUnits.value, {table, a1, a2});
+    // M-SS7: `groupUnitsOf` leaves the generated units out.
     expect(c.selectedGroup.value, 'party');
     expect(c.selectableMembers('party'), {table, a1, a2});
     // M-SS8: `hasGeneratedVisibleMember` answers false.
@@ -534,9 +534,11 @@ void main() {
     });
     c.setMode(PlanMode.service);
     c.select({'5'});
-    // M-SS5: `groupUnitsOf` reads no lock.
+    // M-SS6 goes red here first (5 selected); the no-group case below pins
+    // it again.
     expect(c.activeSelection.keys, keysOf(c, {'1'}));
     expect(c.selectedUnits.value, {'1'});
+    // M-SS5: `groupUnitsOf` reads no lock.
     expect(c.selectableMembers('g'), {'1'});
     expect(c.groupLookup.hasLockedVisibleMember('g'), isTrue);
     expect(c.selectedGroup.value, 'g');

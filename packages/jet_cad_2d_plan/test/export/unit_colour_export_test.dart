@@ -30,8 +30,10 @@ import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
-    show PageUnderlayCircle, PageUnderlayPolygon;
+    show FlutterTextMeasurer, PageUnderlayCircle, PageUnderlayPolygon;
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+import 'package:jet_cad_2d_plan/src/export/export_font.dart'
+    show ExportFontCache;
 import 'package:jet_cad_2d_plan/src/export/builtin_exporters.dart'
     show exportPageOf;
 import 'package:jet_cad_2d_plan/src/export/unit_colour_underlay.dart';
@@ -131,6 +133,35 @@ final List<Spec> filled = [
 ];
 
 void main() {
+  test(
+      'M-8: PlanExportRequest refuses an opacity not finite or outside '
+      '[0, 1], as export and print do; 0, 1 and the default 0.35 pass '
+      '(M-ER-unchecked)', () {
+    final document = DraftDocument.empty(measurer: FlutterTextMeasurer());
+    addTearDown(document.dispose);
+    final fonts = ExportFontCache();
+    PlanExportRequest request(double? opacity) => opacity == null
+        ? PlanExportRequest(
+            document: document,
+            page: null,
+            choice: PlanExportChoice.initial,
+            omitted: const {},
+            fonts: fonts)
+        : PlanExportRequest(
+            document: document,
+            page: null,
+            choice: PlanExportChoice.initial,
+            omitted: const {},
+            fonts: fonts,
+            unitColourOpacity: opacity);
+    for (final bad in [1.5, -0.1, double.nan, double.infinity]) {
+      expect(() => request(bad), throwsA(isA<ArgumentError>()), reason: '$bad');
+    }
+    expect(request(0).unitColourOpacity, 0);
+    expect(request(1).unitColourOpacity, 1);
+    expect(request(null).unitColourOpacity, 0.35);
+  });
+
   test('the fixture premises: the tables the underlay fills', () {
     // The source's key list without R (sub-project 3, R-16).
     expect([for (final s in specs) s.key],

@@ -18,7 +18,7 @@ import 'package:vector_math/vector_math_64.dart' show Vector2;
 import '../units/unit_index.dart';
 import '../units/unit_label.dart' show firstLeafOf;
 
-/// A table's top in definition space (14s S4): its first leaf.
+/// A unit's top in definition space (14s S4): its first leaf.
 sealed class UnitTop {
   const UnitTop();
 

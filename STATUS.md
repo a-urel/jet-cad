@@ -443,7 +443,13 @@ with 0.7.0 (below).
   seat drag's spend pinned). **Merged into `main` at `fa294563`** on the
   human's *"1"* (local merge, run by the human; on the merged tree
   `jet_cad_2d_plan` +1512 with `--enable-vmservice`, `jet_cad_2d_kit` +340,
-  `jet_cad_2d` +1337 -2, the two standing hash lines); not pushed. The human asked to be told when
+  `jet_cad_2d` +1337 -2, the two standing hash lines); not pushed. **The 2b
+  follow-ups** (F-1 of `chrome_change_test.dart`, the parked pins, the
+  minor triage) are done on `fix/plan-library-2b-followups`, cut from
+  local `main` at `2b1f7a0e`, not merged, not pushed: record
+  [2026-10-15-plan-library-2b-followups.md](docs/superpowers/notes/2026-10-15-plan-library-2b-followups.md)
+  (each test with its mutation; M-1, M-4, M-5, M-6 and the `_buildService`
+  edge left for the human). The human asked to be told when
   `apps/architecture_demo` runs on the new packages (the end of
   sub-project 3) and to have everything tested after sub-project 4.
 
@@ -578,10 +584,12 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 **In flight: the kit architecture. Sub-project 1 (`jet_cad_2d_kit`) is
 merged (PR #11 `bc705be`, PR #12 `27244bf`). Sub-project 2a (the plan library
 in design mode) is merged at `4130ebc` and 2b (the service mode) at
-`fa294563`; neither is pushed. Next: the 2b follow-ups (F-1 of
-`chrome_change_test.dart`, a design-only 2a port gap, and the parked minors;
-a separate session on a `fix/` branch), then sub-project 3 (the architecture
-kit).** (In flight). Where 2b stands, its gaps and rulings: the results note's
+`fa294563`; neither is pushed. The 2b follow-ups (F-1 of
+`chrome_change_test.dart`, the parked pins, the minor triage) are done on
+`fix/plan-library-2b-followups` (from `2b1f7a0e`), awaiting the human's word
+on the merge; the record and what is left for the human:
+[2026-10-15-plan-library-2b-followups.md](docs/superpowers/notes/2026-10-15-plan-library-2b-followups.md).
+Next: sub-project 3 (the architecture kit).** (In flight). Where 2b stands, its gaps and rulings: the results note's
 [Spec gaps](docs/superpowers/notes/2026-10-14-plan-library-2b-results.md#spec-gaps-and-interface-problems-found-while-executing)
 section and its "Final fix wave". A14's `selectTool` difference was settled
 by the human (2b spec decision 9: true kept).

@@ -7,6 +7,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:meta/meta.dart';
 
 import '../theme/plan_theme.dart' show kUnitColourOpacity;
+import 'unit_colour_underlay.dart' show checkedUnitColourOpacity;
 
 /// What makes an export's bytes. Its [id] names the format in the dialog's
 /// answer and in `PlanController.export`: the built-ins are `plan.pdf` and
@@ -127,8 +128,9 @@ final class PlanExportRequest {
     required this.choice,
     required Set<Handle> omitted,
     required this.fonts,
-    this.unitColourOpacity = kUnitColourOpacity,
-  }) : omitted = Set.unmodifiable(omitted);
+    double unitColourOpacity = kUnitColourOpacity,
+  })  : omitted = Set.unmodifiable(omitted),
+        unitColourOpacity = checkedUnitColourOpacity(unitColourOpacity);
 
   /// A copy of the plan made when the export started, so edits made while
   /// the export runs cannot race with it. Disposed once the bytes are back:
@@ -148,7 +150,8 @@ final class PlanExportRequest {
   final PlanExportFonts fonts;
 
   /// The alpha the units' colours are filled at under the drawing (2b spec
-  /// S4): the exporting editor's theme, or the host's argument, or 0.35.
+  /// S4): the exporting editor's theme, or the host's argument, or 0.35. An
+  /// [ArgumentError] for one that is not finite or outside [0, 1].
   final double unitColourOpacity;
 }
 

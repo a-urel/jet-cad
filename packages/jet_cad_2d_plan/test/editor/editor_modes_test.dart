@@ -11,7 +11,10 @@
 // "F-3 chrome changed in the mode shown keeps the plan in place" (no task
 // placed them; they pin the chrome kept in place, `chromeMoved`, which
 // M-SV-R2 removes; the editor capabilities -> `Caps` below: PlanEditor's
-// permissions, which decide the left column, and its rulers). Each switches modes inside one widget,
+// permissions, which decide the left column, and its rulers), and, after
+// 2b's merge, "F-1 the canvas kept across a change of both side columns"
+// (design only, a 2a gap; PlannerView -> PlanCanvas; mutant M-F1: the
+// canvas's `Expanded` in PlanEditor unkeyed). Each switches modes inside one widget,
 // PlanEditor (2b spec S4; today's R-13 kept by the controller and the
 // editor).
 //
@@ -32,6 +35,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
     show InteractionLayer, ViewportTransform, kRulerThickness;
+import 'package:jet_cad_2d_plan/src/canvas/plan_canvas.dart';
 import 'package:jet_cad_2d_plan/src/controller/permissions.dart';
 import 'package:jet_cad_2d_plan/src/controller/plan_camera.dart';
 import 'package:jet_cad_2d_plan/src/controller/plan_controller.dart';
@@ -642,6 +646,47 @@ void main() {
     }
   });
 
+  // ---- chrome_change_test.dart: F-1 ----
+
+  group('F-1 the canvas kept across a change of both side columns', () {
+    for (final (name, from, to) in [
+      ('both columns -> none', Caps.full, kNoColumns),
+      ('none -> both columns', kNoColumns, Caps.full),
+      ('left only -> right only', kLeftOnly, Caps.readOnly),
+      ('right only -> left only', Caps.readOnly, kLeftOnly),
+    ]) {
+      testWidgets(
+          '$name: the same PlanCanvas state, the scale kept, a unit '
+          'where it was (the user\'s pan and a host\'s centerOn), no first '
+          'fit', (tester) async {
+        final h = await mountChrome(tester, caps: from);
+        final c = h.c;
+        final w = centreOf(c, '1');
+        // A host's centerOn, then the user's pan.
+        c.centerOn(Offset(w.x, w.y), scale: 0.5);
+        await tester.pump();
+        await tester.pump();
+        c.camera.panBy(const Offset(-37, 23));
+        await tester.pump();
+        final state = tester.state(find.byType(PlanCanvas));
+        final scale = c.camera.value.scale;
+        final at = chromeGlobalOf(tester, c, w);
+        h.caps.value = to;
+        await tester.pump();
+        await tester.pump();
+        // M-F1: the canvas's Expanded unkeyed.
+        expect(identical(tester.state(find.byType(PlanCanvas)), state), isTrue,
+            reason: 'the canvas kept its element');
+        expect(c.camera.value.scale, scale, reason: 'no fit');
+        expectAt(chromeGlobalOf(tester, c, w), at, 'the unit kept its place');
+        // The page fit is due no more: a later frame changes nothing.
+        final m = c.camera.value;
+        await tester.pump(const Duration(milliseconds: 100));
+        expect(identical(c.camera.value, m), isTrue);
+      });
+    }
+  });
+
   // ---- chrome_change_test.dart: F-2 and F-3 ----
 
   group('F-2 a controller swapped and disposed in one step, a bar hidden', () {
@@ -931,6 +976,9 @@ final class Caps {
 
 /// No side column: no tool but Select, no panel.
 const Caps kNoColumns = Caps(PlanPermissions.readOnly, panels: false);
+
+/// The left column alone.
+const Caps kLeftOnly = Caps(PlanPermissions.full, panels: false);
 
 /// The view's chrome as a host rebuilds it.
 final class ChromeHost {
