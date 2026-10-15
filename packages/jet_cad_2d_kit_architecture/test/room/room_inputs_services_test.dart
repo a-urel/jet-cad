@@ -11,7 +11,7 @@
 // second separator at x 1,500.25 and freezes one object at a time with no
 // document change, as a plan does (Task 12's WL4 for the bands).
 import 'package:flutter_test/flutter_test.dart';
-import 'package:jet_cad_2d/jet_cad_2d.dart' show Handle;
+import 'package:jet_cad_2d/jet_cad_2d.dart' show Aabb2, Handle;
 import 'package:jet_cad_2d_kit/testing.dart';
 import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart'
     show ArchitectureTypes;
@@ -94,8 +94,9 @@ void main() {
       'RR-freeze a wall or separator frozen with no document change stops '
       'being an input at the next read, whichever reader comes first: the '
       "services' frozen set grows, no change is reported, and inputOf, "
-      'traceRoomAmong, placedIn, wallNeighboursOf and generation each see it '
-      'gone at once (spec 3a C1.5; M-RR-9)', () {
+      'traceRoomAmong, placedIn, bounds, wallNeighboursOf and generation '
+      "each see it gone at once, a wall's frozen neighbour included (spec 3a "
+      'C1.5; M-RR-9 to M-RR-14)', () {
     // Two separators, face to face: x 6,250.5 in the right room and
     // x 1,500.25 in the left one, at the corpus far origin turned 23°, every
     // object in its own rotated, translated group.
@@ -153,12 +154,43 @@ void main() {
     // The whole box, 7,800 × 3,800 = 29,640,000.
     expect(areaAt(), closeTo(29640000, 1e-2));
 
-    // A wall frozen whose first reader is wallNeighboursOf: wall 0 leaves
-    // wall 1's neighbours.
-    expect(inputs.wallNeighboursOf(plan.walls[1]), contains(plan.walls[0]));
+    // Wall 0 frozen; the first reader is inputOf of its neighbour, wall 1,
+    // live itself: its band loses the corner joint with wall 0, and equals
+    // a cache built afresh under the same rule.
+    (double, double, double, double) box(Aabb2 b) =>
+        (b.minX, b.minY, b.maxX, b.maxY);
+    RoomInputs afresh() {
+      final made = RoomInputs(doc, services.liveTypeIdOf);
+      addTearDown(made.dispose);
+      return made;
+    }
+
+    final band1 = inputs.inputOf(plan.walls[1])!;
     frozen.add(plan.walls[0]);
+    final now1 = inputs.inputOf(plan.walls[1]);
+    expect(now1, isNot(band1), reason: 'the joint with wall 0 is gone');
+    expect(now1, afresh().inputOf(plan.walls[1]));
+
+    // Wall 2 frozen; the first reader is wallNeighboursOf: it leaves wall
+    // 1's neighbours.
+    expect(inputs.wallNeighboursOf(plan.walls[1]), contains(plan.walls[2]));
+    frozen.add(plan.walls[2]);
     expect(
-        inputs.wallNeighboursOf(plan.walls[1]), isNot(contains(plan.walls[0])));
+        inputs.wallNeighboursOf(plan.walls[1]), isNot(contains(plan.walls[2])));
+
+    // Wall 3, now alone on the left, frozen; the first reader is bounds,
+    // which shrinks to wall 1's band.
+    final before3 = box(inputs.bounds!);
+    frozen.add(plan.walls[3]);
+    final now3 = box(inputs.bounds!);
+    expect(now3, isNot(before3));
+    expect(now3, box(afresh().bounds!));
+    expect(now3, box(inputs.inputOf(plan.walls[1])!.box));
+
+    // Wall 1, the last, frozen; the first reader is placedIn: nothing.
+    frozen.add(plan.walls[1]);
+    expect(inputs.placedIn(everywhere), isEmpty);
+    expect(inputs.bounds, isNull);
     expect(doc.commands.stateId, state, reason: 'no document change');
   });
 }
