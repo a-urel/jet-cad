@@ -218,7 +218,12 @@ final double _engineNeighbourOverlap = Tolerance.standard.linear;
 ///
 /// Marked stale on each of the document's changes (its `changes` stream,
 /// which delivers after the task that made the change) and on [invalidate],
-/// and rebuilt at the next query.
+/// and rebuilt at the next query. A freeze changes no document, so every
+/// read also re-checks, in place and allocation-free, the liveness of what
+/// the cache was built from, and marks it stale when one is no longer live:
+/// every cached object for [placedIn], [bounds] and [generation], the
+/// handle and its wall neighbours for [inputOf] and [wallNeighboursOf]
+/// (spec 3a C1.5).
 ///
 /// It is the tools' [PlaceSource] (spec 10 D7, D19): `traceRoomAmong(seed,
 /// roomInputs)` traces what a room there would.
@@ -328,7 +333,8 @@ final class RoomInputs implements PlaceSource, Disposable {
     _held.clear();
     final doc = document;
     final walls = <WorldWall>[
-      for (final h in _live<WallParams>(ArchitectureTypes.wall))
+      for (final h
+          in liveObjectsOf<WallParams>(doc, live, ArchitectureTypes.wall))
         WorldWall(h, doc.components.get<WallParams>(h)!,
             doc.tree.accumulatedTransform(h)),
     ];
@@ -341,7 +347,8 @@ final class RoomInputs implements PlaceSource, Disposable {
       _held.add(w.handle);
     }
     _heldWalls = _held.length;
-    for (final h in _live<SeparatorParams>(ArchitectureTypes.separator)) {
+    for (final h in liveObjectsOf<SeparatorParams>(
+        doc, live, ArchitectureTypes.separator)) {
       _inputs[h] = roomInputOf(h, doc.components.get<SeparatorParams>(h)!,
           doc.tree.accumulatedTransform(h));
       _held.add(h);
@@ -357,14 +364,6 @@ final class RoomInputs implements PlaceSource, Disposable {
     }
     _bounds = u.isEmpty ? null : u;
   }
-
-  /// The holders of a `T` whose live type id is [typeId], ascending by
-  /// handle (`withComponent`'s order): today's `liveObjectsOf<T>`, asked of
-  /// the plan's live rule.
-  List<Handle> _live<T extends Component>(String typeId) => [
-        for (final h in document.components.withComponent<T>())
-          if (live(h) == typeId) h,
-      ];
 
   /// Marks the cache stale when a wall or separator it was built from is no
   /// longer live: a plan freezes an object (spec 2a E2) without changing
