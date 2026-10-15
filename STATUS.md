@@ -446,7 +446,9 @@ with 0.7.0 (below).
   `jet_cad_2d` +1337 -2, the two standing hash lines); not pushed. **The 2b
   follow-ups** (F-1 of `chrome_change_test.dart`, the parked pins, the
   minor triage) are done on `fix/plan-library-2b-followups`, cut from
-  local `main` at `2b1f7a0e`, not merged, not pushed: record
+  local `main` at `2b1f7a0e`, **merged into `main` at `de6abda9`** on the
+  human's *"1"* (local merge; the merged tree is the branch's, gated at
+  `59c6b402`: plan +1519, kit +340); not pushed: record
   [2026-10-15-plan-library-2b-followups.md](docs/superpowers/notes/2026-10-15-plan-library-2b-followups.md)
   (each test with its mutation; M-1, M-4, M-5, M-6 and the `_buildService`
   edge left for the human). The human asked to be told when
@@ -586,8 +588,8 @@ merged (PR #11 `bc705be`, PR #12 `27244bf`). Sub-project 2a (the plan library
 in design mode) is merged at `4130ebc` and 2b (the service mode) at
 `fa294563`; neither is pushed. The 2b follow-ups (F-1 of
 `chrome_change_test.dart`, the parked pins, the minor triage) are done on
-`fix/plan-library-2b-followups` (from `2b1f7a0e`), awaiting the human's word
-on the merge; the record and what is left for the human:
+`fix/plan-library-2b-followups` (from `2b1f7a0e`) and merged at `de6abda9`,
+not pushed; the record and what is left for the human:
 [2026-10-15-plan-library-2b-followups.md](docs/superpowers/notes/2026-10-15-plan-library-2b-followups.md).
 Next: sub-project 3 (the architecture kit).** (In flight). Where 2b stands, its gaps and rulings: the results note's
 [Spec gaps](docs/superpowers/notes/2026-10-14-plan-library-2b-results.md#spec-gaps-and-interface-problems-found-while-executing)
