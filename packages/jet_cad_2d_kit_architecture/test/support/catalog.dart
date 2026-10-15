@@ -7,10 +7,13 @@
 // its line (this task the box's).
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_kit_architecture/src/box/box.dart';
+import 'package:jet_cad_2d_kit_architecture/src/wall/wall.dart';
 
 final ParametricCatalog _testCatalog = ParametricCatalog()
   ..register<BoxParams>(
-      BoxParams.componentTypeId, BoxParams.fromJson, const BoxType());
+      BoxParams.componentTypeId, BoxParams.fromJson, const BoxType())
+  ..register<WallParams>(
+      WallParams.componentTypeId, WallParams.fromJson, const WallType());
 
 /// The kit tests' catalog (ruling R-P13): the one instance above, so every
 /// call sees every registration the type tasks append to its cascade.
