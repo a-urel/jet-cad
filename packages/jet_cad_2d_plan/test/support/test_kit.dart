@@ -424,12 +424,12 @@ List<PropertySpec<SlabSettings>> slabSettingSpecs() => [
     ];
 
 /// The escape hatch: one button that widens the slab by 250 mm.
-Widget slabSection(BuildContext context, SlabComponent value,
-        void Function(SlabComponent) commit, KitWords words) =>
+Widget slabSection(BuildContext context, PlanSection<SlabComponent> section) =>
     TextButton(
         key: const Key('test-slab-widen'),
-        onPressed: () => commit(value.copyWith(width: value.width + 250)),
-        child: Text(words.word('property:test.slab.widen')));
+        onPressed: () => section
+            .commit(section.value.copyWith(width: section.value.width + 250)),
+        child: Text(section.words.word('property:test.slab.widen')));
 
 /// A flipped slab's section is titled by another word.
 String slabTitle(SlabComponent s) =>

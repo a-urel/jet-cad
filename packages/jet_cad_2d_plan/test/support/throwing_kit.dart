@@ -36,6 +36,8 @@ const Set<String> boomHooks = {
   // colour target and the title.
   'read', 'write', 'apply', 'section', 'sectionWidget', 'colourRead',
   'colourWrite', 'title',
+  // Spec 3a C1.1, C1.7: a text display's read, a length's range, a spec's visible.
+  'display', 'range', 'visible',
 };
 
 /// What a failing hook throws: not an `Error`, as a kit's own exception
@@ -100,14 +102,34 @@ final class ThrowingKit {
               min: 10,
               max: 10000,
               decimals: 0),
+          TextDisplay<BlockComponent>(
+              id: 'shown',
+              read: (b, o) {
+                check('display');
+                return '${b.size.round()} mm at ${o.handle.value}';
+              }),
+          LengthProperty<BlockComponent>(
+              id: 'span',
+              read: (b) => b.size,
+              write: (b, v) => b.copyWith(size: v),
+              min: 10,
+              max: 10000,
+              range: (b, o) {
+                check('range');
+                return (10, 10000);
+              }),
           ActionProperty<BlockComponent>(
               id: 'grow',
               apply: (b) {
                 check('apply');
                 return b.copyWith(size: b.size * 2);
+              },
+              visible: (b) {
+                check('visible');
+                return true;
               }),
         ],
-        section: (context, value, commit, words) {
+        section: (context, section) {
           check('section');
           return BoomSection(kit: this);
         },
@@ -171,6 +193,8 @@ final class ThrowingKit {
         'tool:boom.tool': 'Boom',
         'property:boom.block.size': 'Size',
         'property:boom.block.grow': 'Grow',
+        'property:boom.block.shown': 'Shown',
+        'property:boom.block.span': 'Span',
       },
     }),
   );

@@ -56,6 +56,7 @@ final class PlanKit {
   /// names the kit before its `/`); a type or tool id that is not
   /// `<this kit's id>.<name>` or is repeated; a word with no stored English
   /// missing from English, for every word a type, tool or property needs.
+  /// A tool's setting that reads an object (spec 3a C1.1).
   /// Empty when sound. Problems across kits are the plan library's.
   List<KitProblem> validate() {
     final problems = <KitProblem>[];
@@ -125,6 +126,17 @@ final class PlanKit {
           tool.settings != null) {
         for (final p in _specIds(tool.id, tool.settings!.specs)) {
           needEnglish.add('property:$p');
+        }
+      }
+      // Spec 3a C1.1: a tool's settings are bound with no object.
+      for (final spec
+          in tool.settings?.specs ?? const <PropertySpec<Object>>[]) {
+        if (spec.needsObject) {
+          problems.add(KitProblem(
+              KitProblemCode.settingsNeedObject,
+              'the tool "${tool.id}"\'s setting "${spec.id}" reads the object '
+              'it is shown for (a TextDisplay or a range): a tool\'s '
+              'settings have none'));
         }
       }
     }

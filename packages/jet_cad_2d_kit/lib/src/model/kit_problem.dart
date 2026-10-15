@@ -40,6 +40,10 @@ enum KitProblemCode {
   // Spec 2b S4: conformance, a unit kind the contract does not name with no
   // English `unit:<kit>/<kind>` word.
   unitKindWord,
+
+  // Spec 3a C1.1: PlanKit.validate, a tool's settings holding a spec that
+  // reads an object (a TextDisplay, a LengthProperty with a range).
+  settingsNeedObject,
 }
 
 @immutable

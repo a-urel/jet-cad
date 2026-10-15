@@ -352,7 +352,7 @@ and runs them again, so nothing a kit holds outlives its document.
 | `parametric` | the engine's `ParametricType<T>`: `reach`, `generate`, `references`, the place hooks |
 | `grips` | `ObjectGripProvider Function(PlanServices)?`: the Flutter layer's grips for its objects |
 | `properties` | the panel's fields (§10.3) |
-| `section` | the escape hatch: `(context, value, commit, words) => Widget`, for what specs cannot say; `commit(T)` is one undo step |
+| `section` | the escape hatch: `(context, section) => Widget`, for what specs cannot say; `section` (a `PlanSection`) holds the `value`, `commit` (one undo step), the kit's `words`, the `object` (document, handle, world) and the kit's `services` |
 | `title` | a word id for the section's title, from the value; default `type:<id>` |
 | `colour` | a `ColourTarget` (§10.4) |
 | `exported` | false leaves the type's objects out of every export |
@@ -399,18 +399,25 @@ final ColourTarget<CafeSign> signColour = ColourTarget<CafeSign>(
 
 | Kind | Holds | The panel |
 |---|---|---|
-| `LengthProperty` | `read`, `write`, `min`, `max` | millimetres, with the plan's decimal separator |
+| `LengthProperty` | `read`, `write`, `min`, `max`, `range(value, object)` (inclusive; null refuses every value) | millimetres, with the plan's decimal separator |
 | `AngleProperty` | `read`, `write` | radians stored, degrees shown |
 | `NumberProperty` | `read`, `write`, `min`, `max`, `decimals` (0 to 10) | rounded to `decimals` on commit |
 | `ChoiceProperty<T, V>` | `values`, `read`, `write` | one of `values`, compared with `==` |
 | `ToggleProperty` | `read`, `write` | a switch |
 | `TextProperty` | `read`, `write`, `maxLength` (code points) | a text field |
 | `ValueDisplay` | `read`, `unit` (`length`, `area`, `angle`, `none`) | read-only: a room's area |
+| `TextDisplay` | `read(value, object)` → a `String`, or null to omit the line | read-only: a room's area as drawn |
 | `ActionProperty` | `apply` | a button: a door's Flip hinge |
 
 - Every spec has an `id` (a lower-case letter, then lower-case letters,
   digits and hyphens), an optional `enabled(T)` that greys the field out,
-  and an optional `gate`, the `PlanGate` permission it needs.
+  an optional visible(T) that hides the field (a hidden field takes no
+  room; an action whose gate is refused is hidden too), and an optional
+  `gate`, the `PlanGate` permission it needs.
+- A TextDisplay and a range read the object a field is shown for
+  (PlanObject: document, handle, world, the kit's words); a tool's
+  settings have none, so PlanKit.validate refuses them there
+  (settingsNeedObject).
 - `write` and `apply` return a changed copy; the plan library commits it
   as one `SetComponentCommand<T>`, the parametric system regenerates, and
   the edit is one undo step.

@@ -2,10 +2,14 @@
 // validates, registers, edits and regenerates.
 import 'dart:math' as math;
 
+import 'package:flutter/widgets.dart' show Locale;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
+import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
 
 import '../../example/cafe_code.dart';
+
+final KitWords words = KitNamesWords(KitNames.empty, () => const Locale('en'));
 
 void main() {
   test('R5-1 the documented code kit validates, edits and regenerates', () {
@@ -34,11 +38,12 @@ void main() {
       SetComponentCommand<CafeSign>(
           sign, const CafeSign(width: 900, face: SignFace.chalk)),
     ], label: 'Add sign'));
-    final width = type.fieldsOf(doc, sign).first;
+    final width = type.fieldsOf(doc, sign, words).first;
     expect(width.value, 900.0);
     // M-R5: the example's `min: 300` lowered to 200.
-    expect(() => type.commitField(doc, sign, width, 250), throwsArgumentError);
-    doc.commands.execute(type.commitField(doc, sign, width, 1500));
+    expect(() => type.commitField(doc, sign, width, 250, words),
+        throwsArgumentError);
+    doc.commands.execute(type.commitField(doc, sign, width, 1500, words));
     final outline = [
       for (final slot in doc.entities.liveSlots)
         if (doc.entities.ownerAt(slot) == sign)

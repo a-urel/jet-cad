@@ -11,18 +11,13 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../model/kit_names.dart';
+import '../model/plan_words.dart';
 import 'attachment.dart';
 import 'symbols_state.dart';
 
-/// A kit's words at the plan's current locale (spec 2a P5).
-abstract interface class KitWords {
-  /// The word [wordId] in the locale, else in English, else [wordId] itself
-  /// (a missing word shows its id, never nothing).
-  String word(String wordId);
-
-  /// The word [wordId] in the locale, else in English, else null.
-  String? maybe(String wordId);
-
+/// A kit's words at the plan's current locale (spec 2a P5): the pure
+/// [PlanWords] and the locale they are in.
+abstract interface class KitWords implements PlanWords {
   /// The locale the words are in now.
   Locale get locale;
 }

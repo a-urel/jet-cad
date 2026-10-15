@@ -421,6 +421,15 @@ Each line is written by the 3a task that lands it (the 3a spec,
   the model (`lib/src/model/symbol_box.dart`), exported by both libraries;
   moved unchanged from the plan library, which imports them from here and
   keeps no copy.
+- **Object views and hidden fields** (3a C1.1, C1.7): the surface gains
+  `PlanObject`, `DocumentPlanObject`, `TextDisplay`,
+  `LengthProperty.range`, `PropertySpec.visible`,
+  `PropertyField.visible`, `PlanSection` (the escape hatch's one context)
+  and `KitProblemCode.settingsNeedObject`; `PlanType.fieldsOf`,
+  `commitField` and `sectionFor` take a `DraftDocument`, and `fieldsOf`
+  and `commitField` the kit's words, which the object carries
+  (`PlanObject.words`, a `PlanWords`: the pure interface `KitWords` now
+  implements, exported by both libraries).
 
 ## Inputs for sub-project 2
 

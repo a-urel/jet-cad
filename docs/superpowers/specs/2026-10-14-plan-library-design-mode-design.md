@@ -824,6 +824,24 @@ packages/jet_cad_2d_plan/example/      PlanEditor with no kit
 - Multiple selection in the property specs.
 - Renaming the engine's `Draft*` family (decision 4).
 
+## Amendments
+
+From the 3a spec
+([2026-10-15-architecture-kit-design.md](2026-10-15-architecture-kit-design.md),
+"Amendments to other specs"), each written by the task that lands it.
+
+- **P3, property specs and the section builder** (3a C1.1, C1.7): a spec
+  is bound with the object it is shown for (`PlanObject`: document,
+  handle, world and the kit's words; none for a tool's settings); `TextDisplay` is a read-only
+  line read from the object, omitted when it reads nothing;
+  `LengthProperty.range` bounds a length by the object, inclusive, a null
+  range refusing every value; every spec takes `visible`, evaluated when
+  it is bound, and a hidden field takes no room; an action whose gate the
+  permissions refuse is hidden, not read-only. The escape hatch is
+  `(context, PlanSection<T>)`, the section holding the value, the commit,
+  the words, the object and the kit's services. `PlanKit.validate` refuses
+  a `TextDisplay` or a `range` in a tool's settings (`settingsNeedObject`).
+
 ## Risks
 
 - **The contract is settled against a test kit only.** Sub-project 3's six

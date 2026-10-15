@@ -333,7 +333,8 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
       case _ObjectTarget(:final handle, :final typeId):
         if (c.catalog.typeIdOf(c.document, handle) != typeId) return const [];
         try {
-          return planTypeOf(c, typeId)!.fieldsOf(c.document, handle);
+          return planTypeOf(c, typeId)!.fieldsOf(
+              c.document, handle, c.servicesOf(kitOfKey(typeId)).words);
         } catch (error) {
           _hookFailed(typeId, 'properties', error);
           return null;
@@ -399,6 +400,7 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
       case ChoiceProperty() ||
             ToggleProperty() ||
             ValueDisplay() ||
+            TextDisplay() ||
             ActionProperty():
         return null;
     }
@@ -438,6 +440,7 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
       case ChoiceProperty() ||
             ToggleProperty() ||
             ValueDisplay() ||
+            TextDisplay() ||
             ActionProperty():
         return null;
     }
@@ -542,8 +545,8 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
           if (field == null || (input != null && input == field.value)) {
             return;
           }
-          final command = planTypeOf(c, typeId)!
-              .commitField(c.document, handle, field, input);
+          final command = planTypeOf(c, typeId)!.commitField(c.document, handle,
+              field, input, c.servicesOf(kitOfKey(typeId)).words);
           // A value the spec rounds back to the stored one (2.31 at one
           // decimal over 2.3) writes nothing: no empty undo step (final
           // review).
@@ -752,6 +755,13 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
               InputDecoration(labelText: label, border: InputBorder.none),
           child: Text(_valueText(field.value, unit), key: key),
         );
+      case TextDisplay():
+        // Spec 3a C1.1: a read-only line, the text as the kit read it.
+        return InputDecorator(
+          decoration:
+              InputDecoration(labelText: label, border: InputBorder.none),
+          child: Text(field.value as String? ?? '', key: key),
+        );
       case ActionProperty():
         return Padding(
           padding: const EdgeInsets.only(top: 8),
@@ -761,6 +771,20 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
               child: Text(label)),
         );
     }
+  }
+
+  /// Whether [field] of [t] takes a row (spec 3a C1.7): not when its
+  /// `visible` says no (a text display that read nothing included), nor an
+  /// object's action whose gate the permissions refuse (today's S-11: a
+  /// button the capabilities refuse is not shown). A hidden field takes no
+  /// room.
+  bool _shows(_Target t, PropertyField field) {
+    if (!field.visible) return false;
+    final gate = field.spec.gate;
+    return !(t is _ObjectTarget &&
+        field.spec is ActionProperty &&
+        gate != null &&
+        !_c.permissions.allows(gate));
   }
 
   /// One `hookFailed` diagnostic for [subject] (a type or a tool id) of its
@@ -797,7 +821,8 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
     return [
       Text(planWordOf(_c, kit, 'tool:${t.toolId}') ?? t.toolId,
           key: Key('settings-${t.toolId}'), style: title),
-      for (final field in fields) _row(t, _Scope.tool, field, kit),
+      for (final field in fields)
+        if (_shows(t, field)) _row(t, _Scope.tool, field, kit),
     ];
   }
 
@@ -825,7 +850,8 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
     return [
       Text(planWordOf(c, kit, titleWord) ?? t.typeId,
           key: Key('section-${t.typeId}'), style: title),
-      for (final field in fields) _row(t, _Scope.object, field, kit),
+      for (final field in fields)
+        if (_shows(t, field)) _row(t, _Scope.object, field, kit),
       if (type.hasSection)
         // Spec P4: a section builder that throws shows a small box in its
         // place (Task 11's boundary).
@@ -839,7 +865,8 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
               t.handle,
               (command) => _guarded(
                   t, 'the section\'s commit', () => c.execute(command)),
-              c.servicesOf(kit).words),
+              c.servicesOf(kit).words,
+              c.servicesOf(kit)),
         ),
     ];
   }

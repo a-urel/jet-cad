@@ -5,6 +5,7 @@ export 'kit_names.dart';
 export 'kit_problem.dart';
 export 'library_component.dart';
 export 'manifest_component.dart';
+export 'plan_words.dart';
 export 'register.dart' show registerKitComponents;
 export 'symbol_box.dart';
 export 'symbol_library.dart';

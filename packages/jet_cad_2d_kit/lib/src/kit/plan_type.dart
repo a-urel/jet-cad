@@ -15,14 +15,38 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
 import 'package:meta/meta.dart';
 
 import '../model/kit_ids.dart';
+import '../model/plan_words.dart';
 import 'colour.dart';
 import 'plan_services.dart';
 import 'properties.dart';
 
-/// A type's escape hatch (umbrella A4): its own panel section over [value],
-/// committing a changed copy through [commit], one undo step.
+/// A type's escape hatch (umbrella A4): its own panel section over
+/// [PlanSection.value], committing a changed copy through
+/// [PlanSection.commit], one undo step. One context, so a later field joins
+/// it without breaking a kit (spec 3a C1.1).
 typedef PropertySectionBuilder<T> = Widget Function(
-    BuildContext context, T value, void Function(T) commit, KitWords words);
+    BuildContext context, PlanSection<T> section);
+
+/// What a section is built over (spec 3a C1.1): the object's component, the
+/// one commit, the kit's words, the object, and the kit's services.
+@immutable
+final class PlanSection<T> {
+  const PlanSection({
+    required this.value,
+    required this.commit,
+    required this.words,
+    required this.object,
+    required this.services,
+  });
+
+  final T value;
+
+  /// Hands the plan one `SetComponentCommand<T>` of [next].
+  final void Function(T next) commit;
+  final KitWords words;
+  final PlanObject object;
+  final PlanServices services;
+}
 
 /// Wraps a kit's engine type at the contract's boundary (spec 2a P4, the
 /// failure boundary). Implemented by the plan library; [wrap] keeps `T`.
@@ -83,14 +107,17 @@ final class PlanType<T extends Component> {
     catalog.register<T>(id, fromJson, type);
   }
 
-  /// The fields of [group]'s `T`, bound to its current value, each under
+  /// The fields of [group]'s `T`, bound to its current value and to the
+  /// object (spec 3a C1.1) with the kit's [words] (ruling R-P4), each under
   /// `property:<id>.<spec id>`; empty when [group] carries no `T`.
-  List<PropertyField> fieldsOf(CommandTarget target, Handle group) {
-    final value = target.components.get<T>(group);
+  List<PropertyField> fieldsOf(
+      DraftDocument document, Handle group, PlanWords words) {
+    final value = document.components.get<T>(group);
     if (value == null) return const [];
+    final object = DocumentPlanObject(document, group, words);
     return [
       for (final spec in properties)
-        spec.bind(value, wordId: 'property:$id.${spec.id}'),
+        spec.bind(value, wordId: 'property:$id.${spec.id}', object: object),
     ];
   }
 
@@ -125,20 +152,25 @@ final class PlanType<T extends Component> {
   /// The one command that commits [input] through [field], one of this
   /// type's fields: bound again to [group]'s current value, so a field
   /// read before another edit never writes back what that edit changed.
+  /// The object is the document's now, so a range is checked against it.
   ///
   /// Throws [ArgumentError] when [field] is not one of this type's specs,
   /// [group] carries no `T` or the field is a display, and what the
   /// field's commit throws (spec 2a P3: out of range, disabled).
-  DraftCommand commitField(
-      CommandTarget target, Handle group, PropertyField field, Object? input) {
+  DraftCommand commitField(DraftDocument document, Handle group,
+      PropertyField field, Object? input, PlanWords words) {
     final spec = properties.firstWhere((s) => identical(s, field.spec),
         orElse: () => throw ArgumentError.value(
             field.wordId, 'field', 'is not a field of $id'));
-    final value = target.components.get<T>(group);
+    final value = document.components.get<T>(group);
     if (value == null) {
       throw ArgumentError.value(group, 'group', 'carries no $id');
     }
-    final commit = spec.bind(value, wordId: field.wordId).commit;
+    final commit = spec
+        .bind(value,
+            wordId: field.wordId,
+            object: DocumentPlanObject(document, group, words))
+        .commit;
     if (commit == null) {
       throw ArgumentError.value(field.wordId, 'field', 'is read-only');
     }
@@ -146,14 +178,26 @@ final class PlanType<T extends Component> {
   }
 
   /// [group]'s escape-hatch section, or null without one or a `T`. Its
-  /// commit hands [execute] one `SetComponentCommand<T>`.
-  Widget? sectionFor(BuildContext context, CommandTarget target, Handle group,
-      void Function(DraftCommand) execute, KitWords words) {
-    final value = target.components.get<T>(group);
+  /// commit hands [execute] one `SetComponentCommand<T>`; [words] and
+  /// [services] are the type's kit's.
+  Widget? sectionFor(
+      BuildContext context,
+      DraftDocument document,
+      Handle group,
+      void Function(DraftCommand) execute,
+      KitWords words,
+      PlanServices services) {
+    final value = document.components.get<T>(group);
     final section = _section;
     if (value == null || section == null) return null;
-    return section(context, value,
-        (next) => execute(SetComponentCommand<T>(group, next)), words);
+    return section(
+        context,
+        PlanSection<T>(
+            value: value,
+            commit: (next) => execute(SetComponentCommand<T>(group, next)),
+            words: words,
+            object: DocumentPlanObject(document, group, words),
+            services: services));
   }
 
   /// This type's grip provider over [services], or null without one.

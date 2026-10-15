@@ -30,17 +30,19 @@ void main() {
       // M-C-cov-a: typeOf answers the set's first type.
       final PlanType<Component> type = c.typeOf(object)!;
       expect(type.id, typeId);
-      final fields = type.fieldsOf(d, object);
+      final fields = type.fieldsOf(
+          d, object, c.servicesOf(type.id.split('.').first).words);
       for (final f in fields) {
         expect(f.wordId, startsWith('property:$typeId.'));
         expect(() => (f.value, f.enabled), returnsNormally);
       }
       final field = fields.singleWhere((f) => f.spec.id == length);
       expect(field.value, value);
-      d.commands.execute(type.commitField(d, object, field, 2345.5));
+      d.commands.execute(type.commitField(d, object, field, 2345.5,
+          c.servicesOf(type.id.split('.').first).words));
       expect(
           type
-              .fieldsOf(d, object)
+              .fieldsOf(d, object, c.servicesOf(type.id.split('.').first).words)
               .singleWhere((f) => f.spec.id == length)
               .value,
           2345.5);
