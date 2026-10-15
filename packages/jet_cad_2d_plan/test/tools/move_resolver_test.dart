@@ -140,10 +140,14 @@ void main() {
     final scaled = Scene();
     scaled.doc.commands.execute(TransformNodeCommand(
         scaled.instance, Transform2.scale(2, 2).multiply(scaled.transform)));
+    // M-PN-ortho (D-45): `if (!isOrthonormal(t)) return null;` deleted in
+    // resolveMove: the scaled instance is asked.
     expect(scaled.resolver.resolveMove(scaled.ctx, scaled.instance, delta),
         isNull);
     expect(scaled.edge.queries, isEmpty);
 
+    // A positive control: an entity is no InstanceNode (that test cannot be
+    // deleted and still compile).
     final line = addDrafted(scaled.doc, EntityKind.line,
         linePayload(Vector2(100500, -70500), Vector2(101500, -70100)),
         layer: ReservedHandles.layerZero);
@@ -178,5 +182,89 @@ void main() {
     final f = s.edge.queries.single.footprint;
     expect([f.minX, f.minY, f.maxX, f.maxY],
         [box.left, box.front, box.right, box.back]);
+  });
+
+  test(
+      'PN-MV-nested (D-45) an instance of an attaching symbol inside a root '
+      'group is not asked: only a root-level instance attaches', () {
+    final s = Scene();
+    s.answer = (_) => attachment(Transform2.translation(99000.5, -69000.25),
+        Vector2(99010.25, -69020.5), 'face');
+    final def = (s.doc.tree[s.instance]! as InstanceNode).definition;
+    final group = s.doc.handleSeed.next();
+    final nested = s.doc.handleSeed.next();
+    s.doc.commands.execute(CompoundCommand([
+      AddNodeCommand(GroupNode(
+          handle: group,
+          parent: s.doc.rootHandle,
+          transform: Transform2.translation(98000.5, -71000.25)
+              .multiply(Transform2.rotation(0.35)),
+          children: const [])),
+      AddNodeCommand(InstanceNode(
+          handle: nested,
+          parent: group,
+          transform: Transform2.translation(420.5, -310.25),
+          definition: def,
+          layer: ReservedHandles.layerZero)),
+    ], label: 'Nest'));
+    // M-PN-nested: `|| n.parent != doc.rootHandle` deleted in resolveMove.
+    expect(s.resolver.resolveMove(s.ctx, nested, delta), isNull);
+    expect(s.edge.queries, isEmpty);
+    expect(s.asked, 0);
+    expect(s.resolver.resolveMove(s.ctx, s.instance, delta), isNotNull,
+        reason: 'positive control: the root-level instance is asked');
+  });
+
+  test(
+      'PN-MV-node (D-45) within one document state, another node starts '
+      'afresh: its first query keeps no answer', () {
+    final s = Scene();
+    final a = attachment(Transform2.translation(99000.5, -69000.25),
+        Vector2(99010.25, -69020.5), 'face');
+    s.answer = (_) => a;
+    s.doc.commands.execute(placeSymbol(s.doc, entry('demo.shelf.wall'),
+        at: Vector2(104000.75, -66000.5), quarterTurns: 3));
+    final other = s.doc.tree.nodes
+        .whereType<InstanceNode>()
+        .map((n) => n.handle)
+        .singleWhere((h) => h != s.instance);
+    s.resolver.resolveMove(s.ctx, s.instance, delta);
+    s.resolver.resolveMove(s.ctx, s.instance, delta);
+    expect(s.edge.queries.last.keep, same(a), reason: 'premise: kept');
+    s.resolver.resolveMove(s.ctx, other, delta);
+    // M-PN-node: `_sync`'s `_last = null;` under `if (node != _node)`
+    // deleted.
+    expect(s.edge.queries.last.keep, isNull);
+  });
+
+  test(
+      "PN-MV-live (D-45) the footprint is the definition's live box: an "
+      "outline edited between two asks is read again, not the entry's box", () {
+    final s = Scene();
+    s.answer = (_) => null;
+    final def = (s.doc.tree[s.instance]! as InstanceNode).definition;
+    s.resolver.resolveMove(s.ctx, s.instance, delta);
+    final e = s.doc.entities;
+    final outline = [
+      for (final slot in e.liveSlots)
+        if (e.ownerAt(slot) == def && e.kindAt(slot) == EntityKind.polyline)
+          e.handleAt(slot),
+    ].single;
+    s.doc.commands.execute(SetEntityGeometryCommand(
+        outline,
+        polylinePayload([
+          Vector2(150, 210),
+          Vector2(2050.5, 210),
+          Vector2(2050.5, 1180.25),
+          Vector2(150, 1180.25),
+        ], closed: true)));
+    final live = boxOfDefinition(s.doc, def)!;
+    expect(live, isNot(boxOfEntry(entry('demo.shelf.wall'))),
+        reason: "premise: the definition's leaves were edited");
+    s.resolver.resolveMove(s.ctx, s.instance, delta);
+    final f = s.edge.queries.last.footprint;
+    // M-PN-live: `_sync` without `_boxes.clear();`: the first ask's box.
+    expect([f.minX, f.minY, f.maxX, f.maxY],
+        [live.left, live.front, live.right, live.back]);
   });
 }

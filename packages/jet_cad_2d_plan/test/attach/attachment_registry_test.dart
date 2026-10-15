@@ -31,6 +31,26 @@ final class Rig {
 Attachment at(double dx, double dy, Object token) => attachment(
     Transform2.translation(p.x + dx, p.y + dy), p + Vector2(dx, dy), token);
 
+/// A provider whose `kind` throws (2a Task 14's deviation 2: the kind is
+/// read inside the factory's guard).
+final class _NoKind implements AttachmentProvider {
+  @override
+  String get kind => throw StateError('no kind');
+  @override
+  Attachment? attach(AttachmentQuery query) => null;
+}
+
+/// A provider whose `dispose` throws (deviation 1: a guarded dispose).
+final class _BrokenDispose implements AttachmentProvider, Disposable {
+  _BrokenDispose(this.kind);
+  @override
+  final String kind;
+  @override
+  Attachment? attach(AttachmentQuery query) => null;
+  @override
+  void dispose() => throw StateError('the $kind provider broke on dispose');
+}
+
 void main() {
   test('AT-1 kinds: every provider\'s kind, once', () {
     final r = Rig()
@@ -141,5 +161,34 @@ void main() {
     expect(r.registry.kinds, {'room-corner'});
     expect([for (final d in r.reported) (d.kitId, d.subject, d.code)],
         [('alpha', 'attachments', KitDiagnosticCode.hookFailed)]);
+  });
+
+  test(
+      'PN-kind (D-45) a provider whose kind throws adds nothing and reports '
+      "hookFailed under 'attachments'", () {
+    final r = Rig();
+    // M-PN-kind: `kind = provider.kind;` moved out of `add`'s try.
+    expect(() => r.registry.add('alpha', (_) => _NoKind(), r.services),
+        returnsNormally);
+    r.add('beta', RecordingProvider('room-corner', (_) => null));
+    expect(r.registry.kinds, {'room-corner'});
+    expect([for (final d in r.reported) (d.kitId, d.subject, d.code)],
+        [('alpha', 'attachments', KitDiagnosticCode.hookFailed)]);
+  });
+
+  test(
+      "PN-dispose (D-45) a provider's dispose that throws is reported under "
+      'its kind; the others are still disposed, and the registry empties', () {
+    final r = Rig();
+    final healthy = DisposableProvider('room-corner', (_) => null);
+    r
+      ..add('alpha', _BrokenDispose('wall-face'))
+      ..add('beta', healthy);
+    // M-PN-dispose: `dispose` calling `disposable.dispose()` bare.
+    expect(r.registry.dispose, returnsNormally);
+    expect(healthy.disposals, 1);
+    expect(r.registry.kinds, isEmpty);
+    expect([for (final d in r.reported) (d.kitId, d.subject, d.code)],
+        [('alpha', 'wall-face', KitDiagnosticCode.hookFailed)]);
   });
 }

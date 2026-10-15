@@ -442,6 +442,45 @@ void main() {
   });
 
   testWidgets(
+      'PN-remount (D-44) shortcuts: false remounted on the same controller '
+      'keeps the idle keys closed (the new one mounts before the old one is '
+      'disposed); of two at once the later speaks, and removed, the earlier '
+      'speaks again', (tester) async {
+    final c = PlanController(kits: const []);
+    addTearDown(c.dispose);
+    Widget keys(int n) => MaterialApp(
+        home: PlanShortcuts(
+            key: ValueKey(n),
+            controller: c,
+            shortcuts: false,
+            child: const SizedBox()));
+    await tester.pumpWidget(keys(1));
+    expect(c.selectGates.idleKeys, isFalse, reason: 'premise');
+    await tester.pumpWidget(keys(2));
+    // M-PN-1: `dispose` giving the keys back whoever speaks now.
+    expect(c.selectGates.idleKeys, isFalse);
+    Widget both({required bool second}) => MaterialApp(
+            home: Column(children: [
+          PlanShortcuts(
+              key: const ValueKey(2),
+              controller: c,
+              shortcuts: false,
+              child: const SizedBox()),
+          if (second)
+            PlanShortcuts(
+                key: const ValueKey(3), controller: c, child: const SizedBox()),
+        ]));
+    await tester.pumpWidget(both(second: true));
+    expect(c.selectGates.idleKeys, isTrue, reason: 'the later speaks');
+    await tester.pumpWidget(both(second: false));
+    // M-PN-2: a leaving state giving the keys back while another still
+    // speaks for the controller.
+    expect(c.selectGates.idleKeys, isFalse);
+    await tester.pumpWidget(const SizedBox());
+    expect(c.selectGates.idleKeys, isTrue, reason: 'none left: keys back');
+  });
+
+  testWidgets(
       'T6-c unitsOnly, 1 selected: Delete and Backspace remove nothing '
       "and reach the host's bindings; with shortcuts: Delete removes 1",
       (tester) async {

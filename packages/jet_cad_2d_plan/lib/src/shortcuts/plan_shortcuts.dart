@@ -60,9 +60,17 @@ class PlanShortcuts extends StatefulWidget {
 }
 
 class _PlanShortcutsState extends State<PlanShortcuts> {
+  /// Each controller's mounted shortcuts, in mount order: the last one
+  /// speaks for the controller's idle keys. A remount mounts the new state
+  /// before the old one is disposed (D-44), so the old one's leaving must
+  /// not undo the new one's say.
+  static final Expando<List<_PlanShortcutsState>> _speakers =
+      Expando<List<_PlanShortcutsState>>('plan shortcuts');
+
   @override
   void initState() {
     super.initState();
+    _join(widget.controller);
     widget.controller.addListener(_applyIdleKeys);
     _applyIdleKeys();
   }
@@ -78,7 +86,8 @@ class _PlanShortcutsState extends State<PlanShortcuts> {
     super.didUpdateWidget(oldWidget);
     if (!identical(oldWidget.controller, widget.controller)) {
       oldWidget.controller.removeListener(_applyIdleKeys);
-      _restoreIdleKeys(oldWidget.controller);
+      _leave(oldWidget.controller);
+      _join(widget.controller);
       widget.controller.addListener(_applyIdleKeys);
       PlanLocaleScope.push(context, widget.controller);
     }
@@ -88,22 +97,37 @@ class _PlanShortcutsState extends State<PlanShortcuts> {
   @override
   void dispose() {
     widget.controller.removeListener(_applyIdleKeys);
-    _restoreIdleKeys(widget.controller);
+    _leave(widget.controller);
     super.dispose();
   }
 
-  /// [c]'s select tool gets its idle keys back once these shortcuts no
-  /// longer speak for it (final review): a removed `shortcuts: false`
-  /// leaves Delete and Escape working in the canvas.
-  static void _restoreIdleKeys(PlanController c) {
-    if (!c.isDisposed) c.selectGates.idleKeys = true;
+  void _join(PlanController c) =>
+      (_speakers[c] ??= <_PlanShortcutsState>[]).add(this);
+
+  /// This state no longer speaks for [c]: the shortcuts mounted before it
+  /// speak again; with none left, [c]'s select tool gets its idle keys
+  /// back (final review), so a removed `shortcuts: false` leaves Delete
+  /// and Escape working in the canvas.
+  void _leave(PlanController c) {
+    final speakers = _speakers[c];
+    speakers?.remove(this);
+    if (speakers == null || speakers.isEmpty) {
+      _speakers[c] = null;
+      if (!c.isDisposed) c.selectGates.idleKeys = true;
+      return;
+    }
+    speakers.last._applyIdleKeys();
   }
 
-  /// The select tool's idle keys are the shortcuts (S-16). The gates are
-  /// per document, so this runs again after a swap (the controller
+  /// The select tool's idle keys are the shortcuts (S-16), set by the
+  /// shortcuts that speak for the controller (mounted last). The gates
+  /// are per document, so this runs again after a swap (the controller
   /// notifies).
-  void _applyIdleKeys() =>
-      widget.controller.selectGates.idleKeys = widget.shortcuts;
+  void _applyIdleKeys() {
+    final c = widget.controller;
+    if (c.isDisposed || !identical(_speakers[c]?.last, this)) return;
+    c.selectGates.idleKeys = widget.shortcuts;
+  }
 
   /// Runs a file command when it can act: no shape part-way (spec 12a D6),
   /// and a page for Print (spec 13 D9); for Export a page or an exporter

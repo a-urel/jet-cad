@@ -110,6 +110,37 @@ void main() {
   });
 
   test(
+      "PN-open (D-45) a new plan's providers are checked against the loaded "
+      'symbols when it opens: a kind they no longer offer is reported',
+      () async {
+    var documents = 0;
+    final c = PlanController(kits: [
+      PlanKit(id: 'demo', version: '1.0.0', symbols: [
+        SymbolLibrarySource(label: 'demo', read: () async => shelfBytes()),
+      ], attachments: [
+        (_) => RecordingProvider(
+            ++documents == 1 ? 'test-edge' : 'room-corner', (_) => null),
+      ]),
+    ]);
+    addTearDown(c.dispose);
+    await settle();
+    List<(String, String?, KitDiagnosticCode)> unoffered() => [
+          for (final p in problemsOf(c))
+            if (p.$3 == KitDiagnosticCode.attachmentKindUnoffered) p,
+        ];
+    expect(unoffered(),
+        [('demo', 'room-corner', KitDiagnosticCode.attachmentKindUnoffered)],
+        reason: 'premise: the first document offers test-edge');
+    c.newPlan();
+    expect(documents, 2, reason: 'premise: the providers ran again');
+    // M-PN-open: `_open` without its `_reportUnofferedKinds()`.
+    expect(
+        unoffered(),
+        contains(
+            ('demo', 'test-edge', KitDiagnosticCode.attachmentKindUnoffered)));
+  });
+
+  test(
       'AT-17 plan.symbol: refused with nothing armed (T4-b); armed, it '
       'places through the kit\'s provider; under rotate: false R is not the '
       'tool\'s', () async {
