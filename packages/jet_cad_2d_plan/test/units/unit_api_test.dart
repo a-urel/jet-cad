@@ -145,6 +145,8 @@ void main() {
     // M-UA3: the lock-set check removed (execute refuses, the hint shows).
     expect(c.setUnitData('A1', const {'id': 'x'}), isFalse);
     expect(c.setUnitColour('A1', PlanSwatch.red), isFalse);
+    // M-UA-seat-label: setUnitsLabel's generated-or-locked refusal removed.
+    expect(c.setUnitLabel('A1', 'Z9'), isFalse);
     expect(c.lockHint.value, isFalse);
     expect(c.document.commands.undoDepth, depth);
     // The placed table is not under the frozen row: it takes data.
