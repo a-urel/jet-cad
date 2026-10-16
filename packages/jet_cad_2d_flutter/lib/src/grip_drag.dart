@@ -195,6 +195,10 @@ final class GripDrag {
 
   /// The node handle when this move captured exactly one node and nothing
   /// else (spec 09c D8); null otherwise.
+  /// The handles of every captured object, built once per drag: what a move
+  /// excludes from its own snap (4a O1). Read-only; never mutate.
+  late final Set<Handle> handles = {for (final c in _captures) c.handle};
+
   Handle? get singleNode => kind == DragKind.move &&
           _captures.length == 1 &&
           _captures.single is _NodeCapture

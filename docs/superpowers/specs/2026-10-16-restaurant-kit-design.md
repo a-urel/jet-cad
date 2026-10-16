@@ -171,6 +171,14 @@ join that release) with a test and a named mutation.
 - **O1. The drag snap.** A test first: dragging a unit with `plan.select`
   must not snap to the dragged unit's own pre-drag geometry. If it does,
   the dragged objects are excluded from the snap candidates.
+- **O1, the engine seam** (the human, 2026-10-16: *"Motoru 4a'da düzelt"*): Task 4
+  found the defect real and its cause in the engine: `resolveDragPoint`
+  (`jet_cad_2d`) runs `SpatialIndex.snapInto` over every object, with no
+  way to exclude the dragged ones, and `SelectTool` (`jet_cad_2d_flutter`)
+  calls it. Umbrella A12 allows an engine change where a seam is missing:
+  an allocation-free exclusion of the dragged objects is added to both, the
+  engine's allocation invariants stay green, and the engine and the
+  Flutter layer are released in 4b's wave (A10).
 - **O2.** The Page panel's orientation row fits its labels at 1440 px and
   at the panel's narrowest width (no mid-word wrap); a golden-free test
   measures the text's line count.

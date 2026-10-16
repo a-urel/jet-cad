@@ -172,6 +172,32 @@ void main() {
     rig.tool.cancel(rig.context);
   });
 
+  test(
+      'a body drag released near the dragged line\'s own old midpoint lands on '
+      'the pointer, not on that midpoint (4a O1)', () {
+    final s = gripScene();
+    final rig = gripRig(s.document);
+    rig.selection.replace([k(s.line)]);
+    // The line's old midpoint is (7070, 3040); the release is 5 mm off it,
+    // inside the aperture, so only the exclusion keeps the pointer.
+    final target = Vector2(7072, 3044);
+    final probe = SnapResult();
+    rig.context.index.snapInto(target,
+        kSnapAperturePixels / rig.camera.value.scale, kDragSnapMask, probe);
+    expect(probe.found, isTrue, reason: 'premise: an unexcluded snap exists');
+    expect(probe.point.x, closeTo(7070, 1e-9), reason: 'premise: the midpoint');
+    final from = screenOf(rig.camera, bodyX, bodyY);
+    final to = rig.camera.value.worldToScreen(target);
+    pressAndMove(rig, from, Offset(to.x, to.y));
+    expect(rig.tool.dragKind, DragKind.move);
+    final t = rig.tool.selectionPreviewTransform!;
+    // Mutation: _resolve passes no exclusion -> the move lands on the
+    // midpoint, (7070 - 7046, 3040 - 3032).
+    expect(t.e, closeTo(target.x - bodyX, 1e-9));
+    expect(t.f, closeTo(target.y - bodyY, 1e-9));
+    rig.tool.cancel(rig.context);
+  });
+
   test('a body drag moves the selection under a rotated camera (M-03a)', () {
     final s = gripScene();
     final rig = gripRig(s.document);
@@ -224,13 +250,19 @@ void main() {
       'a drag back to the press pixel, or snapped back onto its base, adds '
       'nothing (M-03p)', () {
     final s = gripScene();
+    // Since 4a O1 the dragged line no longer snaps to its own endpoint, so
+    // another, unselected line ends where the dragged one starts: that is
+    // the snap the base and the target both land on.
+    addEntity(s.document, s.document.rootHandle, EntityKind.line,
+        [7010, 3020, 6900, 3000], []);
+    final depth0 = s.document.commands.undoDepth;
     final rig = gripRig(s.document, objectSnap: true);
     rig.selection.replace([k(s.line)]);
     final from = screenOf(rig.camera, bodyX, bodyY);
     pressAndMove(rig, from, from + const Offset(40, 0));
     rig.tool.onPointerMove(pointerAt(rig.camera, from), rig.context);
     release(rig, from);
-    expect(rig.document.commands.undoDepth, 0,
+    expect(rig.document.commands.undoDepth, depth0,
         reason: 'the same pixel under the same camera is a bit-identical '
             'world point, so Δ == 0');
 
@@ -242,7 +274,7 @@ void main() {
     pressAndMove(rig, nearEnd, nearEnd + const Offset(60, -30));
     expect(rig.tool.dragKind, DragKind.move);
     release(rig, screenOf(rig.camera, 7010, 3020) + const Offset(3, 0));
-    expect(rig.document.commands.undoDepth, 0,
+    expect(rig.document.commands.undoDepth, depth0,
         reason: 'target == base: Δ is exactly zero');
   });
 

@@ -421,11 +421,13 @@ class SelectTool extends Tool {
   /// chain as the target but without ortho. With grid snap on, a move from
   /// on-grid geometry is then a lattice vector (M-03s).
   void _moveBase(ToolContext ctx, GripDrag drag) {
+    _exclude = drag.handles;
     _resolve(ctx, _pressWorld, null);
     drag.base.setFrom(_dragPoint.point);
   }
 
   void _enter(GripDrag drag, ToolPointerEvent e, ToolContext ctx) {
+    _exclude = drag.kind == DragKind.move ? drag.handles : null;
     _drag = drag;
     _dragKind = drag.kind;
     _dragCtx = ctx;
@@ -472,6 +474,10 @@ class SelectTool extends Tool {
     _attached = true;
   }
 
+  /// The dragged objects while a move drag lives: they offer no snap to
+  /// their own pre-drag geometry (4a O1). The drag's own set, not a copy.
+  Set<Handle>? _exclude;
+
   void _resolve(ToolContext ctx, Vector2 raw, Vector2? orthoBase) {
     final cam = ctx.camera.value;
     final page = ctx.page?.value;
@@ -485,6 +491,7 @@ class SelectTool extends Tool {
       gridStepMm: dragGridStepMm(page, cam.scale),
       scratch: _snapScratch,
       out: _dragPoint,
+      exclude: _exclude,
     );
   }
 
@@ -669,6 +676,7 @@ class SelectTool extends Tool {
     (_dragCtx ?? ctx).camera.removeListener(_onCamera);
     ctx.grips?.hot = -1;
     _drag = null;
+    _exclude = null;
     _dragCtx = null;
     _dragPoint.reset();
     _cursor = MouseCursor.defer;

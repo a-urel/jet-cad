@@ -20,7 +20,8 @@ List<double> coordsOf(DraftDocument d, Handle line) {
 void main() {
   test(
       'O1 a line dragged by its body releases 30 mm from its own old '
-      'midpoint: it moves by the pointer\'s offset, not onto the midpoint', () {
+      'midpoint: it moves by the pointer\'s offset, not onto the midpoint',
+      () async {
     final c = PlanController(kits: const []);
     addTearDown(c.dispose);
     useTestCamera(c);
@@ -33,6 +34,9 @@ void main() {
         doc.components
             .get<PageComponent>(doc.rootHandle)!
             .copyWith(snapToGrid: false)));
+    // PageNotifier follows the document's change stream, a microtask late.
+    await pumpEventQueue();
+    expect(c.page.value!.snapToGrid, isFalse, reason: 'premise: no grid');
     final before = coordsOf(doc, line);
     final mid =
         Vector2((before[0] + before[2]) / 2, (before[1] + before[3]) / 2);
@@ -57,11 +61,5 @@ void main() {
           after[i], closeTo(before[i] + (i.isEven ? shift.x : shift.y), 1e-6),
           reason: 'coord $i');
     }
-  },
-      skip: 'O1 is real and red: plan.select\'s drag resolves the pointer '
-          'through resolveDragPoint over the whole SpatialIndex (jet_cad_2d '
-          'drag_snap.dart:72, called from jet_cad_2d_flutter select_tool.dart '
-          ':478), which has no exclusion of the dragged objects. The fix is '
-          'in the engine packages, outside Task 4\'s scope; remove this skip '
-          'with it.');
+  });
 }

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- `SpatialIndex.snapInto(…, exclude: Set<Handle>?)` and
+  `resolveDragPoint(…, exclude: Set<Handle>?)`: the objects named (a leaf,
+  a group and so its leaves, an instance and so its contents) offer no snap
+  of any kind, so a drag never snaps to its own pre-drag geometry. The set
+  is caller-owned and only read; nothing is allocated per query.
 - `ParametricCatalog.typeIds` and `ParametricCatalog.typeIdOf(target,
   group)`: the registered type ids in registration order, and the type id
   that names a group's live object by the engine's own rule (null when it
