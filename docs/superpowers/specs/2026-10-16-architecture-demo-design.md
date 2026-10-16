@@ -4,6 +4,7 @@
 approved the design section by section in chat (*"onaylıyorum"*, twice).
 No independent Opus review: the human paused them to save cost (decision
 2); the controller self-reviewed this file.
+**Approved by the human** (*"onaylıyorum"*, 2026-10-16).
 
 **Binds:** the umbrella spec
 [2026-10-13-kit-architecture-design.md](2026-10-13-kit-architecture-design.md)
