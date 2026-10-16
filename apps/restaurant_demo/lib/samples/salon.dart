@@ -47,7 +47,11 @@ void buildSalon(DraftDocument document, KitWords words) {
 /// the default A4 sheet is, so [kSheetMin] still measures the placements
 /// (the default sheet's lower-left corner) and the room lies inside it.
 void _sheet(DraftDocument doc) {
-  final page = PageComponent(widthMm: 297, heightMm: 420);
+  // The plan's own page, resized: its decimal separator (the language's, not
+  // the build's to decide) and every other field stay.
+  final page = doc.components
+      .get<PageComponent>(doc.rootHandle)!
+      .copyWith(widthMm: 297, heightMm: 420);
   final w = page.effectiveWidthMm * page.scaleDenominator;
   final h = page.effectiveHeightMm * page.scaleDenominator;
   doc.commands.execute(SetComponentCommand<PageComponent>(

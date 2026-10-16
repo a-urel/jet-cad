@@ -141,8 +141,8 @@ void main() {
   });
 
   testWidgets(
-      'D10 Revert with nothing stored empties the area; Teras keeps its own '
-      'service layout', (tester) async {
+      'D10 Revert with nothing stored rebuilds the area\'s sample; Teras '
+      'keeps its own service layout', (tester) async {
     final demo = await pumpDemo(tester);
     await press(tester, 'area-1');
     final teras = demo.area.controller;
@@ -163,7 +163,10 @@ void main() {
     expect(demo.area.stored, isNull, reason: 'premise: nothing stored');
     expect(tablesText(tester), salonTables, reason: 'premise: a plan');
     await press(tester, 'revert');
-    expect(tablesText(tester), 'none');
+    // Decided: the old demo's Revert went back to the area's sample; the
+    // ported one emptied the area (a defect, fixed), so
+    // the old 'none' is now the sample's tables.
+    expect(tablesText(tester), salonTables);
 
     await press(tester, 'area-1');
     expect(tablesText(tester), '1 (4), 2 (4), 3 (4), 4 (4), 5 (2), 6 (2)',
@@ -256,8 +259,8 @@ void main() {
   });
 
   testWidgets(
-      'DQ2 Revert after a switch to German: an area with nothing stored gets '
-      'a comma plan; one with a stored point plan reloads it as point (N2)',
+      'DQ2 Revert after a switch to German: an area with nothing stored '
+      'rebuilds its sample as a comma plan; one with a stored point plan reloads it as point (N2)',
       (tester) async {
     final demo = await pumpDemo(tester);
     expect(demo.area.name, 'Salon');
@@ -275,6 +278,7 @@ void main() {
     expect(demo.area.stored, isNull, reason: 'premise: nothing stored');
     await press(tester, 'revert');
     expect(separatorOf(demo.area.controller), DecimalSeparator.comma);
+    expect(tablesText(tester), salonTables, reason: 'the sample, not empty');
     expect(demo.area.controller.dirty.value, isFalse);
     expect(demo.area.controller.canUndo.value, isFalse);
 
