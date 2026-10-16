@@ -52,7 +52,7 @@ Future<void> titledClean(AppRig rig) async {
 }
 
 /// [titledClean], then one more wall: dirty, with history.
-Future<void> titledDirty(AppRig rig) async {
+Future<void> savedThenDirty(AppRig rig) async {
   await titledClean(rig);
   await drawWall(rig.tester, rig.controller, far + Vector2(-400, 1600),
       far + Vector2(2200, 1600));
@@ -118,7 +118,7 @@ void main() {
     final files = rig.files;
     final c = rig.controller;
     final session = rig.session;
-    await titledDirty(rig);
+    await savedThenDirty(rig);
     final doc = c.document;
     final writes = files.writes.length;
 
@@ -231,7 +231,7 @@ void main() {
     final files = rig.files;
     final c = rig.controller;
     final session = rig.session;
-    await titledDirty(rig);
+    await savedThenDirty(rig);
     final doc = c.document;
 
     // A New's dialog is up.
@@ -352,7 +352,7 @@ void main() {
       'then an exit request exits with nothing asked and no error (spec 12a '
       'D11, S-18)', (tester) async {
     final rig = await pumpApp(tester);
-    await titledDirty(rig);
+    await savedThenDirty(rig);
     await tester.pumpWidget(const SizedBox());
     expect(await requestExit(tester), AppExitResponse.exit);
     expect(tester.takeException(), isNull);

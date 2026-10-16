@@ -263,3 +263,49 @@ int liveOfAny(PlanController c, String typeId) => [
       for (final h in c.document.tree.nodes)
         if (c.typeOf(h.handle)?.id == typeId) h,
     ].length;
+
+/// The plan titled and dirty with history, on [rig]: the sample opened from
+/// `[name].jetplan` at [location] (the plan must be clean on entry, so the
+/// Open asks nothing), then a wall drawn through the Wall tool around [at]
+/// (far from the origin by default) under a rotated camera, the shape
+/// ended: one more step of history, dirty.
+Future<void> titledDirty(AppRig rig,
+    {String name = 'plan', Object? location = '/p/plan', Vector2? at}) async {
+  final c = rig.controller;
+  expect(c.dirty.value, isFalse, reason: 'premise: Open asks nothing');
+  rig.files.scriptOpen(
+      name: '$name.jetplan', bytes: sampleBytes(), location: location);
+  await rig.host.openFlow();
+  await rig.tester.pump();
+  final depth = c.document.commands.undoDepth;
+  final p = at ?? kFar;
+  await aimCamera(rig.tester, c, p);
+  await drawWall(
+      rig.tester, c, p + Vector2(-1600, 250), p + Vector2(1400, -450));
+  expect(c.document.commands.undoDepth, depth + 1, reason: 'premise: an edit');
+  expect(c.dirty.value, isTrue, reason: 'premise: dirty');
+  expect((
+    rig.session.name,
+    rig.session.fileName,
+    rig.session.location
+  ), (
+    name,
+    '$name.jetplan',
+    location
+  ), reason: 'premise: titled');
+}
+
+/// Whether the canvas has the focus: the primary focus is inside the
+/// `InteractionLayer` (or, with [exact], is the layer's own node).
+bool canvasFocused(WidgetTester tester, {bool exact = false}) {
+  final node = FocusManager.instance.primaryFocus;
+  if (exact) return node?.debugLabel == 'InteractionLayer';
+  if (node?.context == null) return false;
+  return find
+      .descendant(
+          of: find.byType(InteractionLayer),
+          matching: find.byElementPredicate((e) => e == node!.context),
+          matchRoot: true)
+      .evaluate()
+      .isNotEmpty;
+}

@@ -27,8 +27,6 @@ import 'package:flutter/material.dart' hide Tolerance;
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
-import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
-    show InteractionLayer;
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show placementTransform;
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
@@ -38,19 +36,6 @@ import '../support/symbol_rig.dart';
 
 const String bedId = 'architecture.bed.double@1';
 final Finder bedCell = find.byKey(const Key('symbol-cell-$bedId'));
-
-/// Whether the primary focus sits inside the canvas's interaction layer.
-bool canvasFocused(WidgetTester tester) {
-  final node = FocusManager.instance.primaryFocus;
-  if (node?.context == null) return false;
-  return find
-      .descendant(
-          of: find.byType(InteractionLayer),
-          matching: find.byElementPredicate((e) => e == node!.context),
-          matchRoot: true)
-      .evaluate()
-      .isNotEmpty;
-}
 
 void main() {
   testWidgets(

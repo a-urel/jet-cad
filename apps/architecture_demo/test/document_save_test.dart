@@ -17,21 +17,14 @@ import 'support/app_rig.dart';
 
 final Vector2 far = Vector2(-38765.5, 29345.75);
 
-/// The app with the sample opened from `flat.jetplan` (at [location]),
-/// then edited through the Wall tool far from the origin: titled, dirty,
-/// one step of history.
-Future<AppRig> titledDirty(
+/// The app over [files] with the sample opened from `flat.jetplan` (at
+/// [location]), then edited through the Wall tool far from the origin:
+/// titled, dirty, one step of history.
+Future<AppRig> titledDirtyFlat(
     WidgetTester tester, FakeDocumentFiles files, Object? location) async {
   final rig = await pumpApp(tester, files: files);
-  files.scriptOpen(
-      name: 'flat.jetplan', bytes: sampleBytes(), location: location);
-  await rig.host.openFlow();
-  await tester.pump();
-  await aimCamera(tester, rig.controller, far);
-  await drawWall(tester, rig.controller, far, far + Vector2(2600, -900));
-  expect(rig.session.name, 'flat', reason: 'premise: titled');
+  await titledDirty(rig, name: 'flat', location: location, at: far);
   expect(rig.controller.document.commands.undoDepth, 1, reason: 'premise');
-  expect(rig.controller.dirty.value, isTrue, reason: 'premise: dirty');
   return rig;
 }
 
@@ -43,7 +36,8 @@ void main() {
         'undoing that edit is clean (writesInPlace: $inPlace; spec 12a D5, '
         'S-2; M-12a-13)', (tester) async {
       final files = FakeDocumentFiles(writesInPlace: inPlace);
-      final rig = await titledDirty(tester, files, inPlace ? '/p/flat' : null);
+      final rig =
+          await titledDirtyFlat(tester, files, inPlace ? '/p/flat' : null);
       final c = rig.controller;
       final encoded = bytesOf(c);
 
@@ -81,7 +75,7 @@ void main() {
       'cleared; then a save writes and is clean (spec 12a D5, S-13, S-21; '
       'M-12a-3, M-12a-17)', (tester) async {
     final files = FakeDocumentFiles();
-    final rig = await titledDirty(tester, files, '/p/flat');
+    final rig = await titledDirtyFlat(tester, files, '/p/flat');
     final c = rig.controller;
     final doc = c.document;
 
@@ -193,7 +187,7 @@ void main() {
       'DS5 web: Save on a titled plan downloads under its name without '
       'asking and marks it clean (spec 12a D9, decision 9)', (tester) async {
     final files = FakeDocumentFiles(writesInPlace: false);
-    final rig = await titledDirty(tester, files, null);
+    final rig = await titledDirtyFlat(tester, files, null);
     final c = rig.controller;
     expect(rig.session.location, isNull, reason: 'premise: the web gives none');
     final saving = rig.host.saveStep();
@@ -259,7 +253,7 @@ void main() {
       'dialog, false, still dirty and titled, no write, busy cleared (spec '
       '12a D5, D8, S-21; Task 5 deviation 5)', (tester) async {
     final files = FakeDocumentFiles();
-    final rig = await titledDirty(tester, files, '/p/flat');
+    final rig = await titledDirtyFlat(tester, files, '/p/flat');
     final c = rig.controller;
     final session = rig.session;
     final doc = c.document;
@@ -297,7 +291,7 @@ void main() {
     // the isDisposed check: "A ValueNotifier<bool> was used after being
     // disposed".
     final files = FakeDocumentFiles(writesInPlace: true);
-    final rig = await titledDirty(tester, files, '/p/flat');
+    final rig = await titledDirtyFlat(tester, files, '/p/flat');
     final session = rig.session;
     files.holdWrites = true;
     final saving = rig.host.saveStep();

@@ -82,10 +82,6 @@ List<String> textsOf(DraftDocument doc) => [
 double scaleOf(DraftDocument doc) =>
     doc.components.get<PageComponent>(doc.rootHandle)!.scaleDenominator;
 
-/// Whether the canvas (the `InteractionLayer`'s node) has the focus.
-bool canvasFocused() =>
-    FocusManager.instance.primaryFocus?.debugLabel == 'InteractionLayer';
-
 /// The text in the page panel's scale field.
 String scaleField(WidgetTester tester) => tester
     .widget<TextField>(find.byKey(const Key('page-scale')))
@@ -162,7 +158,8 @@ void main() {
       expect(doc.commands.undoDepth, depth + 1,
           reason: 'the commit is its own step');
       expect(c.dirty.value, isFalse, reason: 'clean after the save');
-      expect(canvasFocused(), isTrue, reason: 'handed back to the canvas');
+      expect(canvasFocused(tester, exact: true), isTrue,
+          reason: 'handed back to the canvas');
 
       // One undo takes back the commit alone.
       await undoKey(tester);
@@ -201,7 +198,7 @@ void main() {
     expect(doc.commands.undoDepth, 2, reason: 'one step');
     expect(entry, findsNothing, reason: 'the entry is closed');
     expect(c.dirty.value, isFalse, reason: 'clean after the save');
-    expect(canvasFocused(), isTrue);
+    expect(canvasFocused(tester, exact: true), isTrue);
     await press(tester, LogicalKeyboardKey.keyL);
     expect(c.activeTool.value, 'plan.line',
         reason: 'the letters reach the editor again');
@@ -237,7 +234,7 @@ void main() {
     expect(doc.commands.undoDepth, 2, reason: 'one step');
     expect(entry, findsNothing);
     expect(c.dirty.value, isFalse, reason: 'clean after the save');
-    expect(canvasFocused(), isTrue);
+    expect(canvasFocused(tester, exact: true), isTrue);
   }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
 
   testWidgets(
@@ -282,7 +279,8 @@ void main() {
     expect(scaleField(tester), '125',
         reason: 'the field shows the stored scale');
     expect(c.dirty.value, isFalse);
-    expect(canvasFocused(), isTrue, reason: 'handed back to the canvas');
+    expect(canvasFocused(tester, exact: true), isTrue,
+        reason: 'handed back to the canvas');
   });
 
   testWidgets(
@@ -315,7 +313,7 @@ void main() {
       expect(entry, findsNothing, reason: '$target $kind: the entry ended');
       expect(bytesOf(c), before,
           reason: '$target $kind: cancelled, not committed');
-      expect(canvasFocused(), isTrue,
+      expect(canvasFocused(tester, exact: true), isTrue,
           reason: '$target $kind: the canvas has it');
 
       expect(await cmdS(tester), isTrue, reason: '$target $kind');
@@ -355,7 +353,7 @@ void main() {
     await tester.pump();
     expect(entry, findsNothing, reason: 'a mouse click ends the entry');
     expect(bytesOf(c), before, reason: 'cancelled, not committed');
-    expect(canvasFocused(), isTrue);
+    expect(canvasFocused(tester, exact: true), isTrue);
   }, variant: TargetPlatformVariant.only(TargetPlatform.android));
 
   testWidgets(
@@ -416,7 +414,7 @@ void main() {
     await tester.pump();
 
     expect(entry, findsNothing, reason: 'the settle closed the entry');
-    expect(canvasFocused(), isTrue);
+    expect(canvasFocused(tester, exact: true), isTrue);
     expect(files.writes.single.bytes, before, reason: 'nothing committed');
     expect(textsOf(doc), isEmpty);
     expect(doc.commands.undoDepth, 1);

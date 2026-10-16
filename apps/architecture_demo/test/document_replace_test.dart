@@ -52,35 +52,6 @@ const List<String> kIds = [
 /// The file buttons: the ones decision 5 holds while busy.
 const List<String> kFileIds = ['new', 'open', 'open-sample', 'save', 'save-as'];
 
-/// The app's plan, titled and dirty with history: the sample opened from
-/// `/p/plan` as `plan.jetplan`, then a wall drawn through the Wall tool far
-/// from the origin under a rotated camera, the shape ended. The plan must
-/// be clean on entry, so the Open asks nothing.
-Future<void> titledDirty(AppRig rig, {Vector2? at}) async {
-  final c = rig.controller;
-  expect(c.dirty.value, isFalse, reason: 'premise: Open asks nothing');
-  rig.files.scriptOpen(
-      name: 'plan.jetplan', bytes: sampleBytes(), location: '/p/plan');
-  await rig.host.openFlow();
-  await rig.tester.pump();
-  final depth = c.document.commands.undoDepth;
-  final p = at ?? far;
-  await aimCamera(rig.tester, c, p);
-  await drawWall(
-      rig.tester, c, p + Vector2(-1600, 250), p + Vector2(1400, -450));
-  expect(c.document.commands.undoDepth, depth + 1, reason: 'premise: an edit');
-  expect(c.dirty.value, isTrue, reason: 'premise: dirty');
-  expect((
-    rig.session.name,
-    rig.session.fileName,
-    rig.session.location
-  ), (
-    'plan',
-    'plan.jetplan',
-    '/p/plan'
-  ), reason: 'premise: titled');
-}
-
 /// The host kept the plan as it was: the same document, not disposed, at
 /// [depth], still dirty, titled `plan` at `/p/plan`, and no flow running.
 void expectKept(AppRig rig, Object doc, int depth, {required String reason}) {
@@ -110,7 +81,7 @@ void main() {
       'it; Cancel and Escape keep everything, with no picker, no panel and '
       'no write (spec 12a D10; M-12a-10)', (tester) async {
     final rig = await pumpApp(tester);
-    await titledDirty(rig);
+    await titledDirty(rig, at: far);
     final doc = rig.controller.document;
     final depth = doc.commands.undoDepth;
     final files = rig.files;
@@ -161,7 +132,7 @@ void main() {
     final session = rig.session;
     final files = rig.files;
 
-    await titledDirty(rig);
+    await titledDirty(rig, at: far);
     final first = c.document;
     await discardAndRun(tester, rig.host.newFlow());
     expect(dialog, findsNothing);
@@ -230,7 +201,7 @@ void main() {
     // Titled: the write fails; the error, then nothing else.
     await undoKey(tester);
     expect(c.dirty.value, isFalse, reason: 'premise: back to clean');
-    await titledDirty(rig);
+    await titledDirty(rig, at: far);
     final doc = c.document;
     final depth = doc.commands.undoDepth;
     files.failNextWrite(StateError('the disk is full'));
@@ -257,7 +228,7 @@ void main() {
     final session = rig.session;
     final files = rig.files;
 
-    await titledDirty(rig);
+    await titledDirty(rig, at: far);
     final doc = c.document;
     final before = bytesOf(c);
     final newing = rig.host.newFlow();
@@ -310,7 +281,7 @@ void main() {
     final files = rig.files;
 
     Future<void> cleanTitled() async {
-      await titledDirty(rig);
+      await titledDirty(rig, at: far);
       await chord(tester, LogicalKeyboardKey.meta, LogicalKeyboardKey.keyS);
       await tester.pump();
       expect(c.dirty.value, isFalse, reason: 'premise: saved');
@@ -351,7 +322,7 @@ void main() {
     final rig = await pumpApp(tester);
     final c = rig.controller;
     final files = rig.files;
-    await titledDirty(rig);
+    await titledDirty(rig, at: far);
     final doc = c.document;
     final depth = doc.commands.undoDepth;
     final calls = files.openCalls;
@@ -393,7 +364,7 @@ void main() {
     final rig = await pumpApp(tester);
     final c = rig.controller;
     final files = rig.files;
-    await titledDirty(rig);
+    await titledDirty(rig, at: far);
     final doc = c.document;
     final wall = wallsOf(c).last;
     await clickAt(tester, c, wallMid(c, wall));
@@ -446,7 +417,7 @@ void main() {
     final c = rig.controller;
     final files = rig.files;
     final session = rig.session;
-    await titledDirty(rig);
+    await titledDirty(rig, at: far);
     final doc = c.document;
     final depth = doc.commands.undoDepth;
     final before = bytesOf(c);
@@ -504,7 +475,7 @@ void main() {
     final rig = await pumpApp(tester);
     final c = rig.controller;
     final files = rig.files;
-    await titledDirty(rig);
+    await titledDirty(rig, at: far);
     final doc = c.document;
     final depth = doc.commands.undoDepth;
 
@@ -540,7 +511,7 @@ void main() {
     final c = rig.controller;
     final files = rig.files;
     final session = rig.session;
-    await titledDirty(rig);
+    await titledDirty(rig, at: far);
     final doc = c.document;
     final before = bytesOf(c);
 
@@ -582,7 +553,7 @@ void main() {
     final c = rig.controller;
     final files = rig.files;
     final session = rig.session;
-    await titledDirty(rig);
+    await titledDirty(rig, at: far);
     final doc = c.document;
 
     files.holdWrites = true;
@@ -641,7 +612,7 @@ void main() {
       'U-3; M-12a-24)', (tester) async {
     final rig = await pumpApp(tester);
     final files = rig.files;
-    await titledDirty(rig);
+    await titledDirty(rig, at: far);
     final doc = rig.controller.document;
     final depth = doc.commands.undoDepth;
     final opens = files.openCalls;
@@ -698,7 +669,7 @@ void main() {
         'the flow ends without asking again or replacing the plan',
         (tester) async {
       final rig = await pumpApp(tester);
-      await titledDirty(rig);
+      await titledDirty(rig, at: far);
       final c = rig.controller;
       final files = rig.files;
       final session = rig.session;
