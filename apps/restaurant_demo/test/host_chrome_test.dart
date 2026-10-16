@@ -303,6 +303,31 @@ void main() {
   });
 
   testWidgets(
+      "OWN-busy the own bar's Export and Print are off while a page flow "
+      'runs (pageFlowBusy), the planner\'s dialog included, and on again '
+      'after it', (tester) async {
+    final demo = await pumpDemo(tester);
+    final c = demo.area.controller;
+    await press(tester, 'mode-service');
+    await pressInPanel(tester, 'own-bar');
+    bool enabled(String key) =>
+        tester.widget<TextButton>(byKey(key)).onPressed != null;
+    expect(enabled('own-export') && enabled('own-print'), isTrue,
+        reason: 'premise: idle');
+    expect(c.pageFlowBusy.value, isFalse);
+
+    await clickAt(tester, c.worldToGlobal(kFloor)!);
+    await chord(tester, LogicalKeyboardKey.keyE, control: true);
+    expect(byKey('export-dialog'), findsOneWidget, reason: 'premise: a flow');
+    expect(c.pageFlowBusy.value, isTrue);
+    expect(enabled('own-export'), isFalse);
+    expect(enabled('own-print'), isFalse);
+    await press(tester, 'export-cancel');
+    expect(c.pageFlowBusy.value, isFalse);
+    expect(enabled('own-export') && enabled('own-print'), isTrue);
+  });
+
+  testWidgets(
       "DH5 a print that fails is logged, from the planner's Print and from "
       "the own bar's", (tester) async {
     final printer = JammedPrinter();
