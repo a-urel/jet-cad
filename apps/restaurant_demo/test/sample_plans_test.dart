@@ -6,6 +6,8 @@
 // The expected table is the old plans' (assets/plans/*.json at v0.7.2): the
 // definition and the instance's translation, copied from the JSON, not
 // derived from the code under test.
+import 'dart:math' as math;
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
@@ -229,6 +231,36 @@ void main() {
           [for (var n = 1; n <= 11; n++) '$n']);
       final firstWall = c.document.components.withComponent<WallParams>().first;
       expect(firstWall.value, lessThan(instances(c).first.handle.value));
+    });
+
+    test('SW3 the room, walls and all, lies inside the sheet', () {
+      final c = open(buildSalon);
+      final page =
+          c.document.components.get<PageComponent>(c.document.rootHandle)!;
+      final sheetW = page.effectiveWidthMm * page.scaleDenominator;
+      final sheetH = page.effectiveHeightMm * page.scaleDenominator;
+      final w = walls(c);
+      final half = w.first.thickness / 2;
+      final xs = [
+        for (final e in w) ...[e.sx, e.ex]
+      ];
+      final ys = [
+        for (final e in w) ...[e.sy, e.ey]
+      ];
+      final room = (
+        xs.reduce(math.min) - half,
+        xs.reduce(math.max) + half,
+        ys.reduce(math.min) - half,
+        ys.reduce(math.max) + half,
+      );
+      expect(room.$1, greaterThanOrEqualTo(page.originX));
+      expect(room.$2, lessThanOrEqualTo(page.originX + sheetW));
+      expect(room.$3, greaterThanOrEqualTo(page.originY));
+      expect(room.$4, lessThanOrEqualTo(page.originY + sheetH));
+      // The sheet is centred where the default one is, so the placements
+      // (measured from kSheetMin) are not moved.
+      expect(page.originX + sheetW / 2, 0);
+      expect(page.originY + sheetH / 2, 0);
     });
   });
 }

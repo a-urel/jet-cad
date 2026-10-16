@@ -4,8 +4,11 @@
 // packages) held the thirteen placements and no wall; the positions are the
 // old ones, in mm from the sheet's lower-left corner, and the room is new:
 // built first, 1200 mm clear of the furniture's box (x 1765..13900, y
-// 1075..9150), so it is wider than the A4 sheet by a little. Numbered in
-// build order: tables 1-3, 4-5, the booths 6-7, the stools 8-11.
+// 1075..9150). That room is wider than the default A4 sheet at 1:50
+// (14850 x 10500 mm), so the build sets an A3 sheet at 1:50 (21000 x 14850
+// mm) over the same centre: the scale, the walls and every placement stay
+// as they are, and only the paper grows. Numbered in build order: tables
+// 1-3, 4-5, the booths 6-7, the stools 8-11.
 
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show KitWords;
@@ -22,6 +25,7 @@ const double kRoomWall = 250;
 
 /// Builds the Salon into [document] (a `PlanBuild`).
 void buildSalon(DraftDocument document, KitWords words) {
+  _sheet(document);
   _room(document);
   final p = TablePlacer(document);
   p.place('restaurant.table.rect.four', 2500, 7600);
@@ -37,6 +41,17 @@ void buildSalon(DraftDocument document, KitWords words) {
   p.place('restaurant.bar.stool', 10100, 2650);
   p.place('restaurant.bar.counter', 8900, 1800);
   p.place('restaurant.host.stand', 13600, 1300);
+}
+
+/// The Salon's sheet: A3 landscape at 1:50, centred on the world origin as
+/// the default A4 sheet is, so [kSheetMin] still measures the placements
+/// (the default sheet's lower-left corner) and the room lies inside it.
+void _sheet(DraftDocument doc) {
+  final page = PageComponent(widthMm: 297, heightMm: 420);
+  final w = page.effectiveWidthMm * page.scaleDenominator;
+  final h = page.effectiveHeightMm * page.scaleDenominator;
+  doc.commands.execute(SetComponentCommand<PageComponent>(
+      doc.rootHandle, page.copyWith(originX: -w / 2, originY: -h / 2)));
 }
 
 /// Four walls anticlockwise from the south-west corner, an entrance door in
