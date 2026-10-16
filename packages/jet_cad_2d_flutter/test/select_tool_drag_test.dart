@@ -176,7 +176,7 @@ void main() {
       'a body drag released near the dragged line\'s own old midpoint lands on '
       'the pointer, not on that midpoint (4a O1)', () {
     final s = gripScene();
-    final rig = gripRig(s.document);
+    final rig = gripRig(s.document, objectSnap: true);
     rig.selection.replace([k(s.line)]);
     // The line's old midpoint is (7070, 3040); the release is 5 mm off it,
     // inside the aperture, so only the exclusion keeps the pointer.
