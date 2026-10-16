@@ -21,6 +21,8 @@ The plan library of jet_cad_2d, in design mode (sub-project 2a).
   `PlanPropertyPanel`, `PlanLayerPanel`, `PlanPagePanel`, `PlanShortcuts`,
   and `PlanEditor` with `PlanEditorBar`.
 - Words in English, German and Turkish; `PlanTheme`; the bundled Roboto.
+- For hosts that wrap the editor: `showPlanExportDialog` (the built-in export
+  dialog) and `kFileChords` (the file commands' chords).
 
 The service mode (sub-project 2b).
 
