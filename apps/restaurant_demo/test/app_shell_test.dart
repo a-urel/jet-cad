@@ -23,12 +23,10 @@ void main() {
 
   testWidgets(
       'SH2 the area switch shows the Teras and back; each area keeps '
-      'its own plan and history', (tester) async {
+      'its own controller and plan', (tester) async {
     final demo = await pumpDemo(tester);
     final salon = demo.areas[0].controller, teras = demo.areas[1].controller;
     expect(identical(salon, teras), isFalse);
-    // An edit in the Salon (a unit removed through the document) must not
-    // reach the Teras.
     await tester.tap(byKey('area-1'));
     await tester.pump();
     await tester.pump();
