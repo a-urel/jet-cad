@@ -421,3 +421,333 @@ Not counted: EF4-EF8 (5, "not 3b"), WE2 (1, "not 3b"), SS16, SS17, WE1 and the l
 3. Whether `armedSymbol` should reset on `newPlan`/`load` (SS7).
 4. The plan file extension and `FileKind.jetplan` (DF1, FK4): the library has no constant.
 5. Library gaps found (candidate tests, in P or in the app): file-button mid-shape gating, redo chords and Cmd+P, per-platform tooltip glyphs, `PrintingPagePrinter` channel test (PR8), Escape in `PlanExportDialog`, tab strip/cell focus, search text surviving a tab switch in `PlanEditor`, Export/Print flags following a page attached/undone/redone.
+
+---
+
+## Closed (3b)
+
+Built by script from the ported test files (test names carry the old ids) and cross-checked against the Task 1-7 reports (`.superpowers/sdd/2026-10-16-architecture-demo/`). Ported files are under `apps/architecture_demo/test/`; library tests named without a path are under `packages/jet_cad_2d_plan/test/`. Every row of the audit has an outcome below; none is open.
+
+### document_commands_test.dart
+
+| case | outcome | where |
+|---|---|---|
+| DC1 | split | document_commands_test.dart: DC1-open; intent covered, checked: packages/jet_cad_2d_plan/test/editor/plan_editor_test.dart:133 (ED-3 order, gap) and :445 (ED-U) |
+| DC1b | ported | document_commands_test.dart: DC1b |
+| DC2 | ported | document_commands_test.dart: DC2 |
+| DC3 | covered | checked: plan_editor_test.dart:133 ED-3 ("without them none is offered"), :445 ED-U, packages/jet_cad_2d_plan/test/editor/editor_view_test.dart:28 V1 (no file buttons, no document-name) |
+| DC4 | ported | document_commands_test.dart: DC4 |
+| DC5 | ported | document_commands_test.dart: DC5, DC5-open-sample |
+| DC6 | ported | document_commands_test.dart: DC6 |
+| DC7 | split | document_commands_test.dart: DC7-open and document_replace_test.dart: RN1 (intent), RN1-open-undo (Undo/Redo stay live during a write) |
+| DC8 | covered | checked: packages/jet_cad_2d_plan/test/panels/layer_panel_test.dart:612 (kUndoChords + kRedoChords stop at the field) and panels/page_scale_field_test.dart:36 (A9); canvas half DC2 |
+| DC9 | ported | document_commands_test.dart: DC9 |
+| DC10 | ported | document_commands_test.dart: DC10 |
+| DC10b | ported | document_commands_test.dart: DC10b |
+| DC11 | ported | document_commands_test.dart: DC11 |
+| DC12 | split | document_commands_test.dart: DC12 (at 800 px); intent covered, checked: packages/jet_cad_2d_plan/test/editor/editor_words_test.dart:190 (OV-$code 704 to 656 px) |
+| DC12b | dropped | the old bar's half-of-shared-width rule is gone; folded into DC12 and DC12c (task 4 report) |
+| DC12c | split | document_commands_test.dart: DC12c (1000 to 800 px; the floor re-measured after the Export button joined the bar); the library bar alone is the OV-$code row above |
+
+### document_exit_test.dart
+
+| case | outcome | where |
+|---|---|---|
+| EX1 | ported | document_exit_test.dart: EX1 |
+| EX2 | ported | document_exit_test.dart: EX2 |
+| EX3 | ported | document_exit_test.dart: EX3 |
+| EX4 | ported | document_exit_test.dart: EX4 |
+| EX5 | ported | document_exit_test.dart: EX5 |
+| EX6 | ported | document_exit_test.dart: EX6 |
+| EX7 | ported | document_exit_test.dart: EX7 |
+| EG1 | ported | document_exit_test.dart: EG1 |
+
+### document_files_kind_test.dart
+
+| case | outcome | where |
+|---|---|---|
+| FK1 | ported | document_files_kind_test.dart: FK1 |
+| FK2 | ported | document_files_kind_test.dart: FK2 |
+| FK3 | ported | document_files_kind_test.dart: FK3 |
+| FK4 | ported | document_files_kind_test.dart: FK4 |
+| FK5 | ported | document_files_kind_test.dart: FK5 |
+| FK6 | ported | document_files_kind_test.dart: FK6 |
+| DK-L | ported | document_files_kind_test.dart: DK-L |
+
+### document_files_sources_test.dart
+
+| case | outcome | where |
+|---|---|---|
+| DS1 | ported | document_files_sources_test.dart: DS1 |
+| DS3 | ported | document_files_sources_test.dart: DS3 |
+| DS2 | ported | document_files_sources_test.dart: DS2 |
+
+### document_files_test.dart
+
+| case | outcome | where |
+|---|---|---|
+| DF1 | ported | document_files_test.dart: DF1 |
+| DF2 | ported | document_files_test.dart: DF2 |
+| DF3 | ported | document_files_test.dart: DF3 |
+| DF4 | ported | document_files_test.dart: DF4 |
+| DF5 | ported | document_files_test.dart: DF5 |
+| DF6 | ported | document_files_test.dart: DF6 |
+| DF7 | ported | document_files_test.dart: DF7 |
+| DF8 | ported | document_files_test.dart: DF8 |
+
+### document_host_test.dart
+
+| case | outcome | where |
+|---|---|---|
+| DH1 | split | document_host_test.dart: DH1-open; intent covered, checked: plan_controller_test.dart:30 (C1), new_plan_test.dart:34 (ND1), packages/jet_cad_2d_integration/test/scaffold/prepare_test.dart:21 (SC-prepare), editor_view_test.dart:49 |
+| DH2 | ported | document_host_test.dart: DH2 |
+| DH3 | ported | document_host_test.dart: DH3 |
+| DH4 | split | document_host_test.dart: DH4-open; intent COVERED, checked: plan_controller_test.dart:119 (C6) |
+| DH5 | split | document_host_test.dart: DH5-open; intent COVERED, checked: controller/lifetimes_test.dart:23 (C-life1), panels/layer_page_controller_test.dart:123 (LP-1); snap survival pinned here |
+| DH6 | ported | document_host_test.dart: DH6 |
+| DH7 | dropped | premise gone: no per-swap shell rebuild; covered by DC7-open and RN1 (task 4 report) |
+
+### document_open_test.dart
+
+| case | outcome | where |
+|---|---|---|
+| DO1 | ported | document_open_test.dart: DO1 |
+| DO2 | ported | document_open_test.dart: DO2 |
+| DO3 | covered | checked: integration scaffold/prepare_test.dart:21 (SC-prepare), controller/prepare_build_test.dart:105 (PB3) |
+| DO4 | covered | checked: layer_page_controller_test.dart:210 (LP-3), editor_view_test.dart:64 (zoom text) |
+| DO5 | covered | checked: kit_architecture/test/sample/sample_flat_test.dart:723 (SP6), integration/test/wall/wall_grips_test.dart:180 (EG2), kit_architecture/test/wall/wall_live_test.dart:64 (WL1) |
+| DO6 | ported | document_open_test.dart: DO6, DO6-open-scale |
+
+### document_replace_test.dart
+
+| case | outcome | where |
+|---|---|---|
+| RP1 | ported | document_replace_test.dart: RP1 |
+| RP2 | ported | document_replace_test.dart: RP2 |
+| RP3 | ported | document_replace_test.dart: RP3 |
+| RP4 | ported | document_replace_test.dart: RP4 |
+| RP5 | ported | document_replace_test.dart: RP5 |
+| RP6 | ported | document_replace_test.dart: RP6 |
+| RP7 | ported | document_replace_test.dart: RP7 |
+| RN1 | ported | document_replace_test.dart: RN1, RN1-open-undo |
+| RN2 | ported | document_replace_test.dart: RN2 |
+| RN3 | ported | document_replace_test.dart: RN3 |
+| RP8 | ported | document_replace_test.dart: RP8 |
+
+### document_save_test.dart
+
+| case | outcome | where |
+|---|---|---|
+| DS1 | ported | document_save_test.dart: DS1 |
+| DS2 | ported | document_save_test.dart: DS2 |
+| DS3 | ported | document_save_test.dart: DS3 |
+| DS4 | ported | document_save_test.dart: DS4 |
+| DS5 | ported | document_save_test.dart: DS5 |
+| DS6 | ported | document_save_test.dart: DS6 |
+| DS7 | ported | document_save_test.dart: DS7 |
+
+### document_separator_test.dart
+
+| case | outcome | where |
+|---|---|---|
+| FS1 | ported | document_separator_test.dart: FS1 |
+| FS2 | ported | document_separator_test.dart: FS2 |
+| FS3 | ported | document_separator_test.dart: FS3 |
+
+### document_settle_test.dart
+
+| case | outcome | where |
+|---|---|---|
+| ST1 | ported | document_settle_test.dart: ST1 |
+| ST1b | ported | document_settle_test.dart: ST1b (the same test body, saveAs variant) |
+| ST2 | ported | document_settle_test.dart: ST2 |
+| ST3 | ported | document_settle_test.dart: ST3 |
+| ST4 | split | document_settle_test.dart: ST4 (the open case; the focus assertion was merged back after Task 4b) ; intent covered, checked: packages/jet_cad_2d_plan/test/panels/layer_page_controller_test.dart:273 (LP-5) |
+| ST5 | ported | document_settle_test.dart: ST5 |
+| ST6 | ported | document_settle_test.dart: ST6 |
+| ST7 | split | document_settle_test.dart: ST7-open; intent covered, checked: layer_page_controller_test.dart:273 (LP-5) |
+| ST8 | ported | document_settle_test.dart: ST8 |
+
+### app_words_test.dart
+
+| case | outcome | where |
+|---|---|---|
+| AW1 | ported | app_words_test.dart: AW1 |
+| AW2 | ported | app_words_test.dart: AW2 |
+| AW3 | ported | app_words_test.dart: AW3 |
+| AW4 | ported | app_words_test.dart: AW4 |
+
+### export/export_flow_test.dart
+
+| case | outcome | where |
+|---|---|---|
+| EX1 | split | export/export_flow_test.dart: EX1-open; intent covered, checked: packages/jet_cad_2d_plan/test/export/page_flows_test.dart:441 (PF13) |
+| EX2 | covered | checked: packages/jet_cad_2d_plan/test/export/registry_test.dart:115 (X-4) |
+| EX2b | covered | checked: registry_test.dart:260 (X-8), page_flows_test.dart:849 (PF17) |
+| EX3 | split | export/export_flow_test.dart: EX3-open; intent covered, checked: page_flows_test.dart:441 (PF13) |
+| EX4 | covered | checked: page_flows_test.dart:479 (PF14), :627 (PF21), plan_export_types_test.dart:8 (X-1) |
+| EX5 | split | export/export_flow_test.dart: EX5-open; intent covered, checked: page_flows_test.dart:414 (PF12) |
+| EX6 | ported | export_flow_test.dart: EX6 |
+| EX7 | ported | export_flow_test.dart: EX7 |
+| EX8 | ported | export_flow_test.dart: EX8, EX8b |
+| EX9 | covered | checked: editor/plan_editor_test.dart:360 (ED-X1), shortcuts/plan_shortcuts_test.dart:308 (KB-6), page_flows_test.dart:161 (PF3) |
+| EX9b | ported | export_flow_test.dart: EX9b |
+| EX10 | split | export/export_flow_test.dart: EX10-open; intent covered, checked: page_flows_test.dart:217 (PF7) |
+| EX11 | covered | checked: editor/editor_bar_test.dart:385 (PF5), :402 (PF6) |
+| EX12 | ported | export_flow_test.dart: EX12 |
+| EX13 | split | export/export_flow_test.dart: EX13-open; intent covered, checked: page_flows_test.dart:143 (PF2), plan_export_types_test.dart:8 (X-1) |
+| EX14 | split | export/export_flow_test.dart: EX14-open; intent covered, checked: page_flows_test.dart:441 (PF13), export/export_font_test.dart:38 (EF4) |
+
+### export/print_flow_test.dart
+
+| case | outcome | where |
+|---|---|---|
+| PR1 | split | export/print_flow_test.dart: PR1-open; intent covered, checked: registry_test.dart:240 (X-7), page_flows_test.dart:161 (PF3) |
+| PR2 | covered | checked: registry_test.dart:240 (X-7) |
+| PR3 | split | export/print_flow_test.dart: PR3-open; intent covered, checked: page_flows_test.dart:324 (PF9), :388 (PF11) |
+| PR4 | covered | checked: ED-X1 plan_editor_test.dart:360, KB-6 plan_shortcuts_test.dart:308, PF3 page_flows_test.dart:161 |
+| PR5 | split | export/print_flow_test.dart: PR5-open; intent covered, checked: page_flows_test.dart:217 (PF7) |
+| PR6 | ported | print_flow_test.dart: PR6 |
+| PR7 | covered | checked: plan_editor_test.dart:133 (ED-3), editor/editor_words_test.dart:134 (SW1) |
+| PR8 | ported | print_flow_test.dart: PR8 |
+| PR9 | covered | checked: registry_test.dart:260 (X-8) |
+| PR10 | split | export/print_flow_test.dart: PR10-open; intent covered, checked: page_flows_test.dart:217 (PF7) |
+
+### export/export_end_to_end_test.dart
+
+| case | outcome | where |
+|---|---|---|
+| E2E | ported | export_end_to_end_test.dart: E2E |
+
+### export/export_font_test.dart
+
+| case | outcome | where |
+|---|---|---|
+| EF1 | covered | checked: packages/jet_cad_2d_plan/test/fonts/plan_assets_test.dart:55 (W-F1) |
+| EF2 | covered | checked: packages/jet_cad_2d_plan/test/fonts/plan_assets_test.dart:55 (W-F1) |
+| EF3 | dropped | the app owns no font copy or README (audit) |
+| EF4-EF8 | not 3b | EF4-EF8 are ported in 3a/2a (jet_cad_2d_plan export_font_test.dart, fonts/plan_assets_test.dart); not counted |
+| EF9 | split | export/export_font_test.dart: EF9-open (one controller kept across New, Open sample, Open; export embeds the font after each); intent pins EF7 per cache |
+| EF10 | covered | checked: export_font_test.dart:38 (EF4), page_flows_test.dart:441 (PF13) |
+| EF11 | ported | export_font_test.dart: EF11 |
+| EF12 | ported | export_font_test.dart: EF12 |
+
+### symbols/symbol_library_loader_test.dart
+
+| case | outcome | where |
+|---|---|---|
+| premise | covered | checked: packages/jet_cad_2d_kit_architecture/test/furniture/furniture_library_test.dart:68 |
+| SL1 | covered | checked: packages/jet_cad_2d_plan/test/controller/symbols_controller_test.dart:44 (S-9), test/symbols/plan_symbol_loader_test.dart:161 (S-7) |
+| SL2 | covered | checked: plan_symbol_loader_test.dart:110 (S-5: throwing read, undecodable bytes, Error as well as Exception; the tag rule is the kit decoder's) |
+| SL3 | covered | checked: plan_symbol_loader_test.dart:110 (S-5: throwing read, undecodable bytes, Error as well as Exception; the tag rule is the kit decoder's) |
+| SL4 | covered | checked: plan_symbol_loader_test.dart:110 (S-5: throwing read, undecodable bytes, Error as well as Exception; the tag rule is the kit decoder's) |
+| SL5 | covered | checked: plan_symbol_loader_test.dart:110 (S-5: throwing read, undecodable bytes, Error as well as Exception; the tag rule is the kit decoder's) |
+| SL6 | covered | checked: symbols_controller_test.dart:148 (S-12); panels/plan_symbol_gallery_test.dart:174 ("a failed load shows its message and Retry") |
+| SL7 | covered | checked: symbols_controller_test.dart:148 (S-12, from ready; from loading unpinned, as the audit says) |
+| SL8 | covered | checked: plan_symbol_loader_test.dart:192 (S-8), symbols_controller_test.dart:204 (S-13) |
+| SL9 | covered | checked: jet_cad_2d_integration/test/furniture/furniture_load_test.dart:26 (FU-load); jet_cad_2d_kit_architecture/test/furniture/package_assets_test.dart:43 (PA2) |
+| SL9b | split | symbol_library_loader_test.dart: SL9b-open (the kit's 41 symbols, six categories) and SL9b (the thumbnail cache holds at least every symbol) |
+| SL9c | dropped | restaurant premise and kAppSymbolSources gone; the controller owns loader and cache (S-11) (audit) |
+| SL10 | covered | checked: symbols_controller_test.dart:109 (S-11) |
+| SL11 | covered | checked: symbols_controller_test.dart:109 (S-11) |
+| SL12 | dropped | PlannerShell API gone; ED-1 pins that a kit without symbols offers no Symbols tab (audit) |
+
+### symbols/symbol_shell_test.dart
+
+| case | outcome | where |
+|---|---|---|
+| SS1 | covered | checked: packages/jet_cad_2d_plan/test/editor/plan_editor_test.dart:111 (ED-2), :72 (ED-1); added SS1-app (the app's editor has the strip, Tools first, 41 symbols) |
+| SS2 | ported | symbol_shell_test.dart: SS2 |
+| SS3 | covered | checked: panels/plan_symbol_gallery_test.dart:426 (highlight follows tool and armed entry), controller/plan_controller_test.dart:196 (C9), controller/symbols_controller_test.dart:224 (S-14). Added F-2 (a cell tap in the app arms plan.symbol, clears the selection of a real wall, highlights the cell) |
+| SS4 | covered | checked: tools/plan_symbol_tool_test.dart:844 and :945; jet_cad_2d_integration/test/attach/wall_attach_tool_test.dart:492 |
+| SS5 | covered | checked: plan_symbol_gallery_test.dart:426 (another tool chosen clears the highlight); shortcuts/plan_shortcuts_test.dart:255 (KB-4) |
+| SS6 | ported | symbol_shell_test.dart: SS6 |
+| SS7 | split | symbol_shell_test.dart: SS7-open (armedSymbol survives New, the tool is Select) and SS7 (intent: no armed cell shown); also covered, checked: packages/jet_cad_2d_plan/test/controller/lifetimes_test.dart:23 (C-life1) |
+| SS8 | split | symbol_shell_test.dart: SS8-open; intent covered, checked: packages/jet_cad_2d_plan/test/tools/plan_symbol_tool_test.dart:406 |
+| SS9 | covered | checked: symbols_controller_test.dart:109 (S-11) |
+| SS10 | covered | checked: symbols_controller_test.dart:109 (S-11) |
+| SS11 | covered | checked: symbols_controller_test.dart:109 (S-11) |
+| SS12 | ported | symbol_shell_test.dart: SS12 |
+| SS13 | split | symbol_shell_test.dart: SS13-open (New then Open sample: same editor state, search text kept); intent unpinned beyond the gallery tests (audit) |
+| SS14 | split | symbol_shell_test.dart: SS14-open; intent covered, checked: packages/jet_cad_2d_plan/test/panels/plan_symbol_gallery_test.dart:289 |
+| SS15 | dropped | PlannerShell(symbols:) gone; the intent is SS12 (audit) |
+
+### symbols/symbol_palette_end_to_end_test.dart
+
+| case | outcome | where |
+|---|---|---|
+| E2E | ported | symbol_palette_end_to_end_test.dart: E2E |
+
+### symbols/symbol_section_end_to_end_test.dart
+
+| case | outcome | where |
+|---|---|---|
+| WE3 | ported | symbol_section_end_to_end_test.dart: WE3 |
+
+### layers/layers_end_to_end_test.dart
+
+| case | outcome | where |
+|---|---|---|
+| E2E | ported | layers_end_to_end_test.dart: E2E |
+
+### layers/layer_panel_test.dart
+
+| case | outcome | where |
+|---|---|---|
+| rows: layer 0 first, then by name under toLowerCase | covered | checked: packages/jet_cad_2d_plan/test/panels/layer_panel_test.dart, same-named test (names compared by script, task 7) |
+| the current mark, the eye, the lock and the colour: each one command, dirty, undone | covered | checked: packages/jet_cad_2d_plan/test/panels/layer_panel_test.dart, same-named test (names compared by script, task 7) |
+| choosing a layer's own colour, or tapping the current mark of the current layer, dispatche | covered | checked: packages/jet_cad_2d_plan/test/panels/layer_panel_test.dart, same-named test (names compared by script, task 7) |
+| swatches: ACI 7 in the paper's foreground | covered | checked: packages/jet_cad_2d_plan/test/panels/layer_panel_test.dart, same-named test (names compared by script, task 7) |
+| disabled: hiding the effective current layer ...; delete on layer 0 ... | covered | checked: packages/jet_cad_2d_plan/test/panels/layer_panel_test.dart, same-named test (names compared by script, task 7) |
+| delete: a stored current layer that is hidden and empty ... (D3, O3) | covered | checked: packages/jet_cad_2d_plan/test/panels/layer_panel_test.dart, same-named test (names compared by script, task 7) |
+| delete: one command, dirty, the row goes; undo brings it back | covered | checked: packages/jet_cad_2d_plan/test/panels/layer_panel_test.dart, same-named test (names compared by script, task 7) |
+| S-6: a file with hidden layer 0 and an unusable stored current layer | covered | checked: packages/jet_cad_2d_plan/test/panels/layer_panel_test.dart, same-named test (names compared by script, task 7) |
+| S-5: showing a hidden stored current layer makes it current again | covered | checked: packages/jet_cad_2d_plan/test/panels/layer_panel_test.dart, same-named test (names compared by script, task 7) |
+| rename: a double-click opens the field ... Enter commits the trimmed name | covered | checked: packages/jet_cad_2d_plan/test/panels/layer_panel_test.dart, same-named test (names compared by script, task 7) |
+| rename: Enter on B (ACI 5, locked) changes the name only | covered | checked: packages/jet_cad_2d_plan/test/panels/layer_panel_test.dart, same-named test (names compared by script, task 7) |
+| rename: a blur-rename then a tap on the same row's lock ... | covered | checked: packages/jet_cad_2d_plan/test/panels/layer_panel_test.dart, same-named test (names compared by script, task 7) |
+| rename: an invalid name on Enter keeps the field open with the reason | covered | checked: packages/jet_cad_2d_plan/test/panels/layer_panel_test.dart, same-named test (names compared by script, task 7) |
+| rename: a case-only rename is valid | covered | checked: packages/jet_cad_2d_plan/test/panels/layer_panel_test.dart, same-named test (names compared by script, task 7) |
+| rename: Escape with a valid new name reverts | covered | checked: packages/jet_cad_2d_plan/test/panels/layer_panel_test.dart, same-named test (names compared by script, task 7) |
+| rename: focus loss: an invalid name reverts, a valid one commits once | covered | checked: packages/jet_cad_2d_plan/test/panels/layer_panel_test.dart, same-named test (names compared by script, task 7) |
+| rename: layer 0 cannot be renamed | covered | checked: packages/jet_cad_2d_plan/test/panels/layer_panel_test.dart, same-named test (names compared by script, task 7) |
+| no shell shortcut fires while typing | covered | checked: packages/jet_cad_2d_plan/test/panels/layer_panel_test.dart, same-named test (names compared by script, task 7) |
+| + adds Layer N ... | covered | checked: packages/jet_cad_2d_plan/test/panels/layer_panel_test.dart, same-named test (names compared by script, task 7) |
+| read-only: every control is disabled and nothing is dispatched | covered | checked: packages/jet_cad_2d_plan/test/panels/layer_panel_test.dart, same-named test (names compared by script, task 7) |
+| the list follows a direct table write and a header change | covered | checked: packages/jet_cad_2d_plan/test/panels/layer_panel_test.dart, same-named test (names compared by script, task 7) |
+| the header collapses and reopens the list | covered | checked: packages/jet_cad_2d_plan/test/panels/layer_panel_test.dart, same-named test (names compared by script, task 7) |
+| another document: the panel moves its subscriptions | covered | checked: packages/jet_cad_2d_plan/test/panels/layer_panel_test.dart, same-named test (names compared by script, task 7) |
+| in the app: panel between the Selection and Page panels; Open shows the opened file's laye | covered | checked: packages/jet_cad_2d_plan/test/editor/plan_editor_test.dart:72 (ED-1), panels/layer_page_controller_test.dart:123 (LP-1), panels/layer_panel_test.dart:194 and :382; the app also covers Open showing layers (layers/layers_end_to_end_test.dart) |
+| a loaded layer whose stored name fails D4: its eye hides it | covered | checked: packages/jet_cad_2d_plan/test/panels/layer_panel_test.dart, same-named test (names compared by script, task 7) |
+| a command the document refuses is caught | covered | checked: packages/jet_cad_2d_plan/test/panels/layer_panel_test.dart, same-named test (names compared by script, task 7) |
+
+### layers/layer_picker_test.dart
+
+| case | outcome | where |
+|---|---|---|
+| shown for a line-only selection ...; choosing layer 0 is one command | covered | checked: packages/jet_cad_2d_plan/test/panels/layer_picker_test.dart, same-named test (names compared by script, task 7) |
+| a mixed selection moves in one undo step | covered | checked: packages/jet_cad_2d_plan/test/panels/layer_picker_test.dart, same-named test (names compared by script, task 7) |
+| a region picked on its boundary moves every fill of it | covered | checked: packages/jet_cad_2d_plan/test/panels/layer_picker_test.dart, same-named test (names compared by script, task 7) |
+| the label: "Mixed" ... | covered | checked: packages/jet_cad_2d_plan/test/panels/layer_picker_test.dart, same-named test (names compared by script, task 7) |
+| a selection already on the target dispatches nothing | covered | checked: packages/jet_cad_2d_plan/test/panels/layer_picker_test.dart, same-named test (names compared by script, task 7) |
+| moving to a hidden layer is allowed and empties the selection | covered | checked: packages/jet_cad_2d_plan/test/panels/layer_picker_test.dart, same-named test (names compared by script, task 7) |
+| read-only disables it with the reason | covered | checked: packages/jet_cad_2d_plan/test/panels/layer_picker_test.dart, same-named test (names compared by script, task 7) |
+| a plain (non-parametric) group disables it | covered | checked: packages/jet_cad_2d_plan/test/panels/layer_picker_test.dart, same-named test (names compared by script, task 7) |
+| every registered parametric type (box, wall, opening, separator, room, dimension) alone | split | packages/jet_cad_2d_integration/test/layers/layer_picker_types_test.dart (the six architecture types alone enable the picker and show their layer); intent covered, checked: packages/jet_cad_2d_plan/test/panels/layer_picker_test.dart:423 |
+| the picker needs components, not transform | covered | checked: packages/jet_cad_2d_plan/test/panels/layer_picker_test.dart, same-named test (names compared by script, task 7) |
+| the no-op rule compares the stored ObjectLayer | covered | checked: packages/jet_cad_2d_plan/test/panels/layer_picker_test.dart, same-named test (names compared by script, task 7) |
+| a move the document refuses (regeneration throws on a broken file) is caught | covered | checked: panels/layer_page_controller_test.dart:319 (LP-7), kits/failure_flow_test.dart:364 (F-9) |
+
+### Totals by outcome
+
+| outcome | rows |
+|---|---|
+| ported | 89 |
+| split | 26 |
+| covered | 73 |
+| dropped | 6 |
+| total | 194 |
+
+Matches the audit's grand total (PORT 89, COVERED 73, DROPPED 6, SPLIT 26 = 194). Not counted, as in the audit: EF4-EF8 (not 3b), WE1, WE2, SS16, SS17 and the layer picker's wall case (3a or not ported).
+
+Outcomes that differ from the audit's disposition: none by count. Four PORT rows (DC5, DO6, RN1, EX8) gained an extra case beside the ported one (DC5-open-sample, DO6-open-scale, RN1-open-undo, EX8b); DS3, AW1, AW2 and AW4 moved from Task 3 to Task 4 and are ported there; ST2, ST3, ST8 and the ST4 focus assertion were skipped in Task 4 and run since Task 4b.

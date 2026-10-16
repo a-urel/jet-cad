@@ -854,6 +854,14 @@ replace, save, separator, settle, export and print flows,
 `symbol_library_loader_test`, `symbol_shell_test` SS1-SS15, the end-to-end
 tests, `app_words_test`, `export_font_test` EF1-EF3, EF9-EF12): 3b.
 
+## Amendments
+
+- **2026-10-16, sub-project 3b done** (spec
+  [2026-10-16-architecture-demo-design.md](2026-10-16-architecture-demo-design.md)):
+  Appendix A.3's 3b rows are closed, each with its outcome, in the 3b audit's
+  "Closed (3b)" section
+  ([2026-10-16-architecture-demo-test-audit.md](2026-10-16-architecture-demo-test-audit.md)).
+
 ## Revision history
 
 - **Revision 1** (`565b233b`): the design approved in chat.
