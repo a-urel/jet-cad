@@ -84,6 +84,7 @@ export 'src/shortcuts/plan_shortcuts.dart' show PlanShortcuts;
 export 'src/symbols/plan_symbol.dart' show PlanSymbol;
 export 'src/symbols/plan_symbol_loader.dart'
     show PlanSymbolLoad, PlanSymbolLoader;
+export 'src/tools/generic_tools.dart' show PlanToolIds;
 export 'src/theme/plan_theme.dart' show PlanTheme, kUnitColourOpacity;
 export 'src/units/unit_detail.dart'
     show

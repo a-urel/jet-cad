@@ -7,7 +7,7 @@ import 'package:test/test.dart';
 
 String read(String path) => File(path).readAsStringSync();
 
-final probeYaml = read('host_probe/pubspec.yaml.in');
+final probeYaml = read('old_host_probe/pubspec.yaml.in');
 
 final cases = {
   'jet_cad_2d': '../readme_probe/lib/engine.dart',
@@ -51,7 +51,7 @@ void main() {
     ]);
   });
 
-  test("RM4 the planner's font block is the host probe's", () {
+  test("RM4 the old planner's font block is the old host probe's", () {
     final readme = read('../../packages/jet_cad_floor_plan/README.md');
     final moved = readme.replaceFirst('Roboto-Regular.ttf', 'Roboto.ttf');
     expect(moved, isNot(readme), reason: 'premise');

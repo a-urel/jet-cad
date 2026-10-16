@@ -87,6 +87,8 @@ void main() {
       'PlanOverlaySize', 'PlanOverlayLayout',
       // 3b Task 1
       'showPlanExportDialog', 'kFileChords',
+      // 4a Task 3
+      'PlanToolIds',
     });
   });
 

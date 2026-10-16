@@ -157,12 +157,14 @@ void main() {
         const ref = '2b35b69931d6acdb03c219a38c923a8fd3fdc50c';
         final ok = await dartRun('check_host_lock.dart', [
           'test/fixtures/host_post_split.lock.txt',
+          '--old',
           '--ref',
           ref,
         ]);
         expect(ok.exitCode, 0, reason: '${ok.stdout}${ok.stderr}');
         final bad = await dartRun('check_host_lock.dart', [
           'test/fixtures/host_post_split.lock.txt',
+          '--old',
           '--ref',
           '0000000000000000000000000000000000000000',
         ]);
@@ -170,6 +172,21 @@ void main() {
         expect(bad.stdout, contains('jet_cad_floor_plan'));
       },
     );
+  });
+
+  test('SC21b --ref on the new probe\'s lock: exit 0; --old: exit 1', () async {
+    const ref = '99ab3f2eb2a20bf1207d4679572103c3520df028';
+    const lock = 'test/fixtures/host_probe.lock.txt';
+    final ok = await dartRun('check_host_lock.dart', [lock, '--ref', ref]);
+    expect(ok.exitCode, 0, reason: '${ok.stdout}${ok.stderr}');
+    final old = await dartRun('check_host_lock.dart', [
+      lock,
+      '--old',
+      '--ref',
+      ref,
+    ]);
+    expect(old.exitCode, 1);
+    expect(old.stdout, contains('jet_cad_floor_plan: not in the lock'));
   });
 
   test(
@@ -203,58 +220,80 @@ void main() {
 
   // Task 2 review R-1: CI's probe runs only at HEAD, which is green, so a
   // probe that stopped running the check would pass unseen. Its commands,
-  // comments aside, in their order.
-  test('SC14 host_probe.sh checks the lock after pub get, before the build', () {
-    final commands = [
-      for (final line in File('host_probe.sh').readAsLinesSync())
-        if (line.trim().isNotEmpty && !line.trimLeft().startsWith('#'))
-          line.trim(),
-    ];
-    int at(String command) {
-      final i = commands.indexOf(command);
-      expect(i, isNot(-1), reason: 'host_probe.sh runs `$command`');
-      return i;
-    }
+  // comments aside, in their order. Sub-project 4a R4: the host probe and the
+  // old host probe (old_host_probe_resolve.sh) each have one.
+  for (final (script, old) in [
+    ('host_probe.sh', false),
+    ('old_host_probe_resolve.sh', true),
+  ]) {
+    test('SC14 $script checks the lock after pub get, before the build', () {
+      final commands = [
+        for (final line in File(script).readAsLinesSync())
+          if (line.trim().isNotEmpty && !line.trimLeft().startsWith('#'))
+            line.trim(),
+      ];
+      int at(String command) {
+        final i = commands.indexOf(command);
+        expect(i, isNot(-1), reason: '$script runs `$command`');
+        return i;
+      }
 
-    expect(commands, contains('set -euo pipefail'));
-    // The final review's F-3 (MU6): stale output survives a build, so the
-    // probe starts clean.
-    // Review Focus 4: a copy left by an earlier run must not mask a copy
-    // step that no longer runs.
-    final clean = at(
-      r'rm -rf "$probe/build" "$probe/.dart_tool" "$probe/pubspec.lock" \',
-    );
-    expect(
-      at(
-        r'"$probe/assets/restaurant.jetlib" '
-        r'"$probe/lib/restaurant_names.dart"',
-      ),
-      clean + 1,
-      reason: 'the clean line goes on to the copies',
-    );
-    final get = at('flutter pub get');
-    expect(clean, lessThan(get), reason: 'cleaned before pub get');
-    final check = at(
-      r'dart run "$ci/check_host_lock.dart" "$probe/pubspec.lock" --ref "$ref"',
-    );
-    final copy = at(
-      r'symbols=$(dart run "$ci/package_root.dart" "$probe" jet_cad_restaurant_symbols)',
-    );
-    final analyze = at('flutter analyze');
-    final build = at('flutter build web');
-    expect(
-      check < copy && copy < analyze,
-      isTrue,
-      reason: 'the symbols are copied after the check, before analyze',
-    );
-    expect(
-      get < check && check < analyze && analyze < build,
-      isTrue,
-      reason:
-          'pub get, the check, analyze, build: $get, $check, '
-          '$analyze, $build',
-    );
-  });
+      expect(commands, contains('set -euo pipefail'));
+      // The final review's F-3 (MU6): stale output survives a build, so the
+      // probe starts clean. Review Focus 4: a copy left by an earlier run
+      // must not mask a copy step that no longer runs (the old probe's).
+      final clean = at(
+        old
+            ? r'rm -rf "$probe/build" "$probe/.dart_tool" "$probe/pubspec.lock" \'
+            : r'rm -rf "$probe/build" "$probe/.dart_tool" "$probe/pubspec.lock"',
+      );
+      if (old) {
+        expect(
+          at(
+            r'"$probe/assets/restaurant.jetlib" '
+            r'"$probe/lib/restaurant_names.dart"',
+          ),
+          clean + 1,
+          reason: 'the clean line goes on to the copies',
+        );
+      }
+      final get = at('flutter pub get');
+      expect(clean, lessThan(get), reason: 'cleaned before pub get');
+      final check = at(
+        old
+            ? r'dart run "$ci/check_host_lock.dart" "$probe/pubspec.lock" '
+                  r'--old --ref "$ref"'
+            : r'dart run "$ci/check_host_lock.dart" "$probe/pubspec.lock" '
+                  r'--ref "$ref"',
+      );
+      final analyze = at('flutter analyze');
+      final build = at('flutter build web');
+      if (old) {
+        final copy = at(
+          r'symbols=$(dart run "$ci/package_root.dart" "$probe" '
+          r'jet_cad_restaurant_symbols)',
+        );
+        expect(
+          check < copy && copy < analyze,
+          isTrue,
+          reason: 'the symbols are copied after the check, before analyze',
+        );
+      } else {
+        expect(
+          commands.any((c) => c.contains('package_root.dart')),
+          isFalse,
+          reason: 'the kits carry their libraries: nothing is copied',
+        );
+      }
+      expect(
+        get < check && check < analyze && analyze < build,
+        isTrue,
+        reason:
+            'pub get, the check, analyze, build: $get, $check, '
+            '$analyze, $build',
+      );
+    });
+  }
 
   // The final review's F-3 (MU7): the probe's checks after the build, run
   // as bash runs them, in a scratch probe; one red case per check.
@@ -515,15 +554,23 @@ void main() {
     setUp(() async {
       repo = Directory.systemTemp.createTempSync('old_host_probe');
       seen = File('${repo.path}/seen.dart');
+      // The tag's probe sat at tool/ci/host_probe (before 4a moved it); this
+      // commit's old probe sits at tool/ci/old_host_probe.
       Directory(
         '${repo.path}/tool/ci/host_probe/lib',
+      ).createSync(recursive: true);
+      Directory(
+        '${repo.path}/tool/ci/old_host_probe/lib',
       ).createSync(recursive: true);
       File('old_host_probe.sh').copySync(
         '${repo.path}/tool/ci/'
         'old_host_probe.sh',
       );
-      main = File('${repo.path}/tool/ci/host_probe/lib/main.dart')
-        ..writeAsStringSync(tagged);
+      File(
+        '${repo.path}/tool/ci/host_probe/lib/main.dart',
+      ).writeAsStringSync(tagged);
+      main = File('${repo.path}/tool/ci/old_host_probe/lib/main.dart')
+        ..writeAsStringSync(current);
       await git(['init', '-q']);
       await git(['add', 'tool']);
       await git([
@@ -531,8 +578,8 @@ void main() {
         'commit', '-q', '-m', 'release',
       ]);
       await git(['tag', 'v0.3.0']);
-      // A later commit, so the tag is not HEAD.
-      main.writeAsStringSync(current);
+      // A later commit, so the tag is not HEAD: the tag's probe is gone.
+      File('${repo.path}/tool/ci/host_probe/lib/main.dart').deleteSync();
       await git([
         '-c', 'user.name=t', '-c', 'user.email=t@t', //
         'commit', '-q', '-am', 'later',
@@ -567,14 +614,14 @@ void main() {
     test('no resolved probe: exit 2, main.dart untouched', () async {
       final r = await runScript(flutterExit: 0);
       expect(r.exitCode, 2);
-      expect(r.stderr, contains('run tool/ci/host_probe.sh first'));
+      expect(r.stderr, contains('run tool/ci/old_host_probe_resolve.sh first'));
       expect(main.readAsStringSync(), current);
       expect(seen.existsSync(), isFalse);
     });
 
     test("the tag's main.dart analysed; this commit's put back", () async {
       File(
-        '${repo.path}/tool/ci/host_probe/pubspec.lock',
+        '${repo.path}/tool/ci/old_host_probe/pubspec.lock',
       ).writeAsStringSync('packages: {}\n');
       final r = await runScript(flutterExit: 0);
       expect(r.exitCode, 0, reason: '${r.stdout}${r.stderr}');
@@ -586,7 +633,7 @@ void main() {
 
     test('analysis fails: exit non-zero, main.dart put back', () async {
       File(
-        '${repo.path}/tool/ci/host_probe/pubspec.lock',
+        '${repo.path}/tool/ci/old_host_probe/pubspec.lock',
       ).writeAsStringSync('packages: {}\n');
       final r = await runScript(flutterExit: 1);
       expect(r.exitCode, 1);

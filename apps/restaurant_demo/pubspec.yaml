@@ -1,9 +1,10 @@
 name: restaurant_demo
 description: >-
-  The restaurant embedding's demo host (spec 14b-2 H10): two dining areas,
-  each a FloorPlanController over an in-memory plan, a Design / Service
-  toggle, selection by table number and a log of the API's state. An
-  example and an integration surface, not a product.
+  The restaurant embedding's demo host: two dining areas, each a
+  PlanController over the architecture and restaurant kits, built in code
+  (lib/samples), a Design / Service toggle, selection by table number and a
+  log of the API's state. An example and an integration surface, not a
+  product.
 publish_to: none
 version: 0.0.1
 resolution: workspace
@@ -17,30 +18,32 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  jet_cad_floor_plan: ^0.7.2
-  jet_cad_restaurant_symbols:
-    path: ../../packages/jet_cad_restaurant_symbols
+  # The samples build documents by engine commands and place tables with the
+  # kit contract's unit label.
+  jet_cad_2d: ^0.7.2
+  jet_cad_2d_kit: ^0.1.0
+  jet_cad_2d_kit_architecture: ^0.1.0
+  jet_cad_2d_kit_restaurant: ^0.1.0
+  jet_cad_2d_plan: ^0.8.0
+  vector_math: ^2.2.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
-  # The tests build seeded plans with the editor's own placement.
-  jet_cad_2d: ^0.7.2
+  # POS1, the run on the real macOS binary (integration_test/pos_test.dart).
+  integration_test:
+    sdk: flutter
+  # The ported service tests (Tasks 7 and 8) drive the editor through the
+  # engine's Flutter types (SelectionKey, Tool, ViewportTransform).
   jet_cad_2d_flutter: ^0.7.2
-  vector_math: ^2.2.0
 
 flutter:
   uses-material-design: true
-  # The sample plans the demo opens with (test/sample_plans_test.dart builds
-  # and checks them).
-  assets:
-    - assets/plans/salon.json
-    - assets/plans/teras.json
   # The bare family documents name, from the planner package's bytes (spec
   # 14b-1 V-11a): on the web the engine would fetch Google's Roboto
   # otherwise.
   fonts:
     - family: Roboto
       fonts:
-        - asset: packages/jet_cad_floor_plan/fonts/Roboto-Regular.ttf
+        - asset: packages/jet_cad_2d_plan/fonts/Roboto-Regular.ttf

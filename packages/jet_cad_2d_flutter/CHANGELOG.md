@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- `SelectTool` passes the dragged selection as `resolveDragPoint`'s new
+  `exclude` while a move drag lives: a dragged object no longer snaps to
+  its own pre-drag geometry.
+
 ## 0.7.2
 
 Screenshots and documentation, and one small change in the rulers. Plans

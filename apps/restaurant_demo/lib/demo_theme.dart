@@ -2,8 +2,8 @@
 // point-of-sale application whose own UI is not Material (shadcn_ui, say)
 // does to make the planner match it.
 //
-// - A `FloorPlanTheme` in each of the app's `ThemeData`s, a light and a
-//   dark one ([posFloorPlanTheme]), so the system's mode picks it.
+// - A `PlanTheme` in each of the app's `ThemeData`s, a light and a
+//   dark one ([posPlanTheme]), so the system's mode picks it.
 // - A local `Theme` around the view with a hand-built `ColorScheme` of the
 //   POS's tokens ([posViewTheme]): the planner's chrome (bars, panels,
 //   buttons, the export dialog) reads its colours from the ambient Material
@@ -17,14 +17,14 @@
 // colours by nature, so the colour scan (theme_colours_test) allows this
 // file whole.
 import 'package:flutter/material.dart';
-import 'package:jet_cad_floor_plan/jet_cad_floor_plan.dart';
+import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 
 /// The two looks the demo's app bar switches between.
 enum DemoLook {
-  /// Today's: the seeded Material theme, no `FloorPlanTheme` anywhere.
+  /// Today's: the seeded Material theme, no `PlanTheme` anywhere.
   standard,
 
-  /// The POS's: [posFloorPlanTheme], [posViewTheme], [kPosViewOverride].
+  /// The POS's: [posPlanTheme], [posViewTheme], [kPosViewOverride].
   pos,
 }
 
@@ -121,7 +121,7 @@ ColorScheme posColorScheme(Brightness brightness) =>
 /// around the page, a taller service bar, an orange selection, and a
 /// heavier veil over the tables out of focus. The veil keeps the paper's
 /// colour: one of another colour would show each faded table's box.
-const FloorPlanTheme kPosFloorPlanLight = FloorPlanTheme(
+const PlanTheme kPosPlanLight = PlanTheme(
   statusCaptionStyle: TextStyle(
       fontFamily: 'Roboto', fontSize: 12, fontWeight: FontWeight.bold),
   statusFillOpacity: 0.8,
@@ -136,11 +136,11 @@ const FloorPlanTheme kPosFloorPlanLight = FloorPlanTheme(
   serviceBarHeight: 52,
 );
 
-/// [kPosFloorPlanLight]'s dark counterpart: the dark primary and muted
+/// [kPosPlanLight]'s dark counterpart: the dark primary and muted
 /// tokens. The selection colours are per paper, not per theme, so they are
 /// the light theme's: a light page under the dark theme is still shown on
 /// the dark canvas (the planner's rule), and takes `selectionOnDark`.
-const FloorPlanTheme kPosFloorPlanDark = FloorPlanTheme(
+const PlanTheme kPosPlanDark = PlanTheme(
   statusCaptionStyle: TextStyle(
       fontFamily: 'Roboto', fontSize: 12, fontWeight: FontWeight.bold),
   statusFillOpacity: 0.8,
@@ -156,18 +156,18 @@ const FloorPlanTheme kPosFloorPlanDark = FloorPlanTheme(
 );
 
 /// The POS look for [brightness]'s app theme.
-FloorPlanTheme posFloorPlanTheme(Brightness brightness) =>
-    brightness == Brightness.light ? kPosFloorPlanLight : kPosFloorPlanDark;
+PlanTheme posPlanTheme(Brightness brightness) =>
+    brightness == Brightness.light ? kPosPlanLight : kPosPlanDark;
 
 /// The view's own override under the POS look: a 3 px selection, merged
 /// over the app theme's extension field by field (the extension sets no
 /// width, so the resolved theme is the extension plus this).
-const FloorPlanTheme kPosViewOverride = FloorPlanTheme(selectionWidth: 3);
+const PlanTheme kPosViewOverride = PlanTheme(selectionWidth: 3);
 
 /// The local `Theme` around the view under the POS look: [ambient]'s
 /// brightness, the hand-built [posColorScheme], and [ambient]'s extensions
 /// carried over, because a local `Theme` replaces the whole `ThemeData`,
-/// and without them the view would see no `FloorPlanTheme`.
+/// and without them the view would see no `PlanTheme`.
 ThemeData posViewTheme(ThemeData ambient) => ThemeData(
       colorScheme: posColorScheme(ambient.brightness),
       extensions: ambient.extensions.values,

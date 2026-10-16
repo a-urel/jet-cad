@@ -907,6 +907,7 @@ class SpatialIndex {
 
     void visitLeaf(int slot) {
       if (!_filters.acceptsEntityOnLayer(slot, filter, context)) return;
+      if (pickOut == null && _slotExcluded(slot)) return;
       _composeLeafTransform(toWorld, index.transformOfLeaf(slot));
       if (pickOut != null) {
         _considerLeaf(slot, _lta, _ltb, _ltc, _ltd, _lte, _ltf, world, radius,
@@ -923,6 +924,7 @@ class SpatialIndex {
     // bound.
     void visitSnapCentre(int slot) {
       if (!_filters.acceptsEntityOnLayer(slot, filter, context)) return;
+      if (_slotExcluded(slot)) return;
       _composeLeafTransform(toWorld, index.transformOfLeaf(slot));
       _considerSnapCentre(slot, _lta, _ltb, _ltc, _ltd, _lte, _ltf, world,
           radius, depth, snapOut!);
@@ -950,7 +952,8 @@ class SpatialIndex {
 
     final level = _scratchForDepth(depth)..reset();
     index.searchInstances(instanceQuery, (node) {
-      if (_filters.acceptsNodeOnLayer(node, filter, context)) {
+      if (_filters.acceptsNodeOnLayer(node, filter, context) &&
+          (pickOut != null || !_inExcluded(node))) {
         level.add(node.value);
       }
     });
@@ -1519,12 +1522,21 @@ class SpatialIndex {
   /// [_descend]'s doc comment for what "shares" means here and what it does
   /// and does not inherit).
   ///
+  /// **[exclude]** names objects that offer no snap: a leaf whose handle is
+  /// in it, a leaf owned (at any depth) by a group in it, and everything
+  /// inside an instance in it; every kind, intersection included. This is how
+  /// a drag avoids snapping to its own pre-drag geometry. Null or empty:
+  /// nothing is excluded. The set is caller-owned, only read, and not held
+  /// after the call; membership tests allocate nothing.
+  ///
   /// **Not reentrant.** Shares this index's scratch state with every other
   /// query; see [forEachInRect]'s doc comment.
   void snapInto(Vector2 world, double radius, SnapMask mask, SnapResult out,
-      {QueryFilter filter = const QueryFilter.snapping()}) {
+      {QueryFilter filter = const QueryFilter.snapping(),
+      Set<Handle>? exclude}) {
     final root = rootIndex; // throws if disposed
     _beginQuery();
+    _snapExclude = exclude == null || exclude.isEmpty ? null : exclude;
     // Guard body inlined, not passed to a closure-taking helper -- see the
     // doc comment on [_beginQuery].
     try {
@@ -1550,8 +1562,38 @@ class SpatialIndex {
       }
       out.found = _bestSnapKind != null;
     } finally {
+      _snapExclude = null;
       _endQuery();
     }
+  }
+
+  /// The [snapInto] `exclude` set while a snap runs, else null. A field, not
+  /// a parameter threaded through [_descend], for the same reason the
+  /// best-so-far fields above are: nothing is allocated per call or per
+  /// candidate. Cleared in `snapInto`'s `finally`.
+  Set<Handle>? _snapExclude;
+
+  /// Whether [h], or a group above it, is in the active exclusion set.
+  /// Climbs `parent` pointers; allocation-free, bounded so a malformed cycle
+  /// ends the walk.
+  bool _inExcluded(Handle h) {
+    final ex = _snapExclude;
+    if (ex == null) return false;
+    var current = h;
+    for (var steps = 0; steps < 4096; steps++) {
+      if (ex.contains(current)) return true;
+      final node = document.tree[current];
+      if (node == null) return false; // a definition, or past the root
+      current = node.parent;
+    }
+    return false;
+  }
+
+  /// [_inExcluded] for the leaf at [slot]: its own handle, then its owners.
+  bool _slotExcluded(int slot) {
+    if (_snapExclude == null) return false;
+    return _inExcluded(document.entities.handleAt(slot)) ||
+        _inExcluded(document.entities.ownerAt(slot));
   }
 
   /// Considers every pairwise crossing among the line and polyline leaves of
@@ -1614,6 +1656,7 @@ class SpatialIndex {
       // between two lines on a hidden layer is no more snappable than
       // either line is on its own.
       if (!_filters.acceptsEntity(slot, filter)) return;
+      if (_slotExcluded(slot)) return;
       _scratch.add(slot);
     });
     _scratch.sortByHandle(document.entities);

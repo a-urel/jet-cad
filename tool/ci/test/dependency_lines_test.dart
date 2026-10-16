@@ -65,10 +65,10 @@ void main() {
     }
     expect(
       seen,
-      21,
+      20,
       reason:
-          'premise: the dependents are read; the pubspecs hold 21 '
-          'dependency lines on a published package (15, and the three each of '
+          'premise: the dependents are read; the pubspecs hold 20 '
+          'dependency lines on a published package (14, and the three each of '
           'tool/screenshots and tool/readme_probe)',
     );
   });

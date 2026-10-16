@@ -68,8 +68,21 @@ List<String> forbiddenInLock(String lock) => [
 
 /// The packages the host probe must take from the commit under test, by
 /// its `dependency_overrides` (publishing spec D6): once they are on
-/// pub.dev, a dropped override would resolve silently from there.
+/// pub.dev, a dropped override would resolve silently from there. Sub-project
+/// 4a R4: the plan library, the kit contract, the two kits and the two engine
+/// packages they stand on.
 const List<String> probedFromCommit = [
+  'jet_cad_2d',
+  'jet_cad_2d_flutter',
+  'jet_cad_2d_kit',
+  'jet_cad_2d_kit_architecture',
+  'jet_cad_2d_kit_restaurant',
+  'jet_cad_2d_plan',
+];
+
+/// The same for the old host probe (tool/ci/old_host_probe), which stays
+/// until sub-project 4b removes `jet_cad_floor_plan`.
+const List<String> oldProbedFromCommit = [
   'jet_cad_2d',
   'jet_cad_2d_flutter',
   'jet_cad_floor_plan',
@@ -99,15 +112,16 @@ Map<String, String> lockEntryFields(String lock, String name) {
   return fields;
 }
 
-/// One message per package of [probedFromCommit] that [lock] does not
-/// resolve from git at [ref]: missing, another source, or another
-/// resolved ref.
-List<String> notFromCommit(String lock, String ref) => [
-  for (final name in probedFromCommit)
-    if (lockEntryFields(lock, name) case final f
-        when f['source'] != 'git' || f['resolved-ref'] != ref)
-      f.isEmpty
-          ? '$name: not in the lock'
-          : '$name: ${f['source']} at ${f['resolved-ref'] ?? 'no ref'}, '
-                'not git at $ref',
-];
+/// One message per package of [packages] ([probedFromCommit] when null)
+/// that [lock] does not resolve from git at [ref]: missing, another
+/// source, or another resolved ref.
+List<String> notFromCommit(String lock, String ref, {List<String>? packages}) =>
+    [
+      for (final name in packages ?? probedFromCommit)
+        if (lockEntryFields(lock, name) case final f
+            when f['source'] != 'git' || f['resolved-ref'] != ref)
+          f.isEmpty
+              ? '$name: not in the lock'
+              : '$name: ${f['source']} at ${f['resolved-ref'] ?? 'no ref'}, '
+                    'not git at $ref',
+    ];

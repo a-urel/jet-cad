@@ -1,53 +1,26 @@
-// Host embedding API spec G-1 to G-7 in the demo: the Salon's badges, one
-// per table through `tableOverlayBuilder`, behind the "Badges" switch, a dot
-// below the detail breakpoint, faded outside the zone focus; and the button
-// that centres the view on table 7 through `centerOn`. Every expectation is
-// computed here from the public API (`tableDetails`, `camera`,
-// `canvasRect`, `worldToGlobal`) on the Salon sample, whose fitted camera
-// is neither the identity nor at the origin; the badges' figures are worked
-// by hand.
+// Ported from the old apps/restaurant_demo/test/badges_test.dart (the
+// restaurant-kit test audit, section 6, docs/superpowers/specs/
+// 2026-10-16-restaurant-kit-test-audit.md): the Salon's badges, one per
+// table through `PlanEditor.unitOverlayBuilder`, behind the "Badges"
+// switch, a dot below the detail breakpoint, faded outside the zone focus;
+// and the button that centres the view on table 7 through `centerOn`. Every
+// expectation is computed here from the public API (`unitDetails`,
+// `cameraValue`, `canvasRect`, `worldToGlobal`) on the Salon sample, whose
+// fitted camera is neither the identity nor at the origin; the badges'
+// figures are worked by hand.
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_test/flutter_test.dart';
-import 'package:jet_cad_floor_plan/jet_cad_floor_plan.dart';
+import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+import 'package:restaurant_demo/badges.dart' show kBadgeDetailScale;
 import 'package:restaurant_demo/main.dart';
 
-Finder byKey(String k) => find.byKey(Key(k));
-
-/// The demo on the sample plans, at 1600 x 1000.
-Future<DemoHomeState> pumpSamples(WidgetTester tester) async {
-  final plans = (await tester.runAsync(() => loadSamplePlans(rootBundle)))!;
-  await tester.binding.setSurfaceSize(const Size(1600, 1000));
-  addTearDown(() => tester.binding.setSurfaceSize(null));
-  await tester.pumpWidget(RestaurantDemo(plans: plans));
-  await tester.pump();
-  await tester.pump();
-  return tester.state<DemoHomeState>(find.byType(DemoHome));
-}
-
-Future<void> settle(WidgetTester tester) async {
-  await tester.pump();
-  await tester.pump();
-}
-
-/// Scrolls the side panel until [key] is in view.
-Future<void> reveal(WidgetTester tester, String key) async {
-  await tester.scrollUntilVisible(byKey(key), 100,
-      scrollable: find
-          .descendant(
-              of: byKey('side-panel'), matching: find.byType(Scrollable))
-          .first);
-  await tester.pump();
-}
+import 'support/demo_rig.dart';
 
 /// The Salon in the service, its badges switched on.
 Future<DemoHomeState> badgesOn(WidgetTester tester) async {
-  final demo = await pumpSamples(tester);
-  await tester.tap(byKey('mode-service'));
-  await settle(tester);
-  await reveal(tester, 'badges');
-  await tester.tap(byKey('badges'));
-  await settle(tester);
+  final demo = await pumpDemo(tester);
+  await enterService(tester);
+  await pressInPanel(tester, 'badges');
   return demo;
 }
 
@@ -65,16 +38,15 @@ List<String> shown(WidgetTester tester, {bool dots = false}) {
 }
 
 /// The numbers of the tables that get a badge: numbered, with geometry.
-List<String> badged(FloorPlanController c) => [
-      for (final d in c.tableDetails)
-        if (d.table.number != null && d.center != null) d.table.number!,
+List<String> badged(PlanController c) => [
+      for (final d in c.unitDetails)
+        if (d.unit.label != null && d.center != null) d.unit.label!,
     ]..sort((a, b) => int.parse(a).compareTo(int.parse(b)));
 
-/// Table [number]'s bounding box on the screen, in global coordinates,
-/// from its world corners through the public `worldToGlobal`.
-Rect screenBox(FloorPlanController c, String number) {
-  final d = c.tableDetails.singleWhere((d) => d.table.number == number);
-  final points = [for (final p in d.corners) c.worldToGlobal(p)!];
+/// Table [number]'s bounding box on the screen, in global coordinates, from
+/// its world corners through the public `worldToGlobal`.
+Rect screenBox(PlanController c, String number) {
+  final points = [for (final p in unitCorners(c, number)) p];
   var box = Rect.fromPoints(points[0], points[1]);
   for (final p in points.skip(2)) {
     box = box.expandToInclude(Rect.fromPoints(p, p));
@@ -92,10 +64,9 @@ void main() {
       'DB1 the Badges switch: off by default, then one badge per numbered '
       'table, worked figures by status, a minute tick without a build, and '
       'none again when off', (tester) async {
-    final demo = await pumpSamples(tester);
+    final demo = await pumpDemo(tester);
     final c = demo.area.controller;
-    await tester.tap(byKey('mode-service'));
-    await settle(tester);
+    await enterService(tester);
     await reveal(tester, 'badges');
     expect(demo.area.badges, isFalse);
     expect(shown(tester), isEmpty, reason: 'off by default');
@@ -109,66 +80,57 @@ void main() {
     ]) {
       c.select({n});
       await tester.pump();
-      await reveal(tester, 'status-$status');
-      await tester.tap(byKey('status-$status'));
-      await tester.pump();
+      await pressInPanel(tester, 'status-$status');
     }
     c.select(const {});
-    await reveal(tester, 'badges');
-    await tester.tap(byKey('badges'));
-    await settle(tester);
+    await pressInPanel(tester, 'badges');
 
     final want = badged(c);
     expect(want, ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11'],
         reason: 'premise: the Salon sample');
     expect(shown(tester), want);
     expect(demo.badgeBuilds, want.length, reason: 'one build per table');
-    String text(String key) => tester.widget<Text>(byKey(key)).data!;
     // By hand: 7 (4 seats) Eating: 1 + 7 % 4 = 4 guests, 20 + 21 % 25 = 41
     // min; 2 (4) Bill: 1 + 2 % 4 = 3, 45 + 14 % 30 = 59; 10 (1) Ordered:
     // 1 + 10 % 1 = 1, 5 + 10 % 10 = 5; 5 (6) free: 0 guests, no minutes.
-    expect(text('badge-guests-7'), '4/4');
-    expect(text('badge-minutes-7'), '41 min');
-    expect(text('badge-guests-2'), '3/4');
-    expect(text('badge-minutes-2'), '59 min');
-    expect(text('badge-guests-10'), '1/1');
-    expect(text('badge-minutes-10'), '5 min');
-    expect(text('badge-guests-5'), '0/6');
+    expect(textOf(tester, 'badge-guests-7'), '4/4');
+    expect(textOf(tester, 'badge-minutes-7'), '41 min');
+    expect(textOf(tester, 'badge-guests-2'), '3/4');
+    expect(textOf(tester, 'badge-minutes-2'), '59 min');
+    expect(textOf(tester, 'badge-guests-10'), '1/1');
+    expect(textOf(tester, 'badge-minutes-10'), '5 min');
+    expect(textOf(tester, 'badge-guests-5'), '0/6');
     expect(byKey('badge-minutes-5'), findsNothing);
 
     // The minutes are the host's live data: a tick rebuilds the counters,
     // not the overlays.
     final builds = demo.badgeBuilds;
     await tester.pump(const Duration(minutes: 1));
-    expect(text('badge-minutes-7'), '42 min');
-    expect(text('badge-minutes-10'), '6 min');
+    expect(textOf(tester, 'badge-minutes-7'), '42 min');
+    expect(textOf(tester, 'badge-minutes-10'), '6 min');
     expect(demo.badgeBuilds, builds, reason: 'a tick builds no overlay');
 
     // A status change rebuilds that table's badge: 5 Eating, 1 + 5 % 6 = 6
     // guests, 20 + 15 % 25 = 35 min, one minute on.
     c.select({'5'});
     await tester.pump();
-    await reveal(tester, 'status-eating');
-    await tester.tap(byKey('status-eating'));
-    await settle(tester);
-    expect(text('badge-guests-5'), '6/6');
-    expect(text('badge-minutes-5'), '36 min');
+    await pressInPanel(tester, 'status-eating');
+    expect(textOf(tester, 'badge-guests-5'), '6/6');
+    expect(textOf(tester, 'badge-minutes-5'), '36 min');
 
-    await reveal(tester, 'badges');
-    await tester.tap(byKey('badges'));
-    await settle(tester);
+    await pressInPanel(tester, 'badges');
     expect(shown(tester), isEmpty, reason: 'switched off');
     expect(shown(tester, dots: true), isEmpty);
     expect(tester.takeException(), isNull);
   });
 
   testWidgets(
-      'DB2 the badges ride with their tables across a pan and a zoom, '
-      'built none; a dot below the breakpoint; a tap on a badge still '
-      'selects its table', (tester) async {
+      'DB2 the badges ride with their tables across a pan and a zoom, built '
+      'none; a dot below the breakpoint; a tap on a badge still selects its '
+      'table', (tester) async {
     final demo = await badgesOn(tester);
     final c = demo.area.controller;
-    final first = c.camera.value;
+    final first = c.cameraValue.value;
     expect(first.scale, greaterThan(kBadgeDetailScale),
         reason: 'premise: the fit shows full badges');
 
@@ -187,7 +149,8 @@ void main() {
     c.panBy(const Offset(-120, 75));
     expect(c.zoomBy(1.6, focus: const Offset(300, 200)), isTrue);
     await settle(tester);
-    expect(c.camera.value, isNot(first), reason: 'premise: the camera moved');
+    expect(c.cameraValue.value, isNot(first),
+        reason: 'premise: the camera moved');
     expect(tester.getRect(byKey('badge-7')).bottomCenter,
         isNot(before.bottomCenter),
         reason: 'premise: the badge moved');
@@ -198,7 +161,7 @@ void main() {
     // again: the full badges.
     expect(c.zoomBy(0.25), isTrue);
     await settle(tester);
-    expect(c.camera.value.scale, lessThan(kBadgeDetailScale),
+    expect(c.cameraValue.value.scale, lessThan(kBadgeDetailScale),
         reason: 'premise');
     expect(shown(tester), isEmpty);
     expect(shown(tester, dots: true), badged(c));
@@ -215,10 +178,10 @@ void main() {
     // Not interactive: the tap is the table's.
     c.fitToView();
     await settle(tester);
-    expect(c.selectedTables.value, isEmpty, reason: 'premise');
+    expect(c.selectedUnits.value, isEmpty, reason: 'premise');
     await tester.tapAt(tester.getCenter(byKey('badge-2')));
     await settle(tester);
-    expect(c.selectedTables.value, {'2'});
+    expect(c.selectedUnits.value, {'2'});
     expect(demo.log.take(2), ['Salon: tapped 2', 'Salon: selected {2}']);
     expect(tester.takeException(), isNull);
   });
@@ -235,12 +198,9 @@ void main() {
         .opacity;
     expect(opacity('1'), 1);
     expect(opacity('7'), 1);
-    await reveal(tester, 'fade-others');
-    await tester.tap(byKey('fade-others'));
-    await tester.pump();
-    await tester.tap(byKey('zone-B'));
-    await settle(tester);
-    expect(c.tableFocus.value, {'6', '7'}, reason: 'premise');
+    await pressInPanel(tester, 'fade-others');
+    await pressInPanel(tester, 'zone-B');
+    expect(c.unitFocus.value, {'6', '7'}, reason: 'premise');
     expect(opacity('7'), 1);
     expect(opacity('6'), 1);
     expect(opacity('1'), 0.35);
@@ -261,31 +221,28 @@ void main() {
   testWidgets(
       'DB4 Centre on table 7: the canvas\'s centre shows table 7\'s centre, '
       'the zoom kept', (tester) async {
-    final demo = await pumpSamples(tester);
+    final demo = await pumpDemo(tester);
     final c = demo.area.controller;
-    await tester.tap(byKey('mode-service'));
-    await settle(tester);
+    await enterService(tester);
     expect(c.zoomBy(1.7, focus: const Offset(100, 640)), isTrue);
     await settle(tester);
-    final scale = c.camera.value.scale;
-    final seven = c.tableDetails.singleWhere((d) => d.table.number == '7');
+    final scale = c.cameraValue.value.scale;
+    final seven = c.unitDetails.singleWhere((d) => d.unit.label == '7');
     final world = seven.center!;
     final canvas = c.canvasRect.value!;
     final middle = canvas.size.center(Offset.zero);
-    expect((c.camera.value.worldToCanvas(world) - middle).distance,
+    expect((c.cameraValue.value.worldToCanvas(world) - middle).distance,
         greaterThan(100),
         reason: 'premise: 7 is away from the middle');
 
-    await reveal(tester, 'center-7');
-    await tester.tap(byKey('center-7'));
-    await settle(tester);
-    final camera = c.camera.value;
+    await pressInPanel(tester, 'center-7');
+    final camera = c.cameraValue.value;
     expectNear(camera.worldToCanvas(world), middle, 'on the canvas');
     expect(camera.scale, closeTo(scale, scale * 1e-12), reason: 'zoom kept');
     final back = c.globalToWorld(canvas.center)!;
     expect(back.dx, closeTo(world.dx, world.dx.abs() * 1e-9 + 1e-9));
     expect(back.dy, closeTo(world.dy, world.dy.abs() * 1e-9 + 1e-9));
-    expect(c.tableAt(middle), '7');
+    expect(c.unitAt(middle), '7');
     expect(tester.takeException(), isNull);
   });
 
@@ -321,9 +278,8 @@ void main() {
     final c = demo.area.controller;
     c.select({'7'});
     await tester.pump();
-    await reveal(tester, 'status-eating');
-    await tester.tap(byKey('status-eating'));
-    await settle(tester);
+    await pressInPanel(tester, 'status-eating');
+    await reveal(tester, 'center-7');
     expect(find.text('Badges'), findsOneWidget);
     expect(find.text('Centre on table 7'), findsOneWidget);
     expect(find.text('41 min'), findsOneWidget);
