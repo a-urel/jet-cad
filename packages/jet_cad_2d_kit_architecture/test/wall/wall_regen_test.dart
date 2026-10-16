@@ -512,6 +512,10 @@ void main() {
     buildSampleFlat(
         sample, KitNamesWords(architectureKit.names, () => const Locale('en')));
     sample.commands.clearHistory();
+    // Non-vacuity: the sample holds live walls for the empty diagnostics
+    // to speak of: its nine walls and the column (sample_flat.dart).
+    expect(testCatalog().objectsOf<WallParams>(sample), hasLength(10),
+        reason: 'premise: the sample holds its live walls');
     expect(diagnosticsOf(sample), isEmpty);
     final clean = wallDoc();
     addL(clean);
