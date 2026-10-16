@@ -284,19 +284,23 @@ void main() {
   // `mounted` check after the save panel in `exportFlow`.
   testWidgets(
       'BU-teardown-print the app unmounted while the print job is held: the '
-      'job ends without an error', (tester) async {
+      'editor\'s printer ends the job without an error', (tester) async {
     final printer = FakePagePrinter()..hold = true;
     final rig = await pumpFlat(tester, printer: printer);
-    await tester.tap(printButton);
-    await settleUntil(tester, () => printer.held.isNotEmpty);
-    expect(printer.held, hasLength(1), reason: 'premise: the job is pending');
     final session = rig.session;
+    // The library swallows a late throw on a dead app, so the editor's own
+    // printer is driven here, as the library does.
+    final wired = tester.widget<PlanEditor>(find.byType(PlanEditor)).printer!;
+    final job = wired.print(
+        Uint8List.fromList([1, 2, 3]), 'n', const PdfPageFormat(100, 200));
+    await tester.pump();
+    expect(printer.held, hasLength(1), reason: 'premise: the job is pending');
+    expect(session.busy.value, isTrue);
 
     await tester.pumpWidget(const SizedBox());
     expect(session.isDisposed, isTrue, reason: 'premise: torn down');
     printer.held.single.complete();
-    await tester.pump();
-    await tester.pump();
+    await job;
     expect(tester.takeException(), isNull);
   });
 

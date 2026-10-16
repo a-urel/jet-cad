@@ -22,6 +22,8 @@ import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:ui' show PointerDeviceKind;
 
+import 'package:architecture_demo/document_host.dart';
+import 'package:architecture_demo/document_session.dart';
 import 'package:flutter/gestures.dart' show kPrimaryButton;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
@@ -34,6 +36,7 @@ import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
+import 'support/app_fakes.dart';
 import 'support/app_rig.dart';
 
 /// Every parametric object of the plan with its parameters: what a round
@@ -344,36 +347,49 @@ void main() {
         contains(KitDiagnosticCode.componentUnreadable));
   });
 
-  // Not a port (the final review's M1): the app torn down while the picker
-  // is up. The picker answers with a valid plan afterwards; the flow must
-  // end there. Mutation M-OP-teardown: without the `mounted` check after the
-  // pick, `load` runs on the disposed controller (its throw is swallowed by
-  // the flow's own catch), which this test sees through the controller's
-  // plan being touched.
+  // Not a port (the final review's M1): the host unmounted while the picker
+  // is up, over a controller and a session the test owns -- so they outlive
+  // the host, and a `load` that wrongly ran would replace the plan and name
+  // the session. The picker then answers with a valid plan; the flow must
+  // end there. Mutation M-OP-teardown: without the `mounted` check after
+  // the pick, `load` and `named` run on the live controller.
   testWidgets(
-      'OP-teardown the app unmounted while the picker is up: its late answer '
-      'reaches neither the controller nor the session', (tester) async {
-    final rig = await pumpApp(tester);
-    final c = rig.controller;
-    final session = rig.session;
-    final files = rig.files
+      'OP-teardown the host unmounted while the picker is up: its late '
+      'answer neither loads the plan nor names the session', (tester) async {
+    final controller = PlanController(kits: [architectureKit]);
+    addTearDown(controller.dispose);
+    final session = DocumentSession();
+    addTearDown(session.dispose);
+    final files = FakeDocumentFiles()
       ..holdOpens = true
       ..scriptOpen(
           name: 'late.jetplan', bytes: sampleBytes(), location: '/p/late');
-    final before = c.document;
-    final running = rig.host.openFlow();
+    await tester.binding.setSurfaceSize(const Size(1440, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(MaterialApp(
+        localizationsDelegates: planLocalizationsDelegates,
+        supportedLocales: planSupportedLocales,
+        home: DocumentHost(
+            controller: controller,
+            session: session,
+            files: files,
+            exitGuard: FakeExitGuard())));
+    await tester.pump();
+    final host = tester.state<DocumentHostState>(find.byType(DocumentHost));
+    final before = controller.document;
+    final running = host.openFlow();
     await tester.pump();
     await tester.pump();
     expect(files.heldOpens, hasLength(1), reason: 'premise: picker held');
 
     await tester.pumpWidget(const SizedBox());
-    expect(session.isDisposed, isTrue, reason: 'premise: torn down');
+    expect(host.mounted, isFalse, reason: 'premise: unmounted');
     files.heldOpens.single.complete();
     await running;
     await tester.pump();
     expect(tester.takeException(), isNull);
-    expect(identical(c.document, before), isTrue,
-        reason: 'no load reached the disposed controller');
+    expect(identical(controller.document, before), isTrue,
+        reason: 'the late file was not loaded');
     expect(session.fileName, isNull, reason: 'the session was not named');
   });
 }
