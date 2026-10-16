@@ -5,6 +5,7 @@ approved the design section by section in chat (*"onaylıyorum"*,
 *"uygun"*, *"uygun, onaylıyorum"*). No independent review: the human's
 approval is the gate (*"benim onaylamam yeterli olacak, bağımsız review
 session'ı yaratma!"*); the controller self-reviewed this file.
+**Approved by the human** (*"onaylıyorum"*, 2026-10-16), decision 9 included.
 
 **Binds:** the umbrella spec
 [2026-10-13-kit-architecture-design.md](2026-10-13-kit-architecture-design.md)
