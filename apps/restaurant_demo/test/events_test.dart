@@ -466,4 +466,36 @@ void main() {
     expect(
         demo.log.first, contains(', ${demo.lastExport!.bytes.length} bytes'));
   });
+
+  testWidgets(
+      'DE11 Revert before any Save rebuilds the area\'s sample: a pristine '
+      'Salon keeps its 11 tables, and so does one with a table deleted; the '
+      'Teras goes back to its 6', (tester) async {
+    final demo = await pumpDemo(tester);
+    final c = demo.area.controller;
+    expect(demo.area.stored, isNull, reason: 'premise: no Save yet');
+    expect(c.units.map((u) => u.label), [for (var n = 1; n <= 11; n++) '$n']);
+
+    await press(tester, 'revert');
+    expect(c.units.map((u) => u.label), [for (var n = 1; n <= 11; n++) '$n'],
+        reason: 'a pristine Salon is not emptied');
+
+    c.select({'3'});
+    await tester.pump();
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.delete);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.delete);
+    await settle(tester);
+    expect(c.units, hasLength(10), reason: 'premise: table 3 deleted');
+    await press(tester, 'revert');
+    expect(c.units.map((u) => u.label), [for (var n = 1; n <= 11; n++) '$n'],
+        reason: 'the deleted table is back');
+
+    demo.setArea(1);
+    await settle(tester);
+    final t = demo.area.controller;
+    expect(t.units, hasLength(6));
+    await press(tester, 'revert');
+    expect(t.units.map((u) => u.label), [for (var n = 1; n <= 6; n++) '$n']);
+    expect(tester.takeException(), isNull);
+  });
 }

@@ -148,6 +148,7 @@ class DemoHomeState extends State<DemoHome> {
         'Salon',
         PlanController(
             kits: [architectureKit, restaurantKit], build: buildSalon),
+        sample: buildSalon,
         zones: kDemoZones['Salon'] ?? const {},
         offersBadges: kBadgeAreas.contains('Salon'),
         tableIds: kDemoTableIds['Salon'] ?? const {}),
@@ -155,6 +156,7 @@ class DemoHomeState extends State<DemoHome> {
         'Teras',
         PlanController(
             kits: [architectureKit, restaurantKit], build: buildTeras),
+        sample: buildTeras,
         zones: kDemoZones['Teras'] ?? const {},
         offersBadges: kBadgeAreas.contains('Teras'),
         tableIds: kDemoTableIds['Teras'] ?? const {}),
@@ -388,14 +390,14 @@ class DemoHomeState extends State<DemoHome> {
     _log(_words.logStored(a.name, a.stored!.length));
   }
 
-  /// Revert: the plan last saved is loaded again, or a new plan made when
-  /// nothing was saved. A load in the service starts from the design: the
+  /// Revert: the plan last saved is loaded again, or the area's sample
+  /// rebuilt when nothing was saved. A load in the service starts from the design: the
   /// layout goes back when the unit changes report the replaced plan.
   void revert() {
     final a = area;
     final stored = a.stored;
     if (stored == null) {
-      a.controller.newPlan();
+      a.controller.newPlan(build: a.sample);
     } else {
       a.controller.load(stored);
     }

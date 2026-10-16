@@ -3,21 +3,27 @@
 // reaches the other), its zones, the plan last saved, the service layout last
 // seen, its badges switch, its POS ids and the host's status names. Pure
 // state.
+import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show PlanBuild;
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 
 /// One dining area.
 final class Area {
   Area(this.name, this.controller,
-      {this.zones = const {},
+      {required this.sample,
+      this.zones = const {},
       this.offersBadges = false,
       this.tableIds = const {}});
 
   final String name;
   final PlanController controller;
 
+  /// The area's sample, the build its controller opened with: Revert before
+  /// any Save rebuilds it.
+  final PlanBuild sample;
+
   /// The plan last saved (`controller.save()`), in memory; null until a
   /// Save (a save settles the plan's decimal separator, so none is taken at
-  /// the start). Revert reloads it, or makes a new plan when there is none.
+  /// the start). Revert reloads it, or rebuilds the [sample] when there is none.
   String? stored;
 
   /// The service layout last seen (`controller.serviceJson()`), kept on
