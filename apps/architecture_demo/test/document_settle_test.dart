@@ -1,9 +1,9 @@
 // Ported from apps/floor_planner/test/document_settle_test.dart (audit
 // docs/superpowers/specs/2026-10-16-architecture-demo-test-audit.md, section
 // "document_settle_test.dart"): ST1, ST1b, ST2, ST3, ST5, ST6 and ST8 are
-// PORT; ST4 and ST7 are SPLIT: the -open halves are here (Cmd+S through the
-// app: the bytes carry the stored scale, the field shows it), the intent half
-// is COVERED, checked: packages/jet_cad_2d_plan/test/panels/
+// PORT (ST4 is whole again after Task 4b: the library's settle hands the
+// focus back); ST7 is SPLIT: the -open half is here (Cmd+S through the app),
+// the intent half is COVERED, checked: packages/jet_cad_2d_plan/test/panels/
 // layer_page_controller_test.dart:273 (LP-5, "the controller's settle
 // re-syncs a typed, unsubmitted scale"). Library halves of the rest:
 // plan_controller_test.dart C11 (settle before undo/redo), editor/
@@ -12,7 +12,12 @@
 // page_scale_field_test.dart A15.
 //
 // The library's settle finishes an open text entry and hands the panel focus
-// back to the canvas (Task 4b), so ST2, ST3, ST4-focus and ST8 run.
+// back to the canvas (Task 4b), so ST2, ST3, ST4 and ST8 run.
+//
+// ST1 differs from the old case in one read: the private `savedState`
+// check (`session.savedState == stateId`) is replaced by `dirty == false`,
+// the public read of the same fact (the controller owns the save point; its
+// `dirty` follows the change stream). The undo depths are the old 2 and 3.
 //
 // A flow commits typed but unsubmitted input before it reads the plan,
 // synchronously -- a Selection panel value lands as its own step, an open
@@ -139,7 +144,7 @@ void main() {
       expect(doc.components.get<WallParams>(wall), params,
           reason: 'premise: nothing committed yet');
       final depth = doc.commands.undoDepth;
-      expect(depth, greaterThan(1), reason: 'premise');
+      expect(depth, 2, reason: 'premise');
       expect(c.dirty.value, isTrue, reason: 'premise: dirty');
 
       files.scriptSaveLocation(name: 'hall.jetplan', location: '/p/hall');
@@ -236,13 +241,9 @@ void main() {
   }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
 
   testWidgets(
-      'ST4-open a page scale typed without Enter, then Cmd+S: nothing is '
+      'ST4 a page scale typed without Enter, then Cmd+S: nothing is '
       'committed, the bytes carry the stored scale, and the field shows it '
       'after (spec 12a D2, D14, T-13)', (tester) async {
-    // Intent half: COVERED, checked: layer_page_controller_test.dart LP-5.
-    // Decided: premise impossible (the re-sync is the Page panel's settle,
-    // registered with the controller; the old test reached it through the
-    // shell's registry).
     final rig = await pumpApp(tester);
     final c = rig.controller;
     final files = rig.files;
@@ -281,23 +282,7 @@ void main() {
     expect(scaleField(tester), '125',
         reason: 'the field shows the stored scale');
     expect(c.dirty.value, isFalse);
-  });
-
-  testWidgets(
-      'ST4-focus after Cmd+S with a page scale typed, the canvas has the '
-      'focus (the old shell handed it back when it settled; spec 12a D2, '
-      'R-5)', (tester) async {
-    final rig = await pumpApp(tester);
-    final scale = find.byKey(const Key('page-scale'));
-    await tester.tap(scale);
-    await tester.pump();
-    await tester.enterText(scale, '40');
-    await tester.pump();
-    expect(panelFieldFocused(), isTrue, reason: 'premise: typed');
-    rig.files.scriptSaveLocation(name: 'sheet.jetplan', location: '/p/sheet');
-    expect(await cmdS(tester), isTrue);
-    await tester.pump();
-    expect(canvasFocused(), isTrue);
+    expect(canvasFocused(), isTrue, reason: 'handed back to the canvas');
   });
 
   testWidgets(
@@ -379,7 +364,8 @@ void main() {
       'with nothing committed (plan 12a Task 7 deviation 2; spec 12a D2, '
       'D14)', (tester) async {
     // Intent half: COVERED, checked: layer_page_controller_test.dart LP-5.
-    // Decided: premise impossible (see ST4-open).
+    // Decided: premise impossible (the re-sync is the Page panel's settle, registered with the
+    // controller; the old test reached it through the shell's registry).
     final rig = await pumpApp(tester);
     final c = rig.controller;
     final files = rig.files;

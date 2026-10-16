@@ -289,4 +289,26 @@ void main() {
     expect(titleOf(tester), '• flat — jet-cad');
     expect(files.unscriptedCalls, 0);
   });
+
+  testWidgets(
+      'DS8 the app unmounted during a held write: the flow ends without '
+      'touching the disposed session (no error)', (tester) async {
+    // Mutation M-DS8: `_flow`'s finally sets `busy.value = false` without
+    // the isDisposed check: "A ValueNotifier<bool> was used after being
+    // disposed".
+    final files = FakeDocumentFiles(writesInPlace: true);
+    final rig = await titledDirty(tester, files, '/p/flat');
+    final session = rig.session;
+    files.holdWrites = true;
+    final saving = rig.host.saveStep();
+    await tester.pump();
+    expect(session.busy.value, isTrue, reason: 'premise: in flight');
+
+    await tester.pumpWidget(const SizedBox());
+    expect(session.isDisposed, isTrue, reason: 'premise: torn down');
+    files.heldWrites.single.complete();
+    await saving;
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+  });
 }

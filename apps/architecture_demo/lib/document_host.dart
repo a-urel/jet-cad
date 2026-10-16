@@ -92,7 +92,8 @@ class DocumentHostState extends State<DocumentHost> {
     try {
       return await body();
     } finally {
-      busy.value = false;
+      // The app may be torn down with a flow in flight.
+      if (!_session.isDisposed) busy.value = false;
     }
   }
 
@@ -255,6 +256,9 @@ class DocumentHostState extends State<DocumentHost> {
       await _showError((w) => w.couldNotSave(fileName), e);
       return false;
     }
+    // The app may be torn down during the write: the file is written, and
+    // the controller and the session are gone.
+    if (!mounted) return true;
     if (identical(_controller.document, encoded.plan)) {
       _controller.markSaved();
       _session.named(fileName, location);

@@ -68,8 +68,14 @@ class DocumentSession extends ChangeNotifier {
     notifyListeners();
   }
 
+  bool _disposed = false;
+
+  /// True once [dispose] ran: a flow still in flight must not touch [busy].
+  bool get isDisposed => _disposed;
+
   @override
   void dispose() {
+    _disposed = true;
     busy.dispose();
     super.dispose();
   }
