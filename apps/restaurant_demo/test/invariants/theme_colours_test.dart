@@ -33,6 +33,10 @@ const List<String> kAllowedFiles = ['lib/demo_theme.dart'];
 const List<(String, String)> kAllowedLiterals = [
   // The demo's theme seed.
   ('lib/main.dart', 'Colors.teal'),
+  // The statuses a POS would set: Ordered, Eating, Bill.
+  ('lib/statuses.dart', 'Color(0x99FFB300)'),
+  ('lib/statuses.dart', 'Color(0x9943A047)'),
+  ('lib/statuses.dart', 'Color(0x99E53935)'),
 ];
 
 final RegExp _word = RegExp(r'\w');

@@ -17,7 +17,9 @@ void main() {
     expect(demo.areas.map((a) => a.name), ['Salon', 'Teras']);
     expect(
         identical(editorsController(tester), demo.areas[0].controller), isTrue);
-    expect(find.text('Salon'), findsOneWidget);
+    expect(
+        find.descendant(of: byKey('area-toggle'), matching: find.text('Salon')),
+        findsOneWidget);
     expect(demo.areas[0].controller.units.length, 11);
   });
 
