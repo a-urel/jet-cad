@@ -319,7 +319,8 @@ class DocumentHostState extends State<DocumentHost> {
 }
 
 /// The plan's name, with `• ` in front and an `Edited` tooltip while it is
-/// dirty, cut with an ellipsis at 240 px.
+/// dirty, cut with an ellipsis at 160 px: with the Open sample button and the
+/// library's bar that leaves the top bar fitting 800 px.
 class _DocumentTitle extends StatelessWidget {
   const _DocumentTitle({required this.session, required this.controller});
 
@@ -328,7 +329,7 @@ class _DocumentTitle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 240),
+        constraints: const BoxConstraints(maxWidth: 160),
         child: ListenableBuilder(
           listenable: Listenable.merge([session, controller.dirty]),
           builder: (context, _) {

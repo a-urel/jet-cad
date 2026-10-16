@@ -8,7 +8,8 @@
 //          (buttons cannot grey out; the file callbacks do nothing while
 //          busy, Undo and Redo are the library's), DC12 and DC12c (the name
 //          and the dirty mark are a bounded host widget in
-//          `PlanEditorBar.leading`; the floor moves, re-measured)
+//          `PlanEditorBar.leading`; DC12 keeps 800 px, DC12c's floor moves
+//          to 776 px, re-measured)
 //   COVERED DC3: packages/jet_cad_2d_plan/test/editor/plan_editor_test.dart
 //          ED-3 (:133, "without them none is offered") and ED-U (:445),
 //          editor/editor_view_test.dart V1 (:28, "the editor has Export and
@@ -809,19 +810,15 @@ void main() {
   });
 
   testWidgets(
-      'DC12-open at 900 px a long file name, dirty, and then a long status '
+      'DC12 at 800 px a long file name, dirty, and then a long status '
       'line do not overflow the top bar: each is cut with an ellipsis, and '
       'OSNAP and the zoom stay on screen (spec 12a D7, S-27, T-13)',
       (tester) async {
     // Intent half: COVERED, checked: packages/jet_cad_2d_plan/test/editor/
     // editor_words_test.dart:190 (the OV-$code cases: "no overflow from 704 px
     // down to 656 px", the library bar without host widgets).
-    // Decided: premise impossible (the width): the name is a host widget in
-    // `PlanEditorBar.leading`, bounded at 240 px, beside the 40 px Open
-    // sample button; with a long name the bar's fixed part is 856 px (see
-    // DC12c-open), so 800 px overflows by 56 px. This runs at 900 px, where
-    // the status line still has 44 px to be cut in.
-    final rig = await pumpApp(tester, size: const Size(900, 600));
+    // The width is the old 800 px: the name is bounded at 160 px.
+    final rig = await pumpApp(tester, size: const Size(800, 600));
     final c = rig.controller;
     const long = 'the ground floor of the house by the lake, third revision, '
         'with the new kitchen and the long hallway to the garden';
@@ -840,7 +837,7 @@ void main() {
         find.descendant(of: f, matching: find.byType(RichText)));
     expect(paragraph(name).didExceedMaxLines, isTrue,
         reason: 'cut, not wrapped');
-    expect(tester.getRect(name).width, 240, reason: 'bounded at 240');
+    expect(tester.getRect(name).width, 160, reason: 'bounded at 160');
     final bar = tester.getRect(find.byKey(const Key('chrome-top')));
     expect(
         tester.getRect(name).right,
@@ -872,17 +869,16 @@ void main() {
   });
 
   testWidgets(
-      'DC12c-open from 1000 px down to 856 px wide a titled long name and a '
+      'DC12c from 1000 px down to 776 px wide a titled long name and a '
       'long status line do not overflow the top bar, and OSNAP and the zoom '
       'stay on screen (spec 12a D7, S-27)', (tester) async {
-    // Decided: premise impossible (the range). The floor is 856 px, measured
-    // on this layout: the 240 px name, the 40 px Open sample button, the
-    // library's toolbar (New, Open, Save, Save As, Print, a 12 px gap, Undo,
-    // Redo: 292 px), its 16 px gap, OSNAP and the zoom (244 px), and the
-    // bar's 24 px padding, with nothing left for the status; at 855 px the
-    // bar overflows by 1 px. The old range was 704 px down to 656 px (plan
-    // 12a measured 576 px with seven buttons; the floor moves by the host
-    // widgets: 280 px, and the buttons the library has now).
+    // Decided: premise impossible (the range). The floor is 776 px, measured
+    // on this layout: the 160 px name, the 40 px Open sample button, the
+    // library's toolbar and its gap, OSNAP and the zoom, and the bar's
+    // padding, with nothing left for the status; at 775 px the bar overflows
+    // by 1 px. The old range was 704 px down to 656 px: the host widgets
+    // (the name and Open sample) add 200 px to the 576 px the library's bar
+    // needs by itself, so 656 px would leave the name 40 px.
     final rig = await pumpApp(tester, size: const Size(1000, 600));
     final c = rig.controller;
     const long = 'the ground floor of the house by the lake, third revision';
@@ -897,7 +893,7 @@ void main() {
     expect(tester.takeException(), isNull);
     final name = find.byKey(const Key('document-name'));
     final status = find.byKey(const Key('status-text'));
-    for (var width = 1000; width >= 856; width--) {
+    for (var width = 1000; width >= 776; width--) {
       await tester.binding.setSurfaceSize(Size(width.toDouble(), 600));
       await tester.pump();
       expect(tester.takeException(), isNull, reason: '$width px');

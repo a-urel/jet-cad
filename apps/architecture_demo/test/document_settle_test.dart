@@ -11,16 +11,8 @@
 // panels/property_panel_test.dart P-swap-pending, panels/
 // page_scale_field_test.dart A15.
 //
-// LIBRARY DEFECT, reported with Task 4 (the cases below marked `skip`): the
-// controller's `settlePendingInput` runs only the settles panels register
-// (the Selection panel's fields, the Page panel's scale). An open text entry
-// registers none, and nothing calls the active tool's `finish`, so a Save
-// (or New, Open, Open sample) with a text entry open neither commits the
-// typed text nor closes the entry (ST2, ST3, ST8), and the Page panel's
-// re-sync leaves the focus in the scale field instead of handing it back to
-// the canvas (ST4-focus). The old shell did both (document_settle_test R-5).
-// The app cannot do either: `settlePendingInput` and the tool controller are
-// internal to the library. The library is not changed in this task.
+// The library's settle finishes an open text entry and hands the panel focus
+// back to the canvas (Task 4b), so ST2, ST3, ST4-focus and ST8 run.
 //
 // A flow commits typed but unsubmitted input before it reads the plan,
 // synchronously -- a Selection panel value lands as its own step, an open
@@ -208,9 +200,7 @@ void main() {
     await press(tester, LogicalKeyboardKey.keyL);
     expect(c.activeTool.value, 'plan.line',
         reason: 'the letters reach the editor again');
-  },
-      skip:
-          true); // LIBRARY DEFECT: the text entry is not settled (see the header).
+  });
 
   testWidgets(
       'ST3 the same through the toolbar on macOS with a mouse: an open entry '
@@ -243,10 +233,7 @@ void main() {
     expect(entry, findsNothing);
     expect(c.dirty.value, isFalse, reason: 'clean after the save');
     expect(canvasFocused(), isTrue);
-  },
-      variant: TargetPlatformVariant.only(TargetPlatform.macOS),
-      skip:
-          true); // LIBRARY DEFECT: the text entry is not settled (see the header).
+  }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
 
   testWidgets(
       'ST4-open a page scale typed without Enter, then Cmd+S: nothing is '
@@ -311,9 +298,7 @@ void main() {
     expect(await cmdS(tester), isTrue);
     await tester.pump();
     expect(canvasFocused(), isTrue);
-  },
-      skip:
-          true); // LIBRARY DEFECT: the Page panel's settle hands no focus back.
+  });
 
   testWidgets(
       'ST5 a text entry ended by a mouse click on the tool palette or on a '
@@ -450,7 +435,5 @@ void main() {
     expect(textsOf(doc), isEmpty);
     expect(doc.commands.undoDepth, 1);
     expect(c.dirty.value, isFalse);
-  },
-      skip:
-          true); // LIBRARY DEFECT: the text entry is not settled (see the header).
+  });
 }
