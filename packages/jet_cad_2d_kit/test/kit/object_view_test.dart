@@ -342,8 +342,9 @@ void main() {
     test(
         'PO-validate-cov the check reads settings of another T through '
         'PropertySpec<Object> without a TypeError (M-PO-cov)', () {
-      // M-PO-cov: validate reading `spec is LengthProperty && spec.range !=
-      // null` instead of `needsObject` throws a TypeError here.
+      // M-PO-cov: validate reading `spec is LengthProperty<Object> &&
+      // spec.range != null` instead of `needsObject` throws a TypeError
+      // here.
       final List<PropertySpec<Object>> held = [
         LengthProperty<Slab>(
             id: 'reach',

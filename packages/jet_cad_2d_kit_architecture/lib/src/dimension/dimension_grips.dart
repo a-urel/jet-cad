@@ -83,7 +83,8 @@ typedef _Dim = ({
 /// that each is still a live wall ([live]); one that is not drops it, and
 /// the preview lays out afresh. Freezes only remove (the plan never
 /// unfreezes) and a new wall is a document change, so that check is the
-/// whole of it: O(walls) calls of [live], no allocation.
+/// whole of it: O(cached walls) calls of [live] (the plan's
+/// `liveTypeIdOf`, each over the catalog's types), no allocation.
 ///
 /// **A broken dimension** (D15: an end that does not resolve, an offset that
 /// is not finite, or a layout that is not finite) has no grips.

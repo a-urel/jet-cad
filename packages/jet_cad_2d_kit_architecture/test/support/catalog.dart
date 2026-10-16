@@ -2,9 +2,9 @@
 // through the engine's ParametricSystem): today's global parametricCatalog
 // and installParametric (jet_cad_floor_plan/lib/src/parametric/
 // catalog.dart:27-39, :64-65) for the kit's own tests. The kit's raw types
-// (no plan guard), under their ArchitectureTypes ids, in today's order --
-// box, wall, opening, separator, room, dimension -- each type task adding
-// its line (this task the box's).
+// (no plan guard), under their ArchitectureTypes ids, registered in
+// today's order: box, wall, opening, separator, room, dimension (one line
+// each, below).
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_kit_architecture/src/box/box.dart';
 import 'package:jet_cad_2d_kit_architecture/src/dimension/dimension.dart';

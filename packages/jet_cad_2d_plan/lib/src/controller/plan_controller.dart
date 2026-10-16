@@ -982,6 +982,8 @@ class PlanController extends ChangeNotifier {
       try {
         return {
           for (final h in type.parametric.references(component))
+            // Defensive: the engine refuses a reference to a non-live
+            // object first (DanglingReferenceError, spec 08 D5).
             if (catalog.typeIdOf(d, h) != null) h,
         };
       } catch (_) {

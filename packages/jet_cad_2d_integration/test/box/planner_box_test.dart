@@ -7,7 +7,9 @@
 // nothing drawn) opened by the controller, its grid snap on: under the
 // editor's turned camera a click's world point does not come back exactly
 // (the plan library's selection_panel_test.dart:38-43 measured a box of
-// 120 x 69.99999999999955), and the grid gives the clicks today's corners.
+// 120 x 69.99999999999955), and the grid keeps the clicks on today's exact
+// corners. BX1-BX6 do not need it to pass: with it off they pass too
+// (BX2's closeTo absorbs the camera's error; Task 10's probe).
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';

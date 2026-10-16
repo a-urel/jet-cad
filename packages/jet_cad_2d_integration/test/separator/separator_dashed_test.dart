@@ -98,7 +98,8 @@ void main() {
     expect(leaves, hasLength(1), reason: 'premise: its polyline');
     expect(leaves.single.linetype, ReservedHandles.dashedLinetype,
         reason: 'premise: it names handle 6');
-    // M-SP-8: open runs the kits' prepare.
+    // M-SP-8b, the open half: the constructor's json path runs the kits'
+    // prepare (`made: true`). M-SP-8 is the load half, below.
     expect(doc.tables.linetypes[ReservedHandles.dashedLinetype], isNull,
         reason: 'no record there: it draws continuous');
     expect(doc.tables.linetypes.byName('DASHED'), isNull);
@@ -111,6 +112,7 @@ void main() {
     expect(
         other.document.tables.linetypes[ReservedHandles.dashedLinetype], dashed,
         reason: 'premise: a new plan has it');
+    // M-SP-8, the load half: load runs the kits' prepare.
     other.load(file);
     expect(
         other.document.tables.linetypes[ReservedHandles.dashedLinetype], isNull,

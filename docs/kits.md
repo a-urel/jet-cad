@@ -501,7 +501,7 @@ once per subject and code:
 | a tool's event or painting | the tool is cancelled and selection is armed |
 | a spec's `write` or `apply` | the field shows its stored value |
 | a section | a small "section failed" box in its place |
-| a kit's `prepare` | the plan opens without what it would have added |
+| a kit's `prepare` | the plan opens; what it added before the throw stays |
 
 A plan that names a kit the host did not load opens: that kit's objects
 draw, are locked, and are saved back unchanged (`kitMissing`). A plan saved

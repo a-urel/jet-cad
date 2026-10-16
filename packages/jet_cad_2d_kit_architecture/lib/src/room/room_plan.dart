@@ -73,6 +73,14 @@ final Expando<({Handle room, int state, String text})> _areaMemo =
 /// Reads the document once per room shown and per document state
 /// (`commands.stateId`): today's panel dropped its memo on every command
 /// change, and the state moves on exactly those.
+///
+/// The limit of that key: only a command moves `stateId`, and
+/// `notifyLoaded`/`notifyPurged` keep it. So when the plan rebuilds the
+/// document under the same state (spec 2a E3: a rollback threw and the
+/// plan is regenerated through `notifyLoaded`), a label the rebuild
+/// rewrote can be shown stale here until the next command moves the
+/// state. It is a display string only, never stored or read back, and the
+/// path is rare (a failed rollback), so the memo keeps the plain key.
 String roomAreaText(PlanObject object) {
   final doc = object.document;
   final room = object.handle;

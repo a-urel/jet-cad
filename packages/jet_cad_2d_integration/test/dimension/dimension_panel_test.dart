@@ -212,9 +212,10 @@ void main() {
       expect(back.$3, first.$3);
       expect(valueText(tester), '3231');
 
-      // The current kind: a click issues nothing (the segmented button
-      // does not call back for its selected segment), nor does the
-      // callback itself (a click that lands before a rebuild).
+      // The current kind: a click issues nothing (the row is a
+      // DropdownButton, and the panel issues nothing for a value equal to
+      // the stored one), nor does the callback called directly (a click
+      // that lands before a rebuild).
       await tapKind(tester, DimKind.aligned);
       expect(doc.commands.undoDepth, 2, reason: 'a click on Aligned');
       menuOf(tester).onChanged!(DimKind.aligned);

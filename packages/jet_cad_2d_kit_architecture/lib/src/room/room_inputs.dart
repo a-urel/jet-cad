@@ -407,7 +407,9 @@ final class RoomInputs implements PlaceSource, Disposable {
   /// must not stay an input (spec 3a C1.5; Task 12's `WallBands`
   /// precedent). The readers whose answer can depend on any cached object
   /// ([placedIn], [bounds], [generation]) run it. Iterates [_held] in
-  /// place: O(n) calls of [live] for n cached objects, no allocation.
+  /// place: O(cached objects) calls of [live], the plan's `liveTypeIdOf`,
+  /// each over the catalog's types (O(cached objects × the catalog's
+  /// types)); no allocation.
   void _dropFrozen() {
     if (_stale || (_inEvent && _checked)) return;
     debugLivenessPasses++;

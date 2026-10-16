@@ -317,7 +317,8 @@ class OpeningTool extends PlacementTool {
       // bands' refresh, which every other read of them runs, moves the
       // generation if a cached wall is no longer live, so neither this
       // scan nor the frame cache built at it outlives a freeze. Once per
-      // pointer event: O(walls) calls of the live reader, no allocation.
+      // pointer event: O(cached objects) `liveTypeIdOf` calls, each over
+      // the catalog's types; no allocation.
       if (!_bandsFresh) {
         _bands.liveWalls(doc);
         _bandsFresh = true;

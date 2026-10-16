@@ -32,11 +32,12 @@ WallBands wallBandsOf(PlanServices services) =>
 /// the document reports a change (its `changes` stream, which delivers
 /// after the task that made the change), when a tool calls [invalidate],
 /// and when a read finds a cached wall no longer live (a plan freezes a
-/// wall, spec 2a E2, with no document change: spec 3a C1.5). Un-freezing
-/// comes with a document change (a reload or an undo), so the stream
-/// covers it. A scan is O(walls) over the cached doubles, plus the
-/// liveness check's O(walls) calls of the live reader, and allocates
-/// nothing in steady state.
+/// wall, spec 2a E2, with no document change: spec 3a C1.5). A frozen
+/// object stays frozen for its document's life; a new document resets the
+/// cache. A scan is O(walls) over the cached doubles, plus the liveness
+/// check's O(cached objects) `liveTypeIdOf` calls, each over the catalog's
+/// types (O(cached objects × the catalog's types)), and allocates nothing
+/// in steady state.
 final class WallBands implements Disposable {
   /// [live] names the live walls (`liveObjectsOf`): a frozen wall has no
   /// band.
@@ -196,8 +197,9 @@ final class WallBands implements Disposable {
   /// change reaches the stream, and a frozen wall must not keep its band
   /// (spec 3a C1.5). Runs on every read ([_refresh]), so every reader --
   /// [liveWalls], [hostAt], [joinInto] -- is covered. Iterates the cached
-  /// handles in place: O(walls) calls of [_live] (a set lookup and the
-  /// engine's naming rule), no allocation.
+  /// handles in place: O(cached objects) calls of [_live], the plan's
+  /// `liveTypeIdOf` (a set lookup and the catalog's naming rule, over its
+  /// types), so O(cached objects × the catalog's types); no allocation.
   bool _stillLive() {
     for (var i = 0; i < _walls; i++) {
       if (_live(_handles[i]) != ArchitectureTypes.wall) return false;
