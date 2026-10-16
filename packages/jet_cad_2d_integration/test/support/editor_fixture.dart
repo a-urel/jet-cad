@@ -110,18 +110,21 @@ ViewportTransform editorCamera() => ViewportTransform(
     worldToScreenMatrix: Transform2(0.37, 0, 0, -0.37, -7918, 6315.9));
 
 /// The editor over [json] ([editorPlanJson] by default) under
-/// [permissions], in [kEditorSurface], under [editorCamera]. The
-/// controller is disposed at tear-down.
+/// [permissions], in [kEditorSurface], under [editorCamera], its object
+/// snap allowed unless [snapping] is false (`PlanEditor.snapping`; 3a Task
+/// 28: today's `Caps.snapping`). The controller is disposed at tear-down.
 Future<PlanController> mountEditor(WidgetTester tester,
-    {PlanPermissions permissions = PlanPermissions.full, String? json}) async {
+    {PlanPermissions permissions = PlanPermissions.full,
+    String? json,
+    bool snapping = true}) async {
   final c = PlanController(
       kits: [architectureKit, fxKit()], json: json ?? editorPlanJson());
   addTearDown(c.dispose);
   c.permissions = permissions;
   await tester.binding.setSurfaceSize(kEditorSurface);
   addTearDown(() => tester.binding.setSurfaceSize(null));
-  await tester
-      .pumpWidget(MaterialApp(home: Scaffold(body: PlanEditor(controller: c))));
+  await tester.pumpWidget(MaterialApp(
+      home: Scaffold(body: PlanEditor(controller: c, snapping: snapping))));
   await tester.pump();
   await tester.pump();
   c.camera.value = editorCamera();

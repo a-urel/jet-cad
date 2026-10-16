@@ -72,6 +72,13 @@ Future<void> frameOn(WidgetTester tester, PlanController c, Vector2 centre,
   await tester.pump();
 }
 
+/// The world point the canvas reads at global [g]: the layer's inverse
+/// camera (3a Task 28; dimension_shell_test.dart:111-116's).
+Vector2 worldAt(WidgetTester tester, PlanController c, Offset g) {
+  final local = g - tester.getTopLeft(find.byType(InteractionLayer));
+  return c.camera.value.screenToWorld(Vector2(local.dx, local.dy));
+}
+
 /// The selection's grips and box: the cache the plan hands its tools in
 /// their context (`InteractionLayer.tools.context.grips`; ruling IT-R12).
 GripCache gripsOf(WidgetTester tester) => tester

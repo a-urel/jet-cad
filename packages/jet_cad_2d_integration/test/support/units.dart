@@ -110,7 +110,8 @@ final CatalogSymbol diningTableTwo = CatalogSymbol(
 
 /// [s] as a library entry, built by hand (no library rule is checked): its
 /// leaves ascending by handle in shape order, each a BYBLOCK leaf on layer
-/// 0; its unit when [CatalogSymbol.unit] is set.
+/// 0; its unit when [CatalogSymbol.unit] is set; its attachment kinds and
+/// family kept (3a Task 28: 2b's copy dropped them).
 SymbolEntry entryOf(CatalogSymbol s) {
   const definition = Handle(0x0F0);
   final leaves = <SymbolLeaf>[];
@@ -142,7 +143,9 @@ SymbolEntry entryOf(CatalogSymbol s) {
         version: s.version,
         name: s.name,
         category: s.category,
-        tags: s.tags),
+        tags: s.tags,
+        attachTo: s.attachTo,
+        family: s.family),
     unit: unit == null
         ? null
         : UnitComponent(

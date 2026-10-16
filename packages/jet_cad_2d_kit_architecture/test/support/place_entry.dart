@@ -8,11 +8,31 @@
 // the contract's `placementTransform`, or under [transform] when given (an
 // attachment's). Not copied: the leaf-equality and unit checks of the plan's
 // reuse and its `#n` definition-name suffix (a test document holds only
-// copies this helper made), the instance style (the placer's default is
-// InstanceNode's own) and the unit label (no `units` index here).
+// copies this helper made) and the unit label (no `units` index here). The
+// instance style is the placer's (`InstanceStyle`, copied below; 3a Task 28
+// for symbol_end_to_end_test's coloured instance).
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
+
+/// The instance fields a placement imposes on the symbol's BYBLOCK
+/// contents (jet_cad_2d_plan/lib/src/symbols/symbol_placer.dart:27-44,
+/// copied). The defaults are [InstanceNode]'s own.
+final class InstanceStyle {
+  final DraftColor color;
+  final int lineweight;
+  final int transparency;
+  final Handle linetype;
+  final double linetypeScale;
+
+  const InstanceStyle({
+    this.color = const ByBlockColor(),
+    this.lineweight = kByBlock,
+    this.transparency = kByBlock,
+    this.linetype = ReservedHandles.byBlockLinetype,
+    this.linetypeScale = 1.0,
+  });
+}
 
 /// The definition of [doc] that copies [entry] (same key and version), or
 /// null.
@@ -30,7 +50,8 @@ Handle? copyOfEntry(DraftDocument doc, SymbolEntry entry) {
 }
 
 /// The command that places [entry] in [doc] at [at] ([quarterTurns]
-/// counter-clockwise, [mirrored]), or under [transform] when given; one
+/// counter-clockwise, [mirrored]), or under [transform] when given, with
+/// [style]'s instance fields; one
 /// compound labelled `Place <name>`, every handle allocated here, in the
 /// placer's order (the definition, its leaves, the instance). [doc] must
 /// have the contract's components registered.
@@ -41,6 +62,7 @@ CompoundCommand placeEntry(
   int quarterTurns = 0,
   bool mirrored = false,
   Transform2? transform,
+  InstanceStyle style = const InstanceStyle(),
 }) {
   final commands = <DraftCommand>[];
   var definition = copyOfEntry(doc, entry);
@@ -72,6 +94,11 @@ CompoundCommand placeEntry(
     parent: doc.rootHandle,
     definition: definition,
     layer: drawingLayer(doc),
+    color: style.color,
+    lineweight: style.lineweight,
+    transparency: style.transparency,
+    linetype: style.linetype,
+    linetypeScale: style.linetypeScale,
     transform: transform ??
         placementTransform(
           at: at,
