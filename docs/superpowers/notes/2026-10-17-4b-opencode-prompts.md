@@ -46,44 +46,59 @@ Commit only that file: "docs: 4b removal inventory".
 
 ---
 
-## P2. Remove the old packages and apps/floor_planner
+## P2. Remove the old packages, apps/floor_planner and the old host probe (revised after P1)
+
+Before this: `chore/4b-inventory` is merged into `main` (so the inventory is visible).
+The old host probe depends on the removed packages, so it goes here too; P3 shrinks to a check.
 
 ```text
 Worktree: git worktree add .claude/worktrees/4b-remove -b chore/4b-remove-old main
-(Run after P1 is merged; read docs/superpowers/notes/2026-10-17-4b-removal-inventory.md first.)
 
-Task: delete packages/jet_cad_floor_plan, packages/jet_cad_restaurant_symbols and apps/floor_planner,
-and make the workspace green without them. Follow the inventory's actions row by row.
-Rows marked QUESTION: leave them, list them in the report, do not guess.
+Read docs/superpowers/notes/2026-10-17-4b-removal-inventory.md first; it is your map.
+Task: delete packages/jet_cad_floor_plan, packages/jet_cad_restaurant_symbols, apps/floor_planner
+AND the old host probe (tool/ci/old_host_probe/, old_host_probe.sh, old_host_probe_resolve.sh,
+`--old` + oldProbedFromCommit in check_host_lock / lib/host_lock.dart, the two *_split.lock.txt
+fixtures and their tests), then make the workspace green. Follow the inventory's §3 and §4 rows.
 
-Steps:
-1. Remove the three directories from the root pubspec.yaml `workspace:` list, then `git rm -r` them.
-2. Fix each inventory row (DEP, IMPORT, TEST-ORACLE) as the inventory says. A ported test keeps
-   every assertion; its header comment names the old file it came from.
-3. .vscode/launch.json: drop the floor_planner entries.
-4. CI: remove the old packages from every matrix in .github/workflows/ci.yml and from tool/ci tests
-   that list live packages (e.g. SC16, DL2 counts). Update counts and their `reason:` text together.
-5. `flutter pub get` from the root, then the gates for every package and app in the workspace.
+Decisions on the inventory's QUESTION rows (binding):
+- tool/screenshots/test/planner_scenes_test.dart: DELETE it (its pictures belong to the removed
+  package; new pictures are a later task).
+- tool/screenshots/test/renderer_scenes_test.dart: KEEP and port it to the new API with the names
+  in the inventory. symbolThumbnailDocument is not exported (src/ only) — do not import src/.
+  Scene R5 (searchSymbols/symbolIdOf): if its PNG is referenced by a README, rewrite it on the
+  public gallery widget so the picture shows the same thing; if not, delete the scene. Say which.
+  Any regenerated PNG: open it and describe it in the report.
+- tool/screenshots/pubspec.yaml: swap the old deps for jet_cad_2d_plan + the two kits; font asset
+  packages/jet_cad_2d_plan/fonts/Roboto-Regular.ttf.
+- harness_test.dart SH3: point it at jet_cad_2d_flutter.
+- check_screenshots.dart: only ['jet_cad_2d_flutter'] for now.
+- tool/readme_probe: delete lib/planner.dart, its dependency, and the planner case + yaml input in
+  check_readmes.dart and readmes_test.dart (RM4).
+- DL2, SC17 and any other count: re-derive the number by reading the files, change the number and
+  its `reason:` text together; never delete such an assertion.
+- Provenance comments (inventory §5): leave them.
+- README/STATUS/host-guide prose (DOC rows): only fix what would now be false
+  (published-packages tables, "adds only jet_cad_floor_plan", the font attribution, the two
+  restaurant_demo comments, .vscode). Keep CHANGELOGs and STATUS-HISTORY as history.
 
+Gates: `flutter pub get` at the root; tests/analyze/format in every package and app of the
+workspace (list each with its real last line); `cd tool/ci && dart test`; `bash tool/ci/host_probe.sh`;
+`dart run tool/ci/check_guide.dart`; `dart run tool/ci/check_readmes.dart`;
+`dart run tool/ci/check_screenshots.dart`.
 Report: docs/superpowers/notes/2026-10-17-4b-remove-report.md.
 ```
 
 ---
 
-## P3. Remove the old host probe; CI clean-up
+## P3. CI check (optional; the controller can do it while reviewing P2)
 
 ```text
 Worktree: git worktree add .claude/worktrees/4b-ci -b chore/4b-ci main   (after P2)
 
-Task: the old host probe is no longer needed once jet_cad_floor_plan is gone.
-Remove tool/ci/old_host_probe/, tool/ci/old_host_probe.sh, tool/ci/old_host_probe_resolve.sh,
-the `--old` mode and `oldProbedFromCommit` in tool/ci/check_host_lock.dart and their tests,
-and the old-probe steps (resolve, replays of v0.3.0..v0.6.0, format) in .github/workflows/ci.yml.
-Keep tool/ci/host_probe/ and tool/ci/host_probe.sh (the new probe) untouched and working:
-run `bash tool/ci/host_probe.sh` and `dart run tool/ci/check_guide.dart`; both must pass.
-Check that every package under packages/ that is live is in both CI matrices (test and publishable).
-
-Report: docs/superpowers/notes/2026-10-17-4b-ci-report.md.
+Check, change only if wrong: every live package under packages/ (each with a pubspec, less the
+dormant packages/jet_cad) is in both matrices of .github/workflows/ci.yml (test and publishable);
+no step names a removed directory or old_host_probe; `bash tool/ci/host_probe.sh` and
+`cd tool/ci && dart test` pass. Report: docs/superpowers/notes/2026-10-17-4b-ci-report.md.
 ```
 
 ---
