@@ -1,0 +1,1739 @@
+# Review package: df16d97a..HEAD
+
+## Commits
+660d3ffe feat(kit-architecture): the separator's grips, tool and plan type
+
+## Files changed
+ .../test/separator/separator_dashed_test.dart      | 120 ++++++
+ .../test/separator/separator_export_test.dart      | 106 ++++++
+ .../test/separator/separator_plans.dart            | 129 +++++++
+ .../test/separator/separator_shell_test.dart       |  44 +++
+ .../test/wall/wall_grips_test.dart                 | 139 ++++++-
+ packages/jet_cad_2d_kit_architecture/CHANGELOG.md  |   3 +
+ .../jet_cad_2d_kit_architecture/lib/src/kit.dart   |   4 +-
+ .../lib/src/separator/separator_grips.dart         | 117 ++++++
+ .../lib/src/separator/separator_plan.dart          |  40 ++
+ .../lib/src/separator/separator_tool.dart          | 141 +++++++
+ .../test/separator/separator_plan_test.dart        | 149 ++++++++
+ .../test/separator/separator_tool_test.dart        | 419 +++++++++++++++++++++
+ .../test/wall/wall_grips_test.dart                 | 102 ++++-
+ 13 files changed, 1504 insertions(+), 9 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_integration/test/separator/separator_dashed_test.dart b/packages/jet_cad_2d_integration/test/separator/separator_dashed_test.dart
+new file mode 100644
+index 00000000..d7e4ed86
+--- /dev/null
++++ b/packages/jet_cad_2d_integration/test/separator/separator_dashed_test.dart
+@@ -0,0 +1,120 @@
++// Ported from jet_cad_floor_plan/test/new_document_test.dart (spec 12a D4,
++// D8): ND1's and ND3's DASHED lines and ND4's "with registerAppComponents:
++// a live page and live walls", assertions unchanged, over the plan library
++// (spec 3a C1.3, C6). ND2's DASHED line is the kit's
++// (test/separator/separator_plan_test.dart); ND1-ND4's page, unit,
++// page-only and catalog-only lines are the plan library's (Task 5).
++// registerAppComponents is the plan's own registration, which a
++// controller's json load runs; the codec's text is the plan's save().
++//
++// And SP-dashed-open, Review Focus 1's kit half (the plan half is Task 5's
++// PB3-prepare-load): a file without the record opens without it, its
++// separator still names handle 6, where no record is, so it draws
++// continuous (the painter's _patternFor answers null,
++// jet_cad_2d_flutter/lib/src/draft_painter.dart:684-690), and it saves back
++// byte-identical (today's R-3; the app's DO3, document_open_test.dart:
++// 217-247).
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_integration/jet_cad_2d_integration.dart';
++import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++
++import '../support/editor_rig.dart';
++import 'separator_plans.dart';
++
++PageComponent? pageOf(DraftDocument d) =>
++    d.components.get<PageComponent>(d.rootHandle);
++
++void main() {
++  testWidgets('ND1 the new plan holds DASHED at handle 6 (spec 12a D4, T-11)',
++      (tester) async {
++    final c = architectureController();
++    addTearDown(c.dispose);
++    final doc = c.document;
++    // M-SP-9: the kit without its prepare.
++    expect(doc.tables.linetypes[ReservedHandles.dashedLinetype], dashed);
++    expect(doc.tables.linetypes.byName('DASHED')!.handle,
++        ReservedHandles.dashedLinetype);
++  });
++
++  testWidgets(
++      'ND3 the new plan encodes, and decodes with the plan\'s registration '
++      'to the same DASHED and bytes (spec 12a D4, D8)', (tester) async {
++    final c = architectureController();
++    addTearDown(c.dispose);
++    final saved = c.save();
++    final loaded = architectureController(json: saved);
++    addTearDown(loaded.dispose);
++    expect(loaded.document.tables.linetypes[ReservedHandles.dashedLinetype],
++        dashed);
++    expect(loaded.save(), saved);
++  });
++
++  testWidgets(
++      'ND4 the sample\'s bytes, decoded with the plan\'s registration '
++      '(registerAppComponents): a live page and live walls (spec 12a D8, '
++      'S-1)', (tester) async {
++    final sample =
++        PlanController(kits: [architectureKit], build: buildTenWalls);
++    addTearDown(sample.dispose);
++    final bytes = sample.save();
++    final sampleWalls = liveOf<WallParams>(sample, ArchitectureTypes.wall);
++    // The group's premises (:92-95), unchanged: a page off the world
++    // origin, not the new document's, and ten walls.
++    expect(pageOf(sample.document), isNotNull);
++    expect(pageOf(sample.document),
++        isNot(PageComponent(originX: -7425, originY: -5250)));
++    expect(sampleWalls, hasLength(10));
++
++    final loaded = architectureController(json: bytes);
++    addTearDown(loaded.dispose);
++    expect(pageOf(loaded.document), pageOf(sample.document));
++    expect(liveOf<WallParams>(loaded, ArchitectureTypes.wall), sampleWalls);
++  });
++
++  testWidgets(
++      'SP-dashed-open a file without the DASHED record opens without it: its '
++      'separator names handle 6, where no record is, so it draws '
++      'continuous; the plan is clean and saves back byte-identical; a load '
++      'does the same', (tester) async {
++    final writer =
++        PlanController(kits: [unpreparedKit], build: buildWallAndSeparator);
++    addTearDown(writer.dispose);
++    expect(
++        writer.document.tables.linetypes
++            .contains(ReservedHandles.dashedLinetype),
++        isFalse,
++        reason: 'premise: a writer that never had the record');
++    final file = writer.save();
++
++    final c = architectureController(json: file);
++    addTearDown(c.dispose);
++    final doc = c.document;
++    final sep = liveOf<SeparatorParams>(c, ArchitectureTypes.separator).single;
++    final leaves = [
++      for (final slot in doc.leavesByOwner()[sep]!) doc.entities.read(slot),
++    ];
++    expect(leaves, hasLength(1), reason: 'premise: its polyline');
++    expect(leaves.single.linetype, ReservedHandles.dashedLinetype,
++        reason: 'premise: it names handle 6');
++    // M-SP-8: open runs the kits' prepare.
++    expect(doc.tables.linetypes[ReservedHandles.dashedLinetype], isNull,
++        reason: 'no record there: it draws continuous');
++    expect(doc.tables.linetypes.byName('DASHED'), isNull);
++    expect(c.dirty.value, isFalse);
++    expect(c.canUndo.value, isFalse);
++    expect(c.save(), file, reason: 'byte-identical');
++
++    final other = architectureController();
++    addTearDown(other.dispose);
++    expect(
++        other.document.tables.linetypes[ReservedHandles.dashedLinetype], dashed,
++        reason: 'premise: a new plan has it');
++    other.load(file);
++    expect(
++        other.document.tables.linetypes[ReservedHandles.dashedLinetype], isNull,
++        reason: 'a load adds nothing');
++    expect(other.save(), file);
++  });
++}
+diff --git a/packages/jet_cad_2d_integration/test/separator/separator_export_test.dart b/packages/jet_cad_2d_integration/test/separator/separator_export_test.dart
+new file mode 100644
+index 00000000..ca6b30f0
+--- /dev/null
++++ b/packages/jet_cad_2d_integration/test/separator/separator_export_test.dart
+@@ -0,0 +1,106 @@
++// Appendix A D-30 (spec 3a C3.4, C6): the separator's type is not exported
++// (today's exportOmitOwners, jet_cad_floor_plan/lib/src/export/
++// export_bytes.dart:28-29), so plan.png and plan.pdf leave every separator
++// out, through the real kit. 2a's X-3 pins the plumbing over a test kit
++// (jet_cad_2d_plan/test/export/registry_test.dart:78-115); the PDF is read
++// back as the app's export test read it (apps/floor_planner/test/export/
++// export_flow_test.dart:115-127; export_flat.dart:198-210's toPdf and
++// pdfDistanceToSegment, copied here over the page's own origin and scale).
++import 'dart:io' show zlib;
++import 'dart:math' as math;
++
++import 'package:flutter/services.dart' show rootBundle;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/export_testing.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
++    show ExportDpi, exportPagePdf, exportPagePng;
++import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/editor_rig.dart';
++import 'separator_plans.dart';
++
++/// World [p] in the PDF's points, under [page] (its origin is the sheet's
++/// lower-left corner).
++Vector2 toPdf(PageComponent page, Vector2 p) {
++  final k = 72 / 25.4 / page.scaleDenominator;
++  return Vector2((p.x - page.originX) * k, (p.y - page.originY) * k);
++}
++
++/// The distance from [p] to the segment [a]-[b], in pt.
++double pdfDistanceToSegment(PdfXY p, Vector2 a, Vector2 b) {
++  final ab = b - a;
++  final t =
++      (((p.x - a.x) * ab.x + (p.y - a.y) * ab.y) / ab.length2).clamp(0.0, 1.0);
++  final q = a + ab * t;
++  return math.sqrt(math.pow(p.x - q.x, 2) + math.pow(p.y - q.y, 2));
++}
++
++/// The plan: a wall, and well clear of it a separator in a turned,
++/// mirrored group, on a new plan's sheet.
++PlanController exportPlan() {
++  final c =
++      PlanController(kits: [architectureKit], build: buildWallAndSeparator);
++  addTearDown(c.dispose);
++  return c;
++}
++
++void main() {
++  testWidgets(
++      'SP-export-png plan.png leaves the separator out: its bytes are the '
++      'page drawn without it', (tester) async {
++    final c = exportPlan();
++    final doc = c.document;
++    final seps = liveOf<SeparatorParams>(c, ArchitectureTypes.separator);
++    expect(seps, hasLength(1), reason: 'premise');
++    final page = doc.components.get<PageComponent>(doc.rootHandle)!;
++    final without = (await tester.runAsync(() => exportPagePng(
++        document: doc,
++        page: page,
++        dpi: ExportDpi.d96,
++        omitOwners: seps.toSet())))!;
++    final whole = (await tester.runAsync(
++        () => exportPagePng(document: doc, page: page, dpi: ExportDpi.d96)))!;
++    expect(without, isNot(whole),
++        reason: 'premise: the separator is on the sheet');
++    final got = (await tester.runAsync(() =>
++        c.export('plan.png', const PlanExportChoice(dpi: PlanExportDpi.d96))))!;
++    // M-SP-1 (exported) and M-SP-10 (omittedOf answering nothing).
++    expect(got.bytes, without);
++  });
++
++  testWidgets(
++      'SP-export-pdf plan.pdf leaves the separator out: no path vertex '
++      'within 1 pt of it, where the page exported with nothing omitted has '
++      'one; the wall is drawn', (tester) async {
++    final c = exportPlan();
++    final doc = c.document;
++    final sep = liveOf<SeparatorParams>(c, ArchitectureTypes.separator).single;
++    final page = doc.components.get<PageComponent>(doc.rootHandle)!;
++    final (s, e) = separatorEnds(doc, sep);
++    final a = toPdf(page, s), b = toPdf(page, e);
++    bool onSeparator(PdfContent content) => [
++          for (final p in content.paths)
++            for (final sub in p.subpaths)
++              for (final v in sub.vertices)
++                if (pdfDistanceToSegment(v, a, b) < 1.0) v,
++        ].isNotEmpty;
++
++    final font = (await tester.runAsync(() => rootBundle
++        .load('packages/jet_cad_2d_plan/lib/fonts/Roboto-Regular.ttf')))!;
++    final all = (await tester.runAsync(() => exportPagePdf(
++        document: doc, page: page, fontBytes: font.buffer.asUint8List())))!;
++    expect(onSeparator(PdfContent.parse(all, inflate: zlib.decode)), isTrue,
++        reason: 'premise: exported with nothing omitted, the separator '
++            'plots where the check looks');
++
++    final got = (await tester
++        .runAsync(() => c.export('plan.pdf', PlanExportChoice.initial)))!;
++    final content = PdfContent.parse(got.bytes, inflate: zlib.decode);
++    // M-SP-1 and M-SP-10.
++    expect(onSeparator(content), isFalse, reason: 'no path at the separator');
++    expect(content.paths, isNotEmpty, reason: 'the wall is drawn');
++  });
++}
+diff --git a/packages/jet_cad_2d_integration/test/separator/separator_plans.dart b/packages/jet_cad_2d_integration/test/separator/separator_plans.dart
+new file mode 100644
+index 00000000..0061ca54
+--- /dev/null
++++ b/packages/jet_cad_2d_integration/test/separator/separator_plans.dart
+@@ -0,0 +1,129 @@
++// Plans for the separator's integration tests, built through the plan
++// library's build seam (spec 3a C1.9) with the kit's public names: walls
++// and separators by command, each in its own root group, as today's room
++// fixture adds them (jet_cad_floor_plan/test/support/room_fixture.dart:
++// 118-178).
++import 'dart:math' as math;
++
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show KitWords, PlanKit;
++import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++/// A wall from world [s] to world [e], [thickness] thick, centred, in its
++/// own root group [at] (the identity by default): its stored ends are [s]
++/// and [e] taken back through [at]. One command.
++Handle addWall(DraftDocument doc, Vector2 s, Vector2 e,
++    {double thickness = 200, Transform2? at}) {
++  final h = doc.handleSeed.next();
++  final g = at ?? Transform2.identity();
++  final inv = g.invert();
++  final ls = inv.transformPoint(s), le = inv.transformPoint(e);
++  doc.commands.execute(CompoundCommand([
++    AddNodeCommand(GroupNode(
++        handle: h, parent: doc.rootHandle, transform: g, children: const [])),
++    SetComponentCommand<WallParams>(
++        h, WallParams(ls.x, ls.y, le.x, le.y, thickness, Justification.centre)),
++  ], label: 'Add wall'));
++  return h;
++}
++
++/// A separator from world [s] to world [e] in its own root group [at]
++/// (room_fixture.dart:165-178's addSeparator).
++Handle addSeparator(DraftDocument doc, Vector2 s, Vector2 e, {Transform2? at}) {
++  final h = doc.handleSeed.next();
++  final g = at ?? Transform2.identity();
++  final inv = g.invert();
++  final ls = inv.transformPoint(s), le = inv.transformPoint(e);
++  doc.commands.execute(CompoundCommand([
++    AddNodeCommand(GroupNode(
++        handle: h, parent: doc.rootHandle, transform: g, children: const [])),
++    SetComponentCommand<SeparatorParams>(
++        h, SeparatorParams(ls.x, ls.y, le.x, le.y)),
++  ], label: 'Add separator'));
++  return h;
++}
++
++/// room_fixture.dart:469-475's boxWalls: an 8,000 × 4,000 rectangle of
++/// 200 mm walls, centred on their centrelines, in plan millimetres.
++const List<(double, double, double, double)> boxWalls = [
++  (0, 0, 8000, 0),
++  (8000, 0, 8000, 4000),
++  (8000, 4000, 0, 4000),
++  (0, 4000, 0, 0),
++];
++
++/// Where the box's plan points go: centred on the world origin (a new
++/// plan's sheet), then turned 23°.
++final Transform2 boxPlace = Transform2.rotation(23 * math.pi / 180)
++    .multiply(Transform2.translation(-4000, -2000));
++
++Vector2 boxAt(double x, double y) => boxPlace.transformPoint(Vector2(x, y));
++
++/// Wall [k]'s own group: today's `_groupFor` (room_fixture.dart:94-96) on
++/// [boxPlace], a turn that is never a multiple of 90°.
++Transform2 groupFor(int k) => boxPlace
++    .multiply(Transform2.translation(311.5 * (k % 7), -173.25 * (k % 5)))
++    .multiply(Transform2.rotation(0.3 + 0.7 * (k % 9)));
++
++/// A [PlanBuild]: [boxWalls] at [boxPlace], each wall in its own group.
++void buildBox(DraftDocument doc, KitWords words) {
++  for (final (k, (sx, sy, ex, ey)) in boxWalls.indexed) {
++    addWall(doc, boxAt(sx, sy), boxAt(ex, ey), at: groupFor(k));
++  }
++}
++
++/// A [PlanBuild]: a wall, and well clear of it (over 1 m) a separator in a
++/// turned, mirrored group, both on a new plan's sheet (A4 landscape at 1:50
++/// about the world origin).
++void buildWallAndSeparator(DraftDocument doc, KitWords words) {
++  addWall(doc, Vector2(-5000.25, 3000.5), Vector2(4000.75, 3600.25),
++      at: Transform2.translation(120.5, -80.25)
++          .multiply(Transform2.rotation(0.05)));
++  addSeparator(doc, Vector2(-3000.5, -1200.25), Vector2(2500.75, 1800.5),
++      at: Transform2.translation(-310.25, 140.5)
++          .multiply(Transform2.rotation(0.3))
++          .multiply(Transform2.scale(-1, 1)));
++}
++
++/// A [PlanBuild] of the sample flat's shape for new_document_test's ND4
++/// (ruling R17-2): ten walls, each in its own turned group, and the page
++/// off the world origin.
++void buildTenWalls(DraftDocument doc, KitWords words) {
++  doc.commands.execute(SetComponentCommand<PageComponent>(
++      doc.rootHandle, PageComponent(originX: 2100.5, originY: -1300.25)));
++  for (var k = 0; k < 10; k++) {
++    addWall(
++        doc, Vector2(900.5 * k, 250.25), Vector2(900.5 * k + 600.75, 1700.5),
++        at: Transform2.translation(311.5 * (k % 7), -173.25 * (k % 5))
++            .multiply(Transform2.rotation(0.3 + 0.7 * (k % 9))));
++  }
++}
++
++/// [architectureKit] without its prepare: a plan it writes has no DASHED
++/// record (a file from a writer that never had one).
++PlanKit get unpreparedKit => PlanKit(
++      id: architectureKit.id,
++      version: architectureKit.version,
++      symbols: architectureKit.symbols,
++      types: architectureKit.types,
++      tools: architectureKit.tools,
++      attachments: architectureKit.attachments,
++      names: architectureKit.names,
++    );
++
++/// Separator [h]'s ends in world.
++(Vector2, Vector2) separatorEnds(DraftDocument doc, Handle h) {
++  final p = doc.components.get<SeparatorParams>(h)!;
++  final t = doc.tree.accumulatedTransform(h);
++  return (t.transformPoint(p.start), t.transformPoint(p.end));
++}
++
++/// The kit's DASHED record, written out (it is not exported):
++/// jet_cad_floor_plan/lib/src/parametric/separator.dart:128-133.
++const LinetypeRecord dashed = LinetypeRecord(
++  handle: ReservedHandles.dashedLinetype,
++  name: 'DASHED',
++  description: 'Dashed __ __ __',
++  pattern: DashPattern(dashes: [200, -100], totalLength: 300),
++);
+diff --git a/packages/jet_cad_2d_integration/test/separator/separator_shell_test.dart b/packages/jet_cad_2d_integration/test/separator/separator_shell_test.dart
+new file mode 100644
+index 00000000..d6564fe7
+--- /dev/null
++++ b/packages/jet_cad_2d_integration/test/separator/separator_shell_test.dart
+@@ -0,0 +1,44 @@
++// Ported from jet_cad_floor_plan/test/separator_tool_test.dart, ST1's shell
++// half (:196-223, spec 10 D20); assertions unchanged. PlannerShell becomes
++// PlanEditor over a controller of the kit whose plan is today's boxWalls,
++// built through the plan's build seam (spec 3a C1.9, C6), turned and in
++// own groups; the palette's 'tool-separator' is
++// 'tool-architecture.separator' (C7 class 1). The pending start is the
++// active tool's isMidShape, a PlacementTool's isPending (ruling R17-1).
++// ST1's tool half and ST2-ST6 are the kit's.
++import 'package:flutter/material.dart';
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++
++import '../support/editor_rig.dart';
++import 'separator_plans.dart';
++
++void main() {
++  testWidgets(
++      'ST1 (editor) S and the palette entry activate the Separator tool; '
++      'Esc cancels a pending start, then returns to Select', (tester) async {
++    final c = PlanController(kits: [architectureKit], build: buildBox);
++    addTearDown(c.dispose);
++    await pumpEditor(tester, c, centre: boxAt(4000, 2000), scale: 0.08);
++    await press(tester, LogicalKeyboardKey.keyS);
++    expect(status(tester), 'Separator');
++    await press(tester, LogicalKeyboardKey.keyV);
++    await tester
++        .tap(find.byKey(const Key('tool-${ArchitectureTools.separator}')));
++    await tester.pump();
++    expect(status(tester), 'Separator');
++    final sep = activeTool(tester);
++    final p = boxAt(2500.5, 2000.25);
++    await tester.tapAt(globalOf(tester, c, p.x, p.y));
++    await tester.pump();
++    expect(sep.isMidShape, isTrue);
++    await press(tester, LogicalKeyboardKey.escape);
++    expect(sep.isMidShape, isFalse, reason: 'the pending start cancelled');
++    expect(status(tester), 'Separator');
++    await press(tester, LogicalKeyboardKey.escape);
++    expect(status(tester), 'Select');
++    expect(liveOf<SeparatorParams>(c, ArchitectureTypes.separator), isEmpty);
++  });
++}
+diff --git a/packages/jet_cad_2d_integration/test/wall/wall_grips_test.dart b/packages/jet_cad_2d_integration/test/wall/wall_grips_test.dart
+index 817fc7c8..487477fd 100644
+--- a/packages/jet_cad_2d_integration/test/wall/wall_grips_test.dart
++++ b/packages/jet_cad_2d_integration/test/wall/wall_grips_test.dart
+@@ -1,16 +1,17 @@
+ // Ported from jet_cad_floor_plan/test/wall_grips_test.dart (3a Task 12):
+-// EG1-EG6, over a PlanController of the architecture kit in PlanEditor,
+-// assertions unchanged; the provider-direct tails of EG1, EG3, EG4 and EG6
+-// use the kit's WallGrips and run in the kit as EG1-k, EG3-k, EG4-k and
+-// EG6-k (R-P1, R12-3); the shown grips are the controller's grip cache
+-// (R-P9). EG7, EG8 move to Task 17 and EG9, EG10 to Task 21 (R-P8).
++// EG1-EG6, and EG7, EG8 (3a Task 17, R-P8: their door and separator), over
++// a PlanController of the architecture kit in PlanEditor, assertions
++// unchanged; the provider-direct tails of EG1, EG3, EG4, EG6 and EG8 use
++// the kit's WallGrips and run in the kit as EG1-k, EG3-k, EG4-k, EG6-k and
++// EG8-k (R-P1, R12-3); the shown grips are the controller's grip cache
++// (R-P9). EG9, EG10 move to Task 21 (R-P8).
+ // WG-refuse-short is new (Review Focus 3's kit half, R-P15).
+ // ignore_for_file: invalid_use_of_internal_member
+ import 'package:flutter/gestures.dart' show PointerDeviceKind, kPrimaryButton;
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
+ import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
+ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+@@ -45,20 +46,86 @@ void addL(DraftDocument doc, {bool withC = true}) {
+   doc.commands
+       .execute(addWall(doc, wa, lStart, lCorner, 200, Justification.centre));
+   doc.commands
+       .execute(addWall(doc, wb, lCorner, lEnd, 115, Justification.left));
+   if (withC) {
+     doc.commands.execute(addWall(doc, wc, cStart, polar(cStart, 23 - 120, 1500),
+         150, Justification.right));
+   }
+ }
+ 
++const Handle shadow = Handle(5500), sep = Handle(5600);
++
++/// fix/live-object-rule: the L, and two root-level groups carrying two
++/// registered types each, as only a file brings them in. Each is made as
++/// the app makes an object, regenerated through the dispatcher, then given
++/// a second component straight through the store:
++/// - [shadow], a door on C (so the engine regenerated it as an opening),
++///   then `WallParams` 400 thick from the L's corner (on the joint, in
++///   world) to [shadowTip], a point of the door's own children. Opening is
++///   registered after Wall, so the engine names it an **opening**. With
++///   [dangling], its `OpeningParams` is then rewritten to name a host that
++///   does not exist (the q12 review's PR2d); otherwise its host is C (PR2).
++/// - [sep], a separator (regenerated as one), then `OpeningParams` hosted
++///   on B. Separator is registered after Opening, so it is a **separator**.
++/// Both groups translated and rotated; neither handle the lowest.
++PlanController shadowController({required bool dangling}) {
++  final ctrl = wallController(gripPlan((doc) {
++    addL(doc);
++    doc.commands.execute(CompoundCommand([
++      AddNodeCommand(GroupNode(
++          handle: shadow,
++          parent: doc.rootHandle,
++          transform: Transform2.translation(ox + 100.5, oy + 50.25)
++              .multiply(Transform2.rotation(-0.4)),
++          children: const [])),
++      SetComponentCommand<OpeningParams>(
++          shadow, const OpeningParams(wc, 700, 800, OpeningKind.door)),
++    ], label: 'Add door'));
++    final at = Transform2.translation(ox - 610.75, oy + 1720.5)
++        .multiply(Transform2.rotation(0.9));
++    final toSep = at.invert();
++    final s = toSep.transformPoint(plan(600, 1800));
++    final e = toSep.transformPoint(plan(2200, 1800));
++    doc.commands.execute(CompoundCommand([
++      AddNodeCommand(GroupNode(
++          handle: sep,
++          parent: doc.rootHandle,
++          transform: at,
++          children: const [])),
++      SetComponentCommand<SeparatorParams>(
++          sep, SeparatorParams(s.x, s.y, e.x, e.y)),
++    ], label: 'Add separator'));
++  }));
++  final doc = ctrl.document;
++  final toShadow = doc.tree.accumulatedTransform(shadow).invert();
++  final s = toShadow.transformPoint(lCorner);
++  final tip = shadowTip(doc);
++  doc.components
++    ..attach<WallParams>(
++        shadow, WallParams(s.x, s.y, tip.x, tip.y, 400, Justification.left))
++    ..attach<OpeningParams>(
++        sep, const OpeningParams(wb, 900, 700, OpeningKind.window));
++  if (dangling) {
++    doc.components.attach<OpeningParams>(shadow,
++        const OpeningParams(Handle(0x7777), 700, 800, OpeningKind.door));
++  }
++  return ctrl;
++}
++
++/// The first point of [shadow]'s first generated line, group-local: a
++/// point of the door's own children.
++Vector2 shadowTip(DraftDocument doc) => [
++      for (final k in kids(doc, shadow))
++        if (kindOf(doc, k) == EntityKind.line) pointsOf(payloadOf(doc, k))[0],
++    ].first;
++
+ void main() {
+   testWidgets(
+       'EG1 a free end drags to the resolved point, stored in its own group, '
+       'the other end untouched; one undo step; a degenerate drop is refused, '
+       'and a drag back onto the grip dispatches nothing', (tester) async {
+     final ctrl = wallController(gripPlan((doc) {
+       doc.commands.execute(addWall(
+           doc, wa, plan(0, 0), plan(3000, 400), 200, Justification.centre));
+     }));
+     final doc = ctrl.document;
+@@ -388,11 +455,73 @@ void main() {
+     // The grips stay usable: the next drag lands, one more step.
+     final r = gridOf(doc, plan(2600, -700));
+     await dragWorld(tester, ctrl, endOf(doc, wa, 1), r);
+     expect(doc.commands.undoDepth, 2);
+     expect((endOf(doc, wa, 1) - r).length, lessThan(1e-6));
+     expect(ctrl.diagnostics.value, hasLength(reports));
+     await undoKey(tester);
+     await undoKey(tester);
+     expect(canon(doc), before);
+   });
++
++  testWidgets(
++      'EG7 (fix/live-object-rule, the q12 review\'s PR2d) a file\'s group '
++      'carrying WallParams on the joint and OpeningParams naming no host is '
++      'an opening, not a wall: the corner drag of A lands one undo step, '
++      'throws nothing and leaves the group as loaded', (tester) async {
++    final ctrl = shadowController(dangling: true);
++    final doc = ctrl.document;
++    final wallP = doc.components.get<WallParams>(shadow)!;
++    final openingP = doc.components.get<OpeningParams>(shadow)!;
++    expect(openingP.host, const Handle(0x7777), reason: 'dangling');
++    final corner = endOf(doc, wa, 1);
++    expect((endOf(doc, shadow, 0) - corner).length, lessThan(wallJoin.linear),
++        reason: 'the shadow\'s WallParams is on the joint in world');
++    await pumpEditor(tester, ctrl, centre: lCorner, scale: 0.15);
++    final before = canon(doc);
++    await selectWall(tester, ctrl, wa);
++    final q = gridOf(doc, plan(3500, -400));
++    await dragWorld(tester, ctrl, corner, q);
++    expect(tester.takeException(), isNull);
++    expect(doc.commands.undoDepth, 1, reason: 'the commit succeeds');
++    for (final (h, k) in [(wa, 1), (wb, 0)]) {
++      expect((endOf(doc, h, k) - q).length, lessThan(1e-6),
++          reason: '${h.toHex()} follows');
++    }
++    expect(doc.components.get<WallParams>(shadow), wallP);
++    expect(doc.components.get<OpeningParams>(shadow), openingP);
++    await undoKey(tester);
++    expect(canon(doc), before);
++  });
++
++  testWidgets(
++      'EG8 (fix/live-object-rule, PR2) the corner drag\'s command and '
++      'preview name the real walls only: a file\'s opening carrying '
++      'WallParams on the joint does not follow, and a separator carrying '
++      'OpeningParams on B is not kept put', (tester) async {
++    final ctrl = shadowController(dangling: false);
++    final doc = ctrl.document;
++    final wallP = doc.components.get<WallParams>(shadow)!;
++    final openingP = doc.components.get<OpeningParams>(shadow)!;
++    final sepS = doc.components.get<SeparatorParams>(sep)!;
++    final sepO = doc.components.get<OpeningParams>(sep)!;
++    final corner = endOf(doc, wa, 1);
++    expect((endOf(doc, shadow, 0) - corner).length, lessThan(wallJoin.linear),
++        reason: 'only the rule separates the shadow from the joint');
++    final q = gridOf(doc, plan(3500, -400));
++
++    // The provider directly: EG8-k (the kit).
++
++    await pumpEditor(tester, ctrl, centre: lCorner, scale: 0.15);
++    final before = canon(doc);
++    await selectWall(tester, ctrl, wa);
++    await dragWorld(tester, ctrl, corner, q);
++    expect(tester.takeException(), isNull);
++    expect(doc.commands.undoDepth, 1, reason: 'the commit succeeds');
++    expect(doc.components.get<WallParams>(shadow), wallP);
++    expect(doc.components.get<OpeningParams>(shadow), openingP);
++    expect(doc.components.get<SeparatorParams>(sep), sepS);
++    expect(doc.components.get<OpeningParams>(sep), sepO);
++    await undoKey(tester);
++    expect(canon(doc), before);
++  });
+ }
+diff --git a/packages/jet_cad_2d_kit_architecture/CHANGELOG.md b/packages/jet_cad_2d_kit_architecture/CHANGELOG.md
+index 93b2ac04..95a57e7e 100644
+--- a/packages/jet_cad_2d_kit_architecture/CHANGELOG.md
++++ b/packages/jet_cad_2d_kit_architecture/CHANGELOG.md
+@@ -6,10 +6,13 @@ The architecture kit of jet_cad_2d plans (sub-project 3a).
+   tool ids (`ArchitectureTypes`, `ArchitectureTools`), its words in
+   English, German and Turkish, and its `prepare`, which gives a plan the
+   plan library makes the separators' DASHED linetype.
+ - The box (`architecture.box`, `BoxParams`): a rectangle whose outline
+   loses what lies inside an overlapping box; its width and height in the
+   property panel; the Box tool (B).
+ - The wall (`architecture.wall`, `WallParams`, `Justification`): mitred
+   joints, Ts and nodes; its two end grips, which move joined ends too; its
+   thickness and justification in the property panel; the Wall tool (W),
+   whose settings the panel edits while it is active.
++- The room separator (`architecture.separator`, `SeparatorParams`): drawn
++  DASHED, an input to rooms, left out of PDF and PNG exports; its two end
++  grips and the Separator tool (S) trim an end to the wall face it enters.
+diff --git a/packages/jet_cad_2d_kit_architecture/lib/src/kit.dart b/packages/jet_cad_2d_kit_architecture/lib/src/kit.dart
+index 916a3ac6..b8ea04ef 100644
+--- a/packages/jet_cad_2d_kit_architecture/lib/src/kit.dart
++++ b/packages/jet_cad_2d_kit_architecture/lib/src/kit.dart
+@@ -1,28 +1,30 @@
+ // The architecture kit's descriptor (spec 3a C2): its types, tools,
+ // attachment providers, symbols, words and prepare. Each type task adds its
+ // own (Tasks 10-25); the tools keep today's palette order (box, wall, door,
+ // window, gap, room, separator, dimension; planner_shell.dart:546-601).
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+ 
+ import 'box/box_plan.dart';
+ import 'opening/opening_plan.dart';
++import 'separator/separator_plan.dart';
+ import 'separator_linetype.dart';
+ import 'wall/wall_plan.dart';
+ import 'words/words.dart';
+ 
+ /// The architecture kit: a host passes it to the plan library,
+ /// `PlanController(kits: [architectureKit])`.
+ final PlanKit architectureKit = PlanKit(
+   id: 'architecture',
+   version: '0.1.0',
+-  types: [boxPlanType, wallPlanType, openingPlanType],
++  types: [boxPlanType, wallPlanType, openingPlanType, separatorPlanType],
+   tools: [
+     boxPlanTool,
+     wallPlanTool,
+     doorPlanTool,
+     windowPlanTool,
+     gapPlanTool,
++    separatorPlanTool,
+   ],
+   names: architectureNames,
+   prepare: ensureDashedLinetype,
+ );
+diff --git a/packages/jet_cad_2d_kit_architecture/lib/src/separator/separator_grips.dart b/packages/jet_cad_2d_kit_architecture/lib/src/separator/separator_grips.dart
+new file mode 100644
+index 00000000..ecc9ff77
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/lib/src/separator/separator_grips.dart
+@@ -0,0 +1,117 @@
++// The separator's end grips (spec 3a C3.4), ported from
++// jet_cad_floor_plan/lib/src/parametric/separator_grips.dart. The
++// RoomInputs is the kit's one per document (roomInputsOf), no longer the
++// shell's.
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../room/room_inputs.dart';
++import 'separator.dart';
++
++/// A separator's end grips (spec 10 D21, D20), through the render layer's
++/// object grip seam.
++///
++/// - **Grips:** two `stretch` grips at the separator's world ends, index 0
++///   the start and 1 the end.
++/// - **Drag:** the dragged end goes to the point the select tool has
++///   already resolved through its snap chain (08's Ruling 08-15), then
++///   through [trimSeparator] with the end that stays, over the kit's shared
++///   [RoomInputs] and F3's object snap ([objectSnap]): the one function the
++///   Separator tool calls (Ruling 10-9), so a dragged end is band-trimmed
++///   as a drawn one is. The end that stays is stored as it was, bit for
++///   bit: a drag moves one end. One `SetComponentCommand<SeparatorParams>`,
++///   the moved end written back in the separator group's local space, or
++///   null when [trimSeparator] makes nothing (both ends in one band, or too
++///   short) or the drag stores what is stored (a drop on the end itself
++///   included: the round trip through the group's transform is not exact).
++/// - **Preview:** the segment as it would be stored, in world.
++/// - **Movable:** the select tool moves and rotates a separator like any
++///   line.
++///
++/// [inputs] is invalidated at each release, before the trim, as the
++/// Separator tool does at its second click: the document's change stream
++/// delivers after the task that made a change (Ruling 10-11).
++final class SeparatorGrips implements ObjectGripProvider {
++  SeparatorGrips({required this.inputs, required this.objectSnap});
++
++  /// The kit's document adapter ([roomInputsOf]), shared with the Room and
++  /// Separator tools. Never disposed here.
++  final RoomInputs inputs;
++
++  /// Whether object snap (F3) is on, read at each drag event: band trimming
++  /// is object snapping (R-21).
++  final bool Function() objectSnap;
++
++  @override
++  List<Grip> gripsOf(DraftDocument d, Handle group) {
++    final ends = _worldEnds(d, group);
++    if (ends == null) return const [];
++    final (s, e) = ends;
++    return [
++      Grip(GripRole.stretch, 0, s.x, s.y),
++      Grip(GripRole.stretch, 1, e.x, e.y),
++    ];
++  }
++
++  @override
++  DraftCommand? drag(DraftDocument d, Handle group, Grip grip, Vector2 world) {
++    final ends = _worldEnds(d, group);
++    if (ends == null) return null;
++    // A drop on the end itself stores what is stored.
++    final end = grip.index == 0 ? ends.$1 : ends.$2;
++    if (world.x == end.x && world.y == end.y) return null;
++    inputs.invalidate();
++    final moved = _moved(d, group, grip, world);
++    if (moved == null) return null;
++    final (p, _) = moved;
++    if (p == d.components.get<SeparatorParams>(group)) return null;
++    return SetComponentCommand<SeparatorParams>(group, p);
++  }
++
++  @override
++  List<(EntityKind, GeometryPayload)> preview(
++      DraftDocument d, Handle group, Grip grip, Vector2 world) {
++    final moved = _moved(d, group, grip, world);
++    if (moved == null) return const [];
++    final (_, (s, e)) = moved;
++    return [(EntityKind.line, linePayload(s, e))];
++  }
++
++  @override
++  bool movable(DraftDocument d, Handle group) => true;
++
++  /// [group]'s ends in world; null when it is not a separator or an end is
++  /// not finite.
++  static (Vector2, Vector2)? _worldEnds(DraftDocument d, Handle group) {
++    final p = d.components.get<SeparatorParams>(group);
++    if (p == null) return null;
++    final t = d.tree.accumulatedTransform(group);
++    final s = t.transformPoint(p.start), e = t.transformPoint(p.end);
++    if (!s.x.isFinite || !s.y.isFinite || !e.x.isFinite || !e.y.isFinite) {
++      return null;
++    }
++    return (s, e);
++  }
++
++  /// [grip]'s end of [group] dragged to [world]: the parameters to store
++  /// and the world segment they draw; null when [trimSeparator] makes
++  /// nothing of it.
++  (SeparatorParams, (Vector2, Vector2))? _moved(
++      DraftDocument d, Handle group, Grip grip, Vector2 world) {
++    final ends = _worldEnds(d, group);
++    if (ends == null) return null;
++    final start = grip.index == 0;
++    final kept = start ? ends.$2 : ends.$1;
++    final trimmed = start
++        ? trimSeparator(world, kept, inputs, objectSnap: objectSnap())
++        : trimSeparator(kept, world, inputs, objectSnap: objectSnap());
++    if (trimmed == null) return null;
++    final w = start ? trimmed.$1 : trimmed.$2;
++    final local = d.tree.accumulatedTransform(group).invert().transformPoint(w);
++    final p = d.components.get<SeparatorParams>(group)!;
++    return start
++        ? (p.copyWith(start: local), (w, kept))
++        : (p.copyWith(end: local), (kept, w));
++  }
++}
+diff --git a/packages/jet_cad_2d_kit_architecture/lib/src/separator/separator_plan.dart b/packages/jet_cad_2d_kit_architecture/lib/src/separator/separator_plan.dart
+new file mode 100644
+index 00000000..a0018472
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/lib/src/separator/separator_plan.dart
+@@ -0,0 +1,40 @@
++// The separator as the kit declares it (spec 3a C3.4): its PlanType -- the
++// type Task 16 ported, not exported (today's exportOmitOwners,
++// jet_cad_floor_plan/lib/src/export/export_bytes.dart:28-29), its grips the
++// two band-trimmed ends over the kit's one RoomInputs and the plan's F3 --
++// and its PlanTool, S (planner_shell.dart:588-594), which band-trims
++// through the same RoomInputs. No properties: today's panel has no
++// separator section.
++import 'package:flutter/material.dart' show Icons;
++import 'package:jet_cad_2d/jet_cad_2d.dart' show Capability;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++
++import '../ids.dart';
++import '../room/room_inputs.dart';
++import 'separator.dart';
++import 'separator_grips.dart';
++import 'separator_tool.dart';
++
++/// The separator's type: drawn DASHED, an input to rooms, left out of
++/// every export.
++final PlanType<SeparatorParams> separatorPlanType = PlanType<SeparatorParams>(
++  id: ArchitectureTypes.separator,
++  fromJson: SeparatorParams.fromJson,
++  parametric: const SeparatorType(),
++  grips: (s) =>
++      SeparatorGrips(inputs: roomInputsOf(s), objectSnap: () => s.objectSnap),
++  exported: false,
++);
++
++/// The Separator tool: two clicks per separator, band-trimmed.
++final PlanTool separatorPlanTool = PlanTool(
++  id: ArchitectureTools.separator,
++  icon: Icons.horizontal_rule,
++  letter: 'S',
++  needs: const {
++    Capability.structure,
++    Capability.components,
++    Capability.geometry,
++  },
++  create: (s) => SeparatorTool(roomInputsOf(s)),
++);
+diff --git a/packages/jet_cad_2d_kit_architecture/lib/src/separator/separator_tool.dart b/packages/jet_cad_2d_kit_architecture/lib/src/separator/separator_tool.dart
+new file mode 100644
+index 00000000..3e6cd9f7
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/lib/src/separator/separator_tool.dart
+@@ -0,0 +1,141 @@
++// The Separator tool, S (spec 3a C3.4), ported from
++// jet_cad_floor_plan/lib/src/parametric/separator_tool.dart. The RoomInputs
++// is the kit's one per document (roomInputsOf).
++import 'dart:ui' show Canvas;
++
++import 'package:flutter/foundation.dart' show visibleForTesting;
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../room/room_inputs.dart';
++import 'separator.dart';
++
++/// Spec 10 D20: the Separator tool (S). A `PlacementTool` of **two clicks
++/// per separator**, not chained (R-20): after the second click it waits for
++/// a new first click. Escape cancels a pending start, then returns to the
++/// select tool.
++///
++/// - **Points** resolve through the drawing tools' chain and mask (05 D4,
++///   `kDragSnapMask`), as the Line tool's do: decision 17's "existing
++///   snaps".
++/// - **Band trimming** (R-21): the second click stores what
++///   [trimSeparator] makes of the two resolved points, over the kit's shared
++///   [RoomInputs], with F3's object snap. Nothing when it makes nothing
++///   (both ends in one band, or too short): the start stays pending.
++/// - **The commit**: one [CompoundCommand], the separator's group at the
++///   identity and its [SeparatorParams], needing structure, components and
++///   geometry: one undo step. A refused commit places nothing.
++/// - **The rubber band** is the segment from the start to the hover point,
++///   as [trimSeparator] would store it: computed per pointer move, painted
++///   per frame from two stored points.
++///
++/// The inputs are invalidated at every second click, before the trim, and
++/// right after the commit (Ruling 10-11): the document's change stream
++/// delivers after the current task.
++class SeparatorTool extends PlacementTool {
++  SeparatorTool(this.inputs);
++
++  /// The kit's document adapter ([roomInputsOf]), shared with the Room tool and the
++  /// separator grips (Ruling 10-11). The tool never disposes it.
++  final RoomInputs inputs;
++
++  /// The context of the last hover, for [hovered], which has none.
++  ToolContext? _context;
++
++  /// The rubber band, as it would be stored. Reused, never reallocated.
++  final Vector2 _bandStart = Vector2.zero();
++  final Vector2 _bandEnd = Vector2.zero();
++  bool _bandShown = false;
++
++  /// The rubber band's two points, or null when none is drawn.
++  @visibleForTesting
++  (Vector2, Vector2)? get debugBand =>
++      points.isEmpty || !_bandShown ? null : (_bandStart, _bandEnd);
++
++  @override
++  String get name => 'Separator';
++
++  static bool _objectSnap(ToolContext? ctx) => ctx?.snap?.objectSnap ?? true;
++
++  @override
++  void onPointerMove(ToolPointerEvent e, ToolContext ctx) {
++    _context = ctx;
++    super.onPointerMove(e, ctx);
++  }
++
++  /// Runs after every hover's resolution, so [hoverPoint] is the resolved
++  /// point. With no start pending there is no rubber band.
++  @override
++  void hovered(Vector2 raw) {
++    _bandShown = false;
++    if (points.isEmpty) return;
++    final trimmed = trimSeparator(points.first, hoverPoint, inputs,
++        objectSnap: _objectSnap(_context));
++    if (trimmed == null) return;
++    _bandStart.setFrom(trimmed.$1);
++    _bandEnd.setFrom(trimmed.$2);
++    _bandShown = true;
++  }
++
++  @override
++  void accept(Vector2 point, ToolContext ctx) {
++    if (points.isEmpty) {
++      points.add(point);
++      _bandShown = false;
++      return;
++    }
++    inputs.invalidate();
++    final trimmed = trimSeparator(points.first, point, inputs,
++        objectSnap: _objectSnap(ctx));
++    if (trimmed == null) return;
++    final (s, e) = trimmed;
++    try {
++      commit(ctx, () {
++        final doc = ctx.document;
++        final h = doc.handleSeed.next();
++        return CompoundCommand([
++          AddNodeCommand(GroupNode(
++              handle: h,
++              parent: doc.rootHandle,
++              transform: Transform2.identity(),
++              children: const [])),
++          SetComponentCommand<SeparatorParams>(
++              h, SeparatorParams(s.x, s.y, e.x, e.y)),
++          // Spec 12b D2: a new object takes the current layer.
++          SetComponentCommand<ObjectLayer>(h, ObjectLayer(drawingLayer(doc))),
++        ], label: 'Add separator');
++      }, needs: const {
++        Capability.structure,
++        Capability.components,
++        Capability.geometry,
++      });
++    } on ArgumentError {
++      // Refused: nothing is placed.
++    } on StateError {
++      // Likewise.
++    }
++    inputs.invalidate();
++    clearShape();
++  }
++
++  @override
++  void finish(ToolContext ctx) => clearShape();
++
++  @override
++  void clearShape() {
++    super.clearShape();
++    _bandShown = false;
++  }
++
++  /// The pending separator, trimmed as it would be stored.
++  @override
++  void paintRubberBand(Canvas canvas, Vector2 origin, double scale) {
++    if (points.isEmpty || !hoverVisible || !_bandShown) return;
++    band
++      ..reset()
++      ..moveTo(_bandStart.x - origin.x, _bandStart.y - origin.y)
++      ..lineTo(_bandEnd.x - origin.x, _bandEnd.y - origin.y);
++    canvas.drawPath(band, bandPaint);
++  }
++}
+diff --git a/packages/jet_cad_2d_kit_architecture/test/separator/separator_plan_test.dart b/packages/jet_cad_2d_kit_architecture/test/separator/separator_plan_test.dart
+new file mode 100644
+index 00000000..e2ecef95
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/test/separator/separator_plan_test.dart
+@@ -0,0 +1,149 @@
++// Spec 3a C3.4: the separator as the kit declares it. Its type is not
++// exported, has grips (two ends, band-trimmed over the kit's RoomInputs with
++// the plan's F3, read at each drag) and no properties; its tool is S, made
++// over the same RoomInputs, in today's palette place. And ND2's DASHED
++// line (jet_cad_floor_plan/test/new_document_test.dart:49-62): the kit's
++// prepare alone sets the record and adds no page, entity or history (spec
++// 3a C1.3; ND2's registration and unit lines are Task 5's).
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/testing.dart';
++import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
++import 'package:jet_cad_2d_kit_architecture/src/room/room_inputs.dart';
++import 'package:jet_cad_2d_kit_architecture/src/separator/separator_plan.dart';
++import 'package:jet_cad_2d_kit_architecture/src/separator/separator_tool.dart';
++import 'package:jet_cad_2d_kit_architecture/src/separator_linetype.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++// testCatalog() through room_fixture.dart's re-export (Task 16).
++import '../support/room_fixture.dart';
++
++Vector2 at(Grip g) => Vector2(g.x, g.y);
++
++/// The distance from [p] to the line through [a] and [b], relative to [a]
++/// (separator_tool_test.dart:90-94).
++double distToLine(Vector2 p, Vector2 a, Vector2 b) {
++  final d = b - a, q = p - a;
++  return (q.x * d.y - q.y * d.x).abs() / d.length;
++}
++
++void main() {
++  test(
++      'SP-type the kit carries the separator: its type is not exported, has '
++      'grips and no properties, colour or section; its tool S needs '
++      'structure, components and geometry, has no settings, and is made '
++      'over the services\' one RoomInputs', () {
++    expect(architectureKit.types, contains(separatorPlanType));
++    expect(separatorPlanType.id, ArchitectureTypes.separator);
++    expect(SeparatorParams.componentTypeId, separatorPlanType.id);
++    // M-SP-1: the type exported.
++    expect(separatorPlanType.exported, isFalse);
++    expect(separatorPlanType.grips, isNotNull);
++    expect(separatorPlanType.properties, isEmpty);
++    expect(separatorPlanType.hasColour, isFalse);
++    expect(separatorPlanType.hasSection, isFalse);
++    expect(architectureKit.tools, contains(separatorPlanTool));
++    expect(separatorPlanTool.id, ArchitectureTools.separator);
++    // M-SP-3: another letter.
++    expect(separatorPlanTool.letter, 'S');
++    expect(separatorPlanTool.needs,
++        {Capability.structure, Capability.components, Capability.geometry});
++    expect(separatorPlanTool.settings, isNull);
++    final doc = DraftDocument.empty();
++    addTearDown(doc.dispose);
++    final services = FakePlanServices(document: doc, catalog: testCatalog());
++    addTearDown(services.dispose);
++    final tool = separatorPlanTool.create(services) as SeparatorTool;
++    addTearDown(tool.dispose);
++    expect(identical(tool.inputs, roomInputsOf(services)), isTrue);
++  });
++
++  test(
++      'SP-order the kit\'s tools keep today\'s palette order (box, wall, '
++      'door, window, gap, room, separator, dimension)', () {
++    const today = [
++      ArchitectureTools.box,
++      ArchitectureTools.wall,
++      ArchitectureTools.door,
++      ArchitectureTools.window,
++      ArchitectureTools.gap,
++      ArchitectureTools.room,
++      ArchitectureTools.separator,
++      ArchitectureTools.dimension,
++    ];
++    final ids = [for (final t in architectureKit.tools) t.id];
++    expect(ids, contains(ArchitectureTools.separator));
++    // M-SP-4: the separator's tool listed first.
++    expect(ids, [
++      for (final id in today)
++        if (ids.contains(id)) id,
++    ]);
++  });
++
++  test(
++      'SP-grips the type\'s grips: two stretch grips at the world ends; the '
++      'end dragged into the north wall\'s band is trimmed to its inner face '
++      'with the plan\'s object snap on and kept as placed with it off; the '
++      'start stays exactly; movable', () {
++    // The separator and every wall in their own turned groups at the
++    // corpus's far origin; the drop's segment from the start is not
++    // collinear with the separator, so the end that stays matters.
++    final plan = buildPlan(boxWalls,
++        seps: const [(3000.5, 1000.25, 3000.5, 3000.75)], place: corpusGroups);
++    final doc = plan.doc;
++    final sep = plan.seps.single;
++    final p = plan.at(3600.75, 4030.5);
++    for (final on in [true, false]) {
++      final why = 'F3 ${on ? 'on' : 'off'}';
++      final services = FakePlanServices(
++          document: doc, catalog: testCatalog(), objectSnap: on);
++      addTearDown(services.dispose);
++      final grips = separatorPlanType.gripsFor(services)!;
++      expect(grips.movable(doc, sep), isTrue);
++      final [g0, g1] = grips.gripsOf(doc, sep);
++      expect([g0.role, g1.role], [GripRole.stretch, GripRole.stretch]);
++      expect((at(g0) - plan.at(3000.5, 1000.25)).length, lessThan(1e-6));
++      expect((at(g1) - plan.at(3000.5, 3000.75)).length, lessThan(1e-6));
++      final stored = doc.components.get<SeparatorParams>(sep)!;
++      final depth = doc.commands.undoDepth;
++      doc.commands.execute(grips.drag(doc, sep, g1, p)!);
++      expect(doc.commands.undoDepth, depth + 1, reason: '$why: one step');
++      final now = doc.components.get<SeparatorParams>(sep)!;
++      expect((now.sx, now.sy), (stored.sx, stored.sy),
++          reason: '$why: the start stays, exactly');
++      final w = doc.tree.accumulatedTransform(sep).transformPoint(now.end);
++      if (on) {
++        // M-SP-7: the end trimmed from the wrong end.
++        expect(distToLine(w, plan.at(0, 3900), plan.at(8000, 3900)),
++            lessThan(1e-6),
++            reason: '$why: on the north wall\'s inner face');
++        expect(distToLine(w, at(g0), p), lessThan(1e-6),
++            reason: '$why: on the segment from the start to the drop');
++        expect((w - p).length, greaterThan(20),
++            reason: '$why: out of the band');
++      } else {
++        // M-SP-2: the grips' object snap fixed on.
++        expect((w - p).length, lessThan(1e-6), reason: '$why: as placed');
++      }
++      expect(driftOf(doc), isEmpty);
++      doc.commands.undo();
++      expect(doc.components.get<SeparatorParams>(sep), stored);
++    }
++  });
++
++  test(
++      'ND2 the set-up alone sets DASHED, and adds no page, entity or '
++      'history (spec 12a D4): the kit\'s prepare, on a document whose page '
++      'type is registered as the plan library registers it', () {
++    final doc = DraftDocument.empty();
++    addTearDown(doc.dispose);
++    PageComponent.register(doc.components);
++    architectureKit.prepare!(doc);
++    expect(doc.components.get<PageComponent>(doc.rootHandle), isNull);
++    expect(doc.entities.liveCount, 0);
++    expect(doc.commands.undoDepth, 0);
++    // M-SP-9: the kit without its prepare.
++    expect(doc.tables.linetypes[ReservedHandles.dashedLinetype],
++        kDashedLinetypeRecord);
++  });
++}
+diff --git a/packages/jet_cad_2d_kit_architecture/test/separator/separator_tool_test.dart b/packages/jet_cad_2d_kit_architecture/test/separator/separator_tool_test.dart
+new file mode 100644
+index 00000000..0bf2e8e7
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/test/separator/separator_tool_test.dart
+@@ -0,0 +1,419 @@
++// Spec 10 D20: the Separator tool (S). Two clicks place one separator, one
++// undo step, its group at the identity and its ends the resolved points;
++// the tool is not chained. With object snap on (F3), an end inside a wall's
++// uncut band is trimmed back to the face the segment enters it by; with it
++// off, the ends are stored as placed. Both ends in one band, or a trimmed
++// length within `roomTrace.linear`, place nothing. A new separator splits
++// its room.
++//
++// Expected areas are hand arithmetic next to the assertion; every expected
++// label string is at least 0.0005 m² from a rounding tie. Points are
++// fractional; the relational cases run at the origin and at the corpus far
++// origin with every wall in its own rotated group.
++//
++// Ported from jet_cad_floor_plan/test/separator_tool_test.dart; assertions
++// unchanged. The tool is the kit's plan tool's (`separatorPlanTool.create`)
++// over a FakePlanServices of the kit tests' catalog, its RoomInputs the
++// services' one (`roomInputsOf`, spec 3a C2); everything else is today's.
++// ST1's shell half (S, the palette, Escape) is the integration package's
++// (test/separator/separator_shell_test.dart); ST4 needs a room and is
++// Task 18's.
++import 'package:flutter/gestures.dart' show kPrimaryButton;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:jet_cad_2d_kit/testing.dart';
++import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
++import 'package:jet_cad_2d_kit_architecture/src/room/room_inputs.dart';
++import 'package:jet_cad_2d_kit_architecture/src/room/room_trace.dart'
++    show distToSegment, pointInRing;
++import 'package:jet_cad_2d_kit_architecture/src/separator/separator_plan.dart';
++import 'package:jet_cad_2d_kit_architecture/src/separator/separator_tool.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/room_fixture.dart';
++
++typedef Rig = ({SeparatorTool tool, ToolContext ctx, RoomInputs inputs});
++
++/// A Separator tool over [doc], made by the kit's plan tool over a
++/// FakePlanServices of the kit tests' catalog (its RoomInputs the services'
++/// shared one): a camera at 1 pixel per mm (a 10 mm aperture), object snap
++/// as [objectSnap] says, no page (no grid).
++Rig separatorRig(DraftDocument doc, {bool objectSnap = true}) {
++  final index = SpatialIndex(doc);
++  final camera = CameraController(
++      ViewportTransform(worldToScreenMatrix: Transform2.identity()));
++  final selection = SelectionController(doc);
++  final snap = SnapSettings(objectSnap: objectSnap);
++  final services = FakePlanServices(
++      document: doc, catalog: testCatalog(), objectSnap: objectSnap);
++  final tool = separatorPlanTool.create(services) as SeparatorTool;
++  addTearDown(() {
++    tool.dispose();
++    services.dispose();
++    snap.dispose();
++    selection.dispose();
++    camera.dispose();
++    index.dispose();
++  });
++  return (
++    tool: tool,
++    ctx: ToolContext(
++        document: doc,
++        index: index,
++        camera: camera,
++        selection: selection,
++        snap: snap),
++    inputs: roomInputsOf(services),
++  );
++}
++
++ToolPointerEvent pointerAt(Vector2 world, {int buttons = 0}) =>
++    ToolPointerEvent(
++        screen: Offset.zero,
++        world: world,
++        pointer: 1,
++        buttons: buttons,
++        shift: false,
++        control: false,
++        meta: false,
++        alt: false,
++        pickRadiusWorld: 1);
++
++void hoverTo(Rig rig, Vector2 world) =>
++    rig.tool.onPointerMove(pointerAt(world), rig.ctx);
++
++void pressAt(Rig rig, Vector2 world) =>
++    rig.tool.onPointerDown(pointerAt(world, buttons: kPrimaryButton), rig.ctx);
++
++/// Every live separator, ascending.
++List<Handle> separators(DraftDocument doc) =>
++    testCatalog().objectsOf<SeparatorParams>(doc);
++
++/// The distance from [p] to the line through [a] and [b], relative to [a].
++double distToLine(Vector2 p, Vector2 a, Vector2 b) {
++  final d = b - a, q = p - a;
++  return (q.x * d.y - q.y * d.x).abs() / d.length;
++}
++
++/// The edge of wall [wall]'s band (its room input) nearest [p], as its two
++/// world points: the face [p] was trimmed to.
++(Vector2, Vector2) faceNear(RoomInputs inputs, Handle wall, Vector2 p) {
++  final pts = inputs.inputOf(wall)!.points;
++  (Vector2, Vector2)? best;
++  var bestD = double.infinity;
++  for (var i = 0; i < pts.length; i++) {
++    final a = pts[i], b = pts[(i + 1) % pts.length];
++    final d = distToSegment(p, a, b);
++    if (d < bestD) {
++      bestD = d;
++      best = (a, b);
++    }
++  }
++  return best!;
++}
++
++/// A chamfered box of 200 mm walls, centred (Task 15's re-review): south,
++/// chamfer, east, north, west.
++const List<W> chamferWalls = [
++  W(0, 0, 7000, 0, 200),
++  W(7000, 0, 7400, 400, 200),
++  W(7400, 400, 7400, 4000, 200),
++  W(7400, 4000, 0, 4000, 200),
++  W(0, 4000, 0, 0, 200),
++];
++
++/// Places a separator from [a] to [b] with [rig]: two presses, hovering to
++/// each first.
++void draw(Rig rig, Vector2 a, Vector2 b) {
++  hoverTo(rig, a);
++  pressAt(rig, a);
++  hoverTo(rig, b);
++  pressAt(rig, b);
++}
++
++void main() {
++  test('ST1 S places one separator in two clicks, one undo step', () {
++    // The box at the corpus far origin in own groups; a LINE whose end lies
++    // 4 mm from the first click, so that click resolves to it.
++    final plan = buildPlan(boxWalls, place: corpusGroups);
++    final doc = plan.doc;
++    final tick = plan.at(1700.25, 1300.5);
++    doc.commands.execute(addDrafted(
++        doc, EntityKind.line, linePayload(tick, plan.at(1400.25, 900.5)),
++        layer: ReservedHandles.layerZero));
++    final rig = separatorRig(doc);
++    final tool = rig.tool;
++    final first = plan.at(1702.75, 1303.625);
++    final second = plan.at(5812.375, 2716.125);
++    hoverTo(rig, first);
++    expect((tool.hoverPoint.x, tool.hoverPoint.y), (tick.x, tick.y),
++        reason: 'premise: the first click resolves to the LINE\'s end');
++    pressAt(rig, first);
++    expect(tool.isPending, isTrue);
++    expect(separators(doc), isEmpty, reason: 'one click places nothing');
++    hoverTo(rig, second);
++    expect((tool.hoverPoint.x, tool.hoverPoint.y), (second.x, second.y),
++        reason: 'premise: nothing within the aperture of the second');
++    final band = tool.debugBand!;
++    expect([
++      band.$1.x,
++      band.$1.y,
++      band.$2.x,
++      band.$2.y
++    ], [
++      tick.x,
++      tick.y,
++      second.x,
++      second.y
++    ], reason: 'the rubber band, as it would be stored');
++    final depth = doc.commands.undoDepth;
++    pressAt(rig, second);
++    final s = separators(doc).single;
++    expect(doc.commands.undoDepth, depth + 1, reason: 'one undo step');
++    expect((doc.tree[s]! as GroupNode).transform.isIdentity, isTrue,
++        reason: 'its group at the identity');
++    expect(doc.components.get<SeparatorParams>(s),
++        SeparatorParams(tick.x, tick.y, second.x, second.y),
++        reason: 'the resolved points, both in open space');
++    expect(kindsOf(doc, s), [EntityKind.polyline]);
++    expect(tool.isPending, isFalse, reason: 'not chained');
++    expect(tool.debugBand, isNull);
++    // A third click starts a new separator and places nothing.
++    pressAt(rig, plan.at(6100.5, 3000.25));
++    expect(tool.isPending, isTrue);
++    expect(separators(doc), [s]);
++    doc.commands.undo();
++    expect(separators(doc), isEmpty, reason: 'one undo takes it away');
++    expect(driftOf(doc), isEmpty);
++  });
++
++  test(
++      'ST2 an end inside a band is trimmed to the face with object snap on, '
++      'and kept as placed with it off', () {
++    for (final place in [origin, corpusGroups]) {
++      // Walls 0-3: south, east, north, west; inner faces 100 in.
++      for (final (what, a, b, trimA, trimB) in [
++        // Centreline to centreline: both ends trimmed, to y 100 and 3,900.
++        ('across', (3000.5, 0.25), (3000.5, 3999.75), 0, 2),
++        // From open space into the east wall's band: that end trimmed to
++        // x 7,900, the other kept.
++        ('into the east wall', (5000.25, 2000.5), (8030.5, 2500.75), null, 1),
++      ]) {
++        final why = '$what, $place';
++        final pa = place.at(a.$1, a.$2), pb = place.at(b.$1, b.$2);
++        for (final snap in [true, false]) {
++          final plan = buildPlan(boxWalls, place: place);
++          final doc = plan.doc;
++          final rig = separatorRig(doc, objectSnap: snap);
++          draw(rig, pa, pb);
++          final p =
++              doc.components.get<SeparatorParams>(separators(doc).single)!;
++          if (!snap) {
++            expect(p, SeparatorParams(pa.x, pa.y, pb.x, pb.y),
++                reason: '$why, F3 off: as placed');
++            continue;
++          }
++          for (final (end, placed, wall) in [
++            (p.start, pa, trimA),
++            (p.end, pb, trimB),
++          ]) {
++            if (wall == null) {
++              expect((end.x, end.y), (placed.x, placed.y),
++                  reason: '$why: an end in open space stays');
++              continue;
++            }
++            final (f1, f2) = faceNear(rig.inputs, plan.walls[wall], end);
++            expect(distToLine(end, f1, f2), lessThan(1e-8),
++                reason: '$why: on the face');
++            expect(distToLine(end, pa, pb), lessThan(1e-8),
++                reason: '$why: on the drawn segment');
++            // The face by hand: 100 in from the wall's centreline.
++            final (h1, h2) = switch (wall) {
++              0 => (place.at(0, 100), place.at(8000, 100)),
++              1 => (place.at(7900, 0), place.at(7900, 4000)),
++              _ => (place.at(0, 3900), place.at(8000, 3900)),
++            };
++            expect(distToLine(end, h1, h2), lessThan(1e-6),
++                reason: '$why: the inner face');
++            expect((end - placed).length, greaterThan(20),
++                reason: '$why: moved out of the band');
++          }
++          expect(driftOf(doc), isEmpty);
++        }
++      }
++
++      // A wall added in the same task as the second click, its change not
++      // yet delivered: the click still trims to its face, y 1,900.
++      final plan = buildPlan(boxWalls, place: place);
++      final doc = plan.doc;
++      final rig = separatorRig(doc);
++      final pa = place.at(3000.5, 1000.25), pb = place.at(3000.5, 2030.5);
++      hoverTo(rig, pa);
++      pressAt(rig, pa);
++      hoverTo(rig, pb);
++      final mid = doc.handleSeed.next();
++      final ms = place.at(0, 2000), me = place.at(8000, 2000);
++      doc.commands.execute(CompoundCommand([
++        AddNodeCommand(GroupNode(
++            handle: mid,
++            parent: doc.rootHandle,
++            transform: Transform2.identity(),
++            children: const [])),
++        SetComponentCommand<WallParams>(
++            mid, WallParams(ms.x, ms.y, me.x, me.y, 200, Justification.centre)),
++      ], label: 'Add wall'));
++      pressAt(rig, pb);
++      final end =
++          doc.components.get<SeparatorParams>(separators(doc).single)!.end;
++      expect(distToLine(end, place.at(0, 1900), place.at(8000, 1900)),
++          lessThan(1e-6),
++          reason: 'trimmed to the new wall\'s face, $place');
++    }
++  });
++
++  test(
++      'ST3 both ends in one band, or a trimmed length within the tolerance, '
++      'places nothing', () {
++    final plan = buildPlan(boxWalls);
++    final doc = plan.doc;
++    for (final (what, a, b, snap) in [
++      // Both ends in the south wall's band (y -100..100).
++      (
++        'both in one band',
++        Vector2(1500.25, -40.5),
++        Vector2(6500.75, 60.25),
++        true
++      ),
++      // From inside the band to 5e-7 mm above its inner face: trimmed to
++      // the face, 5e-7 long.
++      (
++        'trimmed too short',
++        Vector2(4000.5, 50.25),
++        Vector2(4000.5, 100.0000005),
++        true
++      ),
++      // Placed 5e-7 mm long, F3 off.
++      (
++        'placed too short',
++        Vector2(4000.5, 2000.25),
++        Vector2(4000.5, 2000.2500005),
++        false
++      ),
++    ]) {
++      final rig = separatorRig(doc, objectSnap: snap);
++      final depth = doc.commands.undoDepth;
++      draw(rig, a, b);
++      expect(rig.tool.debugBand, isNull, reason: '$what: no rubber band');
++      expect(separators(doc), isEmpty, reason: what);
++      expect(doc.commands.undoDepth, depth, reason: what);
++      expect(rig.tool.isPending, isTrue, reason: '$what: the start stays');
++      expect(trimSeparator(a, b, rig.inputs, objectSnap: snap), isNull,
++          reason: what);
++    }
++  });
++
++  test(
++      'ST5 an end trimmed through a mitre, or through two joints, lies on '
++      'the face the walk entered by, with no wall behind it', () {
++    for (final place in placements) {
++      // From inside the box to the south-east corner's east half (x + y >
++      // 8,000, beyond the mitre from (7,900, 100) to (8,100, -100)): the
++      // walk enters the south wall's band at its inner face, y 100, and
++      // passes through the mitre into the east wall's band.
++      for (final (x, y) in const [(7960.5, 50.25), (7990.5, 20.25)]) {
++        final why = '($x, $y), $place';
++        final plan = buildPlan(boxWalls, place: place);
++        final rig = separatorRig(plan.doc);
++        final a = place.at(4000.5, 2000.25), b = place.at(x, y);
++        final east = rig.inputs.inputOf(plan.walls[1])!.points;
++        final south = rig.inputs.inputOf(plan.walls[0])!.points;
++        expect((pointInRing(b, east), pointInRing(b, south)), (true, false),
++            reason: 'premise: the end is in the east wall\'s band only, $why');
++        draw(rig, a, b);
++        final p = plan.doc.components
++            .get<SeparatorParams>(separators(plan.doc).single)!;
++        expect((p.start.x, p.start.y), (a.x, a.y), reason: why);
++        final end = p.end;
++        expect(distToLine(end, place.at(0, 100), place.at(8000, 100)),
++            lessThan(1e-6),
++            reason: '$why: on the south wall\'s inner face');
++        expect(distToLine(end, a, b), lessThan(1e-6),
++            reason: '$why: on the drawn segment');
++        final local = place.m.invert().transformPoint(end);
++        expect(local.x, lessThan(7900), reason: '$why: short of the corner');
++        expect(driftOf(plan.doc), isEmpty);
++      }
++
++      // Two joints (Task 15's re-review): a chamfered box, the south wall
++      // to (7,000, 0), a chamfer to (7,400, 400), then the east wall up. The
++      // end lies in the east wall's band; the walk from a start below the
++      // building enters the south wall's band by its outer face, y −100,
++      // at x 6,648.23 + 750.15 · 336.61 / 880.23 ≈ 6,935.10 (short of the
++      // outer mitre corner, 7,000 + 100 · tan 22.5° ≈ 7,041.42), passes
++      // through the south|chamfer mitre into the chamfer's band and through
++      // the chamfer|east mitre into the east wall's: three rounds.
++      final why = 'the chamfer, $place';
++      final plan = buildPlan(chamferWalls, place: place);
++      final rig = separatorRig(plan.doc);
++      final a = place.at(6648.23, -436.61), b = place.at(7398.38, 443.62);
++      final bands = [
++        for (final h in plan.walls) rig.inputs.inputOf(h)!.points,
++      ];
++      expect([
++        for (final r in bands) pointInRing(b, r)
++      ], [
++        false,
++        false,
++        true,
++        false,
++        false
++      ], reason: 'premise: the end is in the east wall\'s band only, $why');
++      expect(bands.any((r) => pointInRing(a, r)), isFalse,
++          reason: 'premise: the start is in open space, $why');
++      draw(rig, a, b);
++      final p = plan.doc.components
++          .get<SeparatorParams>(separators(plan.doc).single)!;
++      expect((p.start.x, p.start.y), (a.x, a.y), reason: why);
++      final end = p.end;
++      expect(distToLine(end, place.at(0, -100), place.at(7000, -100)),
++          lessThan(1e-6),
++          reason: '$why: on the south wall\'s outer face');
++      expect(distToLine(end, a, b), lessThan(1e-6),
++          reason: '$why: on the drawn segment');
++      // Nothing behind it: 1e-3 back toward the start is open space.
++      final back = end + (a - end).normalized() * 1e-3;
++      expect(bands.any((r) => pointInRing(back, r)), isFalse,
++          reason: '$why: no wall behind the end');
++      expect(driftOf(plan.doc), isEmpty);
++    }
++  });
++
++  test(
++      'ST6 an end inside two crossing walls stops at the first of their '
++      'faces the walk meets', () {
++    for (final place in [origin, corpusGroups]) {
++      final why = '$place';
++      // X1 along x, X2 along y, crossing at the origin; 200 mm each.
++      final plan = buildPlan(const [
++        W(-2000, 0, 2000, 0, 200),
++        W(0, -2000, 0, 2000, 200),
++      ], place: place);
++      final rig = separatorRig(plan.doc);
++      final a = place.at(-1500.5, 1200.25), b = place.at(40.5, 30.25);
++      final x1 = rig.inputs.inputOf(plan.walls[0])!.points;
++      final x2 = rig.inputs.inputOf(plan.walls[1])!.points;
++      expect((pointInRing(b, x1), pointInRing(b, x2)), (true, true),
++          reason: 'premise: the end is in both bands, $why');
++      // The walk meets X2's west face, x -100, at y 1,200.25 - 1,400.5 ·
++      // 1,170 / 1,541 ≈ 136.9, above X1's band; X1's north face, y 100,
++      // only later, inside X2's band.
++      final (s, e) = trimSeparator(a, b, rig.inputs, objectSnap: true)!;
++      expect((s.x, s.y), (a.x, a.y), reason: why);
++      final local = place.m.invert().transformPoint(e);
++      expect(local.x, closeTo(-100, 1e-6), reason: '$why: X2\'s west face');
++      expect(local.y, closeTo(1200.25 - 1400.5 * 1170 / 1541, 1e-6),
++          reason: why);
++    }
++  });
++}
+diff --git a/packages/jet_cad_2d_kit_architecture/test/wall/wall_grips_test.dart b/packages/jet_cad_2d_kit_architecture/test/wall/wall_grips_test.dart
+index bc6a87cf..66bc514a 100644
+--- a/packages/jet_cad_2d_kit_architecture/test/wall/wall_grips_test.dart
++++ b/packages/jet_cad_2d_kit_architecture/test/wall/wall_grips_test.dart
+@@ -1,19 +1,22 @@
+ // Ported from jet_cad_floor_plan/test/wall_grips_test.dart (3a Task 12,
+-// R-P1): the provider-direct tails of EG1, EG3, EG4 and EG6, whose
+-// WallGrips is a kit internal, assertions unchanged, each over its case's
+-// fixture as the shell case leaves it there (the shell part ends undone or
++// R-P1): the provider-direct tails of EG1, EG3, EG4 and EG6, and of EG8
++// (Task 17, R-P8), whose WallGrips is a kit internal, assertions
++// unchanged, each over its case's fixture as the shell case leaves it
++// there (the shell part ends undone or
+ // refused, so the document is the fixture's). The shell parts run in
+ // jet_cad_2d_integration. Every wall sits at the far origin in its own
+ // rotated group (`groupAt`, or a spoke's group at its hub).
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit_architecture/src/opening/opening.dart';
++import 'package:jet_cad_2d_kit_architecture/src/separator/separator.dart';
+ import 'package:jet_cad_2d_kit_architecture/src/wall/wall.dart';
+ import 'package:jet_cad_2d_kit_architecture/src/wall/wall_grips.dart';
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import '../support/wall_fixture.dart';
+ 
+ /// The walls [build] adds to an empty document with the kit tests' system,
+ /// with no undo history (wall_grips_test.dart:36-56's `gripDoc`, without
+ /// the page, which only the shell's snap reads).
+ DraftDocument gripDoc(void Function(DraftDocument doc) build) {
+@@ -52,20 +55,85 @@ void addL(DraftDocument doc, {bool withC = true}) {
+   doc.commands
+       .execute(addWall(doc, wa, lStart, lCorner, 200, Justification.centre));
+   doc.commands
+       .execute(addWall(doc, wb, lCorner, lEnd, 115, Justification.left));
+   if (withC) {
+     doc.commands.execute(addWall(doc, wc, cStart, polar(cStart, 23 - 120, 1500),
+         150, Justification.right));
+   }
+ }
+ 
++const Handle shadow = Handle(5500), sep = Handle(5600);
++
++/// fix/live-object-rule: the L, and two root-level groups carrying two
++/// registered types each, as only a file brings them in. Each is made as
++/// the app makes an object, regenerated through the dispatcher, then given
++/// a second component straight through the store:
++/// - [shadow], a door on C (so the engine regenerated it as an opening),
++///   then `WallParams` 400 thick from the L's corner (on the joint, in
++///   world) to [shadowTip], a point of the door's own children. Opening is
++///   registered after Wall, so the engine names it an **opening**. With
++///   [dangling], its `OpeningParams` is then rewritten to name a host that
++///   does not exist (the q12 review's PR2d); otherwise its host is C (PR2).
++/// - [sep], a separator (regenerated as one), then `OpeningParams` hosted
++///   on B. Separator is registered after Opening, so it is a **separator**.
++/// Both groups translated and rotated; neither handle the lowest.
++DraftDocument shadowDoc({required bool dangling}) {
++  final doc = gripDoc((doc) {
++    addL(doc);
++    doc.commands.execute(CompoundCommand([
++      AddNodeCommand(GroupNode(
++          handle: shadow,
++          parent: doc.rootHandle,
++          transform: Transform2.translation(ox + 100.5, oy + 50.25)
++              .multiply(Transform2.rotation(-0.4)),
++          children: const [])),
++      SetComponentCommand<OpeningParams>(
++          shadow, const OpeningParams(wc, 700, 800, OpeningKind.door)),
++    ], label: 'Add door'));
++    final at = Transform2.translation(ox - 610.75, oy + 1720.5)
++        .multiply(Transform2.rotation(0.9));
++    final toSep = at.invert();
++    final s = toSep.transformPoint(plan(600, 1800));
++    final e = toSep.transformPoint(plan(2200, 1800));
++    doc.commands.execute(CompoundCommand([
++      AddNodeCommand(GroupNode(
++          handle: sep,
++          parent: doc.rootHandle,
++          transform: at,
++          children: const [])),
++      SetComponentCommand<SeparatorParams>(
++          sep, SeparatorParams(s.x, s.y, e.x, e.y)),
++    ], label: 'Add separator'));
++  });
++  final toShadow = doc.tree.accumulatedTransform(shadow).invert();
++  final s = toShadow.transformPoint(lCorner);
++  final tip = shadowTip(doc);
++  doc.components
++    ..attach<WallParams>(
++        shadow, WallParams(s.x, s.y, tip.x, tip.y, 400, Justification.left))
++    ..attach<OpeningParams>(
++        sep, const OpeningParams(wb, 900, 700, OpeningKind.window));
++  if (dangling) {
++    doc.components.attach<OpeningParams>(shadow,
++        const OpeningParams(Handle(0x7777), 700, 800, OpeningKind.door));
++  }
++  return doc;
++}
++
++/// The first point of [shadow]'s first generated line, group-local: a
++/// point of the door's own children.
++Vector2 shadowTip(DraftDocument doc) => [
++      for (final k in kids(doc, shadow))
++        if (kindOf(doc, k) == EntityKind.line) pointsOf(payloadOf(doc, k))[0],
++    ].first;
++
+ void main() {
+   test(
+       'EG1-k a degenerate drop is refused by the provider: no command, no preview',
+       () {
+     final doc = gripDoc((doc) {
+       doc.commands.execute(addWall(
+           doc, wa, plan(0, 0), plan(3000, 400), 200, Justification.centre));
+     });
+     final g = WallGrips(live: liveOf(doc)).gripsOf(doc, wa)[1];
+     expect(WallGrips(live: liveOf(doc)).drag(doc, wa, g, endOf(doc, wa, 0)),
+@@ -242,11 +310,39 @@ void main() {
+     final pieces = grips.preview(doc, wa, g, q);
+     expect(pieces.map((p) => p.$1), [EntityKind.line, EntityKind.line]);
+     final [a0, a1] = pointsOf(pieces[0].$2);
+     final [b0, b1] = pointsOf(pieces[1].$2);
+     expect((a0 - lStart).length, lessThan(1e-6));
+     for (final p in [a1, b0]) {
+       expect((p - q).length, lessThan(1e-6));
+     }
+     expect((b1 - lEnd).length, lessThan(1e-6));
+   });
++
++  test(
++      "EG8-k the corner drag's command and preview, the provider directly: the real walls only (a file's opening carrying WallParams on the joint, a separator carrying OpeningParams on B)",
++      () {
++    // Today's :616-623 less the four components it reads for the shell
++    // part's after-drag checks (EG8, the integration package's): unused here.
++    final doc = shadowDoc(dangling: false);
++    final corner = endOf(doc, wa, 1);
++    expect((endOf(doc, shadow, 0) - corner).length, lessThan(wallJoin.linear),
++        reason: 'only the rule separates the shadow from the joint');
++    final q = gridOf(plan(3500, -400));
++
++    final grips = WallGrips(live: liveOf(doc));
++    final g = grips.gripsOf(doc, wa)[1];
++    final c = grips.drag(doc, wa, g, q)! as CompoundCommand;
++    // ignore: avoid_dynamic_calls
++    expect([for (final m in c.children) (m as dynamic).handle as Handle],
++        [wa, wb]);
++    final pieces = grips.preview(doc, wa, g, q);
++    expect(pieces.map((p) => p.$1), [EntityKind.line, EntityKind.line]);
++    final [a0, a1] = pointsOf(pieces[0].$2);
++    final [b0, b1] = pointsOf(pieces[1].$2);
++    expect((a0 - lStart).length, lessThan(1e-6));
++    for (final p in [a1, b0]) {
++      expect((p - q).length, lessThan(1e-6));
++    }
++    expect((b1 - lEnd).length, lessThan(1e-6));
++  });
+ }

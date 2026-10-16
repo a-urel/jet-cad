@@ -1,0 +1,3330 @@
+# Review package: 711889c1..HEAD
+
+## Commits
+543d1bf2 feat(architecture): the wall's parameters, geometry and band cache (3a C3.2)
+
+## Files changed
+ .../lib/src/wall/wall.dart                         | 238 +++++++
+ .../lib/src/wall/wall_bands.dart                   | 196 ++++++
+ .../lib/src/wall/wall_geometry.dart                | 677 +++++++++++++++++++
+ .../test/support/catalog.dart                      |   5 +-
+ .../test/support/wall_fixture.dart                 | 313 +++++++++
+ .../test/wall/wall_bands_test.dart                 |  97 +++
+ .../test/wall/wall_geometry_test.dart              | 725 ++++++++++++++++++++
+ .../test/wall/wall_live_test.dart                  | 139 ++++
+ .../test/wall/wall_params_test.dart                | 102 +++
+ .../test/wall/wall_regen_test.dart                 | 740 +++++++++++++++++++++
+ 10 files changed, 3231 insertions(+), 1 deletion(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_kit_architecture/lib/src/wall/wall.dart b/packages/jet_cad_2d_kit_architecture/lib/src/wall/wall.dart
+new file mode 100644
+index 00000000..805fea34
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/lib/src/wall/wall.dart
+@@ -0,0 +1,238 @@
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../ids.dart';
++import 'wall_geometry.dart';
++
++/// Which side of the centreline a wall's body lies on, looking from `start`
++/// to `end` (spec 07 D2).
++enum Justification { left, centre, right }
++
++/// Every "do these join" decision for walls (spec 07 D7): endpoint
++/// coincidence, a point on a centreline, parallel faces. Absolute, in mm.
++///
++/// Not the engine's standard tolerance (1e-9): at the far origin one ulp is
++/// ~9.3e-10, and two rotated groups leave a snapped joint up to ~4.7e-10
++/// apart; 1e-6 is about a thousand ulps there and far below anything drawn
++/// on purpose. Stored values are still compared with exact `==`.
++const Tolerance wallJoin = Tolerance(linear: 1e-6, angular: 1e-9);
++
++/// The thickest wall the Selection panel and the Wall tool accept, in mm:
++/// 1e7 (10 km), far past any floor plan (spec 07 D11, fix/post-11).
++///
++/// Above some thickness a wall's band collapses in floating point: when
++/// the wall's length falls below an ulp of its own corner coordinates
++/// (about the thickness), the four corners of a wall that is not parallel
++/// to its group's axes round to two points, every value still finite. The
++/// fallback rectangle is then not triangulable and 07 D8's region check
++/// refuses the edit, which the Wall tool and the grips do not catch. The
++/// post-11 probe's sweep (3 justifications x 120 directions x 5 lengths
++/// from just above `wallJoin.linear` to 3000 mm x 5 placements) found the
++/// smallest such thickness at 1.33e10 mm (a thickness-to-length ratio of
++/// 1.15e16), and none at or below 1e10. This bound leaves a margin of about
++/// 1,300 below it, and sits under 2^53, so the panel shows it exactly.
++const double kWallMaxThickness = 1e7;
++
++/// Whether [t] is a thickness a wall may be drawn or edited with (final
++/// review m1, fix/post-11): finite, greater than `wallJoin.linear` and at
++/// most [kWallMaxThickness]. A positive thickness at or below the floor is
++/// a band thinner than the join tolerance, and far from the origin its
++/// faces round onto each other; one above the ceiling can collapse the
++/// band (see [kWallMaxThickness]). The Selection panel rejects any other
++/// value, for a wall and for the Wall tool's settings, and the Wall tool
++/// does not commit with one. A loaded wall may still hold one (D2's
++/// degenerate wall is `t <= 0`; a thicker one still throws on the Wall
++/// tool's and the grips' regenerating edits, a known limit).
++bool isWallThickness(double t) =>
++    t.isFinite && t > wallJoin.linear && t <= kWallMaxThickness;
++
++/// A wedge corner farther than this many half-thicknesses of the thicker
++/// wall from the node is clamped (spec 07 D6).
++const double mitreLimit = 4;
++
++/// Every wall child's colour (spec 07 D3): a black band, fill, outline
++/// and centreline alike, on every paper. Concrete, not ByLayer. When 07
++/// landed, layer 0's ACI 7 resolved to white (`aciToRgb(7)`) and a ByLayer
++/// band was paper-white. Since fix/post-07 the shell's resolver draws ACI 7
++/// in a foreground that follows the paper, black on a light one and white
++/// on Blueprint, so ByLayer drafting follows the paper and a ByLayer wall
++/// would too. Walls stay black on the human's decision: a concrete colour
++/// does not depend on the resolver, so on Blueprint a wall is black while
++/// drafting is white.
++const DraftColor kWallColor = TrueColor(0x000000);
++
++/// A wall's parameters (spec 07 D2): both centreline endpoints in
++/// group-local space, the thickness and the justification, in mm.
++///
++/// Value-equal with exact `==` on the doubles: a stored value. `fromJson`
++/// accepts a degenerate wall (length ≤ `wallJoin.linear` or thickness ≤ 0);
++/// the geometry gives it no outline.
++final class WallParams implements Component {
++  const WallParams(
++      this.sx, this.sy, this.ex, this.ey, this.thickness, this.justification);
++
++  static const String componentTypeId = ArchitectureTypes.wall;
++
++  final double sx, sy, ex, ey;
++  final double thickness;
++  final Justification justification;
++
++  Vector2 get start => Vector2(sx, sy);
++  Vector2 get end => Vector2(ex, ey);
++
++  @override
++  String get typeId => componentTypeId;
++
++  @override
++  Map<String, Object?> toJson() => {
++        'start': [sx, sy],
++        'end': [ex, ey],
++        'thickness': thickness,
++        'justification': justification.name,
++      };
++
++  /// Throws `ArgumentError` on an unknown justification name.
++  static WallParams fromJson(Map<String, Object?> json) {
++    final s = json['start']! as List;
++    final e = json['end']! as List;
++    return WallParams(
++        (s[0] as num).toDouble(),
++        (s[1] as num).toDouble(),
++        (e[0] as num).toDouble(),
++        (e[1] as num).toDouble(),
++        (json['thickness']! as num).toDouble(),
++        Justification.values.byName(json['justification']! as String));
++  }
++
++  WallParams copyWith(
++          {Vector2? start,
++          Vector2? end,
++          double? thickness,
++          Justification? justification}) =>
++      WallParams(start?.x ?? sx, start?.y ?? sy, end?.x ?? ex, end?.y ?? ey,
++          thickness ?? this.thickness, justification ?? this.justification);
++
++  @override
++  bool operator ==(Object other) =>
++      other is WallParams &&
++      other.sx == sx &&
++      other.sy == sy &&
++      other.ex == ex &&
++      other.ey == ey &&
++      other.thickness == thickness &&
++      other.justification == justification;
++
++  @override
++  int get hashCode => Object.hash(sx, sy, ex, ey, thickness, justification);
++
++  @override
++  String toString() =>
++      'WallParams(($sx, $sy) -> ($ex, $ey), $thickness, ${justification.name})';
++}
++
++/// A wall's world geometry from its parameters and its group's accumulated
++/// transform: the one function every joint computation goes through (spec
++/// 07 D4), so two walls that compute the same neighbour get the same bits.
++/// Null when [h] carries no `WallParams` (a box, say).
++WorldWall? _worldWall(ParametricView view, Handle h) {
++  final p = view.paramsOf<WallParams>(h);
++  return p == null ? null : WorldWall(h, p, view.toWorld(h));
++}
++
++/// [self]'s outline in group-local space among its wall neighbours in
++/// [view] (neighbours that are not walls are ignored): what
++/// [WallType.generate] stores and [WallType.diagnose] reports on, one
++/// decision for both. A thin wrapper over [localOutlineOf] (Ruling 10-8),
++/// which the rooms' trace inputs call too (spec 10 D4).
++({List<Vector2> ring, bool fellBack, List<Handle>? hole}) _localOutlineOf(
++    ParametricView view, Handle self) {
++  final w = wallsInView(view, self)!;
++  return localOutlineOf(w.host, w.walls);
++}
++
++/// The wall (spec 07 D3, D4, D12): a region (the outline and its fill) and
++/// the centreline, regenerated from its own parameters and its wall
++/// neighbours'.
++final class WallType extends ParametricType<WallParams> {
++  const WallType();
++
++  @override
++  Capability get editCapability => Capability.geometry;
++
++  /// The world centreline's bounding box, expanded by `wallJoin.linear`
++  /// (spec 07 D4): every joint is a centreline relation, and an axis-aligned
++  /// wall's box would otherwise have no height (or width) to overlap with.
++  @override
++  Aabb2 reach(WallParams params, Transform2 toWorld) => Aabb2.fromPoints([
++        toWorld.transformPoint(params.start),
++        toWorld.transformPoint(params.end),
++      ]).expandedBy(wallJoin.linear);
++
++  /// 07's path (spec 07 D3): in this order, fixed at creation, the region,
++  /// whose outline is [_localOutlineOf] -- computed in world space, taken to
++  /// group-local space and checked there -- then the open centreline from
++  /// `start` to `end`, the stored values themselves. A degenerate wall (D2)
++  /// generates the centreline alone. Every child is [kWallColor].
++  ///
++  /// The cut at the wall's openings (spec 08 D9) joins in 3a's Task 13.
++  @override
++  List<Generated> generate(ParametricView view, Handle self) {
++    final p = view.paramsOf<WallParams>(self)!;
++    final centreline = Generated(
++        EntityKind.polyline, polylinePayload([p.start, p.end]),
++        color: kWallColor);
++    final ring = _localOutlineOf(view, self).ring;
++    if (ring.isEmpty) return [centreline];
++    return [
++      Generated.region(polylinePayload(ring, closed: true), color: kWallColor),
++      centreline,
++    ];
++  }
++
++  /// At most one entry of each code for [self] (spec 07 D12), warnings:
++  ///
++  /// - `wall.hole`: [self] owns a crossing lobe that was dropped at one of
++  ///   its nodes (D5.6), so the node shows a hole. Reported by the lobe's
++  ///   owner only, naming every member wall. A wall owning such lobes at
++  ///   both ends reports one entry naming both nodes' members.
++  /// - `wall.fallback`: [self]'s joined outline was not simple, in world
++  ///   or in group-local space, so it squared both of its ends (D6's short
++  ///   wall): the very decision [generate] takes, through [_localOutlineOf].
++  /// - `wall.degenerate`: [self] is D2's degenerate wall and has no outline;
++  ///   nothing else is reported for it.
++  @override
++  List<Diagnostic> diagnose(ParametricView view, Handle self) {
++    final me = _worldWall(view, self)!;
++    if (me.degenerate) {
++      return [
++        Diagnostic(
++          severity: DiagnosticSeverity.warning,
++          code: 'wall.degenerate',
++          message: 'wall ${self.toHex()} is no longer than the join '
++              'tolerance or not thicker than zero: it has no outline',
++          handles: [self],
++        ),
++      ];
++    }
++    final o = _localOutlineOf(view, self);
++    return [
++      if (o.hole case final members?)
++        Diagnostic(
++          severity: DiagnosticSeverity.warning,
++          code: 'wall.hole',
++          message: 'the joint of walls '
++              '${[for (final h in members) h.toHex()].join(', ')} leaves a '
++              'hole: a crossing lobe was dropped',
++          handles: members,
++        ),
++      if (o.fellBack)
++        Diagnostic(
++          severity: DiagnosticSeverity.warning,
++          code: 'wall.fallback',
++          message: 'wall ${self.toHex()} is shorter than its corners: both '
++              'of its ends are square',
++          handles: [self],
++        ),
++    ];
++  }
++}
+diff --git a/packages/jet_cad_2d_kit_architecture/lib/src/wall/wall_bands.dart b/packages/jet_cad_2d_kit_architecture/lib/src/wall/wall_bands.dart
+new file mode 100644
+index 00000000..86a2ef53
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/lib/src/wall/wall_bands.dart
+@@ -0,0 +1,196 @@
++import 'dart:async' show StreamSubscription, unawaited;
++import 'dart:collection' show UnmodifiableListView;
++import 'dart:typed_data' show Float64List;
++
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart'
++    show Disposable, PlanServices;
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../ids.dart';
++import '../live.dart';
++import 'wall.dart';
++import 'wall_geometry.dart';
++
++/// The kit's one [WallBands] for [services]' document (spec 3a C2): a
++/// `PlanServices.shared` object, disposed with its document. The wall tool,
++/// the opening tools and the wall faces share it.
++WallBands wallBandsOf(PlanServices services) =>
++    services.shared<WallBands>((s) => WallBands(liveTypesOf(s)));
++
++/// The walls' bands, cached for the tools that look for a wall under the
++/// pointer on every move (spec 07 D11; spec 08 D14, Ruling 08-11): the Wall
++/// tool, which joins a band it is clicked in, and the Door, Window and Gap
++/// tools, which find their host with [hostAt]. One per kit per document
++/// ([wallBandsOf]); the four tools share it.
++///
++/// Per live, non-degenerate wall, ascending by handle, [_stride] doubles: the
++/// world start and end (`WorldWall`'s own `s` and `e`, so bitwise what
++/// `WallType` builds), the unit direction, the length, the left and right
++/// face offsets and the thickness; and the wall's handle beside them.
++/// Rebuilt only when the document reports a change (its `changes` stream,
++/// which delivers after the task that made the change) or a tool calls
++/// [invalidate]. A scan is O(walls) over the cached doubles and allocates
++/// nothing in steady state.
++final class WallBands implements Disposable {
++  /// [live] names the live walls (`liveObjectsOf`): a frozen wall has no
++  /// band.
++  WallBands(this._live);
++
++  final LiveTypeOf _live;
++
++  static const int _stride = 10;
++  Float64List _cache = Float64List(_stride * 16);
++  final List<Handle> _handles = <Handle>[];
++  late final List<Handle> _liveView = UnmodifiableListView(_handles);
++  int _walls = 0;
++  bool _stale = true;
++  int _generation = 0;
++  DraftDocument? _document;
++  StreamSubscription<DocChange>? _changes;
++
++  /// Bumped whenever the cache goes stale: on each of the document's
++  /// changes, on [invalidate], and when a different document is scanned. A
++  /// tool that caches something derived from the walls compares it with
++  /// the value it built at.
++  int get generation => _generation;
++
++  /// The next scan rebuilds the cache: a tool that has just committed, or
++  /// is about to act on a click, must never see a band the document no
++  /// longer has.
++  void invalidate() {
++    _stale = true;
++    _generation++;
++  }
++
++  /// The live, non-degenerate walls of [doc], ascending by handle (spec
++  /// 09c D3, D6): what the wall faces are built from. Runs the refresh, so
++  /// the first call starts the document subscription and a caller that
++  /// never asked [hostAt] or [joinInto] still sees current walls; a change
++  /// moves [generation] as before.
++  ///
++  /// An unmodifiable **view** of the cache's own handle list, not a copy:
++  /// no allocation per call, and it reads the walls of the latest refresh.
++  /// Call again (which refreshes) before trusting it after a change.
++  List<Handle> liveWalls(DraftDocument doc) {
++    _refresh(doc);
++    return _liveView;
++  }
++
++  /// The index of the lowest-handle wall whose band contains `(px, py)`, or
++  /// -1. In a band: between the wall's two faces (by its justification) and
++  /// within the centreline's length, both within `wallJoin.linear`. With
++  /// [accept], a wall it refuses is passed over, as if it had no band.
++  int _indexAt(DraftDocument doc, double px, double py,
++      [bool Function(DraftDocument, Handle)? accept]) {
++    _refresh(doc);
++    final tol = wallJoin.linear;
++    final c = _cache;
++    for (var i = 0, o = 0; i < _walls; i++, o += _stride) {
++      final sx = c[o], sy = c[o + 1];
++      final dx = c[o + 4], dy = c[o + 5];
++      final vx = px - sx, vy = py - sy;
++      final along = vx * dx + vy * dy;
++      // Along the left normal (-dy, dx), as the face offsets are.
++      final across = vy * dx - vx * dy;
++      if (across > c[o + 7] + tol ||
++          across < c[o + 8] - tol ||
++          along < -tol ||
++          along > c[o + 6] + tol) {
++        continue;
++      }
++      if (accept != null && !accept(doc, _handles[i])) continue;
++      return i;
++    }
++    return -1;
++  }
++
++  /// The wall whose band contains the world point `(x, y)`, the lowest
++  /// handle when several do (spec 08 D14), or null. With [accept], only a
++  /// wall it accepts is a candidate (the Opening tools pass their layer
++  /// rule, spec 12b S-11); it is called only for a wall whose band contains
++  /// the point.
++  Handle? hostAt(DraftDocument doc, double x, double y,
++      {bool Function(DraftDocument, Handle)? accept}) {
++    final i = _indexAt(doc, x, y, accept);
++    return i < 0 ? null : _handles[i];
++  }
++
++  /// Spec 07 D11: where the Wall tool joins the world point `(px, py)`.
++  /// When it lies in a wall's band (the lowest handle's, when several),
++  /// [out] is set to:
++  /// - within one thickness of a centreline end, along the centreline, that
++  ///   end: bitwise the world endpoint `WallType` builds (`WorldWall` of the
++  ///   params and the group's transform), so the two walls make a node;
++  /// - otherwise the projection onto the centreline: a T.
++  ///
++  /// Returns false, and leaves [out] alone, when the point is in no band.
++  bool joinInto(DraftDocument doc, double px, double py, Vector2 out) {
++    final i = _indexAt(doc, px, py);
++    if (i < 0) return false;
++    final c = _cache;
++    final o = i * _stride;
++    final sx = c[o], sy = c[o + 1];
++    final dx = c[o + 4], dy = c[o + 5];
++    final length = c[o + 6];
++    final along = (px - sx) * dx + (py - sy) * dy;
++    final t = c[o + 9];
++    final toEnd = length - along;
++    if (along <= t || toEnd <= t) {
++      if (along <= toEnd) {
++        out.setValues(sx, sy);
++      } else {
++        out.setValues(c[o + 2], c[o + 3]);
++      }
++    } else {
++      out.setValues(sx + dx * along, sy + dy * along);
++    }
++    return true;
++  }
++
++  void _refresh(DraftDocument doc) {
++    if (!identical(doc, _document)) {
++      final old = _changes;
++      if (old != null) unawaited(old.cancel());
++      _document = doc;
++      _changes = doc.changes.listen((_) => invalidate());
++      invalidate();
++    }
++    if (!_stale) return;
++    _stale = false;
++    _walls = 0;
++    _handles.clear();
++    // Live walls only, by the engine's object rule through [_live] (spec 3a
++    // C1.5: a frozen wall is none). A stray `WallParams` (on a nested group,
++    // on a handle with no node, or shadowed on a group a later-registered
++    // type names: no tool makes one, but a file can bring each in) is not a
++    // wall, and must not shadow one under it. O(walls · registered types), on
++    // a rebuild only.
++    for (final h
++        in liveObjectsOf<WallParams>(doc, _live, ArchitectureTypes.wall)) {
++      final w = WorldWall(h, doc.components.get<WallParams>(h)!,
++          doc.tree.accumulatedTransform(h));
++      if (w.degenerate) continue;
++      if ((_walls + 1) * _stride > _cache.length) {
++        _cache = Float64List(_cache.length * 2)..setAll(0, _cache);
++      }
++      final (left, right) = w.offsets;
++      _cache.setAll(_walls * _stride, [
++        w.s.x, w.s.y, w.e.x, w.e.y, w.d.x, w.d.y, //
++        w.s.distanceTo(w.e), left, right, w.t,
++      ]);
++      _handles.add(h);
++      _walls++;
++    }
++  }
++
++  /// Cancels the document subscription: `PlanServices.shared` calls it
++  /// when the document goes.
++  @override
++  void dispose() {
++    final changes = _changes;
++    if (changes != null) unawaited(changes.cancel());
++    _changes = null;
++    _document = null;
++  }
++}
+diff --git a/packages/jet_cad_2d_kit_architecture/lib/src/wall/wall_geometry.dart b/packages/jet_cad_2d_kit_architecture/lib/src/wall/wall_geometry.dart
+new file mode 100644
+index 00000000..b5874087
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/lib/src/wall/wall_geometry.dart
+@@ -0,0 +1,677 @@
++// Pure wall joint geometry (spec 07 D4-D7). No Flutter import: this file is
++// Dart over `package:jet_cad_2d` and `vector_math` only (Ruling 07-2).
++//
++// Ported from the spike's node rule (`spike/07-walls` at 45aecb6,
++// `test/spike_walls/wall.dart`) with Ruling 07-3's anchor rule, Ruling 07-4's
++// coincident directions, per-call hole reporting instead of a global counter,
++// and degenerate walls left out of every joint.
++import 'dart:math' as math;
++
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../ids.dart';
++import '../live.dart' show LiveTypeOf;
++import 'wall.dart';
++
++/// A wall in world space: what every joint computation reads (spec 07 D4).
++///
++/// Built by this one constructor from `(params, toWorld)`, so two walls that
++/// compute the same neighbour get the same bits.
++final class WorldWall {
++  WorldWall(this.handle, WallParams p, this.toWorld)
++      : params = p,
++        s = toWorld.transformPoint(p.start),
++        e = toWorld.transformPoint(p.end),
++        t = p.thickness,
++        j = p.justification;
++
++  final Handle handle;
++
++  /// The stored parameters and the group's accumulated transform this wall
++  /// was built from: what the host frame (spec 08 D7), computed in the
++  /// wall's group-local space, reads.
++  final WallParams params;
++  final Transform2 toWorld;
++
++  /// The world start and end of the centreline.
++  final Vector2 s, e;
++
++  /// The thickness.
++  final double t;
++
++  final Justification j;
++
++  /// Spec 07 D2: a centreline no longer than `wallJoin.linear`, or a
++  /// thickness that is not positive. Such a wall has no outline and is never
++  /// classified against (a NaN counts as degenerate).
++  bool get degenerate => !((e - s).length > wallJoin.linear) || !(t > 0);
++
++  /// The unit direction from start to end. Undefined for a degenerate wall.
++  late final Vector2 d = (e - s).normalized();
++
++  /// The left and right face offsets along the left normal `(-d.y, d.x)`
++  /// (spec 07 D2): `(t/2, -t/2)`, `(t, 0)` or `(0, -t)`.
++  (double, double) get offsets => switch (j) {
++        Justification.centre => (t / 2, -t / 2),
++        Justification.left => (t, 0),
++        Justification.right => (0, -t),
++      };
++
++  /// The start for `k == 0`, the end otherwise.
++  Vector2 endpoint(int k) => k == 0 ? s : e;
++}
++
++/// One wall end seen from its joint, looking outward along the wall: [a]
++/// points away from the end's point into the wall's body.
++final class End {
++  factory End(WorldWall wall, int k) {
++    final d = wall.d;
++    final a = k == 0 ? d : -d;
++    final (l, r) = wall.offsets;
++    // The outward-looking left normal is perp(a); at the end (k == 1) it is
++    // the wall's right normal, so the faces swap sides and signs.
++    return End._(wall, k, a, k == 0 ? l : -r, k == 0 ? r : -l);
++  }
++
++  End._(this.wall, this.k, this.a, this.left, this.right);
++
++  final WorldWall wall;
++
++  /// 0 for the wall's start, 1 for its end.
++  final int k;
++
++  /// The outgoing unit direction.
++  final Vector2 a;
++
++  /// The outgoing-left and outgoing-right face offsets along [nOut].
++  final double left, right;
++
++  /// The end's point.
++  Vector2 get p => wall.endpoint(k);
++
++  /// The outgoing left normal.
++  Vector2 get nOut => Vector2(-a.y, a.x);
++
++  Vector2 leftPoint(Vector2 at) => at + nOut * left;
++  Vector2 rightPoint(Vector2 at) => at + nOut * right;
++
++  /// The outgoing angle, in (-π, π].
++  late final double angle = math.atan2(a.y, a.x);
++}
++
++/// Ascending by handle value, then end index (spec 07 D5.1's tie-break and
++/// D5.5's owner order).
++int _byHandleThenEnd(End x, End y) {
++  final h = x.wall.handle.value.compareTo(y.wall.handle.value);
++  return h != 0 ? h : x.k.compareTo(y.k);
++}
++
++/// Spec 07 D7: two endpoints join when they lie within `wallJoin.linear`.
++bool _joined(Vector2 a, Vector2 b) => (a - b).length <= wallJoin.linear;
++
++/// The intersection of `p + u·a` and `q + v·b`, or null when the directions
++/// are parallel within `wallJoin.angular`.
++Vector2? intersect(Vector2 p, Vector2 a, Vector2 q, Vector2 b) {
++  final cross = a.x * b.y - a.y * b.x;
++  if (cross.abs() <= wallJoin.angular) return null;
++  final w = q - p;
++  final u = (w.x * b.y - w.y * b.x) / cross;
++  return p + a * u;
++}
++
++/// How one wall end is capped (spec 07 D4).
++sealed class Joint {
++  const Joint();
++}
++
++/// No joint: the end is square at its own endpoint.
++final class Free extends Joint {
++  const Free();
++}
++
++/// The end butts [through]'s near face (spec 07 D4.1).
++final class Tee extends Joint {
++  const Tee(this.through);
++  final WorldWall through;
++}
++
++/// The end meets other ends at a node (spec 07 D4.2, D5).
++final class NodeJoint extends Joint {
++  NodeJoint(this.ends, this.members);
++
++  /// The ends the node is built from, sorted anticlockwise by outgoing
++  /// angle, ties by handle then end index (D5.1). Ends that share a direction
++  /// with another member are not among them (Ruling 07-4).
++  final List<End> ends;
++
++  /// Every member wall of the node (Ruling 07-3), ascending, once each —
++  /// including walls left out of [ends] by Ruling 07-4. D12's `wall.hole`
++  /// names these.
++  final List<Handle> members;
++}
++
++/// Whether [p] lies on [o]'s centreline within `wallJoin.linear` and more
++/// than `wallJoin.linear` from both of its ends, measured along it (D4.1).
++/// Spec 08 D7's T obstacle reads it with the host as [o].
++bool strictlyInside(Vector2 p, WorldWall o) {
++  final len = (o.e - o.s).length;
++  final u = (p - o.s).dot(o.d);
++  if (!(u > wallJoin.linear && u < len - wallJoin.linear)) return false;
++  final foot = o.s + o.d * u;
++  return (p - foot).length <= wallJoin.linear;
++}
++
++bool _lower(WorldWall w, int k, WorldWall than, int thanK) {
++  final h = w.handle.value.compareTo(than.handle.value);
++  return h < 0 || (h == 0 && k < thanK);
++}
++
++/// Ruling 07-4: two ends whose outgoing directions agree within
++/// `wallJoin.angular` (a sweep of 0 or 2π) are two overlapping walls.
++bool _sameDirection(End x, End y) {
++  var d = (x.angle - y.angle).abs();
++  if (d > math.pi) d = 2 * math.pi - d;
++  return d <= wallJoin.angular;
++}
++
++/// The joint at [self]'s end [k] among [others], in this order (spec 07 D4):
++///
++/// 1. **T** — the end lies within `wallJoin.linear` of another centreline,
++///    strictly inside it (more than `wallJoin.linear` from both of its
++///    ends). Several: the lowest handle.
++/// 2. **Node** (Ruling 07-3) — the candidates are this end and every other
++///    wall's end within `wallJoin.linear` of it; the **anchor** is the lowest
++///    `(handle, end index)` among them; the members are every end, this
++///    wall's included, within `wallJoin.linear` of the anchor's endpoint.
++///    Every member computes the same set whenever the lowest end is within
++///    `wallJoin.linear` of all the others; a wider cluster, which snapping
++///    never produces, can compute differing sets (ends at 0, 0.9 and
++///    1.8 × `wallJoin.linear` in handle order: the first two see two
++///    members, the third sees three). Ends sharing a direction with
++///    another member keep free caps and the node is built from the rest
++///    (Ruling 07-4); fewer than two left is no node.
++/// 3. **Free** otherwise.
++///
++/// [self] must not be degenerate. Degenerate walls in [others], and [self]
++/// itself if listed, are ignored.
++Joint classify(WorldWall self, int k, List<WorldWall> others) {
++  final p = self.endpoint(k);
++  final walls = [
++    for (final o in others)
++      if (o.handle != self.handle && !o.degenerate) o,
++  ];
++  WorldWall? through;
++  for (final o in walls) {
++    if (!strictlyInside(p, o)) continue;
++    if (through == null || o.handle.value < through.handle.value) through = o;
++  }
++  if (through != null) return Tee(through);
++
++  var anchor = self;
++  var anchorK = k;
++  for (final o in walls) {
++    for (final m in const [0, 1]) {
++      if (_joined(o.endpoint(m), p) && _lower(o, m, anchor, anchorK)) {
++        anchor = o;
++        anchorK = m;
++      }
++    }
++  }
++  final at = anchor.endpoint(anchorK);
++  final members = <End>[
++    for (final w in [self, ...walls])
++      for (final m in const [0, 1])
++        if (_joined(w.endpoint(m), at)) End(w, m),
++  ];
++  final ends = [
++    for (final x in members)
++      if (!members.any((y) => !identical(x, y) && _sameDirection(x, y))) x,
++  ];
++  if (ends.length < 2 ||
++      !ends.any((x) => x.wall.handle == self.handle && x.k == k)) {
++    return const Free();
++  }
++  ends.sort((x, y) {
++    final c = x.angle.compareTo(y.angle);
++    return c != 0 ? c : _byHandleThenEnd(x, y);
++  });
++  final handles = {for (final x in members) x.wall.handle.value}.toList()
++    ..sort();
++  return NodeJoint(ends, [for (final h in handles) Handle(h)]);
++}
++
++/// One end's cap, from its outgoing-left face to its outgoing-right face,
++/// and whether this end owns a crossing lobe that was dropped (spec 07 D5.6).
++typedef Cap = ({List<Vector2> points, bool ownsHole});
++
++/// The cap of [me] under [joint].
++///
++/// - **Free:** square at the end's own point.
++/// - **Tee** (D4.1, D6): the two faces meet the through wall's **near** face
++///   (the one on the side the stem's body goes to); a corner farther than
++///   `mitreLimit / 2 ×` the thicker wall from the end's point squares the
++///   end at its own point instead, inside the through wall's body.
++/// - **Node** (D5): the straight segment from this end's left corner (the
++///   wedge after it) to its right corner (the wedge before it). The node
++///   point is never inserted as a cap vertex (D5.3). At two ends that is the
++///   mitre (D5.4). At three or more, or when a wedge is clamped, the corners
++///   enclose a central polygon, split at exactly repeated vertices into
++///   lobes; the lowest `(handle, end)` whose cap is an edge of a lobe owns it
++///   and its cap walks the lobe from its left corner to its right corner
++///   (D5.5). A folded (signed area ≤ 0) or self-crossing lobe is dropped and
++///   every cap stays straight; a crossing lobe of positive area leaves a hole,
++///   which its owner reports (D5.6).
++Cap cap(End me, Joint joint) {
++  switch (joint) {
++    case Free():
++      return (
++        points: [me.leftPoint(me.p), me.rightPoint(me.p)],
++        ownsHole: false
++      );
++    case Tee(:final through):
++      final (l, r) = through.offsets;
++      final n = Vector2(-through.d.y, through.d.x);
++      final off = me.a.dot(n) > 0 ? l : r;
++      final q = through.s + n * off;
++      final cl = intersect(me.leftPoint(me.p), me.a, q, through.d);
++      final cr = intersect(me.rightPoint(me.p), me.a, q, through.d);
++      final limit = mitreLimit / 2 * math.max(me.wall.t, through.t);
++      if (cl == null ||
++          cr == null ||
++          (cl - me.p).length > limit ||
++          (cr - me.p).length > limit) {
++        return (
++          points: [me.leftPoint(me.p), me.rightPoint(me.p)],
++          ownsHole: false
++        );
++      }
++      return (points: [cl, cr], ownsHole: false);
++    case NodeJoint(:final ends):
++      final i = ends
++          .indexWhere((x) => x.wall.handle == me.wall.handle && x.k == me.k);
++      final hub = nodeHub(ends);
++      final n = ends.length;
++      final wedges = [for (var w = 0; w < n; w++) wedge(ends, w, hub)];
++      final left = wedges[i].first; // on my outgoing-left face
++      final right = wedges[(i - 1 + n) % n].last; // on my outgoing-right face
++      if (n == 2 && wedges.every((w) => w.length == 1)) {
++        return (points: [left, right], ownsHole: false); // the mitre
++      }
++      // The central polygon, anticlockwise: edge q runs from vertex q to
++      // q + 1 and carries the index of the end whose cap it is, or -1 for a
++      // clamp edge between two feet.
++      final verts = <Vector2>[], edgeEnd = <int>[];
++      for (var w = 0; w < n; w++) {
++        final pts = wedges[w];
++        for (var q = 0; q < pts.length; q++) {
++          verts.add(pts[q]);
++          edgeEnd.add(q < pts.length - 1 ? -1 : (w + 1) % n);
++        }
++      }
++      for (final (ring, labels) in lobes(verts, edgeEnd)) {
++        final capsOn = [
++          for (final e in labels)
++            if (e >= 0) e
++        ];
++        if (!capsOn.contains(i)) continue;
++        capsOn.sort((x, y) => _byHandleThenEnd(ends[x], ends[y]));
++        final owner = capsOn.first == i;
++        if (ring.length < 3 || !isSimpleCcw(ring)) {
++          return (
++            points: [left, right],
++            ownsHole: owner && ring.length >= 3 && signedArea(ring) > 0
++          );
++        }
++        if (!owner) break;
++        // My cap edge runs from my right corner (vertex q) to my left corner
++        // (vertex q + 1): start just after it.
++        final q = labels.indexOf(i);
++        final m = ring.length;
++        return (
++          points: [for (var s = 1; s <= m; s++) ring[(q + s) % m]],
++          ownsHole: false
++        );
++      }
++      return (points: [left, right], ownsHole: false);
++  }
++}
++
++/// Splits a closed ring at exactly repeated vertices into lobes, each with
++/// its edge labels (spec 07 D5.5). Exact: a stored-value comparison.
++List<(List<Vector2>, List<int>)> lobes(List<Vector2> v, List<int> e) {
++  for (var a = 0; a < v.length; a++) {
++    for (var b = a + 1; b < v.length; b++) {
++      if (_same(v[a], v[b])) {
++        return [
++          ...lobes(v.sublist(a, b), e.sublist(a, b)),
++          ...lobes([...v.sublist(b), ...v.sublist(0, a)],
++              [...e.sublist(b), ...e.sublist(0, a)]),
++        ];
++      }
++    }
++  }
++  return [(v, e)];
++}
++
++/// The node's reference point: the endpoint of its lowest `(handle, end)`,
++/// the same bits for every member. Used only as the clamp reference and the
++/// feet's base, never inserted as a cap vertex (spec 07 D5.3).
++Vector2 nodeHub(List<End> ends) => ends[nodeOwner(ends)].p;
++
++/// The index of the lowest `(handle, end)` among [ends].
++int nodeOwner(List<End> ends) {
++  var o = 0;
++  for (var i = 1; i < ends.length; i++) {
++    if (_byHandleThenEnd(ends[i], ends[o]) < 0) o = i;
++  }
++  return o;
++}
++
++/// Wedge [w], anticlockwise from end `w` to end `w + 1`: its points on the
++/// central polygon, in anticlockwise order (spec 07 D5.2, D6).
++///
++/// One corner, end `w`'s outgoing-left face ∩ end `w + 1`'s outgoing-right
++/// face, computed once in that argument order so both walls hold the same
++/// bits. Both faces are taken through [hub], not through each end's own
++/// point: the members' points differ by up to `wallJoin.linear`, and a face
++/// at offset 0 must pass exactly through the node, so that a corner and a
++/// foot on it coincide bitwise and the lobes split there (D5.5). Measured on
++/// spike Q5b's generator with every wall in its own rotated group: through
++/// each end's own point, 1.19% of nodes leave a hole and 0.17% of walls fall
++/// back; through [hub], 0.76% and 0.11%, as with bitwise joints.
++///
++/// A wedge narrower than 90° is never clamped: its long inner mitre is real
++/// geometry. A wider wedge whose faces are parallel, or whose corner lies
++/// farther than `mitreLimit / 2 ×` the thicker wall from [hub], is clamped to
++/// two feet: end `w`'s left face point at [hub], then end `w + 1`'s right
++/// face point at [hub].
++List<Vector2> wedge(List<End> ends, int w, Vector2 hub) {
++  final x = ends[w], y = ends[(w + 1) % ends.length];
++  final s = sweep(x, y);
++  final c = intersect(x.leftPoint(hub), x.a, y.rightPoint(hub), y.a);
++  final limit = mitreLimit / 2 * math.max(x.wall.t, y.wall.t);
++  if (c != null && (s < math.pi / 2 || (c - hub).length <= limit)) return [c];
++  return [x.leftPoint(hub), y.rightPoint(hub)];
++}
++
++/// The anticlockwise sweep from [x]'s direction to [y]'s, in (0, 2π].
++double sweep(End x, End y) {
++  var s = y.angle - x.angle;
++  if (s <= 0) s += 2 * math.pi;
++  return s;
++}
++
++/// A wall's world outline: an anticlockwise ring, end cap then start cap
++/// (spec 07 D5, D6).
++///
++/// - `ring` is empty for a degenerate wall (D2).
++/// - `fellBack` is true when the joined ring was not simple and
++///   anticlockwise, so this wall alone squared both ends at its own endpoints
++///   (D6's short wall). Its neighbours are unaffected: squaring them too
++///   would make them depend on each other through this wall, a two-hop
++///   dependency 06's closure does not regenerate.
++/// - `hole` lists the node's member walls (Ruling 07-3), ascending, when a
++///   crossing lobe of positive area was dropped at one of this wall's ends
++///   and this wall owns that lobe (D5.6, D12: reported once, by the owner).
++///   If both ends own one, it lists both nodes' members, ascending, once each.
++///
++/// The ring is simplified (D6): exact consecutive duplicates and zero-width
++/// spikes, which do occur (a closing duplicate at some right-angle Ls of
++/// round sizes), are removed. No measured triangulation outcome has depended
++/// on it, since lobes split at exactly repeated vertices and the triangulator
++/// tolerates consecutive duplicates; it stays as D6's guard.
++///
++/// [fallback] false returns the joined ring even when it is not simple — a
++/// measurement hook, never used to store an outline.
++({List<Vector2> ring, bool fellBack, List<Handle>? hole}) outline(
++    WorldWall w, List<WorldWall> others,
++    {bool fallback = true}) {
++  if (w.degenerate) {
++    return (ring: const <Vector2>[], fellBack: false, hole: null);
++  }
++  final je = classify(w, 1, others), js = classify(w, 0, others);
++  final ce = cap(End(w, 1), je), cs = cap(End(w, 0), js);
++  final owned = <int>{
++    if (ce.ownsHole)
++      for (final h in (je as NodeJoint).members) h.value,
++    if (cs.ownsHole)
++      for (final h in (js as NodeJoint).members) h.value,
++  }.toList()
++    ..sort();
++  final hole = owned.isEmpty ? null : [for (final h in owned) Handle(h)];
++  final ring = simplifyRing([...ce.points, ...cs.points]);
++  if (fallback && !isSimpleCcw(ring)) {
++    return (
++      ring: [
++        ...cap(End(w, 1), const Free()).points,
++        ...cap(End(w, 0), const Free()).points,
++      ],
++      fellBack: true,
++      hole: hole,
++    );
++  }
++  return (ring: ring, fellBack: false, hole: hole);
++}
++
++/// [self]'s outline in its group-local space among [neighbours] (spec 07
++/// D4-D6; Ruling 10-8): what `WallType` stores and diagnoses, and what a
++/// room traces once it is taken back to world (spec 10 D4, R-5). One
++/// function, so the wall and both of the rooms' adapters compute one ring.
++///
++/// The world ring ([outline]) is taken to local space through
++/// `self.toWorld.invert()`. [outline] judged it simple in world, but the
++/// mapping rounds, and a folded mitre spike that clears a crossing by
++/// ~1e-10 can cross after it (07's final review I1). A local ring that is
++/// not simple and anticlockwise is replaced by [self]'s free rectangle
++/// computed in local space -- the wall at the identity with no neighbours --
++/// and counts as a fallback: storing it would fail the planner's
++/// triangulation check and refuse the edit. Empty for a degenerate wall.
++({List<Vector2> ring, bool fellBack, List<Handle>? hole}) localOutlineOf(
++    WorldWall self, List<WorldWall> neighbours) {
++  final o = outline(self, neighbours);
++  if (o.ring.isEmpty) return o;
++  final toLocal = self.toWorld.invert();
++  final local = [for (final q in o.ring) toLocal.transformPoint(q)];
++  if (isSimpleCcw(local)) {
++    return (ring: local, fellBack: o.fellBack, hole: o.hole);
++  }
++  return (
++    ring: outline(WorldWall(self.handle, self.params, Transform2.identity()),
++        const []).ring,
++    fellBack: true,
++    hole: o.hole,
++  );
++}
++
++/// [outline]'s two caps kept apart (spec 08 D7), in world space: the end
++/// cap, from the wall's right face to its left face, and the start cap,
++/// from its left face to its right face — `[...endCap, ...startCap]` is
++/// [outline]'s ring before it is simplified. When that ring is not simple
++/// and anticlockwise, both caps are the free caps and `fellBack` is true,
++/// as [outline]'s fallback. Null for a degenerate wall (07 D2).
++({List<Vector2> endCap, List<Vector2> startCap, bool fellBack})? capsOf(
++    WorldWall w, List<WorldWall> others) {
++  if (w.degenerate) return null;
++  final ce = cap(End(w, 1), classify(w, 1, others)).points;
++  final cs = cap(End(w, 0), classify(w, 0, others)).points;
++  if (!isSimpleCcw(simplifyRing([...ce, ...cs]))) {
++    return (
++      endCap: cap(End(w, 1), const Free()).points,
++      startCap: cap(End(w, 0), const Free()).points,
++      fellBack: true,
++    );
++  }
++  return (endCap: ce, startCap: cs, fellBack: false);
++}
++
++/// [w]'s caps as they are **drawn** (spec 11 D4, R-5): the caps whose
++/// points are the corners of the outline the wall stores, in world. Null for
++/// a degenerate wall (07 D2). Two steps, 07's two fallbacks:
++///
++/// 1. [capsOf]: the joined caps, or both free caps when 07 D6's short-wall
++///    fallback applies (the world ring is not simple). When it fell back,
++///    that is the answer.
++/// 2. Otherwise the ring `simplifyRing([...endCap, ...startCap])` is taken
++///    to [w]'s group-local space through `w.toWorld.invert()`. When that
++///    image is not [isSimpleCcw], the answer is the free caps **of the
++///    stored ring**: the caps of `WorldWall(w.handle, w.params,
++///    Transform2.identity())` among no walls (the local free rectangle
++///    [localOutlineOf] stores), each point mapped through `w.toWorld`, with
++///    `fellBack` true.
++///
++/// Step 2 is exactly [localOutlineOf]'s decision: the same ring, the same
++/// mapping, the same test. So a face point is always the drawn corner, at
++/// any similarity: under a scaled group the stored rectangle is `t · s`
++/// thick in world, while a free cap recomputed in world would be `t` thick
++/// (spec 11 S-5). Step 1 stays for the reverse rounding edge (spec 11 S-2):
++/// a world ring that is not simple whose local image is. [localOutlineOf]
++/// falls back there (in world), and step 2 alone would not; 07's `WR13`
++/// sweep reaches it (the 3° L, right/left, turned 299°), so with step 1 the
++/// decision is [localOutlineOf]'s bit for bit.
++///
++/// [localOutlineOf] is not edited, so 07's, 08's and 10's stored children
++/// stay bit for bit.
++({List<Vector2> endCap, List<Vector2> startCap, bool fellBack})? drawnCapsOf(
++    WorldWall w, List<WorldWall> others) {
++  final caps = capsOf(w, others);
++  if (caps == null || caps.fellBack) return caps;
++  final toLocal = w.toWorld.invert();
++  final local = [
++    for (final q in simplifyRing([...caps.endCap, ...caps.startCap]))
++      toLocal.transformPoint(q),
++  ];
++  if (isSimpleCcw(local)) return caps;
++  final stored = WorldWall(w.handle, w.params, Transform2.identity());
++  final m = w.toWorld;
++  List<Vector2> toWorld(List<Vector2> ps) =>
++      [for (final q in ps) m.transformPoint(q)];
++  return (
++    endCap: toWorld(cap(End(stored, 1), const Free()).points),
++    startCap: toWorld(cap(End(stored, 0), const Free()).points),
++    fellBack: true,
++  );
++}
++
++/// The signed area of a closed ring, anticlockwise positive.
++double signedArea(List<Vector2> r) {
++  var a = 0.0;
++  for (var i = 0; i < r.length; i++) {
++    final p = r[i], q = r[(i + 1) % r.length];
++    a += p.x * q.y - q.x * p.y;
++  }
++  return a / 2;
++}
++
++bool _same(Vector2 a, Vector2 b) => a.x == b.x && a.y == b.y;
++
++/// Removes exact consecutive duplicates and zero-width spikes `a, b, a`
++/// (spec 07 D6). Stored-value comparisons, so exact; zero area, so the tiling
++/// is unchanged. Without it the triangulator refuses a pinched outline.
++List<Vector2> simplifyRing(List<Vector2> ring) {
++  final r = [...ring];
++  var changed = true;
++  while (changed && r.length > 3) {
++    changed = false;
++    for (var i = 0; i < r.length && r.length > 3; i++) {
++      final prev = r[(i - 1 + r.length) % r.length];
++      final next = r[(i + 1) % r.length];
++      if (_same(r[i], next)) {
++        r.removeAt(i);
++        changed = true;
++        break;
++      }
++      if (_same(prev, next)) {
++        // a, b, a -> a: drop b and the repeated a.
++        final j = (i + 1) % r.length;
++        if (j > i) {
++          r.removeAt(j);
++          r.removeAt(i);
++        } else {
++          r.removeAt(i);
++          r.removeAt(j);
++        }
++        changed = true;
++        break;
++      }
++    }
++  }
++  return r;
++}
++
++/// Exact, like the triangulator: the signed area is positive and no two
++/// non-adjacent edges properly cross (spec 07 D6's invariant).
++bool isSimpleCcw(List<Vector2> ring) {
++  final n = ring.length;
++  if (!(signedArea(ring) > 0)) return false;
++  double cross(Vector2 a, Vector2 b, Vector2 d) =>
++      (b.x - a.x) * (d.y - a.y) - (b.y - a.y) * (d.x - a.x);
++  bool crosses(Vector2 a, Vector2 b, Vector2 d, Vector2 e) {
++    final d1 = cross(d, e, a), d2 = cross(d, e, b);
++    final d3 = cross(a, b, d), d4 = cross(a, b, e);
++    return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) &&
++        ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
++  }
++
++  for (var i = 0; i < n; i++) {
++    for (var j = i + 2; j < n; j++) {
++      if (i == 0 && j == n - 1) continue;
++      if (crosses(ring[i], ring[(i + 1) % n], ring[j], ring[(j + 1) % n])) {
++        return false;
++      }
++    }
++  }
++  return true;
++}
++
++// ---------------------------------------------------------------------------
++// The two adapters (Ruling 08-8), moved here from opening_geometry.dart
++// (:600-616, :698-725), because the wall's own outline and grips read them
++// before the opening lands (3a R-P8); every type task reads the walls
++// around a host through them.
++
++/// The walls a regeneration sees around [host] (the **view adapter**,
++/// Ruling 08-8): [host] as a [WorldWall], and every neighbour of it in
++/// [view] carrying `WallParams`, as 07's outline reads them. Null when
++/// [host] is not a live wall.
++({WorldWall host, List<WorldWall> walls})? wallsInView(
++    ParametricView view, Handle host) {
++  final p = view.paramsOf<WallParams>(host);
++  if (p == null) return null;
++  return (
++    host: WorldWall(host, p, view.toWorld(host)),
++    walls: [
++      for (final n in view.neighbours(host))
++        if (view.paramsOf<WallParams>(n) case final q?)
++          WorldWall(n, q, view.toWorld(n)),
++    ],
++  );
++}
++
++/// The walls the tools, the grips and the panel see around [host] (the
++/// **document adapter**, Ruling 08-8): [host] as a [WorldWall], and every
++/// other live wall of [doc] ([live] names it `ArchitectureTypes.wall`; a
++/// frozen one is not live, spec 3a C1.5), ascending by handle. The view
++/// adapter ([wallsInView]) sees only [host]'s neighbours; [classify], [cap]
++/// and the openings' obstacles ignore a wall that does not join [host], so
++/// the extra walls change nothing. Null when [host] is not a live wall.
++///
++/// [moved] stands in for the walls it names (an end drag's walls before it
++/// is executed, spec 08 D13): each is read from it instead of [doc].
++({WorldWall host, List<WorldWall> walls})? wallsInDocument(
++    DraftDocument doc, Handle host, LiveTypeOf live,
++    {Map<Handle, WorldWall> moved = const {}}) {
++  if (live(host) != ArchitectureTypes.wall) return null;
++  final p = doc.components.get<WallParams>(host)!;
++  return (
++    host:
++        moved[host] ?? WorldWall(host, p, doc.tree.accumulatedTransform(host)),
++    walls: [
++      for (final h in doc.components.withComponent<WallParams>())
++        if (h != host && live(h) == ArchitectureTypes.wall)
++          moved[h] ??
++              WorldWall(h, doc.components.get<WallParams>(h)!,
++                  doc.tree.accumulatedTransform(h)),
++    ],
++  );
++}
+diff --git a/packages/jet_cad_2d_kit_architecture/test/support/catalog.dart b/packages/jet_cad_2d_kit_architecture/test/support/catalog.dart
+index d804cd40..bc0c8d50 100644
+--- a/packages/jet_cad_2d_kit_architecture/test/support/catalog.dart
++++ b/packages/jet_cad_2d_kit_architecture/test/support/catalog.dart
+@@ -1,21 +1,24 @@
+ // The kit tests' engine catalog (spec 3a "Tests": every type's generate
+ // through the engine's ParametricSystem): today's global parametricCatalog
+ // and installParametric (jet_cad_floor_plan/lib/src/parametric/
+ // catalog.dart:27-39, :64-65) for the kit's own tests. The kit's raw types
+ // (no plan guard), under their ArchitectureTypes ids, in today's order --
+ // box, wall, opening, separator, room, dimension -- each type task adding
+ // its line (this task the box's).
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_kit_architecture/src/box/box.dart';
++import 'package:jet_cad_2d_kit_architecture/src/wall/wall.dart';
+ 
+ final ParametricCatalog _testCatalog = ParametricCatalog()
+   ..register<BoxParams>(
+-      BoxParams.componentTypeId, BoxParams.fromJson, const BoxType());
++      BoxParams.componentTypeId, BoxParams.fromJson, const BoxType())
++  ..register<WallParams>(
++      WallParams.componentTypeId, WallParams.fromJson, const WallType());
+ 
+ /// The kit tests' catalog (ruling R-P13): the one instance above, so every
+ /// call sees every registration the type tasks append to its cascade.
+ ParametricCatalog testCatalog() => _testCatalog;
+ 
+ /// Builds and installs [doc]'s parametric system over [testCatalog].
+ ParametricSystem installParametric(DraftDocument doc) =>
+     ParametricSystem(doc, testCatalog())..install();
+diff --git a/packages/jet_cad_2d_kit_architecture/test/support/wall_fixture.dart b/packages/jet_cad_2d_kit_architecture/test/support/wall_fixture.dart
+new file mode 100644
+index 00000000..9d3bb683
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/test/support/wall_fixture.dart
+@@ -0,0 +1,313 @@
++// Ported from jet_cad_floor_plan/test/support/wall_fixture.dart (3a Task
++// 11): the floor planner's catalog becomes the kit tests' (catalog.dart,
++// re-exported); `liveOf` is new (spec 3a C1.5).
++import 'dart:convert';
++import 'dart:math' as math;
++import 'dart:typed_data';
++
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit_architecture/src/live.dart' show LiveTypeOf;
++import 'package:jet_cad_2d_kit_architecture/src/wall/wall.dart';
++import 'package:jet_cad_2d_kit_architecture/src/wall/wall_geometry.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import 'catalog.dart';
++
++export 'catalog.dart' show installParametric, testCatalog;
++
++/// The measurement corpus's far origin (`generate_document.dart`): one ulp
++/// is ~9.3e-10 in x here.
++const double ox = 4500000, oy = 1200000;
++
++Vector2 far(double x, double y) => Vector2(ox + x, oy + y);
++
++/// The plan point `(x, y)`, turned [deg] degrees about the far origin: every
++/// relational fixture is drawn rotated.
++Vector2 plan(double x, double y, [double deg = 23]) {
++  final r = deg * math.pi / 180;
++  final c = math.cos(r), s = math.sin(r);
++  return far(x * c - y * s, x * s + y * c);
++}
++
++/// The next double above a positive [x]: one ulp.
++double nextUp(double x) {
++  final b = ByteData(8)..setFloat64(0, x);
++  b.setInt64(0, b.getInt64(0) + 1);
++  return b.getFloat64(0);
++}
++
++/// [from] plus [len] along [deg] degrees anticlockwise from +x.
++Vector2 polar(Vector2 from, double deg, double len) {
++  final r = deg * math.pi / 180;
++  return from + Vector2(math.cos(r), math.sin(r)) * len;
++}
++
++/// Wall [h]'s own group transform: a translation near the far origin times
++/// a rotation that is never a multiple of 90°. Every wall of a joint sits in
++/// its own (06's M-06o lesson).
++Transform2 groupAt(int h) => Transform2.translation(
++        ox - 950 + 311.5 * (h % 7), oy + 420 - 173.25 * (h % 5))
++    .multiply(Transform2.rotation(0.3 + 0.7 * (h % 9)));
++
++/// A world wall from [s] to [e], stored in group [at] (default
++/// [groupAt]`(h)`) as local parameters: its world endpoints are the local
++/// ones taken back through [at], so a joint drawn at one world point meets
++/// within rounding, not bitwise.
++WorldWall worldWall(int h, Vector2 s, Vector2 e, double t,
++    [Justification j = Justification.centre, Transform2? at]) {
++  final g = at ?? groupAt(h);
++  final inv = g.invert();
++  final ls = inv.transformPoint(s), le = inv.transformPoint(e);
++  return WorldWall(Handle(h), WallParams(ls.x, ls.y, le.x, le.y, t, j), g);
++}
++
++/// A spoke of a node at [hub]: wall [h] between [hub] and the point [len]
++/// along [deg], starting at [hub] when [fromHub]. Its group sits at [hub]
++/// under [groupAt]`(h)`'s rotation and its hub end is local `(0, 0)`, so
++/// every spoke's hub end is **bitwise** [hub] in world — the exact joint a
++/// pinched node needs.
++WorldWall spoke(
++    int h, Vector2 hub, double deg, double len, double t, Justification j,
++    {required bool fromHub}) {
++  final g = Transform2.translation(hub.x, hub.y)
++      .multiply(Transform2.rotation(0.3 + 0.7 * (h % 9)));
++  final tip = g.invert().transformPoint(polar(hub, deg, len));
++  final p = fromHub
++      ? WallParams(0, 0, tip.x, tip.y, t, j)
++      : WallParams(tip.x, tip.y, 0, 0, t, j);
++  return WorldWall(Handle(h), p, g);
++}
++
++/// [w]'s outline among [all] ([w] itself is skipped).
++({List<Vector2> ring, bool fellBack, List<Handle>? hole}) ringOf(
++        WorldWall w, List<WorldWall> all,
++        {bool fallback = true}) =>
++    outline(
++        w,
++        [
++          for (final o in all)
++            if (o.handle != w.handle) o
++        ],
++        fallback: fallback);
++
++/// The meet of line p1p2 and line q1q2 by Cramer's rule on explicit
++/// coordinates — an oracle independent of `intersect`.
++Vector2 oracleMeet(Vector2 p1, Vector2 p2, Vector2 q1, Vector2 q2) {
++  final a1 = p2.y - p1.y, b1 = p1.x - p2.x, c1 = a1 * p1.x + b1 * p1.y;
++  final a2 = q2.y - q1.y, b2 = q1.x - q2.x, c2 = a2 * q1.x + b2 * q1.y;
++  final det = a1 * b2 - a2 * b1;
++  return Vector2((b2 * c1 - b1 * c2) / det, (a1 * c2 - a2 * c1) / det);
++}
++
++/// [w]'s face line at [offset] along its left normal (start to end), as two
++/// points, from its world coordinates.
++(Vector2, Vector2) face(WorldWall w, double offset) {
++  final dx = w.e.x - w.s.x, dy = w.e.y - w.s.y;
++  final len = math.sqrt(dx * dx + dy * dy);
++  final nx = -dy / len * offset, ny = dx / len * offset;
++  return (Vector2(w.s.x + nx, w.s.y + ny), Vector2(w.e.x + nx, w.e.y + ny));
++}
++
++/// The perpendicular distance from [p] to the line through [a] and [b].
++double distToLine(Vector2 p, Vector2 a, Vector2 b) {
++  final dx = b.x - a.x, dy = b.y - a.y;
++  return (dx * (p.y - a.y) - dy * (p.x - a.x)).abs() /
++      math.sqrt(dx * dx + dy * dy);
++}
++
++/// The foot of [p] on the line through [a] and [b].
++Vector2 project(Vector2 p, Vector2 a, Vector2 b) {
++  final d = b - a;
++  return a + d * ((p - a).dot(d) / d.dot(d));
++}
++
++/// Crossing-number point-in-polygon.
++bool insideRing(Vector2 p, List<Vector2> r) {
++  var c = false;
++  for (var i = 0, j = r.length - 1; i < r.length; j = i++) {
++    final a = r[i], b = r[j];
++    if ((a.y > p.y) != (b.y > p.y) &&
++        p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x) {
++      c = !c;
++    }
++  }
++  return c;
++}
++
++/// [count] points uniform in the disk of radius [r] about [centre].
++List<Vector2> diskSamples(Vector2 centre, double r,
++    {int count = 20000, int seed = 7}) {
++  final rnd = math.Random(seed);
++  return [
++    for (var i = 0; i < count; i++)
++      () {
++        final a = rnd.nextDouble() * 2 * math.pi;
++        final rad = r * math.sqrt(rnd.nextDouble());
++        return centre + Vector2(math.cos(a), math.sin(a)) * rad;
++      }(),
++  ];
++}
++
++/// How many samples in the disk of radius [r] about [centre] lie in two or
++/// more of [rings] — the overlap census.
++int overlapCensus(List<List<Vector2>> rings, Vector2 centre, double r) => [
++      for (final p in diskSamples(centre, r))
++        if (rings.where((g) => insideRing(p, g)).length >= 2) p
++    ].length;
++
++/// The points of [a] that also occur in [b], compared bitwise.
++List<Vector2> sharedBitwise(List<Vector2> a, List<Vector2> b) => [
++      for (final p in a)
++        if (b.any((q) => q.x == p.x && q.y == p.y)) p
++    ];
++
++/// Whether [ring] closes into a polyline that the engine triangulates.
++bool triangulates(List<Vector2> ring) {
++  final tri = triangulationFor(
++      EntityKind.polyline, polylinePayload(ring, closed: true));
++  return tri != null && tri.isNotEmpty;
++}
++
++/// The smallest distance from [p] to any point of [ring].
++double nearestIn(List<Vector2> ring, Vector2 p) =>
++    ring.map((q) => (q - p).length).reduce(math.min);
++
++// ---------------------------------------------------------------------------
++// Documents: walls through the parametric system (Task 5 onwards).
++
++/// An empty document with the kit tests' parametric system installed.
++DraftDocument wallDoc() {
++  final doc = DraftDocument.empty();
++  installParametric(doc);
++  return doc;
++}
++
++/// `PlanServices.liveTypeIdOf` over [doc] without a plan: [testCatalog]'s
++/// type id, and null for a handle in [frozen] (spec 3a C1.5).
++LiveTypeOf liveOf(DraftDocument doc, {Set<Handle> frozen = const {}}) =>
++    (h) => frozen.contains(h) ? null : testCatalog().typeIdOf(doc, h);
++
++/// Creates wall [h] in its own group [at] with the local parameters [p]:
++/// one command, as the Wall tool and 06's fixtures create an object.
++DraftCommand addWallLocal(
++        DraftDocument doc, Handle h, WallParams p, Transform2 at) =>
++    CompoundCommand([
++      AddNodeCommand(GroupNode(
++          handle: h,
++          parent: doc.rootHandle,
++          transform: at,
++          children: const [])),
++      SetComponentCommand<WallParams>(h, p),
++    ], label: 'Add wall');
++
++/// Creates wall [h] from world [s] to world [e] in group [at] (default
++/// [groupAt]`(h)`): its stored endpoints are [s] and [e] taken back through
++/// [at], so a joint drawn at one world point meets within rounding, not
++/// bitwise.
++DraftCommand addWall(DraftDocument doc, Handle h, Vector2 s, Vector2 e,
++    double t, Justification j,
++    {Transform2? at}) {
++  final g = at ?? groupAt(h.value);
++  final inv = g.invert();
++  final ls = inv.transformPoint(s), le = inv.transformPoint(e);
++  return addWallLocal(doc, h, WallParams(ls.x, ls.y, le.x, le.y, t, j), g);
++}
++
++/// [spoke]'s document form: wall [h] between [hub] and the point [len]
++/// along [deg], in a group at [hub] whose hub end is local `(0, 0)`, so its
++/// world hub end is **bitwise** [hub].
++DraftCommand addSpoke(DraftDocument doc, Handle h, Vector2 hub, double deg,
++    double len, double t, Justification j,
++    {required bool fromHub}) {
++  final g = Transform2.translation(hub.x, hub.y)
++      .multiply(Transform2.rotation(0.3 + 0.7 * (h.value % 9)));
++  final tip = g.invert().transformPoint(polar(hub, deg, len));
++  return addWallLocal(
++      doc,
++      h,
++      fromHub
++          ? WallParams(0, 0, tip.x, tip.y, t, j)
++          : WallParams(tip.x, tip.y, 0, 0, t, j),
++      g);
++}
++
++/// [group]'s children, ascending.
++List<Handle> kids(DraftDocument doc, Handle group) => [
++      for (final slot in doc.entities.liveSlots)
++        if (doc.entities.ownerAt(slot) == group) doc.entities.handleAt(slot),
++    ]..sort((a, b) => a.value.compareTo(b.value));
++
++EntityKind kindOf(DraftDocument doc, Handle h) =>
++    doc.entities.kindAt(doc.entities.slotOf(h)!);
++
++GeometryPayload payloadOf(DraftDocument doc, Handle h) =>
++    doc.geometry.read(doc.entities.geomIndexAt(doc.entities.slotOf(h)!));
++
++/// The points of a polyline payload, less a closed one's repeated first
++/// point.
++List<Vector2> pointsOf(GeometryPayload p, {bool closed = false}) {
++  final c = p.coords;
++  final n = c.length ~/ 2 - (closed ? 1 : 0);
++  return [for (var i = 0; i < n; i++) Vector2(c[2 * i], c[2 * i + 1])];
++}
++
++/// Wall [h] as the geometry reads it: its stored parameters under its
++/// group's accumulated transform.
++WorldWall worldWallOf(DraftDocument doc, Handle h) => WorldWall(
++    h, doc.components.get<WallParams>(h)!, doc.tree.accumulatedTransform(h));
++
++/// Wall [h]'s stored outline (the boundary its fill names), read back to
++/// world through its group's transform. Empty when it has no fill.
++List<Vector2> worldOutline(DraftDocument doc, Handle h) {
++  final fills = [
++    for (final k in kids(doc, h))
++      if (kindOf(doc, k) == EntityKind.fill) k
++  ];
++  if (fills.isEmpty) return const [];
++  final boundary = Handle(payloadOf(doc, fills.single).scalars[0].toInt());
++  final m = doc.tree.accumulatedTransform(h);
++  return [
++    for (final q in pointsOf(payloadOf(doc, boundary), closed: true))
++      m.transformPoint(q),
++  ];
++}
++
++/// The points of [a] within [tol] of some point of [b].
++List<Vector2> sharedNear(List<Vector2> a, List<Vector2> b,
++        [double tol = 1e-6]) =>
++    [
++      for (final p in a)
++        if (b.any((q) => (q - p).length < tol)) p
++    ];
++
++/// Whether [ring] has exactly four points, one within 1e-6 of each of
++/// [want].
++bool isRectNear(List<Vector2> ring, List<Vector2> want) =>
++    ring.length == 4 && want.every((p) => nearestIn(ring, p) < 1e-6);
++
++/// `drift()` of [doc] under the kit tests' catalog.
++List<Handle> driftOf(DraftDocument doc) =>
++    ParametricSystem(doc, testCatalog()).drift();
++
++/// `diagnostics()` of [doc] under the kit tests' catalog.
++List<Diagnostic> diagnosticsOf(DraftDocument doc) =>
++    ParametricSystem(doc, testCatalog()).diagnostics();
++
++String enc(DraftDocument d) => DraftDocumentCodec.encodeToString(d);
++
++/// Entities sorted by handle: slot order is history, not state (06 D11).
++String canon(DraftDocument d) {
++  final j = DraftDocumentCodec.encode(d);
++  j['entities'] = List<Map<String, Object?>>.from(j['entities']! as List)
++    ..sort((a, b) => ((a['record']! as Map)['handle']! as int)
++        .compareTo((b['record']! as Map)['handle']! as int));
++  return jsonEncode(j);
++}
++
++/// Decodes [s] with the kit tests' factories and installs their system.
++DraftDocument reload(String s) {
++  final doc = DraftDocumentCodec.decode(jsonDecode(s) as Map<String, Object?>,
++      registerComponents: testCatalog().registerComponents);
++  installParametric(doc);
++  return doc;
++}
+diff --git a/packages/jet_cad_2d_kit_architecture/test/wall/wall_bands_test.dart b/packages/jet_cad_2d_kit_architecture/test/wall/wall_bands_test.dart
+new file mode 100644
+index 00000000..a4ab5025
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/test/wall/wall_bands_test.dart
+@@ -0,0 +1,97 @@
++// Spec 07 D11, spec 08 D14 (Ruling 08-11): the shared band cache that the
++// Wall tool joins through and the opening tools find their host through.
++// A band is bounded along the centreline as well as across it. 07's wall
++// tests reach this code through the Wall tool and stay unedited (Ruling
++// 08-1); this file pins the length bound the final review found unkilled
++// (fr-X9). The walls are at the far origin in their own rotated groups.
++// Ported from jet_cad_floor_plan/test/wall_bands_test.dart (3a Task 11).
++import 'package:jet_cad_2d_kit_architecture/src/wall/wall.dart';
++import 'package:jet_cad_2d_kit_architecture/src/wall/wall_bands.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/wall_fixture.dart';
++
++void main() {
++  test(
++      'WB1 (fr-X9) a point on a wall\'s centreline line beyond either end, or '
++      'in its band\'s width beyond an end, is in no band: it neither joins '
++      'nor hosts; just inside an end it joins that end, bit for bit, and '
++      'hosts', () {
++    const hA = Handle(1000);
++    final doc = wallDoc();
++    doc.commands.execute(addWall(
++        doc, hA, plan(-1200, 300), plan(1800, 300), 200, Justification.left));
++    final bands = WallBands(liveOf(doc));
++    addTearDown(bands.dispose);
++    final w = worldWallOf(doc, hA);
++    final n = Vector2(-w.d.y, w.d.x);
++    final len = (w.e - w.s).length;
++    expect(len, closeTo(3000, 1e-6));
++
++    // Beyond the ends: 1e-3 is a thousand times the tolerance.
++    for (final (what, p) in [
++      ('past the end, on the line', w.e + w.d * 1e-3),
++      ('past the end, in the band\'s width', w.e + w.d * 1e-3 + n * 100),
++      ('far past the end, on the line', w.e + w.d * 900),
++      ('before the start, on the line', w.s - w.d * 1e-3),
++      ('before the start, in the band\'s width', w.s - w.d * 1e-3 + n * 100),
++    ]) {
++      expect(bands.hostAt(doc, p.x, p.y), isNull, reason: what);
++      final out = Vector2(7, 7);
++      expect(bands.joinInto(doc, p.x, p.y, out), isFalse, reason: what);
++      expect(out.storage.toList(), [7, 7], reason: '$what: left alone');
++    }
++
++    // Just inside each end (inside the band: A is left-justified, so its
++    // band runs from the centreline to 200 along the left normal).
++    for (final (what, p, end) in [
++      ('inside the end', w.e - w.d * 1e-3 + n * 100, w.e),
++      ('inside the start', w.s + w.d * 1e-3 + n * 100, w.s),
++    ]) {
++      expect(bands.hostAt(doc, p.x, p.y), hA, reason: what);
++      final out = Vector2.zero();
++      expect(bands.joinInto(doc, p.x, p.y, out), isTrue, reason: what);
++      expect(out.storage.toList(), end.storage.toList(), reason: what);
++    }
++  });
++
++  test(
++      'WB2 (09c D3, D6) liveWalls in a fresh WallBands sees the live walls, '
++      'ascending, and a wall added after the first call once the change is '
++      'delivered; it returns an unmodifiable view, not a copy; the '
++      'generation moves on the change', () async {
++    final doc = wallDoc();
++    // Reserved up front, so the wall added last has the middle handle.
++    final h1 = doc.handleSeed.next(), h3 = doc.handleSeed.next();
++    final h2 = doc.handleSeed.next(), hd = doc.handleSeed.next();
++    doc.commands.execute(addWall(
++        doc, h1, plan(-1200, 300), plan(1800, 300), 200, Justification.left));
++    doc.commands.execute(addWall(doc, h2, plan(-1200, 1300), plan(1800, 1700),
++        120, Justification.right));
++    // A degenerate wall (zero thickness) has no band, so it is not listed.
++    doc.commands.execute(addWallLocal(doc, hd,
++        WallParams(10, 20, 3000, 40, 0, Justification.centre), groupAt(7)));
++    expect(doc.components.get<WallParams>(hd), isNotNull);
++    final bands = WallBands(liveOf(doc));
++    addTearDown(bands.dispose);
++
++    // Fresh: the first call refreshes (no hostAt or joinInto ran before).
++    final live = bands.liveWalls(doc);
++    expect(live, [h1, h2]);
++    expect(() => live.add(h3), throwsUnsupportedError);
++    final g0 = bands.generation;
++
++    // A wall added after construction, with a handle between the two:
++    // the subscription the first call started marks the cache stale.
++    doc.commands.execute(addWall(doc, h3, plan(-900, -800), plan(2100, -400),
++        150, Justification.centre));
++    await pumpEventQueue();
++    expect(bands.generation, greaterThan(g0));
++    final again = bands.liveWalls(doc);
++    expect(again, [h1, h3, h2]);
++    // A view of the cache's own list: the first result reads the same.
++    expect(live, [h1, h3, h2]);
++  });
++}
+diff --git a/packages/jet_cad_2d_kit_architecture/test/wall/wall_geometry_test.dart b/packages/jet_cad_2d_kit_architecture/test/wall/wall_geometry_test.dart
+new file mode 100644
+index 00000000..d384a5a7
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/test/wall/wall_geometry_test.dart
+@@ -0,0 +1,725 @@
++// Ported from jet_cad_floor_plan/test/wall_geometry_test.dart (3a Task 11).
++import 'dart:math' as math;
++
++import 'package:jet_cad_2d_kit_architecture/src/wall/wall.dart';
++import 'package:jet_cad_2d_kit_architecture/src/wall/wall_geometry.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/wall_fixture.dart';
++
++const centre = Justification.centre;
++const left = Justification.left;
++const right = Justification.right;
++
++/// The plan's rotation for relational fixtures: never 0° or 90°.
++const double rot = 23;
++
++/// [w]'s free rectangle between its face offsets [lo] and [ro], from the
++/// fixture's explicit faces.
++List<Vector2> rect(WorldWall w, double lo, double ro) {
++  final (a, b) = face(w, lo);
++  final (c, d) = face(w, ro);
++  return [a, b, c, d];
++}
++
++void expectRect(List<Vector2> ring, List<Vector2> want, {String? reason}) {
++  expect(ring, hasLength(4), reason: reason);
++  for (final p in want) {
++    expect(nearestIn(ring, p), lessThan(1e-6), reason: reason);
++  }
++}
++
++void expectSound(({List<Vector2> ring, bool fellBack, List<Handle>? hole}) o,
++    {String? reason}) {
++  expect(isSimpleCcw(o.ring), isTrue, reason: reason);
++  expect(triangulates(o.ring), isTrue, reason: reason);
++  expect(o.fellBack, isFalse, reason: reason);
++  expect(o.hole, isNull, reason: reason);
++}
++
++/// The index of the point of [ring] within 1e-6 of [p], or -1.
++int indexNear(List<Vector2> ring, Vector2 p) =>
++    ring.indexWhere((q) => (q - p).length < 1e-6);
++
++void main() {
++  test(
++      'WG1 a free wall is the rectangle between its face offsets, per '
++      'justification (M-07f)', () {
++    final want = {
++      centre: (100.0, -100.0),
++      left: (200.0, 0.0),
++      right: (0.0, -200.0),
++    };
++    for (final j in Justification.values) {
++      final s = plan(-1200, 300), e = plan(2300, 1150);
++      final w = worldWall(7, s, e, 200, j);
++      final o = ringOf(w, [w]);
++      // The left normal of s -> e, from the plan points themselves.
++      final dx = e.x - s.x, dy = e.y - s.y;
++      final len = math.sqrt(dx * dx + dy * dy);
++      final n = Vector2(-dy / len, dx / len);
++      final (lo, ro) = want[j]!;
++      expectRect(o.ring, [s + n * lo, s + n * ro, e + n * lo, e + n * ro],
++          reason: j.name);
++      expectSound(o, reason: j.name);
++    }
++  });
++
++  test(
++      'WG2 the 67° L, 200 centre against 115 left: two corners shared '
++      'bitwise, each equal to the oracle (M-07a, M-07b, M-07f, M-07i)', () {
++    final h = plan(0, 0);
++    final a = worldWall(1, plan(-3000, 0), h, 200, centre);
++    final b = worldWall(2, h, polar(h, 180 - 67 + rot, 2500), 115, left);
++    // Joined within tolerance, not bitwise: each wall is in its own group.
++    expect(a.e.x == b.s.x && a.e.y == b.s.y, isFalse);
++    expect((a.e - b.s).length, lessThan(wallJoin.linear));
++    final ra = ringOf(a, [a, b]), rb = ringOf(b, [a, b]);
++    expectSound(ra);
++    expectSound(rb);
++    expect(ra.ring, hasLength(4));
++    expect(rb.ring, hasLength(4));
++    final shared = sharedBitwise(ra.ring, rb.ring);
++    expect(shared, hasLength(2));
++    // A's faces (±100) against B's faces (+115, 0).
++    final (al1, al2) = face(a, 100);
++    final (ar1, ar2) = face(a, -100);
++    final (bl1, bl2) = face(b, 115);
++    final (br1, br2) = face(b, 0);
++    expect(nearestIn(shared, oracleMeet(al1, al2, bl1, bl2)), lessThan(1e-6));
++    expect(nearestIn(shared, oracleMeet(ar1, ar2, br1, br2)), lessThan(1e-6));
++  });
++
++  test(
++      'WG3 control only: the 90° equal-thickness centre L has its corners '
++      'at (±t/2, ±t/2) from the node', () {
++    const turn = 41.0;
++    final h = plan(0, 0, turn);
++    final a = worldWall(3, polar(h, 180 + turn, 3000), h, 200, centre);
++    final b = worldWall(4, h, polar(h, 90 + turn, 2500), 200, centre);
++    final ra = ringOf(a, [a, b]), rb = ringOf(b, [a, b]);
++    expectSound(ra);
++    expectSound(rb);
++    final shared = sharedBitwise(ra.ring, rb.ring);
++    expect(shared, hasLength(2));
++    // The outgoing directions from the node.
++    final ua = polar(Vector2.zero(), 180 + turn, 1);
++    final ub = polar(Vector2.zero(), 90 + turn, 1);
++    expect(nearestIn(shared, h + (ua + ub) * 100), lessThan(1e-6));
++    expect(nearestIn(shared, h - (ua + ub) * 100), lessThan(1e-6));
++  });
++
++  test(
++      'WG4 the T at 58°: the stem butts the near face of a 200 '
++      'right-justified wall; the through wall stays four points '
++      '(M-07c, M-07r)', () {
++    final b = worldWall(5, plan(-2000, 0), plan(3000, 0), 200, right);
++    final p = plan(700, 0);
++    final a = worldWall(6, polar(p, 58 + rot, 2400), p, 115, centre);
++    final ra = ringOf(a, [a, b]), rb = ringOf(b, [a, b]);
++    expectSound(ra);
++    expectSound(rb);
++    // The stem comes from B's left side; B's body lies right of its
++    // centreline, so the near face is the centreline (offset 0).
++    final (n1, n2) = face(b, 0);
++    final (f1, f2) = face(b, -200);
++    final capPoints = [
++      for (final q in ra.ring)
++        if ((q - p).length < 500) q
++    ];
++    expect(capPoints, hasLength(2));
++    for (final q in capPoints) {
++      expect(distToLine(q, n1, n2), lessThan(1e-6));
++      expect(distToLine(q, f1, f2), greaterThan(100));
++    }
++    expectRect(rb.ring, rect(b, 0, -200));
++  });
++
++  test('WG5 an X: both crossing walls stay rectangles', () {
++    final x1 = worldWall(7, plan(-1000, -1000), plan(1000, 900), 150, centre);
++    final x2 = worldWall(8, plan(-1000, 800), plan(1200, -700), 240, left);
++    final r1 = ringOf(x1, [x1, x2]), r2 = ringOf(x2, [x1, x2]);
++    expectSound(r1);
++    expectSound(r2);
++    expectRect(r1.ring, rect(x1, 75, -75));
++    expectRect(r2.ring, rect(x2, 240, 0));
++  });
++
++  test(
++      'WG6 a three-way node, 200 centre / 115 left / 150 right: every ring '
++      'simple, the central polygon covered exactly once (M-07k)', () {
++    // Twice: turned so that the lowest handle (w1) sorts second by angle,
++    // and so that it sorts first — ownership must not depend on either.
++    for (final (turn, firstIsLowest) in const [(rot, false), (-53.0, true)]) {
++      final h = plan(0, 0);
++      final w1 = worldWall(11, h, polar(h, 10 + turn, 3000), 200, centre);
++      final w2 = worldWall(12, polar(h, 50 + turn, 2000), h, 115, left);
++      final w3 = worldWall(13, h, polar(h, 200 + turn, 2500), 150, right);
++      final all = [w1, w2, w3];
++      final rings = [for (final w in all) ringOf(w, all)];
++      for (final o in rings) {
++        expectSound(o);
++      }
++      // The central polygon, from the oracle. The node point is the lowest
++      // handle's endpoint; w3 (right-justified, from the node) and w2
++      // (left-justified, into the node) each have a face through it, and their
++      // wide wedges are clamped to feet there, so the node point is one vertex.
++      // w1's right foot, and the corner of w1's left face with w2's left face.
++      final hub = w1.s;
++      final (r1, r2) = face(w1, -100);
++      final foot = project(hub, r1, r2);
++      final (a1, a2) = face(w1, 100);
++      final (b1, b2) = face(w2, 115);
++      final corner = oracleMeet(a1, a2, b1, b2);
++      final central = [hub, foot, corner];
++      expect(signedArea(central), greaterThan(1000));
++      for (final v in central) {
++        expect(nearestIn(rings[0].ring, v), lessThan(1e-6));
++      }
++      final inside = [
++        for (final p in diskSamples(hub, 400))
++          if (insideRing(p, central)) p
++      ];
++      expect(inside.length, greaterThan(300));
++      final covered = [
++        for (final p in inside) rings.where((o) => insideRing(p, o.ring)).length
++      ];
++      expect(covered.where((c) => c >= 2), isEmpty, reason: 'overlap');
++      expect(covered.every((c) => c == 1), isTrue, reason: 'gap');
++      final node = classify(w1, 0, [w2, w3]) as NodeJoint;
++      expect(node.ends.first.wall.handle == w1.handle, firstIsLowest);
++    }
++  });
++
++  test(
++      'WG7 the 216 common plan nodes (spike Q2c): no non-simple ring, no '
++      'hole', () {
++    final cases = <(String, List<(double, double, Justification, bool)>)>[];
++    for (final ext in Justification.values) {
++      for (final br in Justification.values) {
++        final n = '${ext.name}/${br.name}';
++        cases
++          ..add((
++            'split300+br115 $n',
++            [(0, 300, ext, true), (180, 300, ext, false), (90, 115, br, true)]
++          ))
++          ..add((
++            'split300+br300 $n',
++            [(0, 300, ext, true), (180, 300, ext, false), (90, 300, br, true)]
++          ))
++          ..add((
++            'cross200/115 $n',
++            [
++              (0, 200, ext, true),
++              (180, 200, ext, false),
++              (90, 115, br, true),
++              (270, 115, br, false),
++            ]
++          ))
++          ..add(
++              ('L300/115 90° $n', [(0, 300, ext, true), (90, 115, br, false)]))
++          ..add((
++            'L300/300 120° $n',
++            [(0, 300, ext, true), (120, 300, br, false)]
++          ))
++          ..add((
++            'Y 200/115 $n',
++            [(0, 200, ext, true), (135, 115, br, true), (225, 115, br, false)]
++          ));
++      }
++    }
++    var nodes = 0;
++    final bad = <String>[];
++    for (final (name, spec) in cases) {
++      for (final turn in const [0.0, 17.0, 73.0, 131.0]) {
++        nodes++;
++        final h = far(0, 0);
++        final all = [
++          for (final (i, (a, t, j, fromHub)) in spec.indexed)
++            fromHub
++                ? worldWall(i + 1, h, polar(h, a + turn, 3000), t, j)
++                : worldWall(i + 1, polar(h, a + turn, 3000), h, t, j),
++        ];
++        for (final w in all) {
++          final o = ringOf(w, all);
++          if (!isSimpleCcw(o.ring) ||
++              !triangulates(o.ring) ||
++              o.fellBack ||
++              o.hole != null) {
++            bad.add('$name rot $turn wall ${w.handle.value}');
++          }
++        }
++      }
++    }
++    expect(nodes, 216);
++    expect(bad, isEmpty);
++  });
++
++  test('WG8 a 20° L: the two bands do not overlap (M-07j)', () {
++    final h = plan(0, 0);
++    final a = worldWall(21, plan(-3000, 0), h, 200, centre);
++    final b = worldWall(22, h, polar(h, 180 - 20 + rot, 2500), 200, centre);
++    final ra = ringOf(a, [a, b]), rb = ringOf(b, [a, b]);
++    expectSound(ra);
++    expectSound(rb);
++    expect(overlapCensus([ra.ring, rb.ring], h, 800), 0);
++    // The inner mitre is real geometry: 100 / sin 10° from the node.
++    final (a1, a2) = face(a, 100);
++    final (b1, b2) = face(b, 100);
++    final inner = oracleMeet(a1, a2, b1, b2);
++    expect((inner - h).length, greaterThan(500));
++    expect(sharedBitwise(ra.ring, rb.ring), hasLength(2));
++    expect(nearestIn(sharedBitwise(ra.ring, rb.ring), inner), lessThan(1e-6));
++  });
++
++  test(
++      'WG9 a reflex bevel: the 20° L clamps its outer wedge, and the bevel '
++      'edge belongs to the lower handle', () {
++    final h = plan(0, 0);
++    final a = worldWall(21, plan(-3000, 0), h, 200, centre);
++    final b = worldWall(22, h, polar(h, 180 - 20 + rot, 2500), 200, centre);
++    final ra = ringOf(a, [a, b]).ring, rb = ringOf(b, [a, b]).ring;
++    final hub = a.e; // the lowest handle's endpoint
++    final (a1, a2) = face(a, -100);
++    final (b1, b2) = face(b, -100);
++    // Unclamped, the outer faces would meet far beyond the mitre limit.
++    final mitre = oracleMeet(a1, a2, b1, b2);
++    expect((mitre - hub).length, greaterThan(mitreLimit / 2 * 200));
++    expect(nearestIn(ra, mitre), greaterThan(1));
++    expect(nearestIn(rb, mitre), greaterThan(1));
++    // Clamped: the two feet, each outer face's point at the node.
++    final fa = project(hub, a1, a2), fb = project(hub, b1, b2);
++    final ia = indexNear(ra, fa), ib = indexNear(ra, fb);
++    expect(ia, isNot(-1));
++    expect(ib, isNot(-1));
++    expect((ia + 1) % ra.length, ib, reason: 'the bevel edge fa -> fb');
++    expect(indexNear(rb, fb), isNot(-1));
++    expect(indexNear(rb, fa), -1);
++  });
++
++  test('WG10 a collinear step, 200 centre into 115 left: two feet each', () {
++    final h = plan(0, 0);
++    final c = worldWall(31, plan(-3000, 0), h, 200, centre);
++    final d = worldWall(32, h, plan(3000, 0), 115, left);
++    final rc = ringOf(c, [c, d]), rd = ringOf(d, [c, d]);
++    expectSound(rc);
++    expectSound(rd);
++    final hub = c.e;
++    for (final (w, o, offs) in [
++      (c, rc, const [100.0, -100.0]),
++      (d, rd, const [115.0, 0.0]),
++    ]) {
++      expect(o.ring, hasLength(4));
++      for (final off in offs) {
++        final (p1, p2) = face(w, off);
++        expect(nearestIn(o.ring, project(hub, p1, p2)), lessThan(1e-6));
++      }
++    }
++    expect(overlapCensus([rc.ring, rd.ring], hub, 300), 0);
++  });
++
++  test(
++      'WG11 a short wall between two nodes falls back alone; its '
++      'neighbours still mitre against its own corners', () {
++    // 150 long, 200 thick, splayed neighbours on one side: its two mitres
++    // cross, so its joined ring is not simple.
++    final s0 = plan(0, 0), s1 = plan(150, 0);
++    final m = worldWall(41, s0, s1, 200, centre);
++    final l = worldWall(42, polar(s0, 100 + rot, 2000), s0, 200, centre);
++    final r = worldWall(43, s1, polar(s1, 80 + rot, 2000), 200, centre);
++    final all = [m, l, r];
++    final raw = ringOf(m, all, fallback: false);
++    expect(isSimpleCcw(raw.ring), isFalse);
++    final fixed = ringOf(m, all);
++    expect(fixed.fellBack, isTrue);
++    expect(isSimpleCcw(fixed.ring), isTrue);
++    expectRect(fixed.ring, rect(m, 100, -100));
++    for (final n in [l, r]) {
++      final o = ringOf(n, all);
++      expectSound(o);
++      // The short wall's fallback does not reach its neighbours: each still
++      // mitres against the corners the short wall's joined ring holds.
++      expect(sharedBitwise(o.ring, raw.ring), hasLength(2));
++    }
++  });
++
++  test(
++      'WG12 a pinched node (two corners exactly on the node): every ring '
++      'triangulates; simplification removes the pinch (M-07n)', () {
++    // Each wall in its own rotated group: the three joints meet within
++    // tolerance, not bitwise. x1's left face and x2's right face both run
++    // through the node, so their wedge's corner is the node; x3's left face
++    // does too, and its wide wedge with x1 is clamped to feet, the first of
++    // which is the node.
++    final h = plan(0, 0);
++    final x1 = worldWall(51, h, polar(h, 0 + rot, 3000), 200, right);
++    final x2 = worldWall(52, h, polar(h, 100 + rot, 3000), 150, left);
++    final x3 = worldWall(53, h, polar(h, 185 + rot, 3000), 115, right);
++    expect(x2.s.x == x1.s.x && x2.s.y == x1.s.y, isFalse);
++    final hub = x1.s; // the lowest handle's endpoint
++    final all = [x1, x2, x3];
++    final node = classify(x1, 0, [x2, x3]) as NodeJoint;
++    final central = [
++      for (var w = 0; w < node.ends.length; w++)
++        ...wedge(node.ends, w, nodeHub(node.ends)),
++    ];
++    expect(central.where((p) => p.x == hub.x && p.y == hub.y), hasLength(2));
++    final rings = [for (final w in all) ringOf(w, all)];
++    for (final o in rings) {
++      expectSound(o);
++      final tri = triangulationFor(
++          EntityKind.polyline, polylinePayload(o.ring, closed: true));
++      expect(tri, isNotNull);
++      expect(tri, isNotEmpty);
++    }
++    // The pinch spliced into x1's ring as a zero-width spike (node, corner,
++    // node) and as a repeated vertex: the triangulator refuses the spike;
++    // simplification restores x1's ring bit for bit.
++    final r1 = rings[0].ring;
++    final i = r1.indexWhere((p) => p.x == hub.x && p.y == hub.y);
++    expect(i, isNot(-1));
++    final corner = central.firstWhere((p) => p.x != hub.x || p.y != hub.y);
++    final spiked = [
++      ...r1.sublist(0, i + 1),
++      corner,
++      Vector2.copy(hub),
++      ...r1.sublist(i + 1),
++    ];
++    expect(triangulates(spiked), isFalse);
++    expect(simplifyRing(spiked), r1);
++    final doubled = [
++      ...r1.sublist(0, i + 1),
++      Vector2.copy(hub),
++      ...r1.sublist(i + 1)
++    ];
++    expect(simplifyRing(doubled), r1);
++    expect(triangulates(simplifyRing(spiked)), isTrue);
++  });
++
++  test(
++      'WG13 property: 10,000 random nodes at the far origin, every ring '
++      'simple and triangulable, shared corners bitwise', () {
++    final rnd = math.Random(20260924);
++    var walls = 0, sharedChecks = 0;
++    final failures = <String>[];
++    for (var trial = 0; trial < 10000; trial++) {
++      final hub = far(rnd.nextDouble() * 1e5, rnd.nextDouble() * 1e5);
++      final k = 2 + rnd.nextInt(4);
++      final angles = <double>[];
++      while (angles.length < k) {
++        final a = rnd.nextDouble() * 360;
++        if (angles.every((b) {
++          final d = ((a - b) % 360 + 360) % 360;
++          return d >= 1 && d <= 359;
++        })) {
++          angles.add(a);
++        }
++      }
++      final all = [
++        for (final (i, a) in angles.indexed)
++          () {
++            final len = 30 + rnd.nextDouble() * 3970;
++            final t = 50 + rnd.nextDouble() * 350;
++            final j = Justification.values[rnd.nextInt(3)];
++            final tip = polar(hub, a, len);
++            return rnd.nextBool()
++                ? worldWall(i + 1, hub, tip, t, j)
++                : worldWall(i + 1, tip, hub, t, j);
++          }(),
++      ];
++      final out = {for (final w in all) w.handle: ringOf(w, all)};
++      for (final w in all) {
++        walls++;
++        final o = out[w.handle]!;
++        if (!isSimpleCcw(o.ring) || !triangulates(o.ring)) {
++          failures.add('trial $trial wall ${w.handle.value}');
++        }
++      }
++      final first = all.first;
++      final k0 = (first.s - hub).length < 1 ? 0 : 1;
++      final node = classify(first, k0, all.sublist(1));
++      if (node is! NodeJoint || node.ends.length != k) {
++        failures.add('trial $trial: not a $k-way node');
++        continue;
++      }
++      final hubPoint = nodeHub(node.ends);
++      for (var w = 0; w < k; w++) {
++        final corner = wedge(node.ends, w, hubPoint);
++        if (corner.length != 1) continue;
++        final x = out[node.ends[w].wall.handle]!;
++        final y = out[node.ends[(w + 1) % k].wall.handle]!;
++        if (x.fellBack || y.fellBack) continue;
++        sharedChecks++;
++        final c = corner.single;
++        bool holds(List<Vector2> r) => r.any((p) => p.x == c.x && p.y == c.y);
++        if (!holds(x.ring) || !holds(y.ring)) {
++          failures.add('trial $trial wedge $w: corner not shared bitwise');
++        }
++      }
++    }
++    expect(walls, greaterThan(30000));
++    expect(sharedChecks, greaterThan(20000));
++    expect(failures, isEmpty);
++  });
++
++  test(
++      'WG14 plausible nodes (spike Q5b): hole rate < 1.5%, fallback rate '
++      '< 0.5%', () {
++    final rnd = math.Random(7707);
++    const ts = [100.0, 115.0, 150.0, 200.0, 250.0, 300.0];
++    var nodes = 0, holeNodes = 0, walls = 0, fellBack = 0;
++    final wrongHole = <String>[];
++    for (var trial = 0; trial < 20000; trial++) {
++      final hub = far(rnd.nextDouble() * 1e5, rnd.nextDouble() * 1e5);
++      final u = rnd.nextDouble();
++      final k = u < 0.6 ? 2 : (u < 0.9 ? 3 : 4);
++      final angles = <double>[];
++      var guard = 0;
++      while (angles.length < k && guard++ < 1000) {
++        final a = rnd.nextDouble() * 360;
++        if (angles.every((b) {
++          final d = ((a - b) % 360 + 360) % 360;
++          return d >= 30 && d <= 330;
++        })) {
++          angles.add(a);
++        }
++      }
++      if (angles.length < k) continue;
++      nodes++;
++      final uniform = rnd.nextDouble() < 0.7;
++      final j0 = Justification.values[rnd.nextInt(3)];
++      final all = [
++        for (final (i, a) in angles.indexed)
++          () {
++            final t = ts[rnd.nextInt(ts.length)];
++            final len = 3 * t + rnd.nextDouble() * 5000;
++            final j = uniform ? j0 : Justification.values[rnd.nextInt(3)];
++            final tip = polar(hub, a, len);
++            return rnd.nextBool()
++                ? worldWall(i + 1, hub, tip, t, j)
++                : worldWall(i + 1, tip, hub, t, j);
++          }(),
++      ];
++      var reporters = 0;
++      for (final w in all) {
++        walls++;
++        final o = ringOf(w, all);
++        if (o.fellBack) fellBack++;
++        if (o.hole case final members?) {
++          reporters++;
++          // The owner names every member of the node.
++          if (members.map((h) => h.value).join(',') !=
++              [for (var i = 1; i <= k; i++) i].join(',')) {
++            wrongHole.add('trial $trial: $members');
++          }
++        }
++      }
++      if (reporters > 0) holeNodes++;
++      // D12: one entry per node, by the lobe's owner.
++      if (reporters > 1) wrongHole.add('trial $trial: $reporters reporters');
++    }
++    final holeRate = 100 * holeNodes / nodes;
++    final fallbackRate = 100 * fellBack / walls;
++    // ignore: avoid_print
++    print('WG14 nodes $nodes with a hole $holeNodes '
++        '(${holeRate.toStringAsFixed(2)}%); walls $walls fell back '
++        '$fellBack (${fallbackRate.toStringAsFixed(2)}%)');
++    expect(nodes, greaterThan(19000));
++    expect(wrongHole, isEmpty);
++    expect(holeRate, lessThan(1.5));
++    expect(fallbackRate, lessThan(0.5));
++  });
++
++  test(
++      'WG15 a joint one ulp apart at the far origin still shares two '
++      'corners (M-07d)', () {
++    final hub = far(0, 0);
++    final ulp = Vector2(nextUp(hub.x), hub.y);
++    final a = spoke(61, hub, 180 + rot, 3000, 200, centre, fromHub: false);
++    final b = spoke(62, ulp, 180 - 67 + rot, 2500, 115, left, fromHub: true);
++    expect(b.s.x - a.e.x, nextUp(hub.x) - hub.x);
++    expect(b.s.x, isNot(a.e.x));
++    expect(b.s.y, a.e.y);
++    final ra = ringOf(a, [a, b]), rb = ringOf(b, [a, b]);
++    expectSound(ra);
++    expectSound(rb);
++    final shared = sharedBitwise(ra.ring, rb.ring);
++    expect(shared, hasLength(2));
++    final (al1, al2) = face(a, 100);
++    final (ar1, ar2) = face(a, -100);
++    final (bl1, bl2) = face(b, 115);
++    final (br1, br2) = face(b, 0);
++    expect(nearestIn(shared, oracleMeet(al1, al2, bl1, bl2)), lessThan(1e-6));
++    expect(nearestIn(shared, oracleMeet(ar1, ar2, br1, br2)), lessThan(1e-6));
++  });
++
++  test(
++      'WG16 node membership is measured from the anchor (Ruling 07-3): '
++      'ends 1.8e-6 apart, each within tolerance of the lowest, form one '
++      'watertight node', () {
++    final hub = far(0, 0);
++    final w1 = spoke(71, hub, 20 + rot, 3000, 200, centre, fromHub: true);
++    final w2 = spoke(72, polar(hub, 123, 0.9e-6), 140 + rot, 3000, 115, left,
++        fromHub: true);
++    final w3 = spoke(
++        73, polar(hub, 123 + 180, 0.9e-6), 250 + rot, 3000, 150, right,
++        fromHub: false);
++    expect((w2.s - w3.e).length, greaterThan(wallJoin.linear));
++    final all = [w1, w2, w3];
++    for (final (w, k) in [(w1, 0), (w2, 0), (w3, 1)]) {
++      final j = classify(w, k, [
++        for (final o in all)
++          if (o != w) o
++      ]);
++      expect(j, isA<NodeJoint>());
++      expect([for (final h in (j as NodeJoint).members) h.value], [71, 72, 73]);
++    }
++    final rings = [for (final w in all) ringOf(w, all)];
++    for (final o in rings) {
++      expectSound(o);
++    }
++    // Anticlockwise neighbours w1 -> w2 -> w3 -> w1 each share their
++    // wedge's corner, bit for bit.
++    for (final (x, y) in [(0, 1), (1, 2), (2, 0)]) {
++      expect(sharedBitwise(rings[x].ring, rings[y].ring), isNotEmpty,
++          reason: '$x/$y');
++    }
++  });
++
++  test(
++      'WG17 two ends in one direction keep free caps; the node is built '
++      'from the rest (Ruling 07-4)', () {
++    final hub = far(0, 0);
++    final a = spoke(81, hub, 30 + rot, 3000, 200, centre, fromHub: true);
++    final b = spoke(82, hub, 30 + rot, 1800, 115, left, fromHub: true);
++    final c = spoke(83, hub, 150 + rot, 2500, 200, centre, fromHub: true);
++    final d = spoke(84, hub, 260 + rot, 2500, 150, right, fromHub: false);
++    final all = [a, b, c, d];
++    expect(classify(a, 0, [b, c, d]), isA<Free>());
++    expect(classify(b, 0, [a, c, d]), isA<Free>());
++    final ra = ringOf(a, all), rb = ringOf(b, all);
++    expectSound(ra);
++    expectSound(rb);
++    expectRect(ra.ring, rect(a, 100, -100));
++    expectRect(rb.ring, rect(b, 115, 0));
++    final rc = ringOf(c, all), rd = ringOf(d, all);
++    expectSound(rc);
++    expectSound(rd);
++    expect(sharedBitwise(rc.ring, rd.ring), hasLength(2));
++    final node = classify(c, 0, [a, b, d]) as NodeJoint;
++    expect([for (final e in node.ends) e.wall.handle.value]..sort(), [83, 84]);
++    expect([for (final h in node.members) h.value], [81, 82, 83, 84]);
++  });
++
++  test(
++      'WG18 a degenerate wall has no ring and is never classified against '
++      '(spec 07 D2)', () {
++    final h = plan(0, 0);
++    final z = worldWall(90, h, h, 200, centre); // zero length, lowest handle
++    final a = worldWall(91, plan(-3000, 0), h, 200, centre);
++    final b = worldWall(92, h, polar(h, 180 - 67 + rot, 2500), 115, left);
++    final zt = worldWall(93, h, polar(h, 250 + rot, 2000), 0, centre);
++    final along = worldWall(94, plan(-1000, 0), plan(-1000, 0.0000005), 200,
++        centre); // on A's centreline, shorter than the tolerance
++    for (final w in [z, zt, along]) {
++      expect(w.degenerate, isTrue);
++    }
++    final all = [z, a, b, zt, along];
++    expect(ringOf(z, all).ring, isEmpty);
++    expect(ringOf(zt, all).ring, isEmpty);
++    expect(ringOf(along, all).ring, isEmpty);
++    // A and B are exactly the plain L.
++    expect(ringOf(a, all).ring, ringOf(a, [a, b]).ring);
++    expect(ringOf(b, all).ring, ringOf(b, [a, b]).ring);
++    expect(
++        sharedBitwise(ringOf(a, all).ring, ringOf(b, all).ring), hasLength(2));
++  });
++
++  test(
++      'WG19 a shallow T squares its stem at its own end; a steeper one butts '
++      'the near face (spec 07 D6: the limit is on the thicker wall)', () {
++    final b = worldWall(95, plan(-2000, 0), plan(3000, 0), 300, centre);
++    final p = plan(700, 0);
++    for (final deg in const [10.0, 25.0]) {
++      final a = worldWall(96, polar(p, deg + rot, 2400), p, 115, centre);
++      final ra = ringOf(a, [a, b]);
++      expectSound(ra, reason: '$deg°');
++      final capPoints = [
++        for (final q in ra.ring)
++          if ((q - p).length < 1500) q
++      ];
++      expect(capPoints, hasLength(2), reason: '$deg°');
++      final (l1, l2) = face(a, 57.5);
++      final (r1, r2) = face(a, -57.5);
++      final square = [project(p, l1, l2), project(p, r1, r2)];
++      final (n1, n2) = face(b, 150);
++      if (deg == 10) {
++        // The corners on the near face lie beyond 4 × 150 of the end point.
++        for (final q in square) {
++          expect(nearestIn(capPoints, q), lessThan(1e-6), reason: '10°');
++        }
++      } else {
++        // Within 4 × 150 (the thicker wall), though beyond 4 × 57.5.
++        for (final q in capPoints) {
++          expect(distToLine(q, n1, n2), lessThan(1e-6), reason: '25°');
++          expect(nearestIn(square, q), greaterThan(100), reason: '25°');
++        }
++      }
++    }
++  });
++
++  test(
++      'WG20 an end strictly inside two centrelines (an X) tees onto the '
++      'lower handle, whatever the order of the neighbours', () {
++    final p = plan(0, 0);
++    final lo = worldWall(97, plan(-2000, 0), plan(2000, 0), 200, right);
++    final hi = worldWall(98, plan(0, -2000), plan(0, 2000), 240, centre);
++    final stem = worldWall(99, polar(p, 60 + rot, 2400), p, 115, centre);
++    for (final others in [
++      [hi, lo],
++      [lo, hi],
++    ]) {
++      final j = classify(stem, 1, others);
++      expect(j, isA<Tee>());
++      expect((j as Tee).through.handle, lo.handle);
++      final ring = ringOf(stem, [stem, ...others]).ring;
++      final capPoints = [
++        for (final q in ring)
++          if ((q - p).length < 1500) q
++      ];
++      expect(capPoints, hasLength(2));
++      // lo's body lies right of its centreline: the stem, from its left,
++      // butts the centreline itself; hi's near face would be x = +120.
++      final (n1, n2) = face(lo, 0);
++      final (h1, h2) = face(hi, -120);
++      for (final q in capPoints) {
++        expect(distToLine(q, n1, n2), lessThan(1e-6));
++        expect(distToLine(q, h1, h2), greaterThan(1));
++      }
++    }
++  });
++
++  test(
++      'WG21 a three-way node under mixed justification: the node point is '
++      'on no ring (M-07i at a node cap)', () {
++    // WG6's w2 and w3 each have a face through the node point, so a node
++    // cap that inserts it mostly repeats a vertex already there. Here only
++    // w2 (left) has a zero face, and its wedge with w3 (120°, corner
++    // ~87 mm out) is not clamped: the node point is a vertex of nothing.
++    final h = plan(0, 0);
++    final w1 = worldWall(11, h, polar(h, 10 + rot, 3000), 200, centre);
++    final w2 = worldWall(12, polar(h, 130 + rot, 2000), h, 115, left);
++    final w3 = worldWall(13, h, polar(h, 250 + rot, 2500), 150, centre);
++    final all = [w1, w2, w3];
++    expect(classify(w1, 0, [w2, w3]), isA<NodeJoint>());
++    final rings = [for (final w in all) ringOf(w, all)];
++    for (final o in rings) {
++      expectSound(o);
++      expect(o.ring.any((p) => (p - h).length < 1e-3), isFalse,
++          reason: 'the node point is on no ring');
++    }
++    expect(overlapCensus([for (final o in rings) o.ring], h, 400), 0);
++  });
++}
+diff --git a/packages/jet_cad_2d_kit_architecture/test/wall/wall_live_test.dart b/packages/jet_cad_2d_kit_architecture/test/wall/wall_live_test.dart
+new file mode 100644
+index 00000000..f2f81c0b
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/test/wall/wall_live_test.dart
+@@ -0,0 +1,139 @@
++// 3a Task 11 (spec C1.5, C2): the walls' caches and the document adapter
++// decide "a live wall" through a LiveTypeOf, never through a catalog of
++// their own, so a frozen wall is absent from them exactly as it is absent
++// from every regeneration. The walls sit at the far origin in their own
++// turned groups; the stray WallParams sits on a nested group inside a
++// turned and mirrored one.
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/testing.dart';
++import 'package:jet_cad_2d_kit_architecture/src/wall/wall.dart';
++import 'package:jet_cad_2d_kit_architecture/src/wall/wall_bands.dart';
++import 'package:jet_cad_2d_kit_architecture/src/wall/wall_geometry.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/wall_fixture.dart';
++
++const Handle a = Handle(1300), b = Handle(2600), f = Handle(3900);
++const Handle outer = Handle(5000), nested = Handle(5100);
++
++/// An L of A (200, left) and B (115, centre); F (150, right) apart from it;
++/// and a stray `WallParams` from the L's corner on [nested], a group inside
++/// the turned and mirrored root group [outer], as only a file brings one.
++DraftDocument liveDoc() {
++  final doc = wallDoc();
++  final corner = plan(1800, 300);
++  doc.commands.execute(
++      addWall(doc, a, plan(-1200, 300), corner, 200, Justification.left));
++  doc.commands.execute(addWall(doc, b, corner, polar(corner, 23 + 105, 2400),
++      115, Justification.centre));
++  doc.commands.execute(addWall(
++      doc, f, plan(-1200, 2300), plan(1800, 2700), 150, Justification.right));
++  doc.commands.execute(CompoundCommand([
++    AddNodeCommand(GroupNode(
++        handle: outer,
++        parent: doc.rootHandle,
++        transform: Transform2.translation(ox + 640.5, oy - 410.25)
++            .multiply(Transform2.rotation(0.7))
++            .multiply(Transform2.scale(-1, 1)),
++        children: const [])),
++    AddNodeCommand(GroupNode(
++        handle: nested,
++        parent: outer,
++        transform: Transform2.translation(-120.5, 330.75)
++            .multiply(Transform2.rotation(-0.45)),
++        children: const [])),
++  ], label: 'Add groups'));
++  final toNested = doc.tree.accumulatedTransform(nested).invert();
++  final s = toNested.transformPoint(corner);
++  final e = toNested.transformPoint(polar(corner, 23 - 40, 1700));
++  doc.components.attach<WallParams>(
++      nested, WallParams(s.x, s.y, e.x, e.y, 90, Justification.left));
++  return doc;
++}
++
++/// A point in the middle of [h]'s band, 40% along it.
++Vector2 inBand(DraftDocument doc, Handle h) {
++  final w = worldWallOf(doc, h);
++  final (l, r) = w.offsets;
++  return w.s + (w.e - w.s) * 0.4 + Vector2(-w.d.y, w.d.x) * ((l + r) / 2);
++}
++
++void main() {
++  test(
++      'WL1 a frozen wall has no band: the band cache neither hosts nor joins '
++      'at it and liveWalls leaves it out; the live walls keep theirs', () {
++    final doc = liveDoc();
++    final bands = WallBands(liveOf(doc, frozen: {f}));
++    addTearDown(bands.dispose);
++    expect(bands.liveWalls(doc), [a, b]);
++    for (final (h, host) in [(a, a), (b, b), (f, null)]) {
++      final p = inBand(doc, h);
++      expect(bands.hostAt(doc, p.x, p.y), host, reason: h.toHex());
++      final out = Vector2(7, 7);
++      expect(bands.joinInto(doc, p.x, p.y, out), host != null,
++          reason: h.toHex());
++    }
++    // The control: nothing frozen, F is a wall with a band.
++    final all = WallBands(liveOf(doc));
++    addTearDown(all.dispose);
++    expect(all.liveWalls(doc), [a, b, f]);
++    final p = inBand(doc, f);
++    expect(all.hostAt(doc, p.x, p.y), f);
++  });
++
++  test(
++      'WL2 the document adapter: a frozen wall and a stray WallParams are no '
++      "walls and no host's others; a live host sees the live walls, "
++      'ascending, bitwise as WorldWall builds them, and moved stands in', () {
++    final doc = liveDoc();
++    final live = liveOf(doc, frozen: {f});
++    expect(
++        doc.components.withComponent<WallParams>().toList(), [a, b, f, nested],
++        reason: 'premise: four holders of WallParams');
++    expect(wallsInDocument(doc, f, live), isNull);
++    expect(wallsInDocument(doc, nested, live), isNull);
++    final w = wallsInDocument(doc, a, live)!;
++    expect(w.host.handle, a);
++    expect([for (final o in w.walls) o.handle], [b]);
++    final want = worldWallOf(doc, a);
++    expect([w.host.s.x, w.host.s.y, w.host.e.x, w.host.e.y],
++        [want.s.x, want.s.y, want.e.x, want.e.y]);
++    final pb = doc.components.get<WallParams>(b)!;
++    final moved = WorldWall(b, pb.copyWith(end: Vector2(-310.5, 920.25)),
++        doc.tree.accumulatedTransform(b));
++    expect(
++        identical(
++            wallsInDocument(doc, a, live, moved: {b: moved})!.walls.single,
++            moved),
++        isTrue);
++    // The control: nothing frozen, F is one of A's others.
++    expect(
++        [for (final o in wallsInDocument(doc, a, liveOf(doc))!.walls) o.handle],
++        [b, f]);
++  });
++
++  test(
++      "WL3 wallBandsOf: the kit's one WallBands per services, over their "
++      'live walls (a frozen one has no band), disposed with them: a change '
++      'after the dispose no longer reaches it', () async {
++    final doc = liveDoc();
++    final services =
++        FakePlanServices(document: doc, catalog: testCatalog(), frozen: {f});
++    final bands = wallBandsOf(services);
++    expect(identical(wallBandsOf(services), bands), isTrue);
++    expect(bands.liveWalls(doc), [a, b]);
++    // The control: a change reaches the live cache.
++    final g0 = bands.generation;
++    doc.commands.execute(addWall(doc, const Handle(7000), plan(-900, -800),
++        plan(2100, -400), 150, Justification.centre));
++    await pumpEventQueue();
++    expect(bands.generation, greaterThan(g0));
++    services.dispose();
++    final g1 = bands.generation;
++    doc.commands.execute(addWall(doc, const Handle(7100), plan(-900, -1800),
++        plan(2100, -1400), 150, Justification.centre));
++    await pumpEventQueue();
++    expect(bands.generation, g1, reason: 'disposed with its services');
++  });
++}
+diff --git a/packages/jet_cad_2d_kit_architecture/test/wall/wall_params_test.dart b/packages/jet_cad_2d_kit_architecture/test/wall/wall_params_test.dart
+new file mode 100644
+index 00000000..9dd4d1ea
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/test/wall/wall_params_test.dart
+@@ -0,0 +1,102 @@
++// Ported from jet_cad_floor_plan/test/wall_params_test.dart (3a Task 11).
++import 'package:jet_cad_2d_kit_architecture/src/wall/wall.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/wall_fixture.dart' show nextUp;
++
++void main() {
++  // Far-origin, non-round values: a key-order or field swap cannot hide.
++  const p = WallParams(
++      4500123.25, 1200456.5, 4503789.125, 1201011.75, 115, Justification.left);
++
++  test('WP1 toJson: key order start, end, thickness, justification', () {
++    final j = p.toJson();
++    expect(j.keys.toList(), ['start', 'end', 'thickness', 'justification']);
++    expect(j['start'], [4500123.25, 1200456.5]);
++    expect(j['end'], [4503789.125, 1201011.75]);
++    expect(j['thickness'], 115);
++    expect(j['justification'], 'left');
++    expect(p.typeId, 'architecture.wall');
++    expect(WallParams.componentTypeId, 'architecture.wall');
++    expect(p.start, Vector2(4500123.25, 1200456.5));
++    expect(p.end, Vector2(4503789.125, 1201011.75));
++  });
++
++  test('WP2 round trip is exact, for every justification', () {
++    for (final j in Justification.values) {
++      // 0.1 and 1/3 are not dyadic: a lossy codec shows.
++      final q = WallParams(4500000.1, 1200000.0 / 3, -0.3, 7e-7, 200.1, j);
++      final back = WallParams.fromJson(q.toJson());
++      expect(back, q);
++      expect(back.sx, q.sx);
++      expect(back.sy, q.sy);
++      expect(back.ex, q.ex);
++      expect(back.ey, q.ey);
++      expect(back.thickness, q.thickness);
++      expect(back.justification, j);
++    }
++    // Integer JSON numbers decode as doubles.
++    expect(
++        WallParams.fromJson({
++          'start': [1, 2],
++          'end': [3, 4],
++          'thickness': 200,
++          'justification': 'centre',
++        }),
++        const WallParams(1, 2, 3, 4, 200, Justification.centre));
++    expect(p.copyWith(), p);
++    expect(p.copyWith(end: Vector2(9, 8)),
++        const WallParams(4500123.25, 1200456.5, 9, 8, 115, Justification.left));
++    expect(
++        p.copyWith(
++            start: Vector2(1, 2),
++            thickness: 300,
++            justification: Justification.right),
++        const WallParams(
++            1, 2, 4503789.125, 1201011.75, 300, Justification.right));
++  });
++
++  test('WP3 == differs on each field alone; equal values hash alike', () {
++    const q = WallParams(4500123.25, 1200456.5, 4503789.125, 1201011.75, 115,
++        Justification.left);
++    expect(q, p);
++    expect(q.hashCode, p.hashCode);
++    final ulp = [
++      const WallParams(4500123.250000001, 1200456.5, 4503789.125, 1201011.75,
++          115, Justification.left),
++      const WallParams(4500123.25, 1200456.5000000002, 4503789.125, 1201011.75,
++          115, Justification.left),
++      const WallParams(4500123.25, 1200456.5, 4503789.125000001, 1201011.75,
++          115, Justification.left),
++      const WallParams(4500123.25, 1200456.5, 4503789.125, 1201011.7500000002,
++          115, Justification.left),
++      const WallParams(4500123.25, 1200456.5, 4503789.125, 1201011.75,
++          115.00000000000001, Justification.left),
++      const WallParams(4500123.25, 1200456.5, 4503789.125, 1201011.75, 115,
++          Justification.right),
++    ];
++    for (final (i, r) in ulp.indexed) {
++      expect(r == p, isFalse, reason: 'field $i');
++      expect(p == r, isFalse, reason: 'field $i');
++    }
++  });
++
++  test('WP4 fromJson of an unknown justification throws', () {
++    final j = p.toJson()..['justification'] = 'center';
++    expect(() => WallParams.fromJson(j), throwsArgumentError);
++  });
++
++  test(
++      'WP5 isWallThickness holds at kWallMaxThickness and fails one ulp '
++      'above it, and above the floor (post-11 (c))', () {
++    expect(kWallMaxThickness, 1e7);
++    expect(isWallThickness(kWallMaxThickness), isTrue);
++    expect(isWallThickness(nextUp(kWallMaxThickness)), isFalse);
++    expect(isWallThickness(nextUp(wallJoin.linear)), isTrue);
++    expect(isWallThickness(wallJoin.linear), isFalse);
++    for (final t in [1e10, 1e100, double.maxFinite, double.infinity]) {
++      expect(isWallThickness(t), isFalse, reason: '$t');
++    }
++  });
++}
+diff --git a/packages/jet_cad_2d_kit_architecture/test/wall/wall_regen_test.dart b/packages/jet_cad_2d_kit_architecture/test/wall/wall_regen_test.dart
+new file mode 100644
+index 00000000..9acee7dc
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/test/wall/wall_regen_test.dart
+@@ -0,0 +1,740 @@
++// Ported from jet_cad_floor_plan/test/wall_regen_test.dart (3a Task 11).
++import 'dart:convert';
++import 'dart:math' as math;
++
++import 'package:jet_cad_2d_kit_architecture/src/box/box.dart';
++import 'package:jet_cad_2d_kit_architecture/src/wall/wall.dart';
++import 'package:jet_cad_2d_kit_architecture/src/wall/wall_geometry.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/wall_fixture.dart';
++
++const centre = Justification.centre;
++const left = Justification.left;
++const right = Justification.right;
++
++/// The plan's rotation for relational fixtures: never 0° or 90°.
++const double rot = 23;
++
++/// Chosen so that [addL]'s joint is off by rounding in both x and y (with
++/// 1000 and 2000 it happens to meet bitwise), and [far]'s axis-aligned A is
++/// exactly horizontal.
++const Handle hA = Handle(1300), hB = Handle(2600), hC = Handle(3000);
++
++/// Load -> save identity is byte identity (spec 07 D13): a stored value,
++/// compared exactly. M-07e compares within a tolerance here; WR6's
++/// perturbed control catches it.
++bool sameSave(String a, String b) => a == b;
++
++/// [w]'s rectangle between its face offsets [lo] and [ro], from the
++/// fixture's explicit faces at its own endpoints.
++List<Vector2> rectOf(WorldWall w, double lo, double ro) {
++  final (a, b) = face(w, lo);
++  final (c, d) = face(w, ro);
++  return [a, b, c, d];
++}
++
++/// [v] turned [deg] degrees anticlockwise.
++Vector2 turned(Vector2 v, double deg) {
++  final r = deg * math.pi / 180;
++  final c = math.cos(r), s = math.sin(r);
++  return Vector2(v.x * c - v.y * s, v.x * s + v.y * c);
++}
++
++/// Executes [c] and checks the differential oracle: nothing drifts.
++void run(DraftDocument doc, DraftCommand c) {
++  doc.commands.execute(c);
++  expect(driftOf(doc), isEmpty, reason: 'drift after ${c.label}');
++}
++
++/// The select tool's group delete (`select_tool.dart` `_groupCascade`):
++/// every leaf except a fill whose boundary goes too, then the node.
++DraftCommand deleteLikeSelectTool(DraftDocument doc, Handle g) =>
++    CompoundCommand([
++      for (final k in kids(doc, g))
++        if (kindOf(doc, k) != EntityKind.fill) RemoveEntityCommand(k),
++      RemoveNodeCommand(g),
++    ], label: 'Delete');
++
++/// Moves object [h] by `(dx, dy)` in world: 03's whole-object gesture.
++DraftCommand moveBy(DraftDocument doc, Handle h, double dx, double dy) =>
++    TransformNodeCommand(
++        h,
++        Transform2.translation(dx, dy)
++            .multiply(doc.tree.accumulatedTransform(h)));
++
++/// The 67° L of WG2 at the far origin, each wall in its own group: A 200
++/// centre into the node, B 115 left out of it.
++void addL(DraftDocument doc) {
++  for (final c in lWalls(doc)) {
++    run(doc, c);
++  }
++}
++
++/// [addL]'s two creation commands, A's then B's.
++List<DraftCommand> lWalls(DraftDocument doc) {
++  final h = plan(0, 0);
++  return [
++    addWall(doc, hA, plan(-3000, 0), h, 200, centre),
++    addWall(doc, hB, h, polar(h, 180 - 67 + rot, 2500), 115, left),
++  ];
++}
++
++/// A's and B's two shared corners in world, each against the Cramer oracle
++/// of the faces that meet there.
++void expectMitre(DraftDocument doc,
++    {required double bThickness, String? reason}) {
++  final a = worldWallOf(doc, hA), b = worldWallOf(doc, hB);
++  final ra = worldOutline(doc, hA), rb = worldOutline(doc, hB);
++  expect(ra, hasLength(4), reason: reason);
++  expect(rb, hasLength(4), reason: reason);
++  final shared = sharedNear(ra, rb);
++  expect(shared, hasLength(2), reason: reason);
++  final (al1, al2) = face(a, 100);
++  final (ar1, ar2) = face(a, -100);
++  final (bl1, bl2) = face(b, bThickness);
++  final (br1, br2) = face(b, 0);
++  expect(nearestIn(shared, oracleMeet(al1, al2, bl1, bl2)), lessThan(1e-6),
++      reason: reason);
++  expect(nearestIn(shared, oracleMeet(ar1, ar2, br1, br2)), lessThan(1e-6),
++      reason: reason);
++}
++
++/// Spec 07 D6's short wall A (150 long, 400 thick, centre) between two
++/// nodes at plan `(x, y)`, handles [base], `base + 100`, `base + 200`. Its
++/// neighbours, as thick, are L (out of the first node at 130°) and R (out
++/// of the second at 50°): A's two mitres run 93 mm along its faces and
++/// cross inside it, so A squares both ends; L and R splay apart, so their
++/// reaches do not overlap and only A links them.
++({Handle a, Handle l, Handle r}) addShortWall(
++    DraftDocument doc, double x, double y, int base) {
++  final s0 = plan(x, y), s1 = plan(x + 150, y);
++  final a = Handle(base), l = Handle(base + 100), r = Handle(base + 200);
++  // One command: all three regenerate together, so a later edit of one of
++  // them is the only thing under test.
++  run(
++      doc,
++      CompoundCommand([
++        addWall(doc, l, polar(s0, 130 + rot, 2000), s0, 400, centre),
++        addWall(doc, a, s0, s1, 400, centre),
++        addWall(doc, r, s1, polar(s1, 50 + rot, 2000), 400, centre),
++      ], label: 'Add short wall'));
++  return (a: a, l: l, r: r);
++}
++
++/// A node of spike Q5b's generator (seed 7707, trial 161) that drops a
++/// crossing lobe: `(angle, length, thickness, justification, from hub)`.
++const holeNode = [
++  (331.4, 4005.0, 250.0, left, false),
++  (294.6, 2843.0, 115.0, centre, false),
++  (115.5, 2117.0, 150.0, centre, true),
++];
++
++/// Adds [holeNode] at plan `(x, y)`, turned by [rot], handles [base],
++/// `base + 100`, `base + 200`.
++List<Handle> addHoleNode(DraftDocument doc, double x, double y, int base) {
++  final hub = plan(x, y);
++  return [
++    for (final (i, (deg, len, t, j, fromHub)) in holeNode.indexed)
++      () {
++        final h = Handle(base + 100 * i);
++        final tip = polar(hub, deg + rot, len);
++        run(
++            doc,
++            fromHub
++                ? addWall(doc, h, hub, tip, t, j)
++                : addWall(doc, h, tip, hub, t, j));
++        return h;
++      }(),
++  ];
++}
++
++/// Each diagnostic as its code and the values of its handles.
++List<String> summary(List<Diagnostic> ds) => [
++      for (final d in ds)
++        [d.code, for (final h in d.handles) h.value].join(' '),
++    ];
++
++bool overlaps(Aabb2 a, Aabb2 b) =>
++    a.minX < b.maxX && b.minX < a.maxX && a.minY < b.maxY && b.minY < a.maxY;
++
++Aabb2 wallReach(DraftDocument doc, Handle h) => const WallType().reach(
++    doc.components.get<WallParams>(h)!, doc.tree.accumulatedTransform(h));
++
++/// The select tool's rotate (`GripDrag.rotateTo`): every object in [hs]
++/// turned [deg] degrees about [pivot], each node's transform premultiplied
++/// by `T(pivot)·R·T(-pivot)`, in one command.
++DraftCommand rotateAbout(
++    DraftDocument doc, List<Handle> hs, Vector2 pivot, double deg) {
++  final t = Transform2.translation(pivot.x, pivot.y)
++      .multiply(Transform2.rotation(deg * math.pi / 180))
++      .multiply(Transform2.translation(-pivot.x, -pivot.y));
++  return CompoundCommand([
++    for (final h in hs)
++      TransformNodeCommand(h, t.multiply(doc.tree[h]!.transform)),
++  ], label: 'Rotate');
++}
++
++/// [h]'s outline boundary: the polyline its one fill names.
++Handle boundaryOfWall(DraftDocument doc, Handle h) {
++  final fill =
++      kids(doc, h).firstWhere((k) => kindOf(doc, k) == EntityKind.fill);
++  return Handle(payloadOf(doc, fill).scalars[0].toInt());
++}
++
++/// Whether [a] and [b] hold the same points, bitwise.
++bool sameRing(List<Vector2> a, List<Vector2> b) =>
++    a.length == b.length &&
++    [for (var i = 0; i < a.length; i++) a[i].x == b[i].x && a[i].y == b[i].y]
++        .every((x) => x);
++
++/// An acute L drawn at the identity, A into [hub] and B out of it at [deg],
++/// then both rotated about [hub] by [turn]: the edit must land, every
++/// stored outline must triangulate, nothing drifts, and undo is exact.
++///
++/// And `diagnose` agrees with `generate`: a wall not named `wall.fallback`
++/// stores the local image of its joined world outline, and a named one
++/// fell back in world or stores its free rectangle in local space because
++/// that image is not simple.
++void expectAcuteLRotates(
++    Vector2 hub, double deg, double turn, Justification ja, Justification jb) {
++  final doc = wallDoc();
++  final id = Transform2.identity();
++  final why = 'L at $deg°, $ja/$jb, turned $turn°';
++  run(
++      doc,
++      CompoundCommand([
++        addWall(doc, hA, polar(hub, 180, 3734.5), hub, 200, ja, at: id),
++        addWall(doc, hB, hub, polar(hub, 180 - deg, 600), 200, jb, at: id),
++      ], label: 'Add L'));
++  final before = canon(doc);
++  doc.commands.execute(rotateAbout(doc, [hA, hB], hub, turn));
++  expect(driftOf(doc), isEmpty, reason: why);
++  final fellBack = {
++    for (final d in diagnosticsOf(doc))
++      if (d.code == 'wall.fallback') d.handles.single
++  };
++  for (final (h, other) in [(hA, hB), (hB, hA)]) {
++    final boundary = boundaryOfWall(doc, h);
++    expect(doc.fills.trianglesFor(boundary), isNotEmpty, reason: '$why $h');
++    final stored = pointsOf(payloadOf(doc, boundary), closed: true);
++    final world = outline(worldWallOf(doc, h), [worldWallOf(doc, other)]);
++    final toLocal = doc.tree.accumulatedTransform(h).invert();
++    final image = [for (final q in world.ring) toLocal.transformPoint(q)];
++    if (!fellBack.contains(h)) {
++      expect(world.fellBack, isFalse, reason: '$why $h');
++      expect(sameRing(stored, image), isTrue, reason: '$why $h');
++    } else if (!world.fellBack) {
++      expect(isSimpleCcw(image), isFalse, reason: '$why $h');
++      final free = outline(
++          WorldWall(h, doc.components.get<WallParams>(h)!, id), const []);
++      expect(sameRing(stored, free.ring), isTrue, reason: '$why $h');
++    }
++  }
++  doc.commands.undo();
++  expect(canon(doc), before, reason: why);
++}
++
++void main() {
++  test(
++      'WR1 one wall: fill < outline < centreline; the fill names the closed '
++      'outline; the centreline is start -> end', () {
++    final doc = wallDoc();
++    final s = plan(-1200, 300), e = plan(2300, 1150);
++    run(doc, addWall(doc, hA, s, e, 200, left));
++    final ks = kids(doc, hA);
++    expect([for (final k in ks) k.value],
++        [hA.value + 1, hA.value + 2, hA.value + 3]);
++    expect([for (final k in ks) kindOf(doc, k)],
++        [EntityKind.fill, EntityKind.polyline, EntityKind.polyline]);
++    final [fill, outline, centreline] = ks;
++    expect(payloadOf(doc, fill).scalars, [outline.value.toDouble()]);
++    expect(doc.fills.fillsOf(outline), [fill]);
++    final c = payloadOf(doc, outline).coords;
++    expect(c, hasLength(10), reason: 'four points, closed');
++    expect([c[8], c[9]], [c[0], c[1]]);
++    final p = doc.components.get<WallParams>(hA)!;
++    expect(payloadOf(doc, centreline).coords, [p.sx, p.sy, p.ex, p.ey]);
++    expect(payloadOf(doc, centreline).scalars, isEmpty);
++    // Left-justified: the body lies between offsets 200 and 0 along the left
++    // normal of s -> e, taken from the plan points themselves.
++    final dx = e.x - s.x, dy = e.y - s.y;
++    final len = math.sqrt(dx * dx + dy * dy);
++    final n = Vector2(-dy / len, dx / len);
++    final ring = worldOutline(doc, hA);
++    expect(isRectNear(ring, [s + n * 200, e + n * 200, s, e]), isTrue,
++        reason: '$ring');
++    expect(signedArea(ring), greaterThan(0), reason: 'anticlockwise');
++    expect(diagnosticsOf(doc), isEmpty);
++  });
++
++  test(
++      'WR2 the 67° L, each wall in its own group: two corners shared in '
++      'world, each equal to the oracle; also with a joint one ulp apart '
++      '(M-07h, M-07d)', () {
++    // Exactly one ulp apart in x: each group sits on its own hub end.
++    final one = wallDoc();
++    final hub = far(0, 0);
++    final ulp = Vector2(nextUp(hub.x), hub.y);
++    run(one,
++        addSpoke(one, hA, hub, 180 + rot, 3000, 200, centre, fromHub: false));
++    run(one,
++        addSpoke(one, hB, ulp, 180 - 67 + rot, 2500, 115, left, fromHub: true));
++    final a1 = worldWallOf(one, hA), b1 = worldWallOf(one, hB);
++    expect(b1.s.x - a1.e.x, nextUp(hub.x) - hub.x);
++    expect(b1.s.x, isNot(a1.e.x));
++    expect(b1.s.y, a1.e.y);
++    expectMitre(one, bThickness: 115, reason: 'one ulp apart');
++
++    // Joined within rounding: two generic rotated groups.
++    final doc = wallDoc();
++    addL(doc);
++    final a = worldWallOf(doc, hA), b = worldWallOf(doc, hB);
++    expect(a.e.x == b.s.x && a.e.y == b.s.y, isFalse);
++    expect((a.e - b.s).length, lessThan(wallJoin.linear));
++    expectMitre(doc, bThickness: 115, reason: 'rounding apart');
++    expect(diagnosticsOf(doc), isEmpty);
++  });
++
++  test(
++      'WR3 moving B off A is one undo step: A\'s end squares, by '
++      'coordinates; undo and redo are exact (M-07g)', () {
++    final doc = wallDoc();
++    // Both walls in one command: A's mitre is built by the creation itself,
++    // not by B's creation regenerating A, so only the move is under test.
++    run(doc, CompoundCommand(lWalls(doc), label: 'Add L'));
++    expectMitre(doc, bThickness: 115);
++    final aKids = kids(doc, hA), bKids = kids(doc, hB);
++    final before = canon(doc);
++    final depth = doc.commands.undoDepth;
++    doc.commands.execute(moveBy(doc, hB, 6000, 5500));
++    expect(doc.commands.undoDepth, depth + 1);
++    final a = worldWallOf(doc, hA), b = worldWallOf(doc, hB);
++    expect(isRectNear(worldOutline(doc, hA), rectOf(a, 100, -100)), isTrue,
++        reason: 'A is free at both ends');
++    expect(isRectNear(worldOutline(doc, hB), rectOf(b, 115, 0)), isTrue,
++        reason: 'B is free at both ends');
++    expect(driftOf(doc), isEmpty);
++    expect(kids(doc, hA), aKids);
++    expect(kids(doc, hB), bKids);
++    final after = canon(doc);
++    doc.commands.undo();
++    expect(canon(doc), before);
++    expect(driftOf(doc), isEmpty);
++    doc.commands.redo();
++    expect(canon(doc), after);
++    expect(driftOf(doc), isEmpty);
++  });
++
++  test('WR4 a thickness edit on B moves A\'s corners, in one step', () {
++    final doc = wallDoc();
++    addL(doc);
++    final ringA = worldOutline(doc, hA);
++    final aKids = kids(doc, hA), bKids = kids(doc, hB);
++    final before = canon(doc);
++    final depth = doc.commands.undoDepth;
++    final p = doc.components.get<WallParams>(hB)!;
++    run(doc, SetComponentCommand<WallParams>(hB, p.copyWith(thickness: 180)));
++    expect(doc.commands.undoDepth, depth + 1);
++    expectMitre(doc, bThickness: 180);
++    // Rewritten in place (spec 07 D3): no child added, removed or renamed.
++    expect(kids(doc, hA), aKids);
++    expect(kids(doc, hB), bKids);
++    // B is left-justified: its face at offset 0 stays put, so A's corner
++    // on it and A's far end do not move; the corner on B's thicker face
++    // does.
++    expect(sharedNear(worldOutline(doc, hA), ringA), hasLength(3));
++    doc.commands.undo();
++    expect(canon(doc), before);
++    expectMitre(doc, bThickness: 115);
++    expect(kids(doc, hA), aKids);
++    expect(kids(doc, hB), bKids);
++  });
++
++  test(
++      'WR5 an X stays two rectangles; a T onto one of them butts its near '
++      'face', () {
++    final doc = wallDoc();
++    run(doc,
++        addWall(doc, hA, plan(-1000, -1000), plan(1000, 900), 150, centre));
++    run(doc, addWall(doc, hB, plan(-1000, 800), plan(1200, -700), 240, left));
++    final x1 = worldWallOf(doc, hA), x2 = worldWallOf(doc, hB);
++    expect(isRectNear(worldOutline(doc, hA), rectOf(x1, 75, -75)), isTrue);
++    expect(isRectNear(worldOutline(doc, hB), rectOf(x2, 240, 0)), isTrue);
++    // The stem ends on B's centreline, three quarters along, and leaves it at
++    // 58° on B's left: B's near face is its left face (offset 240), not its
++    // centreline.
++    final p = x2.s + (x2.e - x2.s) * 0.75;
++    final dir = turned((x2.e - x2.s).normalized(), 58);
++    run(doc, addWall(doc, hC, p + dir * 2400, p, 115, centre));
++    final stem = worldOutline(doc, hC);
++    final capPoints = [
++      for (final q in stem)
++        if ((q - p).length < 500) q
++    ];
++    expect(capPoints, hasLength(2));
++    final (n1, n2) = face(x2, 240);
++    final (f1, f2) = face(x2, 0);
++    for (final q in capPoints) {
++      expect(distToLine(q, n1, n2), lessThan(1e-6));
++      expect(distToLine(q, f1, f2), greaterThan(100));
++    }
++    expect(isRectNear(worldOutline(doc, hA), rectOf(x1, 75, -75)), isTrue);
++    expect(isRectNear(worldOutline(doc, hB), rectOf(x2, 240, 0)), isTrue);
++    expect(diagnosticsOf(doc), isEmpty);
++  });
++
++  test(
++      'WR6 load -> save is byte-identical, drift() is empty after reload, '
++      'typed components equal; a one-ulp perturbed outline is not (M-07e)', () {
++    final doc = wallDoc();
++    addL(doc);
++    final saved = enc(doc);
++    final back = reload(saved);
++    expect(sameSave(enc(back), saved), isTrue);
++    expect(driftOf(back), isEmpty);
++    for (final h in [hA, hB]) {
++      expect(back.components.get<WallParams>(h),
++          doc.components.get<WallParams>(h));
++      expect(back.components.get<WallParams>(h), isA<WallParams>());
++    }
++    // The control: one stored outline coordinate of A, one ulp off. Load
++    // trusts geometry (06 D10), so the reload keeps it and saves it.
++    final j = jsonDecode(saved) as Map<String, Object?>;
++    final boundary = kids(doc, hA)[1];
++    final entity = (j['entities']! as List)
++        .cast<Map<String, Object?>>()
++        .firstWhere((e) => (e['record']! as Map)['handle'] == boundary.value);
++    final coords = (entity['geometry']! as Map)['coords']! as List;
++    final was = (coords[2] as num).toDouble();
++    coords[2] = nextUp(was);
++    expect(coords[2], isNot(was));
++    final perturbed = jsonEncode(j);
++    final off = reload(perturbed);
++    expect(sameSave(enc(off), saved), isFalse);
++    expect(sameSave(enc(off), perturbed), isTrue);
++    expect(driftOf(off), [hA]);
++  });
++
++  test(
++      'WR7 deleting A with the select tool\'s cascade detaches it and squares '
++      'B\'s end; undo restores A\'s three children and the mitre', () {
++    final doc = wallDoc();
++    addL(doc);
++    final aKids = kids(doc, hA);
++    final before = canon(doc);
++    run(doc, deleteLikeSelectTool(doc, hA));
++    expect(doc.components.get<WallParams>(hA), isNull);
++    expect(doc.tree[hA], isNull);
++    expect(kids(doc, hA), isEmpty);
++    final b = worldWallOf(doc, hB);
++    expect(isRectNear(worldOutline(doc, hB), rectOf(b, 115, 0)), isTrue);
++    doc.commands.undo();
++    expect(kids(doc, hA), aKids);
++    expect(canon(doc), before);
++    expectMitre(doc, bThickness: 115);
++    expect(driftOf(doc), isEmpty);
++  });
++
++  test(
++      'WR8 a short wall between two nodes: moving the far neighbour of one '
++      'node leaves nothing drifted (M-07l)', () {
++    final doc = wallDoc();
++    final (:a, :l, :r) = addShortWall(doc, 0, 0, 1000);
++    // L and R are not neighbours: only the short wall links them.
++    expect(overlaps(wallReach(doc, l), wallReach(doc, r)), isFalse);
++    expect(
++        isRectNear(
++            worldOutline(doc, a), rectOf(worldWallOf(doc, a), 200, -200)),
++        isTrue,
++        reason: 'the short wall squares both its ends');
++    expect(summary(diagnosticsOf(doc)), ['wall.fallback ${a.value}']);
++    final ringL = worldOutline(doc, l);
++    run(doc, moveBy(doc, r, 5000, -6000));
++    expect(diagnosticsOf(doc), isEmpty, reason: 'A mitres at L again');
++    // L's outline never depended on R.
++    expect(worldOutline(doc, l), ringL);
++    expect(sharedNear(worldOutline(doc, a), ringL), hasLength(2));
++  });
++
++  test(
++      'WR9 diagnostics() names a hole node once, a fallback wall and a '
++      'degenerate wall; the sample plan and a clean L report none', () {
++    final doc = wallDoc();
++    final node = addHoleNode(doc, -9000, 9000, 1000);
++    final (:a, l: _, r: _) = addShortWall(doc, 9000, 9000, 2000);
++    const zeroLength = Handle(3000), zeroThick = Handle(3100);
++    final z = plan(0, -9000);
++    run(doc, addWall(doc, zeroLength, z, z, 200, centre));
++    run(doc,
++        addWall(doc, zeroThick, plan(-500, -9000), plan(500, -9000), 0, left));
++    expect(kids(doc, zeroLength).map((k) => kindOf(doc, k)),
++        [EntityKind.polyline]);
++    expect(
++        kids(doc, zeroThick).map((k) => kindOf(doc, k)), [EntityKind.polyline]);
++    final ds = diagnosticsOf(doc);
++    expect(summary(ds), [
++      'wall.hole ${node.map((h) => h.value).join(' ')}',
++      'wall.fallback ${a.value}',
++      'wall.degenerate ${zeroLength.value}',
++      'wall.degenerate ${zeroThick.value}',
++    ]);
++    expect(ds.every((d) => d.severity == DiagnosticSeverity.warning), isTrue);
++    for (final d in ds) {
++      for (final h in d.handles) {
++        expect(d.message, contains(h.toHex()));
++      }
++    }
++    // Every wall of the hole node still has a sound outline.
++    for (final h in node) {
++      expect(isSimpleCcw(worldOutline(doc, h)), isTrue);
++    }
++
++    // The sample plan's line (wall_regen_test.dart:497-501) returns with
++    // buildSampleFlat in Task 25 (ruling R11-1).
++    final clean = wallDoc();
++    addL(clean);
++    expect(diagnosticsOf(clean), isEmpty);
++  });
++
++  test(
++      'WR10 a box overlapping a wall: each regenerates on its own; the wall '
++      'ignores the box and the box ignores the wall', () {
++    final doc = wallDoc();
++    const box = Handle(5000);
++    final boxAt = Transform2.translation(ox - 400, oy - 300)
++        .multiply(Transform2.rotation(0.61));
++    run(
++        doc,
++        CompoundCommand([
++          AddNodeCommand(GroupNode(
++              handle: box,
++              parent: doc.rootHandle,
++              transform: boxAt,
++              children: const [])),
++          SetComponentCommand<BoxParams>(box, const BoxParams(1500, 900)),
++        ], label: 'Add box'));
++    run(doc, addWall(doc, hA, plan(-2000, 100), plan(2500, 400), 200, right));
++    expect(
++        overlaps(
++            wallReach(doc, hA),
++            const BoxType().reach(doc.components.get<BoxParams>(box)!,
++                doc.tree.accumulatedTransform(box))),
++        isTrue,
++        reason: 'they are neighbours');
++
++    void expectIndependent() {
++      final w = worldWallOf(doc, hA);
++      // Right-justified: the body lies between offsets 0 and -t.
++      expect(isRectNear(worldOutline(doc, hA), rectOf(w, 0, -w.t)), isTrue);
++      final p = doc.components.get<BoxParams>(box)!;
++      final m = doc.tree.accumulatedTransform(box);
++      final corners = [
++        Vector2(0, 0),
++        Vector2(p.width, 0),
++        Vector2(p.width, p.height),
++        Vector2(0, p.height),
++      ];
++      final lines = kids(doc, box);
++      expect([for (final k in lines) kindOf(doc, k)],
++          List.filled(4, EntityKind.line));
++      for (final (i, k) in lines.indexed) {
++        expect(payloadOf(doc, k).coords, [
++          corners[i].x,
++          corners[i].y,
++          corners[(i + 1) % 4].x,
++          corners[(i + 1) % 4].y,
++        ]);
++      }
++      // The wall's centreline runs through the box.
++      final quad = [for (final c in corners) m.transformPoint(c)];
++      expect([
++        for (var i = 0; i <= 20; i++)
++          if (insideRing(w.s + (w.e - w.s) * (i / 20), quad)) i
++      ], isNotEmpty);
++    }
++
++    expectIndependent();
++    final wallRing = payloadOf(doc, kids(doc, hA)[1]).coords.toList();
++    run(doc, SetComponentCommand<BoxParams>(box, const BoxParams(1800, 1100)));
++    expect(payloadOf(doc, kids(doc, hA)[1]).coords, wallRing);
++    expectIndependent();
++    final p = doc.components.get<WallParams>(hA)!;
++    run(doc, SetComponentCommand<WallParams>(hA, p.copyWith(thickness: 320)));
++    expectIndependent();
++    expect(
++        isRectNear(
++            worldOutline(doc, hA), rectOf(worldWallOf(doc, hA), 0, -320)),
++        isTrue);
++  });
++
++  test(
++      'WR11 an axis-aligned L (0° and 90° in world) is a pair of neighbours '
++      'and mitres (M-07s)', () {
++    final doc = wallDoc();
++    final h = far(0, 0);
++    run(doc, addWall(doc, hA, far(-3000, 0), h, 200, centre));
++    run(doc, addWall(doc, hB, h, far(0, 2500), 115, left));
++    expectMitre(doc, bThickness: 115);
++    expect(diagnosticsOf(doc), isEmpty);
++  });
++
++  test(
++      'WR12 a 26-wall plan with every joint kind: the incremental document '
++      'and one built in reverse order hold the same world outlines', () {
++    final specs = <(Handle, Vector2, Vector2, double, Justification)>[];
++    var next = 1000;
++    void wall(Vector2 s, Vector2 e, double t, Justification j) {
++      specs.add((Handle(next), s, e, t, j));
++      next += 100;
++    }
++
++    // A room of four Ls at unequal angles, and a stem teed at both ends.
++    final p0 = plan(0, 0), p1 = plan(4000, 300);
++    final p2 = plan(3600, 3100), p3 = plan(-200, 2700);
++    wall(p0, p1, 200, centre);
++    wall(p1, p2, 115, left);
++    wall(p2, p3, 150, right);
++    wall(p3, p0, 200, centre);
++    wall(p0 + (p1 - p0) * 0.4, p2 + (p3 - p2) * 0.55, 100, centre);
++    // An X, and a stem teed onto one of its walls.
++    final x1s = plan(8000, -1000), x1e = plan(10000, 900);
++    final x2s = plan(8000, 800), x2e = plan(10200, -700);
++    wall(x1s, x1e, 150, centre);
++    wall(x2s, x2e, 240, left);
++    final q = x2s + (x2e - x2s) * 0.75;
++    wall(q + turned((x2e - x2s).normalized(), 58) * 2400, q, 115, centre);
++    // A three-way node.
++    final n3 = plan(0, 9000);
++    wall(n3, polar(n3, 10 + rot, 3000), 200, centre);
++    wall(polar(n3, 50 + rot, 2000), n3, 115, left);
++    wall(n3, polar(n3, 200 + rot, 2500), 150, right);
++    // A four-way cross.
++    final n4 = plan(9000, 9000);
++    wall(n4, polar(n4, 0 + rot, 3000), 200, centre);
++    wall(polar(n4, 180 + rot, 3000), n4, 200, centre);
++    wall(n4, polar(n4, 90 + rot, 2500), 115, left);
++    wall(polar(n4, 270 + rot, 2500), n4, 115, left);
++    // A collinear step.
++    wall(plan(15000, 0), plan(18000, 0), 200, centre);
++    wall(plan(18000, 0), plan(21000, 0), 115, left);
++    // A short wall that falls back, between two nodes.
++    final s0 = plan(18000, 9000), s1 = plan(18150, 9000);
++    wall(polar(s0, 130 + rot, 2000), s0, 400, centre);
++    wall(s0, s1, 400, centre);
++    wall(s1, polar(s1, 50 + rot, 2000), 400, centre);
++    // A node that leaves a hole.
++    final hub = plan(0, 18000);
++    for (final (deg, len, t, j, fromHub) in holeNode) {
++      final tip = polar(hub, deg + rot, len);
++      fromHub ? wall(hub, tip, t, j) : wall(tip, hub, t, j);
++    }
++    // A 20° L, whose outer wedge is bevelled.
++    final n2 = plan(9000, 18000);
++    wall(plan(6000, 18000), n2, 200, centre);
++    wall(n2, polar(n2, 180 - 20 + rot, 2500), 200, centre);
++    // A free wall.
++    wall(plan(17000, 17000), plan(19500, 18200), 300, right);
++    expect(specs.length, greaterThanOrEqualTo(20));
++
++    DraftDocument build(Iterable<int> order) {
++      final doc = wallDoc();
++      for (final i in order) {
++        final (h, s, e, t, j) = specs[i];
++        run(doc, addWall(doc, h, s, e, t, j));
++      }
++      return doc;
++    }
++
++    final n = specs.length;
++    final incremental = build([for (var i = 0; i < n; i++) i]);
++    final fresh = build([for (var i = n - 1; i >= 0; i--) i]);
++
++    // The plan holds every joint kind.
++    final world = [for (final s in specs) worldWallOf(incremental, s.$1)];
++    Joint jointOf(int i, int k) => classify(world[i], k, world);
++    expect(jointOf(0, 1), isA<NodeJoint>(), reason: 'L');
++    expect(jointOf(4, 0), isA<Tee>(), reason: 'T');
++    expect(jointOf(4, 1), isA<Tee>(), reason: 'T');
++    expect(jointOf(5, 0), isA<Free>(), reason: 'X: nothing at the ends');
++    expect(jointOf(7, 1), isA<Tee>(), reason: 'T onto the X');
++    expect((jointOf(8, 0) as NodeJoint).ends, hasLength(3));
++    expect((jointOf(11, 0) as NodeJoint).ends, hasLength(4));
++    expect((jointOf(15, 1) as NodeJoint).ends, hasLength(2), reason: 'step');
++    expect([for (final d in diagnosticsOf(incremental)) d.code],
++        ['wall.fallback', 'wall.hole']);
++    expect(diagnosticsOf(fresh), diagnosticsOf(incremental));
++
++    for (final (h, _, _, _, _) in specs) {
++      final a = worldOutline(incremental, h), b = worldOutline(fresh, h);
++      expect(a, hasLength(b.length), reason: h.toHex());
++      expect(a.length, greaterThanOrEqualTo(4), reason: h.toHex());
++      // Exact: every outline is a function of the parameters alone, so the
++      // build order leaves no trace in the bits.
++      for (var i = 0; i < a.length; i++) {
++        expect([a[i].x, a[i].y], [b[i].x, b[i].y], reason: '${h.toHex()} $i');
++      }
++    }
++  });
++
++  test(
++      'WR13 an acute L rotated about its node: an outline simple in world '
++      'but not in group-local space falls back in local space; the edit '
++      'lands and diagnose agrees (final review I1)', () {
++    // The reviewer's reproduction: A 200 right into the hub, B 200 left out
++    // of it at 178°, both at the identity, turned 133° about the hub.
++    final hub = far(1234.5, 678.25);
++    final doc = wallDoc();
++    final id = Transform2.identity();
++    run(
++        doc,
++        CompoundCommand([
++          addWall(doc, hA, far(-2500, 678.25), hub, 200, right, at: id),
++          addWall(doc, hB, hub, polar(hub, 178, 600), 200, left, at: id),
++        ], label: 'Add L'));
++    final before = canon(doc);
++    final depth = doc.commands.undoDepth;
++    doc.commands.execute(rotateAbout(doc, [hA, hB], hub, 133));
++    expect(doc.commands.undoDepth, depth + 1, reason: 'the rotate landed');
++    expect(driftOf(doc), isEmpty);
++    // A's world outline is simple, its local image is not: A falls back.
++    final a = worldWallOf(doc, hA);
++    final world = outline(a, [worldWallOf(doc, hB)]);
++    expect(world.fellBack, isFalse);
++    final toLocal = doc.tree.accumulatedTransform(hA).invert();
++    expect(isSimpleCcw([for (final q in world.ring) toLocal.transformPoint(q)]),
++        isFalse);
++    // B, 600 long at 2° to A, is D6's short wall in world already.
++    expect(outline(worldWallOf(doc, hB), [a]).fellBack, isTrue);
++    expect(summary(diagnosticsOf(doc)),
++        ['wall.fallback ${hA.value}', 'wall.fallback ${hB.value}']);
++    // A's stored outline is its free rectangle in local space, bitwise.
++    expect(
++        pointsOf(payloadOf(doc, boundaryOfWall(doc, hA)), closed: true)
++            .map((q) => [q.x, q.y]),
++        outline(
++            WorldWall(
++                hA, doc.components.get<WallParams>(hA)!, Transform2.identity()),
++            const []).ring.map((q) => [q.x, q.y]));
++    for (final h in [hA, hB]) {
++      expect(doc.fills.trianglesFor(boundaryOfWall(doc, h)), isNotEmpty);
++    }
++    final after = canon(doc);
++    doc.commands.undo();
++    expect(canon(doc), before);
++    doc.commands.redo();
++    expect(canon(doc), after);
++
++    // A small sweep: acute Ls of 2-5°, every justification pair of A right
++    // or left with B left or right, a handful of turns.
++    for (final deg in [2.0, 3.0, 4.5, 5.0]) {
++      for (final (ja, jb) in [(right, left), (left, right), (right, right)]) {
++        for (final turn in [17.0, 133.0, 211.5, 299.0]) {
++          expectAcuteLRotates(hub, deg, turn, ja, jb);
++        }
++      }
++    }
++  });
++}

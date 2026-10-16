@@ -1,0 +1,1099 @@
+# Review package: 690e36e0..HEAD
+
+## Commits
+9117826c test(plan): a frozen object's referents, a throwing references and the service copy (spec 3a C1.10)
+7e6b671d feat(plan): grip refusals; a frozen object's referents locked (spec 3a C1.8, C1.10)
+
+## Files changed
+ docs/kits.md                                       |   5 +-
+ .../2026-10-14-plan-library-design-mode-design.md  |   8 +
+ .../lib/src/controller/plan_controller.dart        |  69 ++++-
+ packages/jet_cad_2d_plan/lib/src/kits/guard.dart   |  51 +++-
+ packages/jet_cad_2d_plan/lib/src/kits/locks.dart   |   8 +-
+ .../lib/src/service/service_session.dart           |   4 +-
+ .../test/kits/frozen_references_test.dart          | 154 +++++++++++
+ .../test/kits/grip_refusal_test.dart               | 283 +++++++++++++++++++++
+ packages/jet_cad_2d_plan/test/kits/locks_test.dart |  15 +-
+ 9 files changed, 567 insertions(+), 30 deletions(-)
+
+## Diff
+diff --git a/docs/kits.md b/docs/kits.md
+index 5c2b09e4..4147fc5d 100644
+--- a/docs/kits.md
++++ b/docs/kits.md
+@@ -489,31 +489,34 @@ already fits.
+ ### 10.8 When a kit's code fails
+ 
+ Every hook is called through a guard. A failure never stops the plan; it
+ becomes a `KitDiagnostic` (kit, subject, `KitDiagnosticCode`, message),
+ once per subject and code:
+ 
+ | What throws | What happens |
+ |---|---|
+ | a `ParametricType` hook | the edit is rolled back; the type's objects are probed, and each one whose hooks throw is frozen (treated as a plain group) and locked; the edit is tried once more. One broken object blocks one edit, once |
+ | a component's `fromJson`, on load | the component is kept as stored, and its object is locked |
+-| grips, an attachment provider | none for that object; no attachment |
++| grips, an attachment provider | an `ArgumentError` from a grip's `drag` or `preview` refuses that point (no move, nothing reported); anything else: no grips for that object; no attachment |
+ | a tool's `create` | the tool is disabled |
+ | a tool's event or painting | the tool is cancelled and selection is armed |
+ | a spec's `write` or `apply` | the field shows its stored value |
+ | a section | a small "section failed" box in its place |
+ | a kit's `prepare` | the plan opens without what it would have added |
+ 
+ A plan that names a kit the host did not load opens: that kit's objects
+ draw, are locked, and are saved back unchanged (`kitMissing`). A plan saved
+ by a newer version of a loaded kit opens with a warning (`kitNewer`).
+ 
++A frozen object's live referents (an opening's host wall) are locked with
++it: they cannot be edited or deleted while it is frozen.
++
+ ### 10.9 The engine's types, and byte equality
+ 
+ **The engine's types bind the contract.** A `PlanType` takes the engine's
+ `ParametricType<T>` and `Component`; a tool commits the engine's
+ `DraftCommand`s to its `DraftDocument`; a library's `SymbolLeaf` exposes
+ `EntityRecord` and `GeometryPayload`, a `SymbolEntry` its `Definition`.
+ Wrapping them in contract types would rewrite the parametric and grip
+ layers, so the contract uses them as they are. A breaking change of one of
+ them in `jet_cad_2d` 0.x is a breaking change of the contract and of every
+ kit that uses it.
+diff --git a/docs/superpowers/specs/2026-10-14-plan-library-design-mode-design.md b/docs/superpowers/specs/2026-10-14-plan-library-design-mode-design.md
+index 3949dd73..aa3ef2d4 100644
+--- a/docs/superpowers/specs/2026-10-14-plan-library-design-mode-design.md
++++ b/docs/superpowers/specs/2026-10-14-plan-library-design-mode-design.md
+@@ -854,20 +854,28 @@ From the 3a spec
+   load order, before any system is installed, then the history is
+   cleared, before the save point and the unsettled baseline; a load or an
+   import never is. A prepare that throws is a `hookFailed`, and the plan
+   opens.
+ - **P2, the controller's `build`** (3a C1.9): `PlanController(build:)`
+   (ignored with `json`) and `newPlan(build:)` run a `PlanBuild` on the new
+   plan once its system is installed, unrestricted, then clear the history,
+   so the built plan opens clean and still unsettled; its words are every
+   loaded kit's, the host's first. A build that throws leaves the empty
+   plan and is a `hookFailed` of the kit `plan`.
++- **P4, the failure boundary's grips row** (3a C1.8): an `ArgumentError`
++  from a kit grip's `drag` or `preview` refuses that point only (no move
++  for that event, no diagnostic, the grips kept); anything else keeps the
++  row. plan.select's drop is refused as `execute` refuses an edit (its
++  `false`: the drag cancelled, no exception); a `StateError` goes on.
++- **P4, the lock set** (3a C1.10, decision 6): the live objects a frozen
++  object references are locked with it, so they can be neither edited nor
++  deleted, up front or on commit (`PlanLocked`, the hint).
+ 
+ ## Risks
+ 
+ - **The contract is settled against a test kit only.** Sub-project 3's six
+   types are the real test. A field they need goes into this spec as an
+   amendment before the wave publishes 0.1.0.
+ - **The guarding adapter sits on the parametric hot path.** It must
+   allocate nothing per call in steady state. The existing query-allocation
+   invariant covers it once the adapter is in the catalog.
+ - **The size of the port.** The ported tests are the oracle (A12).
+diff --git a/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart b/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
+index 907f4e27..d719a881 100644
+--- a/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
++++ b/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
+@@ -867,43 +867,57 @@ class PlanController extends ChangeNotifier {
+   /// widget and panel (controller ruling R-b; no widget calls
+   /// `document.commands.execute`). True when it applied; false when it was
+   /// refused, the refusal caught here: [PlanLocked] (and [lockHint] set;
+   /// the engine's refusal of a write on a frozen, locked object is one),
+   /// `DanglingReferenceError` (E2's refusal of a frozen object's
+   /// referrer), `PermissionDeniedError` (the engine permissions the
+   /// editor's permissions set, e.g. [PlanPermissions.readOnly]),
+   /// `ArgumentError`, and a kit's hook failure the retry did not cure (one
+   /// diagnostic). `StateError` (`PartialMutationError` included, after the
+   /// damage is handled) goes on to the caller.
++  /// The rule is [_refusal]'s, which plan.select's drop shares (spec 3a C1.8).
+   ///
+   /// Drops the pending symbol definitions (spec 2b S2).
+   ///
+   /// False in service (spec 2b S3): the design is not edited there.
+   bool execute(DraftCommand command) {
+     if (_service != null) return false;
+     _pendingDefinitions.clear();
+     try {
+       document.commands.execute(command);
+       return true;
+-    } on PlanLocked {
+-      lockHint.value = true;
+-      return false;
+-    } on DanglingReferenceError {
+-      return false;
+-    } on PermissionDeniedError {
+-      return false;
+-    } on ArgumentError {
+-      return false;
+-    } on KitHookFailure catch (failure) {
+-      _reportFailure(failure);
+-      return false;
++    } catch (error) {
++      if (_refusal(error)) return false;
++      rethrow;
++    }
++  }
++
++  /// Whether [error], thrown by an edit of the design, is a refusal: what
++  /// [execute] answers false for, and what cancels plan.select's drop
++  /// (spec 3a C1.8). [PlanLocked] ([lockHint] set), `DanglingReferenceError`,
++  /// `PermissionDeniedError`, `ArgumentError`, and a [KitHookFailure] the
++  /// retry did not cure (one diagnostic). Anything else, a `StateError`
++  /// (`PartialMutationError` included) above all, is the caller's.
++  bool _refusal(Object error) {
++    switch (error) {
++      case PlanLocked():
++        lockHint.value = true;
++        return true;
++      case DanglingReferenceError() ||
++            PermissionDeniedError() ||
++            ArgumentError():
++        return true;
++      case final KitHookFailure failure:
++        _reportFailure(failure);
++        return true;
+     }
++    return false;
+   }
+ 
+   void _reportFailure(KitHookFailure failure) => _diagnostics.add(KitDiagnostic(
+       kitId: failure.kitId,
+       subject: failure.typeId,
+       code: KitDiagnosticCode.hookFailed,
+       message: '${failure.hook}: ${failure.error}',
+       error: failure.error));
+ 
+   /// E3: a rollback threw. The plan is rebuilt from what it holds (the
+@@ -917,31 +931,58 @@ class PlanController extends ChangeNotifier {
+     notifyListeners();
+   }
+ 
+   /// The decorator every tool of a document's map wears (spec P4).
+   Tool _guardTool(String kitId, String toolId, Tool tool) => GuardedTool(
+       inner: tool,
+       kitId: kitId,
+       toolId: toolId,
+       log: _diagnostics,
+       lockHint: lockHint,
++      // Spec 3a C1.8 (2): plan.select's drop is refused as execute refuses.
++      refusal: toolId == planSelectToolId ? _refusal : null,
+       onFailed: () {
+         if (!_disposed) selectTool(planSelectToolId);
+       });
+ 
+   /// The type of [object] (E1), or null for anything that is not a live
+   /// object of a loaded kit's type.
+   PlanType<Component>? typeOf(Handle object) {
+     final typeId = catalog.typeIdOf(document, object);
+     return typeId == null ? null : kits.typeOf(typeId);
+   }
+ 
++  /// The live objects [object] references in [d] (spec 3a C1.10): its
++  /// type's `references`, called on its component as stored (the pair of
++  /// its snapshot whose type id is the type's, so the call keeps the
++  /// type's own `T`), each one a loaded kit's object in [d]. Empty when no
++  /// loaded type names [object] (a missing kit's, an unreadable one's), and
++  /// when `references` throws: the type already failed, and the object is
++  /// frozen for it, with its diagnostic.
++  Set<Handle> _referencesOf(DraftDocument d, Handle object) {
++    final typeId = catalog.typeIdOf(d, object);
++    final type = typeId == null ? null : kits.typeOf(typeId);
++    if (type == null) return const {};
++    for (final (id, component) in d.components.snapshotOf(object).components) {
++      if (id != typeId) continue;
++      try {
++        return {
++          for (final h in type.parametric.references(component))
++            if (catalog.typeIdOf(d, h) != null) h,
++        };
++      } catch (_) {
++        return const {};
++      }
++    }
++    return const {};
++  }
++
+   // ---------------------------------------------------------------------
+   // The unit API (spec 2b S3), design side (Task 9). Task 11 re-points the
+   // seams below to the service copy in service; every member that switches
+   // on the mode reads them.
+ 
+   /// The active document's units: the copy's in service (spec S3).
+   UnitIndexCache get _activeUnits => _service?.units ?? _session.units;
+ 
+   /// The active document: the copy in service.
+   DraftDocument get _activeDocument => activeDocument;
+@@ -1604,21 +1645,22 @@ class PlanController extends ChangeNotifier {
+         units: () => session.units.current));
+     registerToolNeeds(PlanToolIds.symbol, PlanToolIds.symbolNeeds);
+     _locked.value = session.locks.objects;
+     session.boundary = FailureBoundary(
+         document: document,
+         catalog: catalog,
+         system: session.parametric,
+         frozen: session.frozen,
+         log: _diagnostics,
+         lock: lockBroken,
+-        damage: _damage);
++        damage: _damage,
++        referencesOf: _referencesOf);
+     session.lockExpander
+       ..onHookFailure = session.boundary.recover
+       ..onPartialMutation = session.boundary.partialMutation
+       ..onRefusedEdit = session.boundary.recoverRefused
+       ..onRetryFailed = session.boundary.retryFailed;
+     session.runKitFactories(kits, _services, _disabledTools);
+     // Spec 3a C1.9: the host's build, over this session's system, before
+     // the views listen, the change tracker takes its baseline and the save
+     // point is taken.
+     if (build != null) _runBuild(document, build);
+@@ -1802,20 +1844,21 @@ class PlanController extends ChangeNotifier {
+           document: copy,
+           measurer: measurer,
+           catalog: catalog,
+           camera: camera,
+           locks: design.locks,
+           frozen: design.frozen,
+           locked: _locked,
+           log: _diagnostics,
+           lock: _lockFromCopy,
+           damage: _damageCopy,
++          referencesOf: _referencesOf,
+           groups: unitGroups,
+           moves: () => permissions.serviceMove);
+     } catch (_) {
+       // The decoded copy is let go as the decode failure's measurer is.
+       unawaited(copy.dispose());
+       measurer.clear();
+       rethrow;
+     }
+   }
+ 
+diff --git a/packages/jet_cad_2d_plan/lib/src/kits/guard.dart b/packages/jet_cad_2d_plan/lib/src/kits/guard.dart
+index 181851ac..833217df 100644
+--- a/packages/jet_cad_2d_plan/lib/src/kits/guard.dart
++++ b/packages/jet_cad_2d_plan/lib/src/kits/guard.dart
+@@ -236,47 +236,57 @@ T? guardFactory<T extends Object?>(
+   }
+ }
+ 
+ /// Every armed tool, generic or a kit's, behind the boundary (spec P4).
+ ///
+ /// - [PlanLocked] and `DanglingReferenceError` (E2's refusal of a frozen
+ ///   object's `cascade` referrer) are refusals: the hint is set and the
+ ///   inner's gesture cancelled; no diagnostic.
+ /// - A [KitHookFailure] is its kit's: a diagnostic, the inner cancelled,
+ ///   [onFailed] (the controller arms `plan.select`).
++/// - Given [refusal] (plan.select's, spec 3a C1.8), an error the
++///   controller's `execute` refuses is a refusal: the gesture is cancelled,
++///   with no exception and no diagnostic beyond the one `execute` would
++///   report.
+ /// - Anything else a kit tool throws is a diagnostic of [toolId], the
+ ///   inner cancelled, [onFailed]; a generic tool's (kit id `plan`) is
+ ///   rethrown unchanged, as today (`select_tool.dart:546-550`).
+ /// - A paint that throws is skipped, reported after the frame, and the tool
+ ///   is given to [onFailed] after the frame; it paints nothing until it is
+ ///   cancelled.
+ ///
+ /// Owns [inner]: [dispose] disposes it (a kit's that throws is reported).
+ final class GuardedTool extends Tool {
+   GuardedTool({
+     required this.inner,
+     required this.kitId,
+     required this.toolId,
+     required this.log,
+     required this.lockHint,
+     required this.onFailed,
++    this.refusal,
+   }) {
+     inner.addListener(_forward);
+   }
+ 
+   final Tool inner;
+   final String kitId;
+   final String toolId;
+   final DiagnosticsLog log;
+   final ValueNotifier<bool> lockHint;
+   final VoidCallback onFailed;
+ 
++  /// What the controller's `execute` refuses (spec 3a C1.8 (2)): given to
++  /// plan.select only, whose drop is executed by the Flutter layer's
++  /// `SelectTool` and would otherwise escape it. Null for every other tool.
++  final bool Function(Object error)? refusal;
++
+   bool _broken = false;
+ 
+   bool get _isKit => kitId != 'plan';
+ 
+   void _forward() => notifyListeners();
+ 
+   KitDiagnostic _diagnostic(Object error) => KitDiagnostic(
+       kitId: kitId,
+       subject: toolId,
+       code: KitDiagnosticCode.hookFailed,
+@@ -298,20 +308,27 @@ final class GuardedTool extends Tool {
+       log.add(_diagnostic(error));
+     }
+   }
+ 
+   void _failed(Object error, StackTrace stack, ToolContext ctx) {
+     if (error is PlanLocked || error is DanglingReferenceError) {
+       lockHint.value = true;
+       _cancelInner(ctx);
+       return;
+     }
++    // Spec 3a C1.8 (2): a drop refused as `execute` refuses an edit cancels
++    // the drag; a StateError is no refusal and goes on below, as today.
++    final refused = refusal;
++    if (refused != null && refused(error)) {
++      _cancelInner(ctx);
++      return;
++    }
+     if (error is KitHookFailure) {
+       log.add(KitDiagnostic(
+           kitId: error.kitId,
+           subject: error.typeId,
+           code: KitDiagnosticCode.hookFailed,
+           message: '${error.hook}: ${error.error}',
+           error: error.error));
+     } else if (_isKit) {
+       log.add(_diagnostic(error));
+     } else {
+@@ -540,24 +557,27 @@ final class _GuardedNotice implements ValueListenable<KitText?> {
+   @override
+   void removeListener(VoidCallback listener) {
+     try {
+       _inner.removeListener(listener);
+     } catch (e, s) {
+       _fail(e, s);
+     }
+   }
+ }
+ 
+-/// The grip provider behind the boundary: a call that throws is reported
+-/// (once per type, through [typeIdOf]) and that object has no grips, no
+-/// drag and does not move until the document is replaced (a drag in flight
+-/// is refused: its `drag` answers null).
++/// The grip provider behind the boundary. An `ArgumentError` from `drag`
++/// or `preview` is the kit refusing that point (spec 3a C1.8): no move for
++/// that event (null, no preview), nothing reported, the grips kept.
++/// Anything else a call throws is reported (once per type, through
++/// [typeIdOf]) and that object has no grips, no drag and does not move
++/// until the document is replaced (a drag in flight is refused: its
++/// `drag` answers null), 2a's rule.
+ final class GuardedGrips implements ObjectGripProvider {
+   GuardedGrips(this._inner,
+       {required String? Function(DraftDocument, Handle) typeIdOf,
+       required DiagnosticsLog log})
+       : _typeIdOf = typeIdOf,
+         _log = log;
+ 
+   final ObjectGripProvider _inner;
+   final String? Function(DraftDocument, Handle) _typeIdOf;
+   final DiagnosticsLog _log;
+@@ -588,32 +608,38 @@ final class GuardedGrips implements ObjectGripProvider {
+       _fail(d, group, 'gripsOf', error);
+       return const [];
+     }
+   }
+ 
+   @override
+   DraftCommand? drag(DraftDocument d, Handle group, Grip grip, Vector2 world) {
+     if (_failed.contains(group)) return null;
+     try {
+       return _inner.drag(d, group, grip, world);
++    } on ArgumentError {
++      // Spec 3a C1.8 (1): the kit refuses this point; the grips stay.
++      return null;
+     } catch (error) {
+       _fail(d, group, 'drag', error);
+       return null;
+     }
+   }
+ 
+   @override
+   List<(EntityKind, GeometryPayload)> preview(
+       DraftDocument d, Handle group, Grip grip, Vector2 world) {
+     if (_failed.contains(group)) return const [];
+     try {
+       return _inner.preview(d, group, grip, world);
++    } on ArgumentError {
++      // Spec 3a C1.8 (1): the kit refuses this point; the grips stay.
++      return const [];
+     } catch (error) {
+       _fail(d, group, 'preview', error);
+       return const [];
+     }
+   }
+ 
+   @override
+   bool movable(DraftDocument d, Handle group) {
+     if (_failed.contains(group)) return false;
+     try {
+@@ -653,46 +679,61 @@ Attachment? guardAttachment(String kitId, AttachmentProvider provider,
+ /// document.
+ final class FailureBoundary {
+   FailureBoundary({
+     required this.document,
+     required this.catalog,
+     required this.system,
+     required this.frozen,
+     required this.log,
+     required this.lock,
+     required this.damage,
++    this.referencesOf,
+   });
+ 
+   final DraftDocument document;
+   final ParametricCatalog catalog;
+   final ParametricSystem system;
+ 
+   /// The set the system's `isFrozen` reads.
+   final Set<Handle> frozen;
+   final DiagnosticsLog log;
+ 
+   /// The controller's `lockBroken`: locks and clears the history.
+   final void Function(Set<Handle> objects) lock;
+ 
+   /// The controller's damage handler (E3).
+   final void Function(PartialMutationError error) damage;
+ 
++  /// The objects a frozen object references (spec 3a C1.10), locked with
++  /// it: the controller reads the object's type's `references`. Null: none.
++  final Set<Handle> Function(DraftDocument document, Handle object)?
++      referencesOf;
++
+   void _report(KitHookFailure f) => log.add(KitDiagnostic(
+       kitId: f.kitId,
+       subject: f.typeId,
+       code: KitDiagnosticCode.hookFailed,
+       message: '${f.hook}: ${f.error}',
+       error: f.error));
+ 
+   void _freeze(Set<Handle> objects) {
+     frozen.addAll(objects);
+-    lock(objects);
++    // Spec 3a C1.10 (decision 6): a frozen object is in no survey, so an
++    // edit of a live object it references would regenerate that one without
++    // it (a wall uncut beside a frozen door), and its delete would not
++    // cascade to it: what it references is locked with it.
++    final references = referencesOf;
++    lock({
++      ...objects,
++      if (references != null)
++        for (final object in objects) ...references(document, object),
++    });
+   }
+ 
+   /// [failure] reported; that type's objects probed, and the failing ones
+   /// frozen and locked. True when one was: the edit is worth one retry.
+   bool recover(KitHookFailure failure) {
+     _report(failure);
+     final broken = probeType(failure.typeId);
+     if (broken.isEmpty) return false;
+     _freeze(broken);
+     return true;
+diff --git a/packages/jet_cad_2d_plan/lib/src/kits/locks.dart b/packages/jet_cad_2d_plan/lib/src/kits/locks.dart
+index 22d97b1b..1fb99421 100644
+--- a/packages/jet_cad_2d_plan/lib/src/kits/locks.dart
++++ b/packages/jet_cad_2d_plan/lib/src/kits/locks.dart
+@@ -99,37 +99,39 @@ final class LockSet {
+   final Set<Handle> _definitions;
+   final Set<Handle> _broken = {};
+ 
+   /// [_missing], [_broken] and [_definitions]: the containers a lock
+   /// starts from.
+   final Set<Handle> _roots = {};
+ 
+   /// Every node and entity under a root when the set last changed.
+   final Set<Handle> _closure = {};
+ 
+-  /// The locked objects: a missing kit's, an unknown type's, a broken one's.
+-  /// The guarded definitions are not listed.
++  /// The locked objects: a missing kit's, an unknown type's, a broken one's,
++  /// and the live objects a frozen one references (spec 3a C1.10). The
++  /// guarded definitions are not listed.
+   Set<Handle> get objects => Set.unmodifiable({..._missing, ..._broken});
+ 
+   bool get isEmpty => _roots.isEmpty;
+ 
+   /// Whether [h] itself is a locked object.
+   bool isLockedObject(Handle h) => _missing.contains(h) || _broken.contains(h);
+ 
+   /// Whether [h] is locked: a locked object or guarded definition, inside
+   /// one now (its containers, walked in [target]), or inside one when the
+   /// set last changed (a handle a command just removed has no container
+   /// left to walk).
+   bool covers(CommandTarget target, Handle h) =>
+       _closure.contains(h) || _walk(target, h);
+ 
+-  /// Adds [objects], broken (Task 11), and refreshes what they contain.
++  /// Adds [objects] (broken, Task 11, or referenced by a frozen object,
++  /// spec 3a C1.10) and refreshes what they contain.
+   void addBroken(CommandTarget target, Iterable<Handle> objects) {
+     _broken.addAll(objects);
+     _refresh(target);
+   }
+ 
+   void _refresh(CommandTarget t) {
+     _roots
+       ..clear()
+       ..addAll(_missing)
+       ..addAll(_broken)
+diff --git a/packages/jet_cad_2d_plan/lib/src/service/service_session.dart b/packages/jet_cad_2d_plan/lib/src/service/service_session.dart
+index c86ece92..81a53607 100644
+--- a/packages/jet_cad_2d_plan/lib/src/service/service_session.dart
++++ b/packages/jet_cad_2d_plan/lib/src/service/service_session.dart
+@@ -65,20 +65,21 @@ final class ServiceSession {
+     required CameraController camera,
+     required LockSet locks,
+     required Set<Handle> frozen,
+     required ValueListenable<Set<Handle>> locked,
+     required DiagnosticsLog log,
+     required void Function(ServiceSession session, Set<Handle> objects) lock,
+     required void Function(ServiceSession session, PartialMutationError error)
+         damage,
+     ValueListenable<Map<String, UnitGroup>>? groups,
+     bool Function()? moves,
++    Set<Handle> Function(DraftDocument document, Handle object)? referencesOf,
+   })  : page = PageNotifier(document),
+         index = SpatialIndex(document) {
+     // The selection before the outlines (it prunes a dead key first), as
+     // the design's (session.dart:49-56).
+     selection = SelectionController(document);
+     outlines = OutlineCache(document, selection);
+     toolContext = ToolContext(
+         document: document,
+         index: index,
+         camera: camera,
+@@ -89,21 +90,22 @@ final class ServiceSession {
+       ..install();
+     labels = UnitLabelSystem(document)..install();
+     lockExpander = LockExpander(document, locks)..install();
+     boundary = FailureBoundary(
+         document: document,
+         catalog: catalog,
+         system: parametric,
+         frozen: frozen,
+         log: log,
+         lock: (objects) => lock(this, objects),
+-        damage: (error) => damage(this, error));
++        damage: (error) => damage(this, error),
++        referencesOf: referencesOf);
+     // As the design's (plan_controller.dart's `_open`): a hook failure is
+     // probed, frozen and retried once.
+     lockExpander
+       ..onHookFailure = boundary.recover
+       ..onPartialMutation = boundary.partialMutation
+       ..onRefusedEdit = boundary.recoverRefused
+       ..onRetryFailed = boundary.retryFailed;
+     // Last but the tool, as the design's (session.dart): it listens to
+     // [locked], so no later step can throw and leak the listener.
+     units = UnitIndexCache(document,
+diff --git a/packages/jet_cad_2d_plan/test/kits/frozen_references_test.dart b/packages/jet_cad_2d_plan/test/kits/frozen_references_test.dart
+new file mode 100644
+index 00000000..9b2b9eb6
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/kits/frozen_references_test.dart
+@@ -0,0 +1,154 @@
++// Spec 3a C1.10 (Task 7), decision 6: a frozen object's live referents are
++// locked with it. A frozen square references a healthy square (its
++// cascade partner, as a frozen opening references its host wall): the
++// partner can be neither edited nor deleted, up front or on commit, with
++// PlanLocked's hint; a square nothing frozen references still edits and
++// deletes. A frozen square whose own `references` throws is locked alone,
++// and the edit that froze it is still refused, not thrown (FL-throw); a
++// square frozen in service locks its partner as well (FL-service). Squares
++// off the origin, turned.
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++
++import '../support/box_kit.dart';
++import '../support/harness.dart' show controllerFor;
++import '../support/service_plans.dart'
++    show kDeg37, placeDef, turned, unitDefinition;
++
++/// A host square, a poisoned square referencing it, and a third square;
++/// the poisoned one frozen by one refused move (its reach throws); the
++/// hint cleared.
++({PlanController c, Handle host, Handle referrer, Handle other, String before})
++    frozenReferrer() {
++  final sw = Switches();
++  final c = PlanController(kits: [boxKit(sw)]);
++  addTearDown(c.dispose);
++  final d = c.document;
++  final host = addObject(
++      d, nearSquare(2600.5, -900.25, 0.4), const SquareParams(side: 900));
++  final referrer = addObject(
++      d, atSquare, SquareParams(side: 1200, poisoned: true, partner: host));
++  final other = addObject(
++      d, nearSquare(-3100.75, 1800.5, -0.6), const SquareParams(side: 700));
++  sw.failing.add('reach');
++  expect(c.execute(TransformNodeCommand(referrer, nearSquare(100.5, 50.25, 0))),
++      isFalse);
++  expect(c.frozen, {referrer}, reason: 'fixture: the referrer is frozen');
++  c.lockHint.value = false;
++  return (c: c, host: host, referrer: referrer, other: other, before: canon(d));
++}
++
++/// The select tool's delete of the group [h]: its leaves, then the group
++/// (`select_tool.dart:787-792`, `_groupCascade`).
++DraftCommand deleteOf(DraftDocument d, Handle h) => CompoundCommand([
++      for (final k in kids(d, h)) RemoveEntityCommand(k),
++      RemoveNodeCommand(h),
++    ], label: 'Delete');
++
++void main() {
++  TestWidgetsFlutterBinding.ensureInitialized();
++
++  test(
++      "FL-edit a frozen square's partner cannot be edited: false, the "
++      'hint, nothing changed; a square nothing frozen references edits', () {
++    final s = frozenReferrer();
++    final c = s.c;
++    // M-FL-1: `FailureBoundary._freeze` locking the frozen objects alone.
++    expect(c.locked.value, {s.referrer, s.host});
++    expect(
++        c.execute(SetComponentCommand<SquareParams>(
++            s.host, const SquareParams(side: 640.5))),
++        isFalse);
++    expect(c.lockHint.value, isTrue);
++    c.lockHint.value = false;
++    expect(
++        c.execute(
++            TransformNodeCommand(s.host, nearSquare(2900.5, -700.25, 0.1))),
++        isFalse);
++    expect(c.lockHint.value, isTrue);
++    expect(canon(c.document), s.before);
++    expect(
++        c.execute(SetComponentCommand<SquareParams>(
++            s.other, const SquareParams(side: 640.5))),
++        isTrue,
++        reason: 'positive control');
++  });
++
++  test(
++      "FL-delete a frozen square's partner cannot be deleted: the gates "
++      'refuse it, and its delete command is refused as locked; a square '
++      'nothing frozen references is deleted by the same command', () {
++    final s = frozenReferrer();
++    final c = s.c;
++    final d = c.document;
++    c.selection.replace([SelectionKey.root(s.host)]);
++    // M-FL-1 again: the gates are open and the partner goes, leaving the
++    // frozen square referencing a dead handle.
++    expect(c.deleteSelection(), isFalse);
++    expect(c.execute(deleteOf(d, s.host)), isFalse);
++    expect(c.lockHint.value, isTrue);
++    expect(canon(d), s.before);
++    expect(d.tree[s.host], isNotNull);
++    expect(c.execute(deleteOf(d, s.other)), isTrue, reason: 'positive control');
++    expect(d.tree[s.other], isNull);
++  });
++
++  test(
++      "FL-throw a frozen square whose own references throws: the edit that "
++      'froze it is refused, not thrown; the square frozen and locked alone; '
++      'one diagnostic', () {
++    final sw = Switches();
++    final c = PlanController(kits: [boxKit(sw)]);
++    addTearDown(c.dispose);
++    final d = c.document;
++    final host = addObject(
++        d, nearSquare(2600.5, -900.25, 0.4), const SquareParams(side: 900));
++    final referrer = addObject(
++        d, atSquare, SquareParams(side: 1200, poisoned: true, partner: host));
++    sw.failing.addAll(['reach', 'references']);
++    // M-FL-4: `_referencesOf` without its try/catch: the freeze throws, the
++    // edit escapes `execute`, and nothing is locked.
++    expect(
++        c.execute(TransformNodeCommand(referrer, nearSquare(100.5, 50.25, 0))),
++        isFalse);
++    expect(c.frozen, {referrer});
++    expect(c.locked.value, {referrer});
++    expect(c.diagnostics.value, hasLength(1));
++  });
++
++  testWidgets(
++      "FL-service a square frozen by the service copy's boundary locks its "
++      'partner with it', (tester) async {
++    final sw = Switches();
++    final c = controllerFor(kits: [boxKit(sw), ringKit(sw)]);
++    final d = c.document;
++    final host = addObject(
++        d, nearSquare(2600.5, -900.25, 0.4), const SquareParams(side: 900));
++    final square = addObject(
++        d, atSquare, SquareParams(side: 1200, poisoned: true, partner: host));
++    final table = unitDefinition(d, key: 'box.table.square.four');
++    final t = placeDef(
++        d, table, turned(table, -2600.25, 1400.5, kDeg37, mirrored: true),
++        label: '1');
++    await tester.pump();
++    c.setMode(PlanMode.service);
++    final copy = c.activeDocument;
++    sw.failing.add('reach');
++    final at = (copy.tree[t]! as InstanceNode).transform;
++    copy.commands.execute(TransformNodeCommand(
++        t, Transform2.translation(750.5, -250.25).multiply(at)));
++    expect(c.frozen, {square}, reason: 'premise: frozen in service');
++    // M-FL-5: `_buildService` without `referencesOf: _referencesOf,`.
++    expect(c.locked.value, {square, host});
++    expect(
++        () => copy.commands.execute(TransformNodeCommand(
++            host,
++            Transform2.translation(10.5, 0)
++                .multiply((copy.tree[host]! as GroupNode).transform))),
++        throwsA(isA<PlanLocked>()),
++        reason: 'the partner locked in the copy');
++    c.setMode(PlanMode.design);
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/kits/grip_refusal_test.dart b/packages/jet_cad_2d_plan/test/kits/grip_refusal_test.dart
+new file mode 100644
+index 00000000..423efa15
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/kits/grip_refusal_test.dart
+@@ -0,0 +1,283 @@
++// Spec 3a C1.8 (Task 7), Review Focus 3's contract half: a kit grip fails
++// in two places. During the drag, an ArgumentError from the kit's `drag` or
++// `preview` is that point refused: no move for that event, nothing
++// reported, the grips kept (anything else keeps 2a's rule, F-B1). At the
++// drop, plan.select's command is refused as the controller's execute
++// refuses an edit: the drag cancelled, no exception; a StateError still
++// goes on (F-T4). The square sits off the origin, turned 30 degrees, on a
++// 1:50 page without grid snap; the camera is turned, flipped, 0.25 px/mm.
++import 'package:flutter/gestures.dart' show kPrimaryButton;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:jet_cad_2d_plan/src/kits/guard.dart'
++    show DiagnosticsLog, GuardedGrips;
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/box_kit.dart';
++import '../support/tool_events.dart';
++
++/// The shortest side the square's grip accepts.
++const double kShortest = 400;
++
++/// The square's one stretch grip, at the middle of its right edge: a drag
++/// sets the side to twice the drop's distance along the square's own x
++/// axis. A side below [kShortest] is refused with an ArgumentError, in
++/// `drag` and in `preview` alike, as a wall-end grip refuses a wall too
++/// short to join. [drop], when set, replaces the command `drag` answers.
++final class _SideGrips implements ObjectGripProvider {
++  DraftCommand Function(Handle group, SquareParams next)? drop;
++  int refusals = 0;
++
++  static Transform2 _toWorld(DraftDocument d, Handle group) =>
++      (d.tree[group]! as GroupNode).transform;
++
++  SquareParams _next(DraftDocument d, Handle group, Vector2 world) {
++    final p = d.components.get<SquareParams>(group)!;
++    final side = 2 * _toWorld(d, group).invert().transformPoint(world).x;
++    if (side < kShortest) {
++      refusals++;
++      throw ArgumentError.value(side, 'side', 'is below $kShortest');
++    }
++    return p.copyWith(side: side);
++  }
++
++  @override
++  List<Grip> gripsOf(DraftDocument d, Handle group) {
++    final p = d.components.get<SquareParams>(group);
++    if (p == null) return const [];
++    final g = _toWorld(d, group).transformPoint(Vector2(p.side / 2, 0));
++    return [Grip(GripRole.stretch, 0, g.x, g.y)];
++  }
++
++  @override
++  DraftCommand? drag(DraftDocument d, Handle group, Grip grip, Vector2 world) {
++    final next = _next(d, group, world);
++    return drop?.call(group, next) ??
++        SetComponentCommand<SquareParams>(group, next);
++  }
++
++  @override
++  List<(EntityKind, GeometryPayload)> preview(
++      DraftDocument d, Handle group, Grip grip, Vector2 world) {
++    final h = _next(d, group, world).side / 2;
++    final t = _toWorld(d, group);
++    return [
++      (
++        EntityKind.line,
++        linePayload(
++            t.transformPoint(Vector2(h, -h)), t.transformPoint(Vector2(h, h)))
++      ),
++    ];
++  }
++
++  @override
++  bool movable(DraftDocument d, Handle group) => true;
++}
++
++/// A command whose `apply` throws [error] before it touches anything.
++final class _Refusing extends DraftCommand {
++  _Refusing(this.error);
++  final Object error;
++  @override
++  Capability get capability => Capability.components;
++  @override
++  String get label => 'Refusing';
++  @override
++  CommandResult apply(CommandTarget target) => throw error;
++}
++
++/// An inner grip provider throwing [error] from every call while it is
++/// set.
++final class _Throwing implements ObjectGripProvider {
++  _Throwing(this.error);
++  Object? error;
++
++  void _maybe() {
++    final e = error;
++    if (e != null) throw e;
++  }
++
++  @override
++  List<Grip> gripsOf(DraftDocument d, Handle group) {
++    _maybe();
++    return const [Grip(GripRole.stretch, 0, 7010, 3020)];
++  }
++
++  @override
++  DraftCommand? drag(DraftDocument d, Handle group, Grip grip, Vector2 world) {
++    _maybe();
++    return TransformNodeCommand(
++        group, Transform2.translation(world.x, world.y));
++  }
++
++  @override
++  List<(EntityKind, GeometryPayload)> preview(
++      DraftDocument d, Handle group, Grip grip, Vector2 world) {
++    _maybe();
++    return [(EntityKind.line, linePayload(Vector2(7010, 3020), world))];
++  }
++
++  @override
++  bool movable(DraftDocument d, Handle group) => true;
++}
++
++/// A controller over the square with [_SideGrips], grid snap off, the
++/// square selected, the test camera. Async: the tool reads the page through
++/// a notifier fed by the document's (asynchronous) change stream, so the
++/// page edit is settled before any drag.
++Future<({PlanController c, Handle square, _SideGrips grips})> scene() async {
++  final grips = _SideGrips();
++  final c = PlanController(kits: [
++    PlanKit(
++      id: 'box',
++      version: '1.4.0',
++      types: [
++        PlanType<SquareParams>(
++            id: SquareParams.id,
++            fromJson: SquareParams.fromJson,
++            parametric: SquareType(Switches()),
++            grips: (services) => grips),
++      ],
++      names: const KitNames({
++        'en': {'type:box.square': 'Square'},
++      }),
++    ),
++  ]);
++  addTearDown(c.dispose);
++  final d = c.document;
++  final page = d.components.get<PageComponent>(d.rootHandle)!;
++  expect(
++      c.execute(SetComponentCommand<PageComponent>(
++          d.rootHandle, page.copyWith(snapToGrid: false))),
++      isTrue);
++  await settleHistory();
++  expect(c.page.value!.snapToGrid, isFalse, reason: 'fixture: no grid snap');
++  final square = addObject(d, atSquare, const SquareParams(side: 1200));
++  useTestCamera(c);
++  c.selection.replace([SelectionKey.root(square)]);
++  return (c: c, square: square, grips: grips);
++}
++
++/// The world point of the grip of a square of [side] at [atSquare].
++Vector2 at(double side) => atSquare.transformPoint(Vector2(side / 2, 0));
++
++double sideOf(PlanController c, Handle h) =>
++    c.document.components.get<SquareParams>(h)!.side;
++
++/// A primary press at [points]' first, a move to each later one, a release
++/// at the last, to the active tool. The caller settles the change stream
++/// first ([settleHistory]): the tool's page and grips follow the document
++/// through it.
++void dragThrough(PlanController c, List<Vector2> points) {
++  final tools = c.toolController;
++  tools.active.onPointerMove(eventAt(c, points.first), tools.context);
++  tools.active.onPointerDown(
++      eventAt(c, points.first, buttons: kPrimaryButton), tools.context);
++  for (final p in points.skip(1)) {
++    tools.active
++        .onPointerMove(eventAt(c, p, buttons: kPrimaryButton), tools.context);
++  }
++  tools.active.onPointerUp(eventAt(c, points.last), tools.context);
++}
++
++void main() {
++  TestWidgetsFlutterBinding.ensureInitialized();
++
++  test(
++      "GR-1 an ArgumentError from a kit's drag or preview is that point "
++      'refused: null or no preview, nothing reported, the object keeps its '
++      'grips; a StateError keeps 2a\'s rule', () {
++    final d = DraftDocument.empty();
++    final log = DiagnosticsLog();
++    addTearDown(log.dispose);
++    final inner = _Throwing(ArgumentError('too short'));
++    final grips = GuardedGrips(inner,
++        typeIdOf: (doc, group) => SquareParams.id, log: log);
++    const group = Handle(4321);
++    const grip = Grip(GripRole.stretch, 0, 7010, 3020);
++    final world = Vector2(7100.5, 3100.25);
++    expect(grips.drag(d, group, grip, world), isNull);
++    // M-GR-1a: `GuardedGrips.drag` without its `on ArgumentError`.
++    expect(log.entries.value, isEmpty);
++    expect(grips.preview(d, group, grip, world), isEmpty);
++    // M-GR-1b: `GuardedGrips.preview` without its `on ArgumentError`.
++    expect(log.entries.value, isEmpty);
++    inner.error = null;
++    expect(grips.gripsOf(d, group), hasLength(1), reason: 'not failed');
++    expect(grips.drag(d, group, grip, world), isNotNull);
++    expect(grips.preview(d, group, grip, world), hasLength(1));
++    // A StateError: 2a's rule (F-B1), the object has no grips from then on.
++    inner.error = StateError('broken');
++    expect(grips.drag(d, group, grip, world), isNull);
++    inner.error = null;
++    expect(grips.gripsOf(d, group), isEmpty);
++    expect(log.entries.value, hasLength(1));
++  });
++
++  test(
++      'GR-drag-refuse a grip drag through plan.select passing a refused '
++      'point: the drop at an accepted point commits it in one undo step; a '
++      'drop at a refused point commits nothing; no diagnostic, no '
++      'exception, the grips still drag (Review Focus 3)', () async {
++    final s = await scene();
++    final c = s.c;
++    final depth = c.document.commands.undoDepth;
++    // M-GR-1b again: the refused preview fails the square's grips, and the
++    // drop commits nothing (and reports a hookFailed).
++    expect(
++        () => dragThrough(c, [at(1200), at(300), at(1500)]), returnsNormally);
++    expect(s.grips.refusals, greaterThan(0),
++        reason: 'premise: a point was refused mid-drag');
++    expect(sideOf(c, s.square), closeTo(1500, 1e-6));
++    expect(c.document.commands.undoDepth, depth + 1);
++    expect(c.diagnostics.value, isEmpty);
++
++    final committed = canon(c.document);
++    // The grips follow the commit through the change stream.
++    await settleHistory();
++    // M-GR-1a again: the drop's refusal fails the grips, with a diagnostic.
++    expect(() => dragThrough(c, [at(1500), at(300)]), returnsNormally);
++    expect(canon(c.document), committed);
++    expect(c.document.commands.undoDepth, depth + 1);
++    expect(c.diagnostics.value, isEmpty);
++    expect(c.lockHint.value, isFalse);
++
++    await settleHistory();
++    dragThrough(c, [at(1500), at(900.5)]);
++    expect(sideOf(c, s.square), closeTo(900.5, 1e-6),
++        reason: 'the grips still drag');
++    expect(c.document.commands.undoDepth, depth + 2);
++  });
++
++  test(
++      "GR-drop-refuse plan.select's drop refused as execute refuses it (an "
++      'ArgumentError no probe cures, a PermissionDeniedError): the drag '
++      'cancelled, no exception, nothing changed, no diagnostic; a '
++      'StateError still goes on', () async {
++    for (final refusal in <Object>[
++      ArgumentError.value(950.5, 'side', 'refused at the drop'),
++      const PermissionDeniedError(Capability.components, 'Refusing'),
++    ]) {
++      final s = await scene();
++      final c = s.c;
++      s.grips.drop = (group, next) => _Refusing(refusal);
++      final before = canon(c.document);
++      final depth = c.document.commands.undoDepth;
++      // M-GR-2a: `_guardTool` without `refusal:`; M-GR-2b: `_failed`
++      // without its refusal branch: plan.select rethrows the drop's error.
++      expect(() => dragThrough(c, [at(1200), at(1500)]), returnsNormally,
++          reason: '$refusal');
++      expect(canon(c.document), before, reason: '$refusal');
++      expect(c.document.commands.undoDepth, depth, reason: '$refusal');
++      expect(c.diagnostics.value, isEmpty, reason: '$refusal');
++      expect(c.activeTool.value, 'plan.select', reason: '$refusal');
++    }
++    final s = await scene();
++    s.grips.drop = (group, next) => _Refusing(StateError('not a refusal'));
++    // M-GR-2c: `_refusal` answering true for every error.
++    expect(() => dragThrough(s.c, [at(1200), at(1500)]), throwsStateError);
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/kits/locks_test.dart b/packages/jet_cad_2d_plan/test/kits/locks_test.dart
+index 4add7307..4fbab938 100644
+--- a/packages/jet_cad_2d_plan/test/kits/locks_test.dart
++++ b/packages/jet_cad_2d_plan/test/kits/locks_test.dart
+@@ -387,45 +387,46 @@ void main() {
+ 
+   test(
+       'L-11 execute (ruling R-b) answers false for a refusal (PlanLocked, '
+       'DanglingReferenceError, ArgumentError), true for an applied edit, '
+       'and lets a StateError through', () {
+     final plan = boxPlan();
+     final b = PlanController(kits: const [], json: plan.json);
+     addTearDown(b.dispose);
+     final d = b.document;
+     final before = canon(d);
+-    // M-L11a: `on PlanLocked` dropped: the refusal escapes. A real move
+-    // (not the square's own placement), so the rollback is observable.
++    // M-L11a: `_refusal`'s PlanLocked case dropped: the refusal escapes. A
++    // real move (not the square's own placement), so the rollback is
++    // observable.
+     expect(
+         b.execute(
+             TransformNodeCommand(plan.square, nearSquare(310.5, -120.25, 0.2))),
+         isFalse);
+     expect(canon(d), before);
+-    // M-L11b: `on ArgumentError` dropped.
++    // M-L11b: ArgumentError dropped from `_refusal`'s refusal case.
+     expect(b.execute(_Throws(ArgumentError.value(3, 'side'))), isFalse);
+-    // M-L11c: `on StateError` (or `catch (_)`) added: a StateError is the
+-    // caller's.
++    // M-L11c: `_refusal` answering true for a StateError (or for anything):
++    // a StateError is the caller's.
+     expect(() => b.execute(_Throws(StateError('refused'))), throwsStateError);
+     expect(
+         b.execute(SetEntityGeometryCommand(plan.line,
+             linePayload(Vector2(-2900.5, 4000.25), Vector2(-1500.75, 4800.5)))),
+         isTrue);
+     expect(d.commands.undoDepth, 1, reason: 'the applied edit recorded');
+ 
+     final c = PlanController(kits: [boxKit(Switches())]);
+     addTearDown(c.dispose);
+     final e = c.document;
+     final partner = addObject(e, atSquare, const SquareParams(side: 800));
+     final referrer = addObject(e, nearSquare(1500, -400, 0.3),
+         SquareParams(side: 450, partner: partner));
+     c.frozen.add(partner);
+     final state = e.commands.stateId;
+-    // M-L11d: `on DanglingReferenceError` dropped: E2's refusal of a frozen
+-    // object's cascade referrer escapes.
++    // M-L11d: DanglingReferenceError dropped from `_refusal`'s refusal case:
++    // E2's refusal of a frozen object's cascade referrer escapes.
+     expect(
+         c.execute(SetComponentCommand<SquareParams>(
+             referrer, SquareParams(side: 520.5, partner: partner))),
+         isFalse);
+     expect(e.commands.stateId, state, reason: 'nothing applied');
+   });
+ }

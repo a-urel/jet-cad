@@ -1,0 +1,1595 @@
+# Review package: dbaf4bd4..HEAD
+
+## Commits
+8102f8a4 feat(kit-architecture): the scaffold of the kit and the integration package
+
+## Files changed
+ .github/workflows/ci.yml                           |   9 +
+ packages/jet_cad_2d_integration/README.md          |  16 ++
+ .../jet_cad_2d_integration/analysis_options.yaml   |  19 ++
+ .../lib/jet_cad_2d_integration.dart                |  27 +++
+ packages/jet_cad_2d_integration/pubspec.yaml       |  27 +++
+ .../test/scaffold/prepare_test.dart                |  63 +++++++
+ .../test/scaffold/smoke_test.dart                  |  33 ++++
+ .../test/support/editor_rig.dart                   | 106 +++++++++++
+ packages/jet_cad_2d_kit_architecture/CHANGELOG.md  |   8 +
+ packages/jet_cad_2d_kit_architecture/LICENSE       | 201 +++++++++++++++++++++
+ packages/jet_cad_2d_kit_architecture/README.md     |  12 ++
+ .../analysis_options.yaml                          |  19 ++
+ .../jet_cad_2d_kit_architecture/example/main.dart  |  44 +++++
+ .../lib/jet_cad_2d_kit_architecture.dart           |   9 +
+ .../jet_cad_2d_kit_architecture/lib/src/ids.dart   |  25 +++
+ .../jet_cad_2d_kit_architecture/lib/src/kit.dart   |  17 ++
+ .../jet_cad_2d_kit_architecture/lib/src/live.dart  |  30 +++
+ .../lib/src/separator_linetype.dart                |  34 ++++
+ .../lib/src/words/de.dart                          |  63 +++++++
+ .../lib/src/words/en.dart                          |  63 +++++++
+ .../lib/src/words/tr.dart                          |  63 +++++++
+ .../lib/src/words/words.dart                       |  27 +++
+ packages/jet_cad_2d_kit_architecture/pubspec.yaml  |  34 ++++
+ .../test/example_test.dart                         |  27 +++
+ .../test/scaffold/kit_test.dart                    |  58 ++++++
+ .../test/scaffold/live_test.dart                   | 101 +++++++++++
+ .../test/scaffold/words_test.dart                  | 149 +++++++++++++++
+ pubspec.yaml                                       |   2 +
+ tool/ci/test/scripts_test.dart                     |  20 ++
+ 29 files changed, 1306 insertions(+)
+
+## Diff
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index 01f7b90f..0b70ed90 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -40,20 +40,28 @@ jobs:
+             tool: flutter
+           - package: packages/jet_cad_2d_gpu
+             tool: flutter
+           - package: packages/jet_cad_2d_kit
+             tool: flutter
+           - package: packages/jet_cad_2d_plan
+             tool: flutter
+             # The pick's and the band's allocation tests (2b Task 14) read
+             # the VM's allocation profiler, as the planner's do.
+             test_flags: --enable-vmservice
++          - package: packages/jet_cad_2d_kit_architecture
++            tool: flutter
++          - package: packages/jet_cad_2d_integration
++            tool: flutter
++            # The paint-allocation invariant over the sample flat (spec 3a
++            # C6) reads the VM's allocation profiler, as the plan
++            # library's does.
++            test_flags: --enable-vmservice
+           - package: packages/jet_cad_floor_plan
+             tool: flutter
+             # The pick's allocation test reads the VM's allocation profiler,
+             # which flutter_tester serves only with this flag (Slice 2's
+             # final review F-2): without it the test skips, and the
+             # comparison reads that skip as red.
+             test_flags: --enable-vmservice
+           - package: packages/jet_cad_restaurant_symbols
+             tool: flutter
+           - package: apps/floor_planner
+@@ -170,20 +178,21 @@ jobs:
+     runs-on: ubuntu-latest
+     timeout-minutes: 15
+     strategy:
+       fail-fast: false
+       matrix:
+         package:
+           - packages/jet_cad_2d
+           - packages/jet_cad_2d_flutter
+           - packages/jet_cad_2d_kit
+           - packages/jet_cad_2d_plan
++          - packages/jet_cad_2d_kit_architecture
+           - packages/jet_cad_floor_plan
+     steps:
+       - uses: actions/checkout@v5
+       - uses: subosito/flutter-action@v2
+         with:
+           channel: stable
+           flutter-version: ${{ env.FLUTTER_VERSION }}
+           cache: true
+       - name: Resolve the workspace
+         run: flutter pub get
+diff --git a/packages/jet_cad_2d_integration/README.md b/packages/jet_cad_2d_integration/README.md
+new file mode 100644
+index 00000000..41ac7aba
+--- /dev/null
++++ b/packages/jet_cad_2d_integration/README.md
+@@ -0,0 +1,16 @@
++# jet_cad_2d_integration
++
++Not published. The tests that run the architecture kit
++(`jet_cad_2d_kit_architecture`) inside the plan library's widgets
++(`jet_cad_2d_plan`): the kit's tools on the canvas, its property sections,
++the layer rules for its objects, its grips through the select tool, the
++wall attachment end to end, and the export of rooms and separators.
++
++A kit may not name the plan library (umbrella A1,
++`tool/ci/check_kit_deps.dart`), and the plan library's own tests stay free
++of any domain, so these tests live here, in a package that imports both
++through their public libraries only, as a host does (spec 3a C6). `lib/`
++holds the fixtures, `test/` the tests.
++
++Run with `flutter test --enable-vmservice`: the paint-allocation invariant
++reads the VM's allocation profiler.
+diff --git a/packages/jet_cad_2d_integration/analysis_options.yaml b/packages/jet_cad_2d_integration/analysis_options.yaml
+new file mode 100644
+index 00000000..375a6d7d
+--- /dev/null
++++ b/packages/jet_cad_2d_integration/analysis_options.yaml
+@@ -0,0 +1,19 @@
++include: package:lints/recommended.yaml
++
++analyzer:
++  language:
++    strict-casts: true
++    strict-inference: true
++    strict-raw-types: true
++  errors:
++    unused_import: error
++    unused_local_variable: error
++  exclude:
++    - build/**
++
++linter:
++  rules:
++    - always_declare_return_types
++    - avoid_dynamic_calls
++    - prefer_final_locals
++    - unawaited_futures
+diff --git a/packages/jet_cad_2d_integration/lib/jet_cad_2d_integration.dart b/packages/jet_cad_2d_integration/lib/jet_cad_2d_integration.dart
+new file mode 100644
+index 00000000..1d384e97
+--- /dev/null
++++ b/packages/jet_cad_2d_integration/lib/jet_cad_2d_integration.dart
+@@ -0,0 +1,27 @@
++/// Fixtures for the tests that run the architecture kit inside the plan
++/// library's widgets (spec 3a C6), built over both packages' public
++/// libraries only, as a host builds them. Not published. Later tasks add
++/// their fixtures here (Task 25: `sampleFlatController`).
++library;
++
++import 'package:flutter/material.dart';
++import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++
++/// A controller over the architecture kit: a new plan (the kit's `prepare`
++/// run on it), or [json] opened as it is.
++PlanController architectureController(
++        {String? json, PlanPermissions permissions = PlanPermissions.full}) =>
++    PlanController(
++        kits: [architectureKit], json: json, permissions: permissions);
++
++/// [controller]'s `PlanEditor` in an app speaking [locale], with the plan
++/// library's locales and delegates.
++Widget planEditorApp(PlanController controller,
++        {Locale locale = const Locale('en')}) =>
++    MaterialApp(
++      locale: locale,
++      supportedLocales: planSupportedLocales,
++      localizationsDelegates: planLocalizationsDelegates,
++      home: PlanEditor(controller: controller),
++    );
+diff --git a/packages/jet_cad_2d_integration/pubspec.yaml b/packages/jet_cad_2d_integration/pubspec.yaml
+new file mode 100644
+index 00000000..705c04ce
+--- /dev/null
++++ b/packages/jet_cad_2d_integration/pubspec.yaml
+@@ -0,0 +1,27 @@
++name: jet_cad_2d_integration
++description: >-
++  Not published: the tests that run the architecture kit inside the plan
++  library's widgets, over both packages' public libraries.
++publish_to: none
++version: 0.0.0
++resolution: workspace
++
++environment:
++  sdk: ^3.6.0
++  flutter: ">=3.44.0"
++
++dependencies:
++  flutter:
++    sdk: flutter
++  jet_cad_2d: ^0.7.2
++  jet_cad_2d_flutter: ^0.7.2
++  jet_cad_2d_kit: ^0.1.0
++  jet_cad_2d_kit_architecture: ^0.1.0
++  jet_cad_2d_plan: ^0.8.0
++  vector_math: ^2.2.0
++
++dev_dependencies:
++  flutter_test:
++    sdk: flutter
++  lints: ^6.1.0
++  vm_service: ^15.2.0
+diff --git a/packages/jet_cad_2d_integration/test/scaffold/prepare_test.dart b/packages/jet_cad_2d_integration/test/scaffold/prepare_test.dart
+new file mode 100644
+index 00000000..a2968b8f
+--- /dev/null
++++ b/packages/jet_cad_2d_integration/test/scaffold/prepare_test.dart
+@@ -0,0 +1,63 @@
++// Spec 3a C1.3, C3.4; Review Focus 1, the kit half (the plan half is Task
++// 5's PB3-prepare-load): a plan the library makes holds the separators'
++// DASHED record at handle 6, clean and with nothing to undo; a loaded file
++// without it opens, and saves back, without it (today's R-3).
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_integration/jet_cad_2d_integration.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++
++/// The kit's kDashedLinetypeRecord, written out (it is not exported):
++/// jet_cad_floor_plan/lib/src/parametric/separator.dart:128-133.
++const LinetypeRecord dashed = LinetypeRecord(
++  handle: ReservedHandles.dashedLinetype,
++  name: 'DASHED',
++  description: 'Dashed __ __ __',
++  pattern: DashPattern(dashes: [200, -100], totalLength: 300),
++);
++
++void main() {
++  testWidgets(
++      'SC-prepare a new plan holds DASHED at handle 6, clean, with nothing to '
++      'undo, and so does newPlan; a loaded file without it opens and saves '
++      'back without it', (tester) async {
++    final c = architectureController();
++    addTearDown(c.dispose);
++    // M-SC-1 (no prepare) and M-SC-2 (another pattern).
++    expect(c.document.tables.linetypes[ReservedHandles.dashedLinetype], dashed);
++    expect(c.dirty.value, isFalse);
++    expect(c.canUndo.value, isFalse);
++    expect(c.document.commands.undoDepth, 0);
++
++    c.newPlan(decimalSeparator: ',');
++    expect(c.document.tables.linetypes[ReservedHandles.dashedLinetype], dashed);
++    expect(c.dirty.value, isFalse);
++    expect(c.canUndo.value, isFalse);
++
++    // A plan with no kit, so no prepare: no record.
++    final bare = PlanController(kits: const []);
++    addTearDown(bare.dispose);
++    expect(
++        bare.document.tables.linetypes.contains(ReservedHandles.dashedLinetype),
++        isFalse,
++        reason: 'premise: no kit, no record');
++    final file = bare.save();
++
++    final opened = architectureController(json: file);
++    addTearDown(opened.dispose);
++    expect(
++        opened.document.tables.linetypes
++            .contains(ReservedHandles.dashedLinetype),
++        isFalse,
++        reason: 'open adds nothing');
++    expect(opened.document.tables.linetypes.byName('DASHED'), isNull);
++    expect(opened.dirty.value, isFalse);
++    expect(opened.save(), file, reason: 'byte-identical');
++
++    c.load(file);
++    expect(c.document.tables.linetypes.contains(ReservedHandles.dashedLinetype),
++        isFalse,
++        reason: 'a load adds nothing either');
++    expect(c.save(), file);
++  });
++}
+diff --git a/packages/jet_cad_2d_integration/test/scaffold/smoke_test.dart b/packages/jet_cad_2d_integration/test/scaffold/smoke_test.dart
+new file mode 100644
+index 00000000..9ed912de
+--- /dev/null
++++ b/packages/jet_cad_2d_integration/test/scaffold/smoke_test.dart
+@@ -0,0 +1,33 @@
++// Spec 3a C6: the integration package's two fixtures. A controller over the
++// kit, with the permissions asked; the editor over it, in the language asked.
++import 'package:flutter/material.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_integration/jet_cad_2d_integration.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++
++import '../support/editor_rig.dart';
++
++void main() {
++  testWidgets(
++      'SC-smoke the controller loads the kit with the permissions asked; '
++      'the editor shows the plan in the language asked', (tester) async {
++    final c = architectureController();
++    addTearDown(c.dispose);
++    expect([for (final k in c.kits.kits) k.id], ['architecture']);
++    expect(c.missingKits, isEmpty);
++    expect(c.permissions, PlanPermissions.full);
++    final readOnly =
++        architectureController(permissions: PlanPermissions.readOnly);
++    addTearDown(readOnly.dispose);
++    // M-SC-perm: architectureController dropping `permissions`.
++    expect(readOnly.permissions, PlanPermissions.readOnly);
++
++    await pumpEditor(tester, c);
++    expect(find.byType(PlanEditor), findsOneWidget);
++    expect(status(tester), 'Select');
++    // M-SC-7: planEditorApp ignoring `locale`.
++    await pumpEditor(tester, c, locale: const Locale('tr'));
++    expect(status(tester), 'Seç');
++    expect(tester.takeException(), isNull);
++  });
++}
+diff --git a/packages/jet_cad_2d_integration/test/support/editor_rig.dart b/packages/jet_cad_2d_integration/test/support/editor_rig.dart
+new file mode 100644
+index 00000000..1c79921a
+--- /dev/null
++++ b/packages/jet_cad_2d_integration/test/support/editor_rig.dart
+@@ -0,0 +1,106 @@
++// The integration tests' editor rig (spec 3a C6): PlanEditor over a
++// controller in planEditorApp, at 1440 x 900, under a zoomed, turned,
++// non-reflecting camera; the status line, a key press, a world point's
++// global position and the active tool; a plan holding only a page; the kit's
++// types in an engine catalog; a controller's live objects of one type. Its
++// own copies of the plan library's test fixtures (canvas_fixture.dart's
++// pumpDraw and globalOf, design_harness.dart's status and press), which
++// another package cannot import, over the public libraries only.
++import 'dart:async' show unawaited;
++
++import 'package:flutter/material.dart';
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
++    show InteractionLayer, Tool, ViewportTransform;
++import 'package:jet_cad_2d_integration/jet_cad_2d_integration.dart';
++import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++/// Pumps [c]'s editor in [locale] at 1440 x 900 (reset after the test).
++/// With [centre], then sets a camera turned by [turn] at [scale] px/mm,
++/// **non-reflecting** (a reflection's `b == c` hides a transposition),
++/// with [centre] in the middle of the drawing area: the plan library's
++/// `pumpDraw` (canvas_fixture.dart:427-443) over PlanEditor. [wrap], when
++/// given, wraps the app (a capture boundary, Task 14's RD1).
++Future<void> pumpEditor(WidgetTester tester, PlanController c,
++    {Locale locale = const Locale('en'),
++    Vector2? centre,
++    double scale = 2,
++    double turn = 0.35,
++    Widget Function(Widget app)? wrap}) async {
++  await tester.binding.setSurfaceSize(const Size(1440, 900));
++  addTearDown(() => tester.binding.setSurfaceSize(null));
++  final app = planEditorApp(c, locale: locale);
++  await tester.pumpWidget(wrap == null ? app : wrap(app));
++  await tester.pump();
++  if (centre == null) return;
++  final size = tester.getSize(find.byType(InteractionLayer));
++  final linear =
++      Transform2.rotation(turn).multiply(Transform2.scale(scale, scale));
++  final mid = linear.transformPoint(centre);
++  c.camera.value = ViewportTransform(
++      worldToScreenMatrix: Transform2.translation(
++              size.width / 2 - mid.x, size.height / 2 - mid.y)
++          .multiply(linear));
++  await tester.pump();
++}
++
++/// World ([x], [y])'s global position under [c]'s camera.
++Offset globalOf(WidgetTester tester, PlanController c, double x, double y) {
++  final s = c.camera.value.worldToScreen(Vector2(x, y));
++  return tester.getTopLeft(find.byType(InteractionLayer)) + Offset(s.x, s.y);
++}
++
++/// World [p]'s global position ([globalOf] over a point).
++Offset globalAt(WidgetTester tester, PlanController c, Vector2 p) =>
++    globalOf(tester, c, p.x, p.y);
++
++/// The editor's status line (`status-text`).
++String status(WidgetTester tester) =>
++    tester.widget<Text>(find.byKey(const Key('status-text'))).data!;
++
++/// Sends [key], then a pump: whether a handler took it.
++Future<bool> press(WidgetTester tester, LogicalKeyboardKey key) async {
++  final handled = await tester.sendKeyEvent(key);
++  await tester.pump();
++  return handled;
++}
++
++/// The canvas's active tool, as its interaction layer holds it: a kit's
++/// tool in the plan library's guard, which forwards `isMidShape`.
++Tool activeTool(WidgetTester tester) =>
++    tester.widget<InteractionLayer>(find.byType(InteractionLayer)).tools.active;
++
++/// A plan holding [page] and nothing else (no manifest kit, no DASHED
++/// record): `jet_cad_floor_plan/test/support/box_rig.dart:16-28`'s
++/// `boxDoc`, as the text a controller opens.
++String pagePlanJson(PageComponent page) {
++  final doc = DraftDocument.empty();
++  PageComponent.register(doc.components);
++  doc.commands
++      .execute(SetComponentCommand<PageComponent>(doc.rootHandle, page));
++  doc.commands.clearHistory();
++  final json = ensureManifest(DraftDocumentCodec.encodeToString(doc));
++  unawaited(doc.dispose());
++  return json;
++}
++
++/// The kit's types (`architectureKit.types`) in an engine catalog of their
++/// own, unguarded: for `ParametricSystem(c.document, kitCatalog()).drift()`.
++ParametricCatalog kitCatalog() {
++  final catalog = ParametricCatalog();
++  for (final type in architectureKit.types) {
++    type.registerInto(catalog);
++  }
++  return catalog;
++}
++
++/// [c]'s live objects of [typeId] carrying a `T`, ascending: today's
++/// `liveObjectsOf<T>(doc)` through the controller's `typeOf` (E1).
++List<Handle> liveOf<T extends Component>(PlanController c, String typeId) => [
++      for (final h in c.document.components.withComponent<T>())
++        if (c.typeOf(h)?.id == typeId) h,
++    ];
+diff --git a/packages/jet_cad_2d_kit_architecture/CHANGELOG.md b/packages/jet_cad_2d_kit_architecture/CHANGELOG.md
+new file mode 100644
+index 00000000..b2febefc
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/CHANGELOG.md
+@@ -0,0 +1,8 @@
++## 0.1.0 (unreleased)
++
++The architecture kit of jet_cad_2d plans (sub-project 3a).
++
++- `architectureKit`: the kit's descriptor (id `architecture`), its type and
++  tool ids (`ArchitectureTypes`, `ArchitectureTools`), its words in
++  English, German and Turkish, and its `prepare`, which gives a plan the
++  plan library makes the separators' DASHED linetype.
+diff --git a/packages/jet_cad_2d_kit_architecture/LICENSE b/packages/jet_cad_2d_kit_architecture/LICENSE
+new file mode 100644
+index 00000000..261eeb9e
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/LICENSE
+@@ -0,0 +1,201 @@
++                                 Apache License
++                           Version 2.0, January 2004
++                        http://www.apache.org/licenses/
++
++   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
++
++   1. Definitions.
++
++      "License" shall mean the terms and conditions for use, reproduction,
++      and distribution as defined by Sections 1 through 9 of this document.
++
++      "Licensor" shall mean the copyright owner or entity authorized by
++      the copyright owner that is granting the License.
++
++      "Legal Entity" shall mean the union of the acting entity and all
++      other entities that control, are controlled by, or are under common
++      control with that entity. For the purposes of this definition,
++      "control" means (i) the power, direct or indirect, to cause the
++      direction or management of such entity, whether by contract or
++      otherwise, or (ii) ownership of fifty percent (50%) or more of the
++      outstanding shares, or (iii) beneficial ownership of such entity.
++
++      "You" (or "Your") shall mean an individual or Legal Entity
++      exercising permissions granted by this License.
++
++      "Source" form shall mean the preferred form for making modifications,
++      including but not limited to software source code, documentation
++      source, and configuration files.
++
++      "Object" form shall mean any form resulting from mechanical
++      transformation or translation of a Source form, including but
++      not limited to compiled object code, generated documentation,
++      and conversions to other media types.
++
++      "Work" shall mean the work of authorship, whether in Source or
++      Object form, made available under the License, as indicated by a
++      copyright notice that is included in or attached to the work
++      (an example is provided in the Appendix below).
++
++      "Derivative Works" shall mean any work, whether in Source or Object
++      form, that is based on (or derived from) the Work and for which the
++      editorial revisions, annotations, elaborations, or other modifications
++      represent, as a whole, an original work of authorship. For the purposes
++      of this License, Derivative Works shall not include works that remain
++      separable from, or merely link (or bind by name) to the interfaces of,
++      the Work and Derivative Works thereof.
++
++      "Contribution" shall mean any work of authorship, including
++      the original version of the Work and any modifications or additions
++      to that Work or Derivative Works thereof, that is intentionally
++      submitted to Licensor for inclusion in the Work by the copyright owner
++      or by an individual or Legal Entity authorized to submit on behalf of
++      the copyright owner. For the purposes of this definition, "submitted"
++      means any form of electronic, verbal, or written communication sent
++      to the Licensor or its representatives, including but not limited to
++      communication on electronic mailing lists, source code control systems,
++      and issue tracking systems that are managed by, or on behalf of, the
++      Licensor for the purpose of discussing and improving the Work, but
++      excluding communication that is conspicuously marked or otherwise
++      designated in writing by the copyright owner as "Not a Contribution."
++
++      "Contributor" shall mean Licensor and any individual or Legal Entity
++      on behalf of whom a Contribution has been received by Licensor and
++      subsequently incorporated within the Work.
++
++   2. Grant of Copyright License. Subject to the terms and conditions of
++      this License, each Contributor hereby grants to You a perpetual,
++      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
++      copyright license to reproduce, prepare Derivative Works of,
++      publicly display, publicly perform, sublicense, and distribute the
++      Work and such Derivative Works in Source or Object form.
++
++   3. Grant of Patent License. Subject to the terms and conditions of
++      this License, each Contributor hereby grants to You a perpetual,
++      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
++      (except as stated in this section) patent license to make, have made,
++      use, offer to sell, sell, import, and otherwise transfer the Work,
++      where such license applies only to those patent claims licensable
++      by such Contributor that are necessarily infringed by their
++      Contribution(s) alone or by combination of their Contribution(s)
++      with the Work to which such Contribution(s) was submitted. If You
++      institute patent litigation against any entity (including a
++      cross-claim or counterclaim in a lawsuit) alleging that the Work
++      or a Contribution incorporated within the Work constitutes direct
++      or contributory patent infringement, then any patent licenses
++      granted to You under this License for that Work shall terminate
++      as of the date such litigation is filed.
++
++   4. Redistribution. You may reproduce and distribute copies of the
++      Work or Derivative Works thereof in any medium, with or without
++      modifications, and in Source or Object form, provided that You
++      meet the following conditions:
++
++      (a) You must give any other recipients of the Work or
++          Derivative Works a copy of this License; and
++
++      (b) You must cause any modified files to carry prominent notices
++          stating that You changed the files; and
++
++      (c) You must retain, in the Source form of any Derivative Works
++          that You distribute, all copyright, patent, trademark, and
++          attribution notices from the Source form of the Work,
++          excluding those notices that do not pertain to any part of
++          the Derivative Works; and
++
++      (d) If the Work includes a "NOTICE" text file as part of its
++          distribution, then any Derivative Works that You distribute must
++          include a readable copy of the attribution notices contained
++          within such NOTICE file, excluding those notices that do not
++          pertain to any part of the Derivative Works, in at least one
++          of the following places: within a NOTICE text file distributed
++          as part of the Derivative Works; within the Source form or
++          documentation, if provided along with the Derivative Works; or,
++          within a display generated by the Derivative Works, if and
++          wherever such third-party notices normally appear. The contents
++          of the NOTICE file are for informational purposes only and
++          do not modify the License. You may add Your own attribution
++          notices within Derivative Works that You distribute, alongside
++          or as an addendum to the NOTICE text from the Work, provided
++          that such additional attribution notices cannot be construed
++          as modifying the License.
++
++      You may add Your own copyright statement to Your modifications and
++      may provide additional or different license terms and conditions
++      for use, reproduction, or distribution of Your modifications, or
++      for any such Derivative Works as a whole, provided Your use,
++      reproduction, and distribution of the Work otherwise complies with
++      the conditions stated in this License.
++
++   5. Submission of Contributions. Unless You explicitly state otherwise,
++      any Contribution intentionally submitted for inclusion in the Work
++      by You to the Licensor shall be under the terms and conditions of
++      this License, without any additional terms or conditions.
++      Notwithstanding the above, nothing herein shall supersede or modify
++      the terms of any separate license agreement you may have executed
++      with Licensor regarding such Contributions.
++
++   6. Trademarks. This License does not grant permission to use the trade
++      names, trademarks, service marks, or product names of the Licensor,
++      except as required for reasonable and customary use in describing the
++      origin of the Work and reproducing the content of the NOTICE file.
++
++   7. Disclaimer of Warranty. Unless required by applicable law or
++      agreed to in writing, Licensor provides the Work (and each
++      Contributor provides its Contributions) on an "AS IS" BASIS,
++      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
++      implied, including, without limitation, any warranties or conditions
++      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
++      PARTICULAR PURPOSE. You are solely responsible for determining the
++      appropriateness of using or redistributing the Work and assume any
++      risks associated with Your exercise of permissions under this License.
++
++   8. Limitation of Liability. In no event and under no legal theory,
++      whether in tort (including negligence), contract, or otherwise,
++      unless required by applicable law (such as deliberate and grossly
++      negligent acts) or agreed to in writing, shall any Contributor be
++      liable to You for damages, including any direct, indirect, special,
++      incidental, or consequential damages of any character arising as a
++      result of this License or out of the use or inability to use the
++      Work (including but not limited to damages for loss of goodwill,
++      work stoppage, computer failure or malfunction, or any and all
++      other commercial damages or losses), even if such Contributor
++      has been advised of the possibility of such damages.
++
++   9. Accepting Warranty or Additional Liability. While redistributing
++      the Work or Derivative Works thereof, You may choose to offer,
++      and charge a fee for, acceptance of support, warranty, indemnity,
++      or other liability obligations and/or rights consistent with this
++      License. However, in accepting such obligations, You may act only
++      on Your own behalf and on Your sole responsibility, not on behalf
++      of any other Contributor, and only if You agree to indemnify,
++      defend, and hold each Contributor harmless for any liability
++      incurred by, or claims asserted against, such Contributor by reason
++      of your accepting any such warranty or additional liability.
++
++   END OF TERMS AND CONDITIONS
++
++   APPENDIX: How to apply the Apache License to your work.
++
++      To apply the Apache License to your work, attach the following
++      boilerplate notice, with the fields enclosed by brackets "[]"
++      replaced with your own identifying information. (Don't include
++      the brackets!)  The text should be enclosed in the appropriate
++      comment syntax for the file format. We also recommend that a
++      file or class name and description of purpose be included on the
++      same "printed page" as the copyright notice for easier
++      identification within third-party archives.
++
++   Copyright [yyyy] [name of copyright owner]
++
++   Licensed under the Apache License, Version 2.0 (the "License");
++   you may not use this file except in compliance with the License.
++   You may obtain a copy of the License at
++
++       http://www.apache.org/licenses/LICENSE-2.0
++
++   Unless required by applicable law or agreed to in writing, software
++   distributed under the License is distributed on an "AS IS" BASIS,
++   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++   See the License for the specific language governing permissions and
++   limitations under the License.
+diff --git a/packages/jet_cad_2d_kit_architecture/README.md b/packages/jet_cad_2d_kit_architecture/README.md
+new file mode 100644
+index 00000000..eaf81000
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/README.md
+@@ -0,0 +1,12 @@
++# jet_cad_2d_kit_architecture
++
++The architecture kit of jet_cad_2d plans: walls, doors, windows and gaps,
++room separators, rooms, dimensions, boxes, a furniture library and the
++attachment of furniture to wall faces, as one `PlanKit` on the kit contract
++(`jet_cad_2d_kit`).
++
++A host loads it into the plan library (`jet_cad_2d_plan`):
++`PlanController(kits: [architectureKit])`. The kit itself depends on the
++contract only, never on the plan library.
++
++This README is a stub; the kit's first release brings the full one.
+diff --git a/packages/jet_cad_2d_kit_architecture/analysis_options.yaml b/packages/jet_cad_2d_kit_architecture/analysis_options.yaml
+new file mode 100644
+index 00000000..375a6d7d
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/analysis_options.yaml
+@@ -0,0 +1,19 @@
++include: package:lints/recommended.yaml
++
++analyzer:
++  language:
++    strict-casts: true
++    strict-inference: true
++    strict-raw-types: true
++  errors:
++    unused_import: error
++    unused_local_variable: error
++  exclude:
++    - build/**
++
++linter:
++  rules:
++    - always_declare_return_types
++    - avoid_dynamic_calls
++    - prefer_final_locals
++    - unawaited_futures
+diff --git a/packages/jet_cad_2d_kit_architecture/example/main.dart b/packages/jet_cad_2d_kit_architecture/example/main.dart
+new file mode 100644
+index 00000000..05e6763f
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/example/main.dart
+@@ -0,0 +1,44 @@
++// The architecture kit as a host sees it. A host passes `architectureKit` to
++// the plan library -- `PlanController(kits: [architectureKit])`, and a
++// `PlanEditor` over it (the plan library's package) -- which this package
++// does not depend on, nor does its example (umbrella A1). What the example shows
++// is the descriptor itself, and the one hook a new plan runs: `prepare`,
++// which gives a document the separators' DASHED linetype.
++//
++// The kit is a Flutter library (its tools draw with Flutter's icons): the
++// example is analysed with the package, and test/example_test.dart runs it.
++import 'dart:async' show unawaited;
++
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
++
++/// The kit's descriptor, line by line: its id and version, its types, its
++/// tools with their letters, what `validate` finds, and what `prepare`
++/// writes into a bare engine document.
++List<String> describeArchitectureKit() {
++  final kit = architectureKit;
++  final problems = kit.validate();
++  final doc = DraftDocument.empty();
++  kit.prepare?.call(doc);
++  final dashed = doc.tables.linetypes[ReservedHandles.dashedLinetype];
++  unawaited(doc.dispose());
++  return [
++    '${kit.id} ${kit.version}: ${kit.types.length} types, '
++        '${kit.tools.length} tools',
++    for (final type in kit.types)
++      '${type.id}${type.exported ? '' : ' (not exported)'}',
++    for (final tool in kit.tools) '${tool.id} (${tool.letter})',
++    problems.isEmpty
++        ? 'validate: no problems'
++        : 'validate: ${problems.length} problems',
++    dashed == null
++        ? 'prepare: no DASHED record'
++        : 'prepare: ${dashed.name} at handle ${dashed.handle.value}',
++  ];
++}
++
++void main() {
++  for (final line in describeArchitectureKit()) {
++    print(line);
++  }
++}
+diff --git a/packages/jet_cad_2d_kit_architecture/lib/jet_cad_2d_kit_architecture.dart b/packages/jet_cad_2d_kit_architecture/lib/jet_cad_2d_kit_architecture.dart
+new file mode 100644
+index 00000000..491e0e89
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/lib/jet_cad_2d_kit_architecture.dart
+@@ -0,0 +1,9 @@
++/// The architecture kit of jet_cad_2d plans (sub-project 3a): walls,
++/// openings, room separators, rooms, dimensions, boxes, a furniture library
++/// and wall attachment, as one `PlanKit` a host passes to the plan library,
++/// `PlanController(kits: [architectureKit])`. The parameter classes and the
++/// type ids let a host build a plan in code.
++library;
++
++export 'src/ids.dart' show ArchitectureTools, ArchitectureTypes;
++export 'src/kit.dart' show architectureKit;
+diff --git a/packages/jet_cad_2d_kit_architecture/lib/src/ids.dart b/packages/jet_cad_2d_kit_architecture/lib/src/ids.dart
+new file mode 100644
+index 00000000..9ebe3197
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/lib/src/ids.dart
+@@ -0,0 +1,25 @@
++// The architecture kit's type and tool ids (spec 3a C2, umbrella A7): today's
++// floor_planner.<type> (jet_cad_floor_plan/lib/src/parametric/catalog.dart:
++// 27-39) under the kit's id. A type id is its component's codec type id.
++
++/// The kit's parametric type ids.
++abstract final class ArchitectureTypes {
++  static const String box = 'architecture.box';
++  static const String wall = 'architecture.wall';
++  static const String opening = 'architecture.opening';
++  static const String separator = 'architecture.separator';
++  static const String room = 'architecture.room';
++  static const String dimension = 'architecture.dimension';
++}
++
++/// The kit's tool ids; a tool's word is `tool:<id>`.
++abstract final class ArchitectureTools {
++  static const String box = 'architecture.box';
++  static const String wall = 'architecture.wall';
++  static const String door = 'architecture.door';
++  static const String window = 'architecture.window';
++  static const String gap = 'architecture.gap';
++  static const String room = 'architecture.room';
++  static const String separator = 'architecture.separator';
++  static const String dimension = 'architecture.dimension';
++}
+diff --git a/packages/jet_cad_2d_kit_architecture/lib/src/kit.dart b/packages/jet_cad_2d_kit_architecture/lib/src/kit.dart
+new file mode 100644
+index 00000000..bfe31aeb
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/lib/src/kit.dart
+@@ -0,0 +1,17 @@
++// The architecture kit's descriptor (spec 3a C2): its types, tools,
++// attachment providers, symbols, words and prepare. Each type task adds its
++// own (Tasks 10-25); the tools keep today's palette order (box, wall, door,
++// window, gap, room, separator, dimension; planner_shell.dart:546-601).
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++
++import 'separator_linetype.dart';
++import 'words/words.dart';
++
++/// The architecture kit: a host passes it to the plan library,
++/// `PlanController(kits: [architectureKit])`.
++final PlanKit architectureKit = PlanKit(
++  id: 'architecture',
++  version: '0.1.0',
++  names: architectureNames,
++  prepare: ensureDashedLinetype,
++);
+diff --git a/packages/jet_cad_2d_kit_architecture/lib/src/live.dart b/packages/jet_cad_2d_kit_architecture/lib/src/live.dart
+new file mode 100644
+index 00000000..a989bdf9
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/lib/src/live.dart
+@@ -0,0 +1,30 @@
++// "Is this a live T", as the kit asks it (spec 3a C1.5): of the plan's
++// services, never of a catalog of the kit's own, so a frozen object (spec 2a
++// E2) is absent from the kit's caches exactly as it is from generate. Today
++// (jet_cad_floor_plan/lib/src/parametric/live_objects.dart) the app asked
++// its global parametricCatalog.
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show PlanServices;
++
++/// The type id of [handle]'s live object, or null: a frozen object, one of
++/// a missing kit, and anything that is not a live object answer null.
++typedef LiveTypeOf = String? Function(Handle handle);
++
++/// The plan's answer: `PlanServices.liveTypeIdOf`.
++LiveTypeOf liveTypesOf(PlanServices services) => services.liveTypeIdOf;
++
++/// Whether [handle] is a live object of [typeId].
++bool isLiveOf(LiveTypeOf live, Handle handle, String typeId) =>
++    live(handle) == typeId;
++
++/// Every live object of [typeId] carrying a `T` in [document], ascending by
++/// handle value (`ComponentRegistry.withComponent` is ascending; the filter
++/// keeps it): today's `liveObjectsOf<T>(doc)`. A fresh list.
++///
++/// Cost: O(k) calls of [live] for k holders of a `T`.
++List<Handle> liveObjectsOf<T extends Component>(
++        DraftDocument document, LiveTypeOf live, String typeId) =>
++    [
++      for (final h in document.components.withComponent<T>())
++        if (live(h) == typeId) h,
++    ];
+diff --git a/packages/jet_cad_2d_kit_architecture/lib/src/separator_linetype.dart b/packages/jet_cad_2d_kit_architecture/lib/src/separator_linetype.dart
+new file mode 100644
+index 00000000..86fb63ab
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/lib/src/separator_linetype.dart
+@@ -0,0 +1,34 @@
++// The separators' DASHED linetype (spec 3a C1.3, C3.4): ported from
++// jet_cad_floor_plan/lib/src/parametric/separator.dart:122-149. The kit's
++// prepare (lib/src/kit.dart) is ensureDashedLinetype.
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++
++/// The DASHED linetype a separator draws with (spec 10 D3, R-4; Ruling
++/// 10-14), on [ReservedHandles.dashedLinetype].
++///
++/// In model millimetres, because the painter scales a pattern by world to
++/// screen: 4 mm and 2 mm on paper at 1:50, 2 mm and 1 mm at 1:100. It does
++/// not follow the page scale.
++const LinetypeRecord kDashedLinetypeRecord = LinetypeRecord(
++  handle: ReservedHandles.dashedLinetype,
++  name: 'DASHED',
++  description: 'Dashed __ __ __',
++  pattern: DashPattern(dashes: [200, -100], totalLength: 300),
++);
++
++/// Adds [kDashedLinetypeRecord] to [doc]'s linetypes, outside the history
++/// (spec 10 D3): the kit's `prepare`, which the plan library runs only on
++/// the plans it makes (spec 3a C1.3). A loaded or imported plan is never
++/// given it: a file without the record opens without one, saves back
++/// byte-identical, and its separators draw continuous (today's R-3).
++///
++/// A no-op when [ReservedHandles.dashedLinetype] already holds a record,
++/// whatever it is, and when another handle already carries the name
++/// `DASHED` (the table's names are case-insensitive): that record is kept,
++/// and a separator, which still names handle 6, draws continuous there.
++void ensureDashedLinetype(DraftDocument doc) {
++  final linetypes = doc.tables.linetypes;
++  if (linetypes.contains(kDashedLinetypeRecord.handle)) return;
++  if (linetypes.byName(kDashedLinetypeRecord.name) != null) return;
++  linetypes.add(kDashedLinetypeRecord);
++}
+diff --git a/packages/jet_cad_2d_kit_architecture/lib/src/words/de.dart b/packages/jet_cad_2d_kit_architecture/lib/src/words/de.dart
+new file mode 100644
+index 00000000..fc44f287
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/lib/src/words/de.dart
+@@ -0,0 +1,63 @@
++// The architecture kit's German words (spec 3a C2, C1.6): today's
++// jet_cad_floor_plan/lib/src/l10n/strings_de.dart (:61, :76-97, :190-250,
++// :304-308, :420, :426-441) under the 3a plan's word ids, and the words the
++// specs add (the opening type, the justification, the dimension's kind and
++// axes, the dimension's notice).
++
++const Map<String, String> germanWords = {
++  'tool:architecture.box': 'Kasten',
++  'tool:architecture.wall': 'Wand',
++  'tool:architecture.door': 'Tür',
++  'tool:architecture.window': 'Fenster',
++  'tool:architecture.gap': 'Öffnung',
++  'tool:architecture.room': 'Raum',
++  'tool:architecture.separator': 'Trennlinie',
++  'tool:architecture.dimension': 'Bemaßung',
++  'type:architecture.box': 'Kasten',
++  'type:architecture.wall': 'Wand',
++  'type:architecture.opening': 'Wandöffnung',
++  'type:architecture.separator': 'Trennlinie',
++  'type:architecture.room': 'Raum',
++  'type:architecture.dimension': 'Bemaßung',
++  'property:architecture.box.width': 'Breite',
++  'property:architecture.box.height': 'Höhe',
++  'property:architecture.wall.thickness': 'Dicke',
++  'property:architecture.wall.justification': 'Ausrichtung',
++  'property:architecture.wall.justification.left': 'Links',
++  'property:architecture.wall.justification.centre': 'Mitte',
++  'property:architecture.wall.justification.right': 'Rechts',
++  'property:architecture.opening.width': 'Breite',
++  'property:architecture.opening.position': 'Position',
++  'property:architecture.opening.flip-hinge': 'Anschlag wechseln',
++  'property:architecture.opening.flip-swing': 'Aufschlag wechseln',
++  'property:architecture.room.name': 'Name',
++  'property:architecture.room.area': 'Fläche',
++  'property:architecture.dimension.value': 'Wert',
++  'property:architecture.dimension.kind': 'Art',
++  'property:architecture.dimension.kind.aligned': 'Ausgerichtet',
++  'property:architecture.dimension.kind.horizontal': 'Horizontal',
++  'property:architecture.dimension.kind.vertical': 'Vertikal',
++  'property:architecture.dimension.axes': 'Achsen',
++  'property:architecture.dimension.end-1': 'Ende 1',
++  'property:architecture.dimension.end-2': 'Ende 2',
++  'property:architecture.door.width': 'Breite',
++  'property:architecture.window.width': 'Breite',
++  'property:architecture.gap.width': 'Breite',
++  'text:architecture.room-name': 'Raum {n}',
++  'text:architecture.room-occupied': 'Bereits ein Raum: {name}',
++  'text:architecture.axes-turned': 'Achsen um {degrees}° gedreht',
++  'text:architecture.end-on-wall': 'Wand {wall}, {end}, {side}',
++  'text:architecture.end-start': 'Anfang',
++  'text:architecture.end-end': 'Ende',
++  'text:architecture.end-fixed': 'Fest',
++  'text:architecture.face-left': 'linke Seite',
++  'text:architecture.face-centre': 'Mittellinie',
++  'text:architecture.face-right': 'rechte Seite',
++  'text:architecture.dimension-value': '{value}',
++  'text:architecture.sample-hall': 'Flur',
++  'text:architecture.sample-kitchen': 'Küche',
++  'text:architecture.sample-bath': 'Bad',
++  'text:architecture.sample-living': 'Wohnen',
++  'text:architecture.sample-dining': 'Essen',
++  'text:architecture.sample-bedroom': 'Schlafzimmer {n}',
++};
+diff --git a/packages/jet_cad_2d_kit_architecture/lib/src/words/en.dart b/packages/jet_cad_2d_kit_architecture/lib/src/words/en.dart
+new file mode 100644
+index 00000000..64b49ebb
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/lib/src/words/en.dart
+@@ -0,0 +1,63 @@
++// The architecture kit's English words (spec 3a C2, C1.6): today's
++// jet_cad_floor_plan/lib/src/l10n/strings_en.dart (:61, :76-97, :190-250,
++// :304-308, :416, :422-437) under the 3a plan's word ids, and the words the
++// specs add (the opening type, the justification, the dimension's kind and
++// axes, the dimension's notice).
++
++const Map<String, String> englishWords = {
++  'tool:architecture.box': 'Box',
++  'tool:architecture.wall': 'Wall',
++  'tool:architecture.door': 'Door',
++  'tool:architecture.window': 'Window',
++  'tool:architecture.gap': 'Gap',
++  'tool:architecture.room': 'Room',
++  'tool:architecture.separator': 'Separator',
++  'tool:architecture.dimension': 'Dimension',
++  'type:architecture.box': 'Box',
++  'type:architecture.wall': 'Wall',
++  'type:architecture.opening': 'Opening',
++  'type:architecture.separator': 'Separator',
++  'type:architecture.room': 'Room',
++  'type:architecture.dimension': 'Dimension',
++  'property:architecture.box.width': 'Width',
++  'property:architecture.box.height': 'Height',
++  'property:architecture.wall.thickness': 'Thickness',
++  'property:architecture.wall.justification': 'Justification',
++  'property:architecture.wall.justification.left': 'Left',
++  'property:architecture.wall.justification.centre': 'Centre',
++  'property:architecture.wall.justification.right': 'Right',
++  'property:architecture.opening.width': 'Width',
++  'property:architecture.opening.position': 'Position',
++  'property:architecture.opening.flip-hinge': 'Flip hinge',
++  'property:architecture.opening.flip-swing': 'Flip swing',
++  'property:architecture.room.name': 'Name',
++  'property:architecture.room.area': 'Area',
++  'property:architecture.dimension.value': 'Value',
++  'property:architecture.dimension.kind': 'Kind',
++  'property:architecture.dimension.kind.aligned': 'Aligned',
++  'property:architecture.dimension.kind.horizontal': 'Horizontal',
++  'property:architecture.dimension.kind.vertical': 'Vertical',
++  'property:architecture.dimension.axes': 'Axes',
++  'property:architecture.dimension.end-1': 'End 1',
++  'property:architecture.dimension.end-2': 'End 2',
++  'property:architecture.door.width': 'Width',
++  'property:architecture.window.width': 'Width',
++  'property:architecture.gap.width': 'Width',
++  'text:architecture.room-name': 'Room {n}',
++  'text:architecture.room-occupied': 'Already a room: {name}',
++  'text:architecture.axes-turned': 'Axes turned {degrees}°',
++  'text:architecture.end-on-wall': 'Wall {wall}, {end}, {side}',
++  'text:architecture.end-start': 'start',
++  'text:architecture.end-end': 'end',
++  'text:architecture.end-fixed': 'Fixed',
++  'text:architecture.face-left': 'left face',
++  'text:architecture.face-centre': 'centreline',
++  'text:architecture.face-right': 'right face',
++  'text:architecture.dimension-value': '{value}',
++  'text:architecture.sample-hall': 'Hall',
++  'text:architecture.sample-kitchen': 'Kitchen',
++  'text:architecture.sample-bath': 'Bath',
++  'text:architecture.sample-living': 'Living',
++  'text:architecture.sample-dining': 'Dining',
++  'text:architecture.sample-bedroom': 'Bedroom {n}',
++};
+diff --git a/packages/jet_cad_2d_kit_architecture/lib/src/words/tr.dart b/packages/jet_cad_2d_kit_architecture/lib/src/words/tr.dart
+new file mode 100644
+index 00000000..ec9868ca
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/lib/src/words/tr.dart
+@@ -0,0 +1,63 @@
++// The architecture kit's Turkish words (spec 3a C2, C1.6): today's
++// jet_cad_floor_plan/lib/src/l10n/strings_tr.dart (:60, :75-96, :189-249,
++// :303-307, :414, :420-435) under the 3a plan's word ids, and the words the
++// specs add (the opening type, the justification, the dimension's kind and
++// axes, the dimension's notice).
++
++const Map<String, String> turkishWords = {
++  'tool:architecture.box': 'Kutu',
++  'tool:architecture.wall': 'Duvar',
++  'tool:architecture.door': 'Kapı',
++  'tool:architecture.window': 'Pencere',
++  'tool:architecture.gap': 'Boşluk',
++  'tool:architecture.room': 'Oda',
++  'tool:architecture.separator': 'Ayırıcı',
++  'tool:architecture.dimension': 'Ölçü',
++  'type:architecture.box': 'Kutu',
++  'type:architecture.wall': 'Duvar',
++  'type:architecture.opening': 'Açıklık',
++  'type:architecture.separator': 'Ayırıcı',
++  'type:architecture.room': 'Oda',
++  'type:architecture.dimension': 'Ölçü',
++  'property:architecture.box.width': 'Genişlik',
++  'property:architecture.box.height': 'Yükseklik',
++  'property:architecture.wall.thickness': 'Kalınlık',
++  'property:architecture.wall.justification': 'Hizalama',
++  'property:architecture.wall.justification.left': 'Sol',
++  'property:architecture.wall.justification.centre': 'Orta',
++  'property:architecture.wall.justification.right': 'Sağ',
++  'property:architecture.opening.width': 'Genişlik',
++  'property:architecture.opening.position': 'Konum',
++  'property:architecture.opening.flip-hinge': 'Menteşeyi çevir',
++  'property:architecture.opening.flip-swing': 'Açılışı çevir',
++  'property:architecture.room.name': 'Ad',
++  'property:architecture.room.area': 'Alan',
++  'property:architecture.dimension.value': 'Değer',
++  'property:architecture.dimension.kind': 'Tür',
++  'property:architecture.dimension.kind.aligned': 'Hizalı',
++  'property:architecture.dimension.kind.horizontal': 'Yatay',
++  'property:architecture.dimension.kind.vertical': 'Dikey',
++  'property:architecture.dimension.axes': 'Eksenler',
++  'property:architecture.dimension.end-1': 'Uç 1',
++  'property:architecture.dimension.end-2': 'Uç 2',
++  'property:architecture.door.width': 'Genişlik',
++  'property:architecture.window.width': 'Genişlik',
++  'property:architecture.gap.width': 'Genişlik',
++  'text:architecture.room-name': 'Oda {n}',
++  'text:architecture.room-occupied': 'Zaten bir oda: {name}',
++  'text:architecture.axes-turned': 'Eksenler {degrees}° döndürülmüş',
++  'text:architecture.end-on-wall': 'Duvar {wall}, {end}, {side}',
++  'text:architecture.end-start': 'başlangıç',
++  'text:architecture.end-end': 'bitiş',
++  'text:architecture.end-fixed': 'Sabit',
++  'text:architecture.face-left': 'sol yüzey',
++  'text:architecture.face-centre': 'eksen',
++  'text:architecture.face-right': 'sağ yüzey',
++  'text:architecture.dimension-value': '{value}',
++  'text:architecture.sample-hall': 'Hol',
++  'text:architecture.sample-kitchen': 'Mutfak',
++  'text:architecture.sample-bath': 'Banyo',
++  'text:architecture.sample-living': 'Oturma odası',
++  'text:architecture.sample-dining': 'Yemek odası',
++  'text:architecture.sample-bedroom': 'Yatak odası {n}',
++};
+diff --git a/packages/jet_cad_2d_kit_architecture/lib/src/words/words.dart b/packages/jet_cad_2d_kit_architecture/lib/src/words/words.dart
+new file mode 100644
+index 00000000..ebc015c8
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/lib/src/words/words.dart
+@@ -0,0 +1,27 @@
++// The architecture kit's words (spec 3a C2 "Words", C1.6): tool:, type:,
++// property: and text: ids in English, German and Turkish. Task 23 adds the
++// furniture library's symbol: and category: words.
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show KitNames;
++
++import 'de.dart';
++import 'en.dart';
++import 'tr.dart';
++
++/// The kit's words by locale.
++const KitNames architectureNames =
++    KitNames({'en': englishWords, 'de': germanWords, 'tr': turkishWords});
++
++/// The words whose right word is the English one, per locale: conformance's
++/// `sameAsEnglish` (contract K7). The dimension's notice is the value alone
++/// in every language.
++const Map<String, Set<String>> architectureSameAsEnglish = {
++  'de': {
++    'property:architecture.opening.position',
++    'property:architecture.room.name',
++    'property:architecture.dimension.kind.horizontal',
++    'text:architecture.dimension-value',
++  },
++  'tr': {
++    'text:architecture.dimension-value',
++  },
++};
+diff --git a/packages/jet_cad_2d_kit_architecture/pubspec.yaml b/packages/jet_cad_2d_kit_architecture/pubspec.yaml
+new file mode 100644
+index 00000000..9cef35b4
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/pubspec.yaml
+@@ -0,0 +1,34 @@
++name: jet_cad_2d_kit_architecture
++description: >-
++  The architecture kit for jet_cad_2d plans: walls, doors, windows, gaps,
++  room separators, rooms, dimensions, boxes, a furniture library and wall
++  attachment.
++version: 0.1.0
++repository: https://github.com/a-urel/jet-cad
++issue_tracker: https://github.com/a-urel/jet-cad/issues
++funding:
++  - https://github.com/sponsors/a-urel
++  - https://buymeacoffee.com/yazemo
++topics:
++  - cad
++  - floor-plan
++  - architecture
++resolution: workspace
++
++environment:
++  sdk: ^3.6.0
++  flutter: ">=3.44.0"
++
++dependencies:
++  flutter:
++    sdk: flutter
++  jet_cad_2d: ^0.7.2
++  jet_cad_2d_flutter: ^0.7.2
++  jet_cad_2d_kit: ^0.1.0
++  meta: ^1.18.0
++  vector_math: ^2.2.0
++
++dev_dependencies:
++  flutter_test:
++    sdk: flutter
++  lints: ^6.1.0
+diff --git a/packages/jet_cad_2d_kit_architecture/test/example_test.dart b/packages/jet_cad_2d_kit_architecture/test/example_test.dart
+new file mode 100644
+index 00000000..a9d46036
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/test/example_test.dart
+@@ -0,0 +1,27 @@
++// The kit's published example (spec 3a C2; Appendix A D-18): the
++// descriptor and the hook a new plan runs, over a bare engine document.
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
++
++// The example is not under lib/, so a relative path is the only way to it.
++// ignore: avoid_relative_lib_imports
++import '../example/main.dart';
++
++void main() {
++  test(
++      'SC-example the example names the kit and its version, every tool '
++      'with its letter, no problems, and the DASHED record its prepare '
++      'writes', () {
++    final lines = describeArchitectureKit();
++    expect(
++        lines.first,
++        'architecture 0.1.0: ${architectureKit.types.length} types, '
++        '${architectureKit.tools.length} tools');
++    for (final tool in architectureKit.tools) {
++      expect(lines, contains('${tool.id} (${tool.letter})'));
++    }
++    expect(lines, contains('validate: no problems'));
++    // M-SC-10: the example without the prepare call.
++    expect(lines.last, 'prepare: DASHED at handle 6');
++  });
++}
+diff --git a/packages/jet_cad_2d_kit_architecture/test/scaffold/kit_test.dart b/packages/jet_cad_2d_kit_architecture/test/scaffold/kit_test.dart
+new file mode 100644
+index 00000000..5494fc97
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/test/scaffold/kit_test.dart
+@@ -0,0 +1,58 @@
++// Spec 3a C2: the kit's descriptor. Its id and version (the pubspec's), its
++// words and its prepare, and the type and tool ids of A7.
++import 'dart:io';
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
++import 'package:jet_cad_2d_kit_architecture/src/separator_linetype.dart';
++import 'package:jet_cad_2d_kit_architecture/src/words/words.dart';
++
++void main() {
++  test(
++      'SC-ids the kit is architecture at its pubspec\'s version, with its '
++      'words and its prepare; its type and tool ids are the spec\'s (C2)', () {
++    expect(architectureKit.id, 'architecture');
++    // M-SC-ver: the kit's version moved without the pubspec's.
++    expect(architectureKit.version, '0.1.0');
++    expect(File('pubspec.yaml').readAsStringSync(),
++        contains('\nversion: ${architectureKit.version}\n'));
++    expect(identical(architectureKit.names, architectureNames), isTrue);
++    // M-SC-1: the kit without its prepare.
++    expect(architectureKit.prepare, ensureDashedLinetype);
++    expect([
++      ArchitectureTypes.box,
++      ArchitectureTypes.wall,
++      ArchitectureTypes.opening,
++      ArchitectureTypes.separator,
++      ArchitectureTypes.room,
++      ArchitectureTypes.dimension,
++    ], [
++      'architecture.box',
++      'architecture.wall',
++      'architecture.opening',
++      'architecture.separator',
++      'architecture.room',
++      'architecture.dimension',
++    ]);
++    // M-SC-ids: a tool id renamed.
++    expect([
++      ArchitectureTools.box,
++      ArchitectureTools.wall,
++      ArchitectureTools.door,
++      ArchitectureTools.window,
++      ArchitectureTools.gap,
++      ArchitectureTools.room,
++      ArchitectureTools.separator,
++      ArchitectureTools.dimension,
++    ], [
++      'architecture.box',
++      'architecture.wall',
++      'architecture.door',
++      'architecture.window',
++      'architecture.gap',
++      'architecture.room',
++      'architecture.separator',
++      'architecture.dimension',
++    ]);
++  });
++}
+diff --git a/packages/jet_cad_2d_kit_architecture/test/scaffold/live_test.dart b/packages/jet_cad_2d_kit_architecture/test/scaffold/live_test.dart
+new file mode 100644
+index 00000000..2aed6ad3
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/test/scaffold/live_test.dart
+@@ -0,0 +1,101 @@
++// Spec 3a C1.5: the kit asks "is this a live T" of the plan's services,
++// never of a catalog of its own. Two test types in a catalog of their own,
++// groups far off the origin and turned by 0.3 + 0.7k rad, one of them
++// frozen.
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/testing.dart';
++import 'package:jet_cad_2d_kit_architecture/src/live.dart';
++
++final class Peg implements Component {
++  const Peg();
++
++  static const String id = 'architecture.peg';
++
++  @override
++  String get typeId => id;
++
++  @override
++  Map<String, Object?> toJson() => const {};
++
++  static Peg fromJson(Map<String, Object?> json) => const Peg();
++}
++
++final class Pin implements Component {
++  const Pin();
++
++  static const String id = 'architecture.pin';
++
++  @override
++  String get typeId => id;
++
++  @override
++  Map<String, Object?> toJson() => const {};
++
++  static Pin fromJson(Map<String, Object?> json) => const Pin();
++}
++
++/// A type that draws nothing: only the naming rule is under test.
++final class Inert<T extends Component> extends ParametricType<T> {
++  const Inert();
++
++  @override
++  Capability get editCapability => Capability.geometry;
++
++  @override
++  Aabb2 reach(T params, Transform2 toWorld) => Aabb2.empty();
++
++  @override
++  List<Generated> generate(ParametricView view, Handle self) => const [];
++}
++
++Handle add<T extends Component>(DraftDocument doc, int h, T value, double k) {
++  final handle = Handle(h);
++  doc.commands.execute(CompoundCommand([
++    AddNodeCommand(GroupNode(
++        handle: handle,
++        parent: doc.rootHandle,
++        transform: Transform2.translation(4500000 + 311.5 * k, -173.25 * k)
++            .multiply(Transform2.rotation(0.3 + 0.7 * k)),
++        children: const [])),
++    SetComponentCommand<T>(handle, value),
++  ], label: 'Add'));
++  return handle;
++}
++
++void main() {
++  test(
++      'SC-live liveTypesOf answers the services\' live type id; isLiveOf and '
++      'liveObjectsOf read it: a frozen object is in neither, while the '
++      'catalog still names it', () {
++    final doc = DraftDocument.empty();
++    addTearDown(doc.dispose);
++    final catalog = ParametricCatalog()
++      ..register<Peg>(Peg.id, Peg.fromJson, const Inert<Peg>())
++      ..register<Pin>(Pin.id, Pin.fromJson, const Inert<Pin>());
++    catalog.registerComponents(doc.components);
++    final frozen = add(doc, 4050, const Peg(), 1);
++    final a = add(doc, 4100, const Peg(), 2);
++    final b = add(doc, 4200, const Pin(), 3);
++    final c = add(doc, 4300, const Peg(), 4);
++    final services =
++        FakePlanServices(document: doc, catalog: catalog, frozen: {frozen});
++    addTearDown(services.dispose);
++    expect(catalog.typeIdOf(doc, frozen), Peg.id,
++        reason: 'premise: the catalog names a frozen object');
++
++    final live = liveTypesOf(services);
++    // M-SC-live-3: liveTypesOf answering null for everything.
++    expect(live(a), Peg.id);
++    expect(live(b), Pin.id);
++    expect(live(frozen), isNull);
++    expect(live(doc.rootHandle), isNull);
++    // M-SC-live-2: isLiveOf asking only "is it live".
++    expect(isLiveOf(live, a, Peg.id), isTrue);
++    expect(isLiveOf(live, b, Peg.id), isFalse);
++    expect(isLiveOf(live, frozen, Peg.id), isFalse);
++    // M-SC-live-1: liveObjectsOf without its filter.
++    expect(liveObjectsOf<Peg>(doc, live, Peg.id), [a, c]);
++    expect(liveObjectsOf<Pin>(doc, live, Pin.id), [b]);
++  });
++}
+diff --git a/packages/jet_cad_2d_kit_architecture/test/scaffold/words_test.dart b/packages/jet_cad_2d_kit_architecture/test/scaffold/words_test.dart
+new file mode 100644
+index 00000000..f2360aaa
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/test/scaffold/words_test.dart
+@@ -0,0 +1,149 @@
++// Spec 3a C2 "Words", C1.6: the kit's words. Every locale holds exactly the
++// plan's word table (symbol and category words, Task 23's, aside); each
++// text: word keeps English's placeholders and fills them; the kit validates,
++// and conformance (A16) holds German and Turkish complete over every
++// code-side word, the descriptor's and the table's.
++import 'dart:ui' show Locale;
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_kit/authoring.dart'
++    show Catalog, conformance, encodeLibrary, encodeSnapshot, geometrySnapshot;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
++import 'package:jet_cad_2d_kit_architecture/src/words/words.dart';
++
++/// The 3a plan's "Word ids" table, written out (55 ids).
++const Set<String> wordTable = {
++  'tool:architecture.box',
++  'tool:architecture.wall',
++  'tool:architecture.door',
++  'tool:architecture.window',
++  'tool:architecture.gap',
++  'tool:architecture.room',
++  'tool:architecture.separator',
++  'tool:architecture.dimension',
++  'type:architecture.box',
++  'type:architecture.wall',
++  'type:architecture.opening',
++  'type:architecture.separator',
++  'type:architecture.room',
++  'type:architecture.dimension',
++  'property:architecture.box.width',
++  'property:architecture.box.height',
++  'property:architecture.wall.thickness',
++  'property:architecture.wall.justification',
++  'property:architecture.wall.justification.left',
++  'property:architecture.wall.justification.centre',
++  'property:architecture.wall.justification.right',
++  'property:architecture.opening.width',
++  'property:architecture.opening.position',
++  'property:architecture.opening.flip-hinge',
++  'property:architecture.opening.flip-swing',
++  'property:architecture.room.name',
++  'property:architecture.room.area',
++  'property:architecture.dimension.value',
++  'property:architecture.dimension.kind',
++  'property:architecture.dimension.kind.aligned',
++  'property:architecture.dimension.kind.horizontal',
++  'property:architecture.dimension.kind.vertical',
++  'property:architecture.dimension.axes',
++  'property:architecture.dimension.end-1',
++  'property:architecture.dimension.end-2',
++  'property:architecture.door.width',
++  'property:architecture.window.width',
++  'property:architecture.gap.width',
++  'text:architecture.room-name',
++  'text:architecture.room-occupied',
++  'text:architecture.axes-turned',
++  'text:architecture.end-on-wall',
++  'text:architecture.end-start',
++  'text:architecture.end-end',
++  'text:architecture.end-fixed',
++  'text:architecture.face-left',
++  'text:architecture.face-centre',
++  'text:architecture.face-right',
++  'text:architecture.dimension-value',
++  'text:architecture.sample-hall',
++  'text:architecture.sample-kitchen',
++  'text:architecture.sample-bath',
++  'text:architecture.sample-living',
++  'text:architecture.sample-dining',
++  'text:architecture.sample-bedroom',
++};
++
++/// [locale]'s word ids, less the catalog's (symbol, category).
++Set<String> codeWords(String locale) => {
++      for (final id in architectureNames.words[locale]!.keys)
++        if (!id.startsWith('symbol:') && !id.startsWith('category:')) id,
++    };
++
++void main() {
++  test(
++      'SC-words English, German and Turkish each hold exactly the plan\'s '
++      'word table', () {
++    expect(wordTable, hasLength(55), reason: 'premise: the table');
++    expect(architectureNames.words.keys.toSet(), {'en', 'de', 'tr'});
++    for (final locale in ['en', 'de', 'tr']) {
++      // M-SC-3: a word deleted from one locale.
++      expect(codeWords(locale), wordTable, reason: locale);
++    }
++  });
++
++  test(
++      'SC-text each text: word keeps English\'s placeholders in German and '
++      'Turkish, and KitWords fills them as today\'s strings did', () {
++    final en = architectureNames.words['en']!;
++    for (final locale in ['de', 'tr']) {
++      final words = architectureNames.words[locale]!;
++      for (final id in wordTable.where((id) => id.startsWith('text:'))) {
++        // M-SC-4: a placeholder renamed in one locale.
++        expect(placeholdersOf(words[id]!), placeholdersOf(en[id]!),
++            reason: '$locale: $id');
++      }
++    }
++    expect(placeholdersOf(en['text:architecture.end-on-wall']!),
++        {'wall', 'end', 'side'});
++    expect(placeholdersOf(en['text:architecture.sample-bedroom']!), {'n'});
++    final tr = KitNamesWords(architectureNames, () => const Locale('tr'));
++    // Today's strings_tr.dart:60 and :306-307.
++    expect(tr.text('text:architecture.room-occupied', {'name': 'Oda 1'}),
++        'Zaten bir oda: Oda 1');
++    expect(
++        tr.text('text:architecture.end-on-wall', {
++          'wall': '1F',
++          'end': tr.text('text:architecture.end-start'),
++          'side': tr.text('text:architecture.face-left'),
++        }),
++        'Duvar 1F, başlangıç, sol yüzey');
++    final de = KitNamesWords(architectureNames, () => const Locale('de'));
++    // Today's strings_de.dart:304.
++    expect(de.text('text:architecture.axes-turned', {'degrees': '12,5'}),
++        'Achsen um 12,5° gedreht');
++  });
++
++  test(
++      'SC-conformance the kit validates, and conformance over the empty '
++      'catalog holds German and Turkish complete for every code-side word', () {
++    expect(architectureKit.validate(), isEmpty);
++    const catalog = Catalog(kit: 'architecture', symbols: []);
++    final english = architectureNames.words['en']!.keys;
++    Set<String> ids(String namespace) => {
++          for (final id in english)
++            if (id.startsWith('$namespace:'))
++              id.substring(namespace.length + 1),
++        };
++    final problems = conformance(
++      catalog: catalog,
++      committedLibrary: encodeLibrary(catalog),
++      committedSnapshot: encodeSnapshot(geometrySnapshot(catalog)),
++      names: architectureNames,
++      locales: const ['de', 'tr'],
++      sameAsEnglish: architectureSameAsEnglish,
++      typeIds: {...ids('type'), for (final t in architectureKit.types) t.id},
++      toolIds: {...ids('tool'), for (final t in architectureKit.tools) t.id},
++      propertyIds: {...ids('property'), ...architectureKit.propertyIds},
++    );
++    // M-SC-3 and M-SC-4 are red here too (wordMissing, placeholderMismatch).
++    expect(problems, isEmpty);
++  });
++}
+diff --git a/pubspec.yaml b/pubspec.yaml
+index 5e26bd99..32e72915 100644
+--- a/pubspec.yaml
++++ b/pubspec.yaml
+@@ -2,19 +2,21 @@ name: jet_cad_workspace
+ publish_to: none
+ environment:
+   sdk: ^3.5.0
+ workspace:
+   - packages/jet_cad
+   - packages/jet_cad_2d
+   - packages/jet_cad_2d_flutter
+   - packages/jet_cad_2d_gpu
+   - packages/jet_cad_2d_kit
+   - packages/jet_cad_2d_plan
++  - packages/jet_cad_2d_kit_architecture
++  - packages/jet_cad_2d_integration
+   - apps/dev_harness
+   - apps/dev_harness_2d
+   - packages/jet_cad_floor_plan
+   - packages/jet_cad_restaurant_symbols
+   - apps/floor_planner
+   - apps/restaurant_demo
+   - tool/ci
+   - tool/screenshots
+   - tool/readme_probe
+diff --git a/tool/ci/test/scripts_test.dart b/tool/ci/test/scripts_test.dart
+index 3c422949..df4a0785 100644
+--- a/tool/ci/test/scripts_test.dart
++++ b/tool/ci/test/scripts_test.dart
+@@ -437,20 +437,40 @@ void main() {
+   test('SC20b the plan library\'s tests run with --enable-vmservice', () {
+     final entry = workflow.indexOf('- package: packages/jet_cad_2d_plan');
+     expect(entry, isNot(-1));
+     final next = workflow.indexOf('- package: ', entry + 1);
+     expect(
+       workflow.substring(entry, next),
+       contains('\n            test_flags: --enable-vmservice\n'),
+     );
+   });
+ 
++  // 3a Task 9: the integration package carries the paint-allocation
++  // invariant over the sample flat (spec 3a C6), which reads the VM's
++  // allocation profiler; without the flag it skips, which the standing
++  // comparison reads as red.
++  test(
++    'SC20c the integration package\'s tests run with --enable-vmservice',
++    () {
++      final entry = workflow.indexOf(
++        '- package: packages/jet_cad_2d_integration',
++      );
++      expect(entry, isNot(-1));
++      final next = workflow.indexOf('- package: ', entry + 1);
++      expect(next, isNot(-1), reason: 'premise: not the matrix\'s last entry');
++      expect(
++        workflow.substring(entry, next),
++        contains('\n            test_flags: --enable-vmservice\n'),
++      );
++    },
++  );
++
+   // The script itself, run by bash in a scratch repository with the tag
+   // and a stand-in `flutter` that records what it analysed.
+   group('SC19 old_host_probe.sh', () {
+     late Directory repo;
+     late File main;
+     late File seen;
+     const tagged = 'void main() {} // as v0.3.0 had it\n';
+     const current = 'void main() {} // this commit\n';
+ 
+     /// Runs git in the scratch repository with automatic maintenance off,

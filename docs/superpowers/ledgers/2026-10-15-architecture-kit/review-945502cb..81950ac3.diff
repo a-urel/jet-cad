@@ -1,0 +1,3389 @@
+81950ac3 docs: 3a results note, the final fix wave
+bc8abbc6 test(integration): one copy each of the rig's click, drag, undo and select helpers
+2bb541ee test(integration): line-level internal-member ignores where a file has few reads
+55aa1bb3 test(integration): the rig unmounts the editor before the controller is disposed
+5d27b59b test(plan): the notice guard catches a throwing addListener and removeListener
+8c8599eb test(kit): FakePlanServices.dispose releases the camera and the symbols state
+d80ff0fa test(kit): contract words: a foreign kit's text is not held to the locales; fillText fills once
+2424d954 test(kit): WR9's empty sample diagnostics paired with its ten live walls
+c39b9d57 test(integration): P-choice-focus gains an Esc step and a tool-settings choice row
+81f9e247 test(kit): DG-frozen probes the candidate set before any wall is laid out
+946b4cac test(kit): DT-freeze split into four tests, one per freeze step
+a1114f4c test(integration): TT7 reads the Room tool's own notice; OT-frozen-host's delete half resets the hint
+53743d55 docs: comment and doc accuracy (3a final wave A3, B1-B9)
+017480eb fix(plan): a failed build or prepare is reported again on a later plan
+ddc44e76 fix(architecture): one RoomInputs liveness pass per Room and Separator tool event
+ docs/kits.md                                       |   2 +-
+ .../notes/2026-10-15-architecture-kit-results.md   |  89 +++++++++++
+ .../test/box/planner_box_test.dart                 |   4 +-
+ .../test/controller/zone_room_test.dart            |   6 +-
+ .../test/dimension/dimension_panel_test.dart       |  11 +-
+ .../test/dimension/dimension_plans.dart            |  18 +--
+ .../test/dimension/dimension_shell_test.dart       |   2 +-
+ .../test/l10n/leak_test.dart                       |   2 +-
+ .../test/l10n/locale_separator_test.dart           |   3 +-
+ .../test/l10n/numbered_names_test.dart             |   2 +-
+ .../test/opening/opening_frozen_test.dart          |  11 +-
+ .../test/opening/opening_grips_test.dart           |   2 +-
+ .../test/opening/opening_kink_test.dart            |   3 +-
+ .../test/opening/opening_paint_test.dart           |   1 -
+ .../test/opening/opening_panel_test.dart           |   3 +-
+ .../test/opening/opening_symbol_test.dart          |   4 +-
+ .../test/opening/opening_tool_test.dart            |   3 +-
+ .../test/panels/wall_section_test.dart             |  43 +++++-
+ .../test/room/room_grips_test.dart                 |  18 ++-
+ .../test/room/room_paint_test.dart                 |   2 +-
+ .../test/room/room_panel_test.dart                 |   4 +-
+ .../test/room/room_tool_test.dart                  |  11 ++
+ .../test/separator/separator_dashed_test.dart      |   4 +-
+ .../test/support/canvas_rig.dart                   |  13 +-
+ .../test/support/editor_rig.dart                   |  70 ++++++++-
+ .../test/support/opening_support.dart              |  46 ++----
+ .../test/support/room_plans.dart                   |  50 ++----
+ .../test/support/wall_shell.dart                   |  30 ----
+ .../test/wall/wall_grips_test.dart                 |   3 +-
+ .../authoring/text_words_conformance_test.dart     |  19 +++
+ .../jet_cad_2d_kit/test/kit/object_view_test.dart  |   5 +-
+ .../jet_cad_2d_kit/test/model/kit_text_test.dart   |  11 ++
+ .../test/testing/fake_plan_services_test.dart      |  22 +++
+ .../lib/src/attach/wall_faces.dart                 |   5 +-
+ .../lib/src/dimension/dimension_grips.dart         |   3 +-
+ .../lib/src/opening/opening_tool.dart              |   3 +-
+ .../lib/src/room/room_inputs.dart                  |  46 +++++-
+ .../lib/src/room/room_plan.dart                    |   8 +
+ .../lib/src/room/room_tool.dart                    |  27 +++-
+ .../lib/src/separator/separator_tool.dart          |  25 ++-
+ .../lib/src/wall/wall_bands.dart                   |  16 +-
+ .../test/dimension/dimension_live_test.dart        |  26 +++-
+ .../test/dimension/dimension_notice_test.dart      | 169 +++++++++++----------
+ .../test/room/room_tool_test.dart                  |  39 +++++
+ .../test/separator/separator_tool_test.dart        |  31 ++++
+ .../test/support/catalog.dart                      |   6 +-
+ .../test/wall/wall_regen_test.dart                 |   4 +
+ .../lib/src/controller/plan_controller.dart        |  17 +++
+ .../test/controller/prepare_build_test.dart        |  71 +++++++++
+ .../test/kits/guarded_notice_test.dart             |  40 +++++
+ .../test/panels/property_panel_test.dart           |  18 +++
+ .../jet_cad_2d_plan/test/support/throwing_kit.dart |  15 +-
+ 52 files changed, 810 insertions(+), 276 deletions(-)
+diff --git a/docs/kits.md b/docs/kits.md
+index 4147fc5d..67561139 100644
+--- a/docs/kits.md
++++ b/docs/kits.md
+@@ -494,21 +494,21 @@ once per subject and code:
+ 
+ | What throws | What happens |
+ |---|---|
+ | a `ParametricType` hook | the edit is rolled back; the type's objects are probed, and each one whose hooks throw is frozen (treated as a plain group) and locked; the edit is tried once more. One broken object blocks one edit, once |
+ | a component's `fromJson`, on load | the component is kept as stored, and its object is locked |
+ | grips, an attachment provider | an `ArgumentError` from a grip's `drag` or `preview` refuses that point (no move, nothing reported); anything else: no grips for that object; no attachment |
+ | a tool's `create` | the tool is disabled |
+ | a tool's event or painting | the tool is cancelled and selection is armed |
+ | a spec's `write` or `apply` | the field shows its stored value |
+ | a section | a small "section failed" box in its place |
+-| a kit's `prepare` | the plan opens without what it would have added |
++| a kit's `prepare` | the plan opens; what it added before the throw stays |
+ 
+ A plan that names a kit the host did not load opens: that kit's objects
+ draw, are locked, and are saved back unchanged (`kitMissing`). A plan saved
+ by a newer version of a loaded kit opens with a warning (`kitNewer`).
+ 
+ A frozen object's live referents (an opening's host wall) are locked with
+ it: they cannot be edited or deleted while it is frozen.
+ 
+ ### 10.9 The engine's types, and byte equality
+ 
+diff --git a/docs/superpowers/notes/2026-10-15-architecture-kit-results.md b/docs/superpowers/notes/2026-10-15-architecture-kit-results.md
+index dc7027eb..515fa3eb 100644
+--- a/docs/superpowers/notes/2026-10-15-architecture-kit-results.md
++++ b/docs/superpowers/notes/2026-10-15-architecture-kit-results.md
+@@ -663,10 +663,99 @@ Open items; none blocks the merge. Wording from the ledger.
+ 4. **A one-frame notice re-word lag on a locale switch** (Task 4, accepted):
+    it comes from `PlanLocaleScope` reporting the locale after the frame
+    (pre-existing); the kit tool's label lags identically, so the line
+    never mixes languages.
+ 
+ Parked Minor findings: 28 `Ruling:` lines of the ledger (Tasks 1-28 and the
+ rig's teardown order), not fixed here; they are the final review's fix
+ wave. Of them, the CHANGELOG items (Tasks 17, 21, 24) are written by this
+ task. One more for that wave, found here: the ported dimension files and
+ `wall_faces_test` carry no 3a port line (Appendix A section above).
++
++## Final fix wave
++
++The final whole-branch review (`7e65905b..945502cb`) found no Critical or
++Important issue. This wave closed its actionable Minors and a curated set of
++the parked ones (`fix-wave-brief.md`, `fix-wave-report.md` in
++`.superpowers/sdd/2026-10-15-architecture-kit/`). Every new pin was proven
++with a named mutation that was run on the committed code, went red and was
++reverted. No ported assertion was weakened or dropped. The figures above
++are unchanged.
++
++Items closed:
++- **A1** (review M3): `RoomInputs` gains a `beginEvent`/`endEvent` bracket.
++  The Room and Separator tools wrap each pointer event in it, so one hover
++  runs one liveness pass. `debugLivenessPasses` pins this (RT-one-pass,
++  ST-one-pass).
++- **A2** (review M4): `newPlan` and `load` now drop the replaced plan's
++  prepare and build `hookFailed` entries (`DiagnosticsLog.removeWhere`).
++  PB12 pins it.
++- **A3**: the room area memo's `stateId` limit after an E3 rebuild is
++  documented.
++- **B1-B9**: doc and comment accuracy.
++- **C1-C7, C9, C10**: the vacuous or unpinned tests named in the brief.
++- **D1**: the rig unmounts the editor before the controller is disposed.
++- **D2**: line-level internal-member ignores. Before the wave there were 19
++  file-level ignores. After it there are 2, in the grip tests, with 7 and
++  14 reads.
++- **D3**: one copy each of `clickAt`, `dragWorld`, `undoKey`, `select` and
++  `addSeparator`. `frameOn` and `pumpEditor` now share `centreCamera`.
++
++Skipped: **C8**. Every word id is namespaced under its own kit, and
++`validateKitSet` refuses a foreign one: a scratch kit carrying
++`tool:test.slab` made the controller throw `KitSetError` with the message
++`foreignWordId: prep: en: "tool:test.slab" is not under the kit "prep"`.
++So two loaded kits' words never conflict, and `kits.reversed` in
++`_buildWords` is an equivalent mutant.
++
++Gates (this run, at `bc8abbc6`, last lines):
++
++| Package | test | analyze | format |
++|---|---|---|---|
++| `jet_cad_2d_kit` | `00:06 +403: All tests passed!` | `No issues found! (ran in 3.0s)` | `Formatted 92 files (0 changed)`, exit 0 |
++| `jet_cad_2d_plan` (`--enable-vmservice`) | `01:55 +1551: All tests passed!` | `No issues found! (ran in 3.5s)` | `Formatted 299 files (0 changed)`, exit 0 |
++| `jet_cad_2d_kit_architecture` | `00:19 +655: All tests passed!` | `No issues found! (ran in 3.1s)` | `Formatted 136 files (0 changed)`, exit 0 |
++| `jet_cad_2d_integration` (`--enable-vmservice`) | `00:55 +227: All tests passed!` | `No issues found! (ran in 3.1s)` | `Formatted 79 files (0 changed)`, exit 0 |
++
++- The plan's invariants, `flutter test --enable-vmservice test/invariants`:
++  `00:09 +15: All tests passed!`
++- IA-alloc, `flutter test --enable-vmservice test/invariants/paint_allocation_test.dart`:
++  `00:00 +1: All tests passed!`
++- `dart run tool/ci/check_kit_deps.dart`: `kit dependencies: 2 package(s)
++  checked, none names the plan library or another kit`, exit 0.
++- The three `dart pub publish --dry-run` runs each exit 0 with `Package has
++  0 warnings.`:
++  - kit: `Total compressed archive size: 121 KB.`
++  - plan: `940 KB`
++  - architecture kit: `539 KB`
++- `git log --name-only --format= 945502cb..HEAD | grep -c analysis_options`
++  prints `0`.
++
++Commits (on `945502cb`, oldest first):
++- `ddc44e76` fix(architecture): one RoomInputs liveness pass per Room and
++  Separator tool event
++- `017480eb` fix(plan): a failed build or prepare is reported again on a
++  later plan
++- `53743d55` docs: comment and doc accuracy (3a final wave A3, B1-B9)
++- `a1114f4c` test(integration): TT7 reads the Room tool's own notice;
++  OT-frozen-host's delete half resets the hint
++- `946b4cac` test(kit): DT-freeze split into four tests, one per freeze step
++- `81f9e247` test(kit): DG-frozen probes the candidate set before any wall
++  is laid out
++- `c39b9d57` test(integration): P-choice-focus gains an Esc step and a
++  tool-settings choice row
++- `2424d954` test(kit): WR9's empty sample diagnostics paired with its ten
++  live walls
++- `d80ff0fa` test(kit): contract words: a foreign kit's text is not held to
++  the locales; fillText fills once
++- `8c8599eb` test(kit): FakePlanServices.dispose releases the camera and the
++  symbols state
++- `5d27b59b` test(plan): the notice guard catches a throwing addListener and
++  removeListener
++- `55aa1bb3` test(integration): the rig unmounts the editor before the
++  controller is disposed
++- `2bb541ee` test(integration): line-level internal-member ignores where a
++  file has few reads
++- `bc8abbc6` test(integration): one copy each of the rig's click, drag, undo
++  and select helpers
++
++This section's commit sits on top of them.
+diff --git a/packages/jet_cad_2d_integration/test/box/planner_box_test.dart b/packages/jet_cad_2d_integration/test/box/planner_box_test.dart
+index 772bed0e..1c803bd2 100644
+--- a/packages/jet_cad_2d_integration/test/box/planner_box_test.dart
++++ b/packages/jet_cad_2d_integration/test/box/planner_box_test.dart
+@@ -1,20 +1,22 @@
+ // Ported from jet_cad_floor_plan/test/planner_box_test.dart (BX1-BX6, spec
+ // 06 D13); assertions unchanged. PlannerShell becomes PlanEditor over
+ // architectureController() (spec 3a C6, C7); the palette's 'tool-box' is
+ // 'tool-architecture.box' (C7 class 1, ids); BX4's drift is asked of the
+ // kit's types (kitCatalog) instead of the floor planner's catalog. The
+ // fixture is box_rig.dart's boxDoc (a 1:20 page anchored at (7000, 3000),
+ // nothing drawn) opened by the controller, its grid snap on: under the
+ // editor's turned camera a click's world point does not come back exactly
+ // (the plan library's selection_panel_test.dart:38-43 measured a box of
+-// 120 x 69.99999999999955), and the grid gives the clicks today's corners.
++// 120 x 69.99999999999955), and the grid keeps the clicks on today's exact
++// corners. BX1-BX6 do not need it to pass: with it off they pass too
++// (BX2's closeTo absorbs the camera's error; Task 10's probe).
+ import 'package:flutter/material.dart';
+ import 'package:flutter/services.dart' show LogicalKeyboardKey;
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_integration/jet_cad_2d_integration.dart';
+ import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
+ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import '../support/editor_rig.dart';
+diff --git a/packages/jet_cad_2d_integration/test/controller/zone_room_test.dart b/packages/jet_cad_2d_integration/test/controller/zone_room_test.dart
+index 3a0846f9..168982a0 100644
+--- a/packages/jet_cad_2d_integration/test/controller/zone_room_test.dart
++++ b/packages/jet_cad_2d_integration/test/controller/zone_room_test.dart
+@@ -1,11 +1,10 @@
+-// ignore_for_file: invalid_use_of_internal_member
+ // R-16's room line of the controller's framing tests (3a Task 28, D-38;
+ // rulings R-P9, R-P18, IA-R6): CZ1 (jet_cad_floor_plan/test/host/
+ // controller_test.dart:559-586), ported whole over the zone fixture with
+ // its room named `7` (`zone_plan.dart`). `fitToTables` is the plan's
+ // `fitToUnits`; `framingFor` is `@internal` (R-P9); today's
+ // `frameTables(bound, size)` is the plan's `frameUnits`, internal, so the
+ // oracle is a copy of it ([frameUnits] below); a table's label is its UNIT
+ // label (`units.dart`'s `unitsLabelled`). Assertions unchanged.
+ import 'dart:ui' show Size;
+ 
+@@ -101,27 +100,30 @@ void main() {
+       'four corners of its box; table " 7 " by 7, not the TEXT or the room '
+       'named 7 (M-Z1, M-Z3)', (tester) async {
+     final c = zoned(tester);
+     final d = c.document;
+     final three = tableNode(d, '3').transform;
+     expect(three.determinant, lessThan(0), reason: 'premise: mirrored');
+     expect(three.b, isNot(0), reason: 'premise: turned');
+     expect(three.e.abs(), greaterThan(30000), reason: 'premise: off origin');
+     expect(c.fitToUnits({'3'}), isTrue);
+     expectCamera(
+-        c.framingFor(zoneSize), frameTables(boundOf(d, {'3'}), zoneSize));
++        // ignore: invalid_use_of_internal_member
++        c.framingFor(zoneSize),
++        frameTables(boundOf(d, {'3'}), zoneSize));
+ 
+     final label = labelOf(d, '7');
+     expect(d.entities.read(d.entities.slotOf(label)!).text, ' 7 ',
+         reason: 'premise: labelled with spaces');
+     final seven = boundOf(d, {'7'});
+     final looks = sevenTexts(d);
+     expect(looks, hasLength(2), reason: 'premise: the TEXT and the room name');
+     for (final p in looks) {
+       expect(seven.expandedBy(15000).containsPoint(p), isFalse,
+           reason: 'premise: far from table 7');
+     }
+     c.camera.value = zoneCamera();
+     expect(c.fitToUnits({'7'}), isTrue);
++    // ignore: invalid_use_of_internal_member
+     expectCamera(c.framingFor(zoneSize), frameTables(seven, zoneSize));
+   });
+ }
+diff --git a/packages/jet_cad_2d_integration/test/dimension/dimension_panel_test.dart b/packages/jet_cad_2d_integration/test/dimension/dimension_panel_test.dart
+index a6b458e3..5fe5d619 100644
+--- a/packages/jet_cad_2d_integration/test/dimension/dimension_panel_test.dart
++++ b/packages/jet_cad_2d_integration/test/dimension/dimension_panel_test.dart
+@@ -1,12 +1,10 @@
+-// ignore_for_file: invalid_use_of_internal_member
+-
+ // Spec 11 D14: the Selection panel's Dimension section. Shown for exactly
+ // one selected dimension (10 D21's rule): its value, read-only, as its TEXT
+ // child reads (decision 13), or `—` for a broken dimension; a switch
+ // Aligned | Horizontal | Vertical, each click one `SetComponentCommand`
+ // with only the kind changed (R-27); the axes line of a turned linear
+ // dimension (D11, R-18); the two end lines (R-28). Read-only unless
+ // `components` and `geometry` are allowed (07 WS8); a refused edit is
+ // caught.
+ //
+ // The plan is C2's L -- A (0, 0) -> (4000, 0), B (4000, 0) -> (4000, 3000),
+@@ -205,23 +203,24 @@ void main() {
+       expect(doc.commands.undoDepth, 2, reason: 'Aligned: one step');
+       p = paramsOf(doc, d);
+       expect(p, p0, reason: 'back to the stored parameters');
+       expect(p.offset, -617.375);
+       final back = childrenOf(doc, d);
+       expect(back.$1, first.$1, reason: 'the same children');
+       expect(back.$2, first.$2, reason: 'their payloads bit for bit');
+       expect(back.$3, first.$3);
+       expect(valueText(tester), '3231');
+ 
+-      // The current kind: a click issues nothing (the segmented button
+-      // does not call back for its selected segment), nor does the
+-      // callback itself (a click that lands before a rebuild).
++      // The current kind: a click issues nothing (the row is a
++      // DropdownButton, and the panel issues nothing for a value equal to
++      // the stored one), nor does the callback called directly (a click
++      // that lands before a rebuild).
+       await tapKind(tester, DimKind.aligned);
+       expect(doc.commands.undoDepth, 2, reason: 'a click on Aligned');
+       menuOf(tester).onChanged!(DimKind.aligned);
+       await tester.pump();
+       await tester.pump();
+       expect(doc.commands.undoDepth, 2, reason: 'the callback on Aligned');
+       expect(paramsOf(doc, d), p0);
+ 
+       // The corner end and the −0.0 offset through a switch and back.
+       await select(tester, c, [e]);
+@@ -489,21 +488,23 @@ void main() {
+       if ((entity['record']! as Map)['handle'] == stray.value) {
+         (entity['geometry']! as Map)['scalars'] = [aOutline];
+         repointed++;
+       }
+     }
+     expect(repointed, 1);
+     final c = architectureController(json: jsonEncode(j));
+     addTearDown(c.dispose);
+     await pumpPlan(tester, c);
+     final doc = c.document;
++    // ignore: invalid_use_of_internal_member
+     expect(c.frozen, contains(d), reason: 'frozen at open');
++    // ignore: invalid_use_of_internal_member
+     expect(c.frozen, isNot(contains(a)));
+     final p0 = paramsOf(doc, d);
+     final before = canon(doc);
+     // The premise: the plan refuses the switch (the lock, spec C1.10).
+     expect(
+         () => doc.commands.execute(SetComponentCommand<DimensionParams>(
+             d, p0.copyWith(kind: DimKind.horizontal))),
+         throwsA(isA<PlanLocked>()));
+     expect(canon(doc), before);
+ 
+diff --git a/packages/jet_cad_2d_integration/test/dimension/dimension_plans.dart b/packages/jet_cad_2d_integration/test/dimension/dimension_plans.dart
+index 5c9b744e..5ab27742 100644
+--- a/packages/jet_cad_2d_integration/test/dimension/dimension_plans.dart
++++ b/packages/jet_cad_2d_integration/test/dimension/dimension_plans.dart
+@@ -16,22 +16,24 @@ import 'package:flutter/material.dart';
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
+     show InteractionLayer, ViewportTransform;
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+ import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
+ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import '../support/room_plans.dart';
++import '../separator/separator_plans.dart' show addSeparator;
+ import '../support/wall_fixture.dart';
+ 
++export '../separator/separator_plans.dart' show addSeparator;
+ export '../support/canvas_rig.dart' show byKey;
+ export '../support/editor_rig.dart'
+     show activeTool, kitCatalog, press, pumpEditor, status;
+ export '../support/room_plans.dart'
+     show
+         O,
+         Placement,
+         S,
+         W,
+         addRoom,
+@@ -124,36 +126,20 @@ Built buildPlanIn(DraftDocument doc, List<W> walls,
+         at: place.groups ? groupFor(place, k++) : null));
+   }
+   addWalls(wallsAfter);
+   for (final (i, position, width, kind, swing) in openings) {
+     oh.add(addOpening(
+         doc, OpeningParams(wh[i], position, width, kind, swing: swing)));
+   }
+   return (walls: wh, seps: sh, openings: oh);
+ }
+ 
+-/// A separator from world [s] to world [e] in its own root group [at]
+-/// (room_fixture.dart:165-178).
+-Handle addSeparator(DraftDocument doc, Vector2 s, Vector2 e, {Transform2? at}) {
+-  final h = doc.handleSeed.next();
+-  final g = at ?? Transform2.identity();
+-  final inv = g.invert();
+-  final ls = inv.transformPoint(s), le = inv.transformPoint(e);
+-  doc.commands.execute(CompoundCommand([
+-    AddNodeCommand(GroupNode(
+-        handle: h, parent: doc.rootHandle, transform: g, children: const [])),
+-    SetComponentCommand<SeparatorParams>(
+-        h, SeparatorParams(ls.x, ls.y, le.x, le.y)),
+-  ], label: 'Add separator'));
+-  return h;
+-}
+-
+ /// Opening [o] in its own root group at the identity, one command
+ /// (room_fixture.dart:180-194).
+ Handle addOpening(DraftDocument doc, OpeningParams o) {
+   final h = doc.handleSeed.next();
+   doc.commands.execute(CompoundCommand([
+     AddNodeCommand(GroupNode(
+         handle: h,
+         parent: doc.rootHandle,
+         transform: Transform2.identity(),
+         children: const [])),
+diff --git a/packages/jet_cad_2d_integration/test/dimension/dimension_shell_test.dart b/packages/jet_cad_2d_integration/test/dimension/dimension_shell_test.dart
+index fdf525a0..6e1a3e18 100644
+--- a/packages/jet_cad_2d_integration/test/dimension/dimension_shell_test.dart
++++ b/packages/jet_cad_2d_integration/test/dimension/dimension_shell_test.dart
+@@ -1,11 +1,10 @@
+-// ignore_for_file: invalid_use_of_internal_member
+ // Ported from jet_cad_floor_plan/test/dimension_shell_test.dart (3a Task 26, spec C6); assertions unchanged.
+ //
+ // Spec 11 D19, D18 and D11 through the shell, on the sample plan (D17; the
+ // plan's Ruling 11-1). The real select tool clicks, bands, drags and deletes
+ // the five dimensions; the real Line tool hovers at an extension line's end.
+ //
+ // - Decisions 24 and 25: an extension line is drawn but never takes a
+ //   click, a band's membership or a snap. A dimension is selected by its
+ //   line, slashes or text; a wall face under an extension line stays
+ //   clickable (`SL1`), and a hover at an extension line's end snaps to
+@@ -569,20 +568,21 @@ void main() {
+     final c = samplePlan(gridSnap: false);
+     final doc = c.document;
+     final [_, _, hall, _, _] = dimsOf(doc);
+     expect(pageOf(doc).snapToGrid, isFalse, reason: 'premise: no grid snap');
+     await pumpShell(tester, c, 'tl9');
+     await pressKey(tester, LogicalKeyboardKey.keyL);
+     // The active tool as its factory made it: the plan wraps every tool,
+     // plan.line included, in its guard (spec P4, `_guardTool`), so the
+     // InteractionLayer's tool is the guard; R-P9's `toolFor` reads the
+     // tool inside it.
++    // ignore: invalid_use_of_internal_member
+     final tool = c.toolFor(c.activeTool.value)!;
+     expect(tool, isA<LineTool>(), reason: 'the Line tool, a PlacementTool');
+     tool as PlacementTool;
+     final raw = Vector2(12253, 9254);
+     await pinCamera(tester, c, raw, 0.3);
+     // A 10 px aperture at 0.3 px/mm: 10 / 0.3 = 33.3 mm.
+     final aperture = kSnapAperturePixels / c.camera.value.scale;
+     expect(aperture, closeTo(33.33, 0.01));
+     // The Hall's extension line at a ends at the line (9,150) + the
+     // overshoot (100): (12,250, 9,250), √(3² + 4²) = 5 mm from the hover.
+diff --git a/packages/jet_cad_2d_integration/test/l10n/leak_test.dart b/packages/jet_cad_2d_integration/test/l10n/leak_test.dart
+index ee909155..406ede60 100644
+--- a/packages/jet_cad_2d_integration/test/l10n/leak_test.dart
++++ b/packages/jet_cad_2d_integration/test/l10n/leak_test.dart
+@@ -1,11 +1,10 @@
+-// ignore_for_file: invalid_use_of_internal_member
+ // Spec 14d M-14d-a (revision 2, V-10): the leak test. The planner is
+ // pumped in Turkish through a recording language; every panel, tab, dialog
+ // and menu is opened in turn; then every Text, tooltip, label and hint on
+ // screen must be a word the planner asked the strings for, a symbol's name
+ // in the language, document text, or on a short allowlist. A literal never
+ // moved into the strings is never recorded, so it fails whatever its
+ // language.
+ // Ported from jet_cad_floor_plan/test/l10n/leak_test.dart (LK2; LK1 is
+ // 2a's) (3a Task 27, Appendix A D-24); assertions unchanged but the
+ // rulings named: IP-R4 (the library table is the fixture kit's) and IP-R5
+@@ -134,20 +133,21 @@ void main() {
+       'selected in turn, its size menu open: nothing bypasses the strings '
+       '(M-14d-a, review 14d-1 F-1)', (tester) async {
+     final recording = RecordingPlanStrings(const PlanStringsTr());
+     // Built in the reported language (spec C1.9): the rooms' stored names
+     // are the kit's Turkish words.
+     final c = PlanController(kits: [
+       architectureKit,
+       fxKit(library: [diningTableTwo])
+     ]);
+     addTearDown(c.dispose);
++    // ignore: invalid_use_of_internal_member
+     c.reportLocale(const Locale('tr'), strings: recording);
+     c.newPlan(build: buildSampleFlat);
+     await tester.binding.setSurfaceSize(const Size(1440, 900));
+     addTearDown(() => tester.binding.setSurfaceSize(null));
+     await tester.pumpWidget(
+         recordingApp(recording, Scaffold(body: PlanEditor(controller: c))));
+     await tester.pump();
+ 
+     // A library table from the palette.
+     await tester.tap(find.byKey(const Key('tab-symbols')));
+diff --git a/packages/jet_cad_2d_integration/test/l10n/locale_separator_test.dart b/packages/jet_cad_2d_integration/test/l10n/locale_separator_test.dart
+index 415e6bda..b4d56acf 100644
+--- a/packages/jet_cad_2d_integration/test/l10n/locale_separator_test.dart
++++ b/packages/jet_cad_2d_integration/test/l10n/locale_separator_test.dart
+@@ -1,11 +1,10 @@
+-// ignore_for_file: invalid_use_of_internal_member
+ // Spec Q0 N2 (M-Q0-e): a loaded plan is never settled. The UI language
+ // differs from the page's separator wherever it could leak in (the fixture
+ // rule).
+ // Ported from jet_cad_floor_plan/test/host/new_plan_separator_test.dart
+ // (NS3) through 2a's port (jet_cad_2d_plan/test/controller/
+ // locale_separator_test.dart: the view replaced by the report it makes,
+ // `reportLocale`) over the decimal separator's plan, with the source's
+ // room line restored (3a Task 27, Appendix A D-24); assertions unchanged.
+ // `reportLocale` is @internal (ruling R-P9).
+ import 'package:flutter/widgets.dart' show Locale;
+@@ -26,27 +25,29 @@ void main() {
+       'load(), a point plan shown in Turkish stays point, its texts with .',
+       (tester) async {
+     final f = q0PlanJson();
+     final json = f.json;
+     final premise = architectureController(json: json);
+     addTearDown(premise.dispose);
+     expect(separatorOf(premise.document), DecimalSeparator.point,
+         reason: 'premise');
+     final byJson = architectureController(json: json);
+     addTearDown(byJson.dispose);
++    // ignore: invalid_use_of_internal_member
+     byJson.reportLocale(const Locale('tr'));
+     final doc = byJson.document;
+     expect(separatorOf(doc), DecimalSeparator.point);
+     final room = doc.components.withComponent<RoomParams>().single;
+     expect(textOf(doc, labelsOf(doc, room)[1]), '12.37 m²');
+     expect(byJson.save(), json, reason: "the bytes are the file's");
+ 
+     final byLoad = architectureController();
+     addTearDown(byLoad.dispose);
+     byLoad.load(json);
++    // ignore: invalid_use_of_internal_member
+     byLoad.reportLocale(const Locale('tr'));
+     expect(separatorOf(byLoad.document), DecimalSeparator.point);
+     expect(byLoad.dirty.value, isFalse);
+     expect(byLoad.save(), json);
+     await tester.pump();
+   });
+ }
+diff --git a/packages/jet_cad_2d_integration/test/l10n/numbered_names_test.dart b/packages/jet_cad_2d_integration/test/l10n/numbered_names_test.dart
+index f14e8045..1d373dd1 100644
+--- a/packages/jet_cad_2d_integration/test/l10n/numbered_names_test.dart
++++ b/packages/jet_cad_2d_integration/test/l10n/numbered_names_test.dart
+@@ -1,29 +1,29 @@
+-// ignore_for_file: invalid_use_of_internal_member
+ // Spec 14d L7: a new layer is named in the language of the moment, its N
+ // counted over every built-in language's pattern, as the table folds names
+ // (M-14d-k); the sample plan names its rooms in its language.
+ // Ported from jet_cad_floor_plan/test/l10n/numbered_names_test.dart (NN3;
+ // NN1 and NN2 are 2a's) (3a Task 27, Appendix A D-24); assertions
+ // unchanged. The plan builds the sample in the language it was told
+ // (`newPlan(build:)`, spec C1.9): the strings become the reported locale,
+ // through `reportLocale`, @internal (ruling R-P9).
+ import 'package:flutter/widgets.dart' show Locale;
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
+ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+ 
+ void main() {
+   testWidgets('NN3 the sample plan names its rooms in its language',
+       (tester) async {
+     List<String> roomsOf(Locale locale) {
+       final c = PlanController(kits: [architectureKit]);
++      // ignore: invalid_use_of_internal_member
+       c.reportLocale(locale);
+       c.newPlan(build: buildSampleFlat);
+       final names = [
+         for (final h in c.document.components.withComponent<RoomParams>())
+           c.document.components.get<RoomParams>(h)!.name
+       ];
+       c.dispose();
+       return names;
+     }
+ 
+diff --git a/packages/jet_cad_2d_integration/test/opening/opening_frozen_test.dart b/packages/jet_cad_2d_integration/test/opening/opening_frozen_test.dart
+index e38e97fe..1c06b9b4 100644
+--- a/packages/jet_cad_2d_integration/test/opening/opening_frozen_test.dart
++++ b/packages/jet_cad_2d_integration/test/opening/opening_frozen_test.dart
+@@ -1,16 +1,15 @@
+ // Spec 3a C1.10 (decision 6): a frozen object's references are locked. A
+ // door whose type's code fails for it alone is frozen on load (spec 2a E2);
+ // its host wall then cannot be edited or deleted (PlanLocked, the lock
+ // hint), so it never regenerates uncut beside the frozen door or leaves the
+ // door naming a dead handle. A wall whose door is live edits as usual.
+-// ignore_for_file: invalid_use_of_internal_member
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+ import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
+ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+ 
+ import '../support/opening_support.dart';
+ 
+ /// The architecture kit, its opening type failing in `generate` for
+@@ -82,41 +81,51 @@ void main() {
+       b = d.handleSeed.next();
+       d.commands.execute(addWall(
+           d, b, plan(0, 2500), plan(4000, 3100), 150, Justification.left));
+       d.commands.execute(addOpening(d, d.handleSeed.next(),
+           OpeningParams(b, 2000, 1200, OpeningKind.window)));
+     });
+     final c = PlanController(kits: [poisonedKit(door)], json: text);
+     addTearDown(c.dispose);
+     await pumpEditor(tester, c, centre: plan(2500, 1200), scale: 0.15);
+     final doc = c.document;
++    // ignore: invalid_use_of_internal_member
+     expect(c.frozen, {door}, reason: 'premise: the door alone, on load');
+     expect([for (final d in c.diagnostics.value) d.code],
+         contains(KitDiagnosticCode.hookFailed));
+     // The plan unchanged: its state, entities by handle (`canon`); a
+     // refused edit is applied and inverted (locks.dart), which may leave
+     // the entity slots in another order (06 D11: slot order is history).
+     final before = canon(doc);
+ 
+     final pa = doc.components.get<WallParams>(a)!;
+     expect(
+         c.execute(
+             SetComponentCommand<WallParams>(a, pa.copyWith(thickness: 250))),
+         isFalse,
+         reason: 'an edit of the frozen door\'s host');
+     expect(c.lockHint.value, isTrue);
+     expect(canon(doc), before);
+     expect(doc.commands.undoDepth, 0);
+ 
++    // ignore: invalid_use_of_internal_member
+     c.selection.replace([SelectionKey.root(a)]);
+     await tester.pump();
++    // The edit above set the hint: reset, so the delete must set it again
++    // (the plan's frozen_references_test FL-delete: the selection's gate
++    // refuses a locked object before any command, the hint set by the
++    // select tool's delete command itself, refused as locked).
++    c.lockHint.value = false;
+     expect(c.deleteSelection(), isFalse, reason: 'a delete of it');
++    expect(c.execute(deleteLikeSelectTool(doc, a)), isFalse,
++        reason: "the select tool's delete command");
++    expect(c.lockHint.value, isTrue, reason: 'the delete shows the hint');
+     expect(doc.tree[a], isNotNull);
+     expect(canon(doc), before);
+ 
+     final pb = doc.components.get<WallParams>(b)!;
+     expect(
+         c.execute(
+             SetComponentCommand<WallParams>(b, pb.copyWith(thickness: 180))),
+         isTrue,
+         reason: 'control: a live door\'s host');
+     expect(doc.components.get<WallParams>(b)!.thickness, 180);
+diff --git a/packages/jet_cad_2d_integration/test/opening/opening_grips_test.dart b/packages/jet_cad_2d_integration/test/opening/opening_grips_test.dart
+index dea63c66..95f9111c 100644
+--- a/packages/jet_cad_2d_integration/test/opening/opening_grips_test.dart
++++ b/packages/jet_cad_2d_integration/test/opening/opening_grips_test.dart
+@@ -73,21 +73,21 @@ void main() {
+     // F3 on: the right edge released ~25 mm short of the obstacle's near
+     // edge snaps onto it (the aperture is ~67 mm).
+     final target = oracleAt(f, s.o1 - 450 - 25, 30);
+     await dragWorld(tester, c, Vector2(g.x, g.y), target);
+     await tester.pump();
+     expect(doc.commands.undoDepth, 1, reason: 'one undo step');
+     expect(paramsOf(doc, s.door).position + 450, closeTo(s.o1, 1e-6));
+     expect(paramsOf(doc, s.door).position,
+         isNot(closeTo(oracleU(f, gridOf(doc, target)), 1)),
+         reason: 'not the chain\'s point');
+-    await undoKey(tester);
++    await undoKey(tester, pumps: 1);
+     expect(paramsOf(doc, s.door), stored, reason: 'undone, exactly');
+     expect(doc.commands.undoDepth, 0);
+ 
+     // F3 off: the grid point projected, no edge snap.
+     await tester.sendKeyEvent(LogicalKeyboardKey.f3);
+     await tester.pump();
+     final g2 = objectGripsOf(c, s.door).single;
+     await dragWorld(tester, c, Vector2(g2.x, g2.y), target);
+     await tester.pump();
+     expect(doc.commands.undoDepth, 1);
+diff --git a/packages/jet_cad_2d_integration/test/opening/opening_kink_test.dart b/packages/jet_cad_2d_integration/test/opening/opening_kink_test.dart
+index 1db57b48..a0b96eec 100644
+--- a/packages/jet_cad_2d_integration/test/opening/opening_kink_test.dart
++++ b/packages/jet_cad_2d_integration/test/opening/opening_kink_test.dart
+@@ -1,14 +1,13 @@
+ // Ported from jet_cad_floor_plan/test/opening_kink_test.dart (spec 3a C6, C7):
+ // KJ3 (Task 15), KJ4 and KJ5 over architectureController in PlanEditor;
+ // KJ1, KJ1 (1e-6°), KJ2 and KJ6 run in the kit.
+-// ignore_for_file: invalid_use_of_internal_member
+ // The final review's I1 (spec 08 D8 and D9, as amended by the final fix
+ // wave): an opening clamped against the end of a wall whose joint is kinked
+ // a little. There the end cap runs from the right face out to a lobe, back
+ // to the endpoint on the centreline and on to the left face; the cap-vertex
+ // snap drops both of the cut's face points, and the end piece ran out to the
+ // left face and straight back over the endpoint: a spike the triangulator
+ // refused, so the whole edit was refused. Now the back-tracking vertex is
+ // dropped, and an opening is admitted only when every piece it leaves is
+ // simple, anticlockwise and triangulable; otherwise it is no-fit.
+ //
+@@ -96,20 +95,21 @@ void main() {
+       addKink(d, 2);
+       d.handleSeed.raiseTo(const Handle(9000));
+       d.commands.execute(addOpening(
+           d, hO, const OpeningParams(hA, 1500, 600, OpeningKind.window)));
+     }));
+     final doc = c.document;
+     await pumpEditor(tester, c, centre: plan(2200, 0), scale: 0.15);
+     final f = oracleFrameOf(doc, hA);
+     // Select the window: a click on its midline, off its centre.
+     await tapWorld(tester, c, oracleAt(f, 1400, 0));
++    // ignore: invalid_use_of_internal_member
+     expect(c.selection.keys, [SelectionKey.root(hO)]);
+     final g = objectGripsOf(c, hO).single;
+     await dragWorld(tester, c, Vector2(g.x, g.y), oracleAt(f, 2990, 30));
+     expect(tester.takeException(), isNull);
+     expect(doc.commands.undoDepth, 1, reason: 'one command');
+     final p = doc.components.get<OpeningParams>(hO)!;
+     expect(
+         p.position + 300, closeTo(OpeningOracle(c.document).span(hA).$2, 1e-6),
+         reason: 'stored where it is drawn, against the end');
+     expect(reports(doc), isEmpty);
+@@ -131,20 +131,21 @@ void main() {
+       d.commands.execute(addOpening(
+           d, hO, const OpeningParams(hA, 2900, 600, OpeningKind.gap)));
+     }));
+     final doc = c.document;
+     await pumpEditor(tester, c, centre: plan(3000, 400), scale: 0.15);
+     expect(reports(doc), ['opening.clamped [$hO]']);
+     final b = worldEndsOf(c.document, hB);
+     // Select B: a click in the middle of its band, 40% along it.
+     final bn = Vector2(-b.d.y, b.d.x);
+     await tapWorld(tester, c, b.s + (b.e - b.s) * 0.4 + bn * -75);
++    // ignore: invalid_use_of_internal_member
+     expect(c.selection.keys, [SelectionKey.root(hB)]);
+     final e = plan(3000, 0);
+     final target = gridOf(doc, polar(e, 23 + 2, 1800));
+     await dragWorld(tester, c, b.e, target);
+     expect(tester.takeException(), isNull);
+     expect(doc.commands.undoDepth, 1, reason: 'not refused');
+     expect((worldEndsOf(c.document, hB).e - target).length, lessThan(1e-6));
+     final bend = bendOf(doc);
+     // ignore: avoid_print
+     print('KJ5: B turned to $bend°');
+diff --git a/packages/jet_cad_2d_integration/test/opening/opening_paint_test.dart b/packages/jet_cad_2d_integration/test/opening/opening_paint_test.dart
+index 666c3186..64cc9158 100644
+--- a/packages/jet_cad_2d_integration/test/opening/opening_paint_test.dart
++++ b/packages/jet_cad_2d_integration/test/opening/opening_paint_test.dart
+@@ -1,13 +1,12 @@
+ // Ported from jet_cad_floor_plan/test/opening_paint_test.dart (spec 3a C6, C7):
+ // RD1 over architectureController in PlanEditor.
+-// ignore_for_file: invalid_use_of_internal_member
+ // Spec 08 D12: draw order stays ascending handle value, and a fitting
+ // symbol is never covered by its host's pieces, even by a piece added after
+ // it. 07's WP5 method (`wall_paint_test.dart`): the shell rendered in
+ // `flutter_test` and read back with `RenderRepaintBoundary.toImage`, here on
+ // Blueprint paper, where the ByLayer symbol is light and the wall black.
+ import 'dart:typed_data';
+ import 'dart:ui' as ui;
+ 
+ import 'package:flutter/material.dart';
+ import 'package:flutter/rendering.dart';
+diff --git a/packages/jet_cad_2d_integration/test/opening/opening_panel_test.dart b/packages/jet_cad_2d_integration/test/opening/opening_panel_test.dart
+index 917a73ff..a462d939 100644
+--- a/packages/jet_cad_2d_integration/test/opening/opening_panel_test.dart
++++ b/packages/jet_cad_2d_integration/test/opening/opening_panel_test.dart
+@@ -1,16 +1,15 @@
+ // Spec 08 D16: the Selection panel's Opening section. Every wall is at the
+ // far origin in its own rotated group, the plan is turned 23 degrees, the
+ // camera is rotated, no opening is central, and the door's own group is off
+ // the identity.
+ // Ported (spec 3a C6, C7); over architectureController in PlanEditor.
+-// ignore_for_file: invalid_use_of_internal_member
+ import 'package:flutter/material.dart';
+ import 'package:flutter/services.dart' show LogicalKeyboardKey;
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
+ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+ 
+ import '../support/opening_support.dart';
+ 
+ /// The panel's fixture.
+@@ -193,20 +192,21 @@ void main() {
+     await tester.pump();
+     await tester.enterText(width, '870');
+     await tester.pump();
+     await tester.tap(flipHinge);
+     await tester.pump();
+     expect(doc.commands.undoDepth, 6);
+     expect(paramsOf(doc, p.door),
+         d1.copyWith(width: 870, hinge: HingeEnd.end, swing: SwingSide.left));
+     await press(tester, LogicalKeyboardKey.keyV);
+     await press(tester, LogicalKeyboardKey.escape);
++    // ignore: invalid_use_of_internal_member
+     expect(c.selection.keys, isEmpty, reason: 'Escape reached the canvas');
+   });
+ 
+   testWidgets(
+       'OS1 under runtime the section is read-only and the flips are '
+       'disabled; D, N and G typed in a field do not switch tools; Escape '
+       'works after Enter', (tester) async {
+     final (c, p) = panelPlan();
+     final doc = c.document;
+     await pumpEditor(tester, c, centre: plan(3000, 1400), scale: 0.15);
+@@ -245,20 +245,21 @@ void main() {
+       ]) {
+         await press(tester, k);
+         expect(status(tester), startsWith('Select'), reason: '$k');
+       }
+     }
+     // Enter hands the focus back to the canvas: Escape clears the
+     // selection there.
+     await enterAndSubmit(tester, position, '1740');
+     expect(paramsOf(doc, p.door).position, 1740);
+     await press(tester, LogicalKeyboardKey.escape);
++    // ignore: invalid_use_of_internal_member
+     expect(c.selection.keys, isEmpty);
+     expect(section, findsNothing);
+   });
+ 
+   testWidgets(
+       'OS2 (M-08pin) the commit target is pinned at focus gain: select A, '
+       'type in Width, select B without taking the focus, blur: A changes, '
+       'B does not; the same for Position; a pinned opening that dies drops '
+       'the text', (tester) async {
+     final (c, p) = panelPlan();
+diff --git a/packages/jet_cad_2d_integration/test/opening/opening_symbol_test.dart b/packages/jet_cad_2d_integration/test/opening/opening_symbol_test.dart
+index fded9f49..34286837 100644
+--- a/packages/jet_cad_2d_integration/test/opening/opening_symbol_test.dart
++++ b/packages/jet_cad_2d_integration/test/opening/opening_symbol_test.dart
+@@ -1,14 +1,13 @@
+ // Ported from jet_cad_floor_plan/test/opening_symbol_test.dart (spec 3a C6, C7):
+ // OR8 over architectureController in PlanEditor; OG7, OG10 and OR7 run in
+ // the kit.
+-// ignore_for_file: invalid_use_of_internal_member
+ // Spec 08 D10-D12: the openings' symbols, through the real ParametricSystem
+ // (and, for OR8, the shell's select tool). Every wall is at the far origin
+ // in its own rotated group (`groupAt`), no host is axis-aligned, no opening
+ // is central, and OR7's openings sit in their own rotated, translated
+ // groups. Expected symbols come from `support/opening_fixture.dart`'s
+ // oracles (`OpeningOracle.door`, `OpeningOracle.lines`), which never call
+ // `opening_geometry.dart`: a frame written out from the host's stored
+ // parameters and its group's transform, over the oracle's own cut.
+ import 'dart:math' as math;
+ 
+@@ -80,23 +79,25 @@ void main() {
+     // The shell, the camera at 0.5 px/mm: the pick aperture is 12 mm in
+     // world, under m/2 = 22.5 for A.
+     const scale = 0.5;
+     expect(kPickRadiusPixels / scale, lessThan(45 / 2));
+     final gapEnd = worldLines(doc, hG).single.$2;
+     await pumpEditor(tester, c, centre: gapEnd, scale: scale);
+ 
+     Future<void> clickGapEnd(String when) async {
+       await tester.tapAt(globalAt(tester, c, gapEnd));
+       await tester.pump();
++      // ignore: invalid_use_of_internal_member
+       expect(c.selection.keys, [SelectionKey.root(hG)], reason: when);
+       await tester.tapAt(globalAt(tester, c, oracleAt(f, 3645, 400)));
+       await tester.pump();
++      // ignore: invalid_use_of_internal_member
+       expect(c.selection.keys, isEmpty, reason: '$when: cleared');
+     }
+ 
+     await clickGapEnd('before the door');
+ 
+     // A door on A's start side, between B and A: the wall's pieces are
+     // rewritten in u order into its regions in handle order, so the end
+     // piece, at A's end jamb, is the added one, with fresh handles.
+     final lineA = kids(doc, hG).single;
+     doc.commands.execute(addOpening(
+@@ -126,13 +127,14 @@ void main() {
+     final from = globalAt(tester, c, lo), to = globalAt(tester, c, hi);
+     expect(to.dx, greaterThan(from.dx), reason: 'a window band');
+     final gesture = await tester.createGesture(
+         kind: PointerDeviceKind.mouse, buttons: kPrimaryButton);
+     await gesture.down(from);
+     await gesture.moveTo(from + const Offset(12, 0));
+     await gesture.moveTo(to);
+     await gesture.up();
+     await gesture.removePointer();
+     await tester.pump();
++    // ignore: invalid_use_of_internal_member
+     expect(c.selection.keys, [SelectionKey.root(hG)]);
+   });
+ }
+diff --git a/packages/jet_cad_2d_integration/test/opening/opening_tool_test.dart b/packages/jet_cad_2d_integration/test/opening/opening_tool_test.dart
+index 7c32cf0c..599acc1d 100644
+--- a/packages/jet_cad_2d_integration/test/opening/opening_tool_test.dart
++++ b/packages/jet_cad_2d_integration/test/opening/opening_tool_test.dart
+@@ -1,12 +1,11 @@
+ // Ported from jet_cad_floor_plan/test/opening_tool_test.dart (spec 3a C6, C7, R15-2..R15-5).
+-// ignore_for_file: invalid_use_of_internal_member
+ // Spec 08 D14: the Door (D), Window (N) and Gap (G) tools in PlanEditor:
+ // OT1 (shell) and OT1 (rv9-guardDNG). The cases that drive the tool
+ // directly, and OT1 (shell)'s preview line (R15-2), run in the kit. Every
+ // wall is at the far origin in its own rotated group, none is
+ // axis-aligned, the camera is rotated, and no click is central. Expected
+ // positions come from `support/opening_support.dart`'s oracles, which
+ // never call the kit's geometry.
+ import 'package:flutter/gestures.dart' show PointerDeviceKind;
+ import 'package:flutter/material.dart';
+ import 'package:flutter/services.dart' show LogicalKeyboardKey;
+@@ -146,21 +145,21 @@ void main() {
+     expect(driftOf(doc), isEmpty);
+ 
+     // A click in no band places nothing.
+     final before = openings(doc);
+     final depth = doc.commands.undoDepth;
+     await tapWorld(tester, c, plan(2500, 1500));
+     expect(openings(doc), before);
+     expect(doc.commands.undoDepth, depth);
+ 
+     // One undo step takes the last door away; Esc returns to Select.
+-    await undoKey(tester);
++    await undoKey(tester, pumps: 1);
+     expect(openings(doc), [d1, w2, g3]);
+     expect(status(tester), 'Door');
+     await press(tester, LogicalKeyboardKey.escape);
+     expect(status(tester), 'Select');
+     expect(driftOf(doc), isEmpty);
+   });
+ 
+   testWidgets(
+       'OT1 (rv9-guardDNG) D, N and G typed into the Text tool\'s field and '
+       'into the page panel\'s scale field are text, not shortcuts (as '
+diff --git a/packages/jet_cad_2d_integration/test/panels/wall_section_test.dart b/packages/jet_cad_2d_integration/test/panels/wall_section_test.dart
+index 0213b0aa..b6beaf4e 100644
+--- a/packages/jet_cad_2d_integration/test/panels/wall_section_test.dart
++++ b/packages/jet_cad_2d_integration/test/panels/wall_section_test.dart
+@@ -1,11 +1,10 @@
+-// ignore_for_file: invalid_use_of_internal_member
+ // Spec 07 D11's Wall section. Every wall sits at the far origin in its own
+ // rotated group (`groupAt`), the plan is turned 23 degrees, and the camera
+ // is rotated.
+ // Ported from jet_cad_floor_plan/test/selection_panel_test.dart (WS1-WS11;
+ // WS7 (Box) is 2a's) for jet_cad_2d_integration (3a Task 27); assertions
+ // unchanged but rulings IP-R1, IP-R2, IP-R8. WS9 becomes WS9-open (the
+ // controller's ruling, Task 18's rule); it reads `frozen`, @internal
+ // (ruling R-P9).
+ import 'dart:convert';
+ 
+@@ -447,20 +446,21 @@ void main() {
+   // on the live walls C and B, which the lock refuses: A's fill names B's
+   // outline, so B regenerating without the frozen A (C1.5) would rewrite
+   // that fill, owned by the locked A; C's edit reaches B through the bands.
+   testWidgets(
+       'WS9-open a loaded fill naming another wall\'s outline freezes that '
+       'wall at open (a hookFailed diagnostic, no Wall section, a raw edit '
+       'refused); an edit of C or B the lock refuses reverts the field and '
+       'the toggle, no exception escapes; the box still edits', (tester) async {
+     final view = await pumpPanel(tester, malformedPlanJson());
+     final doc = view.document;
++    // ignore: invalid_use_of_internal_member
+     expect(view.frozen, contains(wa));
+     expect(view.locked.value, {wa}, reason: 'the lock set is A alone');
+     expect(
+         [for (final d in view.diagnostics.value) (d.code, d.kitId, d.subject)],
+         contains((
+           KitDiagnosticCode.hookFailed,
+           'architecture',
+           ArchitectureTypes.wall
+         )));
+     await select(tester, view, [wa]);
+@@ -591,11 +591,52 @@ void main() {
+     await tester.pump();
+     await tester.enterText(thickness, '$over');
+     await tester.pump();
+     await tester.tap(wallSection);
+     await tester.pump();
+     expect(tester.takeException(), isNull);
+     expect(textOf(tester, thickness), '200');
+     expect(doc.commands.undoDepth, 0);
+     expect(enc(doc), before);
+   });
++
++  testWidgets(
++      'P-choice-focus-settings a value chosen in a tool\'s settings choice '
++      'row (setting-justification) reaches the settings and hands the '
++      'focus back to the canvas; its letters still work (2a "focus rules '
++      'are today\'s"; M-P-choice-focus)', (tester) async {
++    final view = await pumpPanel(tester, panelPlanJson());
++    await focusCanvas(tester);
++    await pressKey(tester, LogicalKeyboardKey.keyW);
++    expect(status(tester), 'Wall');
++    final canvas = canvasFocus(tester);
++    expect(FocusManager.instance.primaryFocus, same(canvas),
++        reason: 'premise: the canvas has the focus');
++    expect(menuOf(tester, 'justification').value, Justification.centre,
++        reason: 'premise: centred');
++    final depth = view.document.commands.undoDepth;
++
++    await tester.tap(byKey('setting-justification'));
++    await tester.pumpAndSettle();
++    expect(FocusManager.instance.primaryFocus, isNot(same(canvas)),
++        reason: 'premise: the open menu has the focus');
++    await tester.tap(byKey('setting-justification-left').last);
++    await tester.pumpAndSettle();
++    expect(menuOf(tester, 'justification').value, Justification.left);
++    expect(view.document.commands.undoDepth, depth,
++        reason: 'settings: no step');
++    expect(FocusManager.instance.primaryFocus, same(canvas),
++        reason: 'the choice hands the focus back');
++    expect(await pressKey(tester, LogicalKeyboardKey.keyM), isTrue);
++    expect(status(tester), 'Room', reason: "the canvas's letters");
++
++    // The settings kept it: the next wall, two clicks after W, is left.
++    await pressKey(tester, LogicalKeyboardKey.keyW);
++    final before = walls(view.document);
++    await clickWorld(tester, view, plan(400, 900));
++    await clickWorld(tester, view, plan(1900, 800));
++    final w = walls(view.document).where((h) => !before.contains(h)).single;
++    expect(view.document.components.get<WallParams>(w)!.justification,
++        Justification.left,
++        reason: 'the settings have it');
++  });
+ }
+diff --git a/packages/jet_cad_2d_integration/test/room/room_grips_test.dart b/packages/jet_cad_2d_integration/test/room/room_grips_test.dart
+index 7ebec9cb..c5e8da07 100644
+--- a/packages/jet_cad_2d_integration/test/room/room_grips_test.dart
++++ b/packages/jet_cad_2d_integration/test/room/room_grips_test.dart
+@@ -115,21 +115,21 @@ void main() {
+       final doc = f.p.doc;
+       final c = f.p.c;
+       await pumpAt(tester, c, f.p.at(1500, 2000));
+       c.activeSelection.replace([k(f.kitchen)]);
+       await tester.pump();
+       final g = objectGripsOf(c, f.kitchen).single;
+       expect((at(g) - anchorOf(doc, f.kitchen)).length, lessThan(1e-6));
+       final before = roomOf(doc, f.kitchen);
+       final p = f.p.at(1900.37, 2600.81);
+       final want = labelFor(doc, f.kitchen, at(g), p);
+-      await dragWorld(tester, c, at(g), p);
++      await dragWorld(tester, c, at(g), p, pumps: 2);
+       expect(doc.commands.undoDepth, 1, reason: 'one undo step');
+       final got = roomOf(doc, f.kitchen).label!;
+       expect(got.$1, closeTo(want.$1, 1e-6));
+       expect(got.$2, closeTo(want.$2, 1e-6));
+       expect((anchorOf(doc, f.kitchen) - p).length, lessThan(1e-6));
+       await undoKey(tester);
+       expect(roomOf(doc, f.kitchen), before, reason: 'undone, exactly');
+     });
+ 
+     testWidgets(
+@@ -147,38 +147,39 @@ void main() {
+       final g0 = objectGripsOf(c, f.kitchen).single;
+       final pole = doc.tree
+           .accumulatedTransform(f.kitchen)
+           .transformPoint(poleLocal(doc, f.kitchen, at(g0)));
+       expect((pole - at(g0)).length, greaterThan(3 * ap),
+           reason: 'premise: the stored offset is well outside the aperture');
+ 
+       for (final snap in [true, false]) {
+         expect(osnap(tester), snap ? 'OSNAP' : 'osnap off');
+         final g = objectGripsOf(c, f.kitchen).single;
+-        await dragWorld(tester, c, at(g), pole + Vector2(0.4 * ap, -0.3 * ap));
++        await dragWorld(tester, c, at(g), pole + Vector2(0.4 * ap, -0.3 * ap),
++            pumps: 2);
+         expect(doc.commands.undoDepth, 1, reason: 'F3 $snap: one step');
+         expect(roomOf(doc, f.kitchen).label, isNull,
+             reason: 'F3 $snap: auto (Ruling 10-17)');
+         expect(roomOf(doc, f.kitchen).name, 'Kitchen');
+         expect((anchorOf(doc, f.kitchen) - pole).length, lessThan(1e-6),
+             reason: 'F3 $snap: the labels at the pole');
+         expect(driftOf(doc), isEmpty);
+         await undoKey(tester);
+         expect(roomOf(doc, f.kitchen), before, reason: 'F3 $snap: undone');
+         if (snap) await toggleF3(tester);
+       }
+ 
+       // The control: 1.5 apertures from the pole stores an offset.
+       final g = objectGripsOf(c, f.kitchen).single;
+       final out = pole + Vector2(1.5 * ap, 0);
+       final want = labelFor(doc, f.kitchen, at(g), out);
+-      await dragWorld(tester, c, at(g), out);
++      await dragWorld(tester, c, at(g), out, pumps: 2);
+       expect(doc.commands.undoDepth, 1);
+       final got = roomOf(doc, f.kitchen).label!;
+       expect(got.$1, closeTo(want.$1, 1e-6));
+       expect(got.$2, closeTo(want.$2, 1e-6));
+     });
+   }
+ 
+   testWidgets('GR3 the label grip is not hit under runtime permissions',
+       (tester) async {
+     final f = gripPlan(corpusGroups);
+@@ -188,60 +189,61 @@ void main() {
+     c.activeSelection.replace([k(f.kitchen)]);
+     await tester.pump();
+     final g = objectGripsOf(c, f.kitchen).single;
+     final m = c.camera.value.worldToScreenMatrix;
+     final s = c.camera.value.worldToScreen(at(g));
+     expect(c.grips.hitTest(Offset(s.x, s.y), m), isNot(-1),
+         reason: 'the control: hit under full permissions');
+     doc.commands.permissions = DraftPermissions.runtime;
+     expect(c.grips.hitTest(Offset(s.x, s.y), m), -1);
+     final before = enc(doc);
+-    await dragWorld(tester, c, at(g), f.p.at(1900.37, 2600.81));
++    await dragWorld(tester, c, at(g), f.p.at(1900.37, 2600.81), pumps: 2);
+     expect(enc(doc), before, reason: 'nothing moved');
+   });
+ 
+   for (final place in [origin, corpusGroups]) {
+     testWidgets(
+         'GR4 a body drag on a selected room moves nothing; rooms alone have '
+         'no rotation grip; a wall selected with a room moves and the room '
+         're-traces, $place', (tester) async {
+       final f = gripPlan(place);
+       final doc = f.p.doc;
+       final c = f.p.c;
+       await pumpAt(tester, c, f.p.at(3000, 2000));
+ 
+       // The Kitchen alone, selected by a click on its name label.
+       final name = anchorOf(doc, f.kitchen) + Vector2(0, 0.7 * 125);
+       await clickAt(tester, c, name);
+       expect(c.activeSelection.keys, [k(f.kitchen)]);
+       expect(c.grips.box, isNotNull);
+       expect(c.grips.rotatable, isFalse, reason: 'no rotation grip');
+       final before = enc(doc);
+-      await dragWorld(
+-          tester, c, name, name + (f.p.at(700, 300) - f.p.at(0, 0)));
++      await dragWorld(tester, c, name, name + (f.p.at(700, 300) - f.p.at(0, 0)),
++          pumps: 2);
+       expect(doc.commands.undoDepth, 0, reason: 'nothing in the history');
+       expect(enc(doc), before, reason: 'nothing moved');
+       expect(c.activeSelection.keys, [k(f.kitchen)], reason: 'still a click');
+ 
+       // The Kitchen, B and the partition: a drag on the partition's west
+       // face, x 2,950, 250 mm along the plan's x axis, with object snap
+       // off, moves the partition alone.
+       await toggleF3(tester);
+       c.activeSelection.replace([k(f.kitchen), k(f.b), k(f.part)]);
+       await tester.pump();
+       expect(c.grips.rotatable, isTrue, reason: 'the partition');
+       final t0 = doc.tree.accumulatedTransform(f.part);
+       final rooms = {
+         f.kitchen: (roomOf(doc, f.kitchen), doc.tree[f.kitchen]),
+         f.b: (roomOf(doc, f.b), doc.tree[f.b]),
+       };
+-      await dragWorld(tester, c, f.p.at(2950, 1200.5), f.p.at(3200, 1200.5));
++      await dragWorld(tester, c, f.p.at(2950, 1200.5), f.p.at(3200, 1200.5),
++          pumps: 2);
+       expect(doc.commands.undoDepth, 1, reason: 'one step');
+       final t1 = doc.tree.accumulatedTransform(f.part);
+       final v = Vector2(t1.e - t0.e, t1.f - t0.f);
+       final x = Vector2(math.cos(place.deg * math.pi / 180),
+           math.sin(place.deg * math.pi / 180));
+       final delta = v.dot(x);
+       expect(delta, closeTo(250, 1), reason: 'premise: the partition moved');
+       expect((v - x * delta).length, lessThan(1e-6), reason: 'along x only');
+       for (final MapEntry(key: h, value: (p, node)) in rooms.entries) {
+         expect(roomOf(doc, h), p, reason: 'the room stays: $h');
+@@ -276,21 +278,21 @@ void main() {
+       await pumpAt(tester, c, f.p.at(6000, 3000));
+       c.activeSelection.replace([k(f.sep)]);
+       await tester.pump();
+       expect(c.grips.rotatable, isTrue, reason: 'a separator is movable');
+       final stored = sepOf(doc, f.sep);
+       final toWorld = doc.tree.accumulatedTransform(f.sep);
+       final p = f.p.at(5800.37, 3960.21);
+       for (final on in [true, false]) {
+         expect(osnap(tester), on ? 'OSNAP' : 'osnap off');
+         final g = objectGripsOf(c, f.sep)[1];
+-        await dragWorld(tester, c, at(g), p);
++        await dragWorld(tester, c, at(g), p, pumps: 2);
+         expect(doc.commands.undoDepth, 1, reason: 'F3 $on: one step');
+         final now = sepOf(doc, f.sep);
+         expect((now.sx, now.sy), (stored.sx, stored.sy),
+             reason: 'F3 $on: the start stays');
+         final w = toWorld.transformPoint(now.end);
+         if (on) {
+           expect(distToLine(w, f.p.at(0, 3900), f.p.at(8000, 3900)),
+               lessThan(1e-6),
+               reason: 'trimmed to the north wall\'s inner face');
+         } else {
+diff --git a/packages/jet_cad_2d_integration/test/room/room_paint_test.dart b/packages/jet_cad_2d_integration/test/room/room_paint_test.dart
+index 3aca4e10..e03efe94 100644
+--- a/packages/jet_cad_2d_integration/test/room/room_paint_test.dart
++++ b/packages/jet_cad_2d_integration/test/room/room_paint_test.dart
+@@ -1,11 +1,10 @@
+-// ignore_for_file: invalid_use_of_internal_member
+ // Ported from jet_cad_floor_plan/test/room_paint_test.dart (3a Task 26, spec C6); assertions unchanged.
+ //
+ // Spec 10 D9, D3 and D24 in the shell, on the sample plan (D23): the
+ // room's tint is the page's foreground at about 10%, never picked,
+ // band-selected or stroked (RR1, RR2, RR3; Ruling 10-23); the separator
+ // paints dashes (RR4) and, without the DASHED record, draws continuous
+ // (SR3); a selected room outlines its labels and its ring (OL4).
+ //
+ // 07's WP5 method: the real shell in `flutter_test`, read back with
+ // `RenderRepaintBoundary.toImage`. The camera is y-up and unrotated, so a
+@@ -566,20 +565,21 @@ void main() {
+     final doc = c.document;
+     final shot = await Shot.of(tester, c);
+     final controller = shot.controller;
+ 
+     /// [room]'s outline points, world, after a click on its name label.
+     Future<List<Vector2>> outlineOf(Handle room) async {
+       controller.activeSelection.clear();
+       await tester.pump();
+       await shot.tap(anchorOf(doc, room) + Vector2(0, 0.7 * 125));
+       expect(controller.activeSelection.keys, {k(room)});
++      // ignore: invalid_use_of_internal_member
+       final c = controller.outlines.debugWorldSegmentsOf(k(room))!;
+       return [for (var i = 0; i < c.length; i += 2) Vector2(c[i], c[i + 1])];
+     }
+ 
+     bool holds(List<Vector2> points, (double, double) q) =>
+         points.any((p) => (p - Vector2(q.$1, q.$2)).length < 1e-6);
+ 
+     /// Whether [p] lies within the labels' reach of [room]'s anchor: the
+     /// two lines are well within 1,000 mm either side and 250 mm above and
+     /// below.
+diff --git a/packages/jet_cad_2d_integration/test/room/room_panel_test.dart b/packages/jet_cad_2d_integration/test/room/room_panel_test.dart
+index 2fb5e76e..a211090b 100644
+--- a/packages/jet_cad_2d_integration/test/room/room_panel_test.dart
++++ b/packages/jet_cad_2d_integration/test/room/room_panel_test.dart
+@@ -1,11 +1,10 @@
+-// ignore_for_file: invalid_use_of_internal_member
+ // Spec 10 D21: the Selection panel's Room section. A free-text Name field,
+ // committed on Enter and on its own focus loss (decision 8, R-23), trimmed,
+ // an empty name reverting (R-24), one `SetComponentCommand<RoomParams>` per
+ // change; and the Area line, the area label's stored string (R-25).
+ //
+ // The plan is the two-room rectangle at the corpus far origin, turned 23°,
+ // every wall and the separator in its own rotated, translated group; room A
+ // sits in a rotated group of its own (as a file may hold one), room B at the
+ // identity (as the Room tool makes one). Seeds are fractional. Expected
+ // area strings are hand arithmetic next to the assertion, each at least
+@@ -264,20 +263,21 @@ void main() {
+       // the test's text input does next.
+       expect(await tester.sendKeyEvent(key), isFalse,
+           reason: '$key reaches the platform as text');
+       typed += key.keyLabel.toLowerCase();
+       tester.testTextInput.enterText(typed);
+       await tester.pump();
+       expect(status(tester), status0, reason: '$key switched no tool');
+       expect(fieldText(tester), typed, reason: '$key typed');
+     }
+     expect(typed, hasLength(letters.length));
++    // ignore: invalid_use_of_internal_member
+     expect(r.p.c.fill.value, isFalse, reason: 'F toggled no fill');
+     await tester.testTextInput.receiveAction(TextInputAction.done);
+     await tester.pump();
+     await tester.pump();
+     expect(nameOf(doc, r.a), typed);
+     expect(labelStrings(doc, r.a), [typed, '10.83 m²']);
+     expect(doc.commands.undoDepth, 1);
+   });
+ 
+   testWidgets(
+@@ -422,21 +422,23 @@ void main() {
+     for (final e in j['entities']! as List) {
+       final entity = e as Map<String, Object?>;
+       if ((entity['record']! as Map)['handle'] == aFill.value) {
+         (entity['geometry']! as Map)['scalars'] = [bBoundary];
+       }
+     }
+     final c = architectureController(json: jsonEncode(j));
+     addTearDown(c.dispose);
+     final doc = c.document;
+     await pumpEditor(tester, c);
++    // ignore: invalid_use_of_internal_member
+     expect(c.frozen, contains(src.a), reason: 'frozen at open');
++    // ignore: invalid_use_of_internal_member
+     expect(c.frozen, isNot(contains(src.b)));
+     final a0 = doc.components.get<RoomParams>(src.a)!;
+     final before = canon(doc);
+     expect(
+         () => doc.commands.execute(
+             SetComponentCommand<RoomParams>(src.a, a0.copyWith(name: 'Study'))),
+         throwsA(isA<PlanLocked>()));
+     expect(canon(doc), before);
+     expect(doc.commands.undoDepth, 0);
+ 
+diff --git a/packages/jet_cad_2d_integration/test/room/room_tool_test.dart b/packages/jet_cad_2d_integration/test/room/room_tool_test.dart
+index 54e274b7..b313297d 100644
+--- a/packages/jet_cad_2d_integration/test/room/room_tool_test.dart
++++ b/packages/jet_cad_2d_integration/test/room/room_tool_test.dart
+@@ -3,20 +3,21 @@
+ // room_tool_test.dart (spec 10 D19, decision 26, R-29, X15-guardMS),
+ // assertions unchanged: the status line composes the tool's label and its
+ // notice as today ('Room — Already a room: Room 1'). RT-notice-locale is
+ // Review Focus 2: a language switch re-words a notice already shown, at
+ // once, the room's name kept.
+ import 'package:flutter/gestures.dart' show PointerDeviceKind;
+ import 'package:flutter/material.dart';
+ import 'package:flutter/services.dart' show LogicalKeyboardKey;
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d_integration/jet_cad_2d_integration.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show ToolNotice;
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import '../support/room_plans.dart';
+ 
+ /// Today's `shellSamplePlan` (room_tool_test.dart:213-218): the sample
+ /// plan's walls, column, separator and openings at the origin, with
+ /// [rooms].
+ RoomPlan sampleRoomPlan({List<R> rooms = const []}) =>
+     roomPlan([...sampleWalls(), sampleColumn],
+         seps: const [sampleSeparator], openings: sampleOpenings, rooms: rooms);
+@@ -82,23 +83,33 @@ void main() {
+     await clickAt(tester, plan.c, plan.at(18200.5, 10800.25));
+     expect(rooms(doc), before, reason: 'nothing placed');
+     expect(doc.commands.undoDepth, depth);
+     expect(status(tester), 'Room — Already a room: Kitchen',
+         reason: 'after a click there');
+     // The Bath: a face with no room.
+     await hover(23500.5, 10000.25);
+     expect(status(tester), 'Room', reason: 'cleared on leaving the face');
+     await hover(19000.5, 10500.25);
+     expect(status(tester), 'Room — Already a room: Kitchen');
++    // The Room tool's own notice (R-P9): the controller's is Select's once
++    // Esc deactivates the tool, null whatever the Room tool holds.
++    final room =
++        // ignore: invalid_use_of_internal_member
++        plan.c.toolFor('architecture.room')! as ToolNotice;
++    expect(room.notice.value?.id, 'text:architecture.room-occupied',
++        reason: 'premise: the tool holds its notice');
+     await press(tester, LogicalKeyboardKey.escape);
+     expect(status(tester), 'Select', reason: 'cleared on deactivation');
+     expect(plan.c.toolNotice.value, isNull);
++    // M-TT7: RoomTool.cancel without `_setOccupied(null)`.
++    expect(room.notice.value, isNull,
++        reason: "the tool's own notice cleared on deactivation");
+     await press(tester, LogicalKeyboardKey.keyM);
+     expect(status(tester), 'Room');
+   });
+ 
+   testWidgets(
+       'SG1 M and S typed into a text entry switch no tool (the shell\'s '
+       'guard, X15-guardMS)', (tester) async {
+     final plan = roomPlan(boxWalls);
+     await pumpEditor(tester, plan.c);
+     await press(tester, LogicalKeyboardKey.keyT);
+diff --git a/packages/jet_cad_2d_integration/test/separator/separator_dashed_test.dart b/packages/jet_cad_2d_integration/test/separator/separator_dashed_test.dart
+index d7e4ed86..d65a235b 100644
+--- a/packages/jet_cad_2d_integration/test/separator/separator_dashed_test.dart
++++ b/packages/jet_cad_2d_integration/test/separator/separator_dashed_test.dart
+@@ -91,30 +91,32 @@ void main() {
+     final c = architectureController(json: file);
+     addTearDown(c.dispose);
+     final doc = c.document;
+     final sep = liveOf<SeparatorParams>(c, ArchitectureTypes.separator).single;
+     final leaves = [
+       for (final slot in doc.leavesByOwner()[sep]!) doc.entities.read(slot),
+     ];
+     expect(leaves, hasLength(1), reason: 'premise: its polyline');
+     expect(leaves.single.linetype, ReservedHandles.dashedLinetype,
+         reason: 'premise: it names handle 6');
+-    // M-SP-8: open runs the kits' prepare.
++    // M-SP-8b, the open half: the constructor's json path runs the kits'
++    // prepare (`made: true`). M-SP-8 is the load half, below.
+     expect(doc.tables.linetypes[ReservedHandles.dashedLinetype], isNull,
+         reason: 'no record there: it draws continuous');
+     expect(doc.tables.linetypes.byName('DASHED'), isNull);
+     expect(c.dirty.value, isFalse);
+     expect(c.canUndo.value, isFalse);
+     expect(c.save(), file, reason: 'byte-identical');
+ 
+     final other = architectureController();
+     addTearDown(other.dispose);
+     expect(
+         other.document.tables.linetypes[ReservedHandles.dashedLinetype], dashed,
+         reason: 'premise: a new plan has it');
++    // M-SP-8, the load half: load runs the kits' prepare.
+     other.load(file);
+     expect(
+         other.document.tables.linetypes[ReservedHandles.dashedLinetype], isNull,
+         reason: 'a load adds nothing');
+     expect(other.save(), file);
+   });
+ }
+diff --git a/packages/jet_cad_2d_integration/test/support/canvas_rig.dart b/packages/jet_cad_2d_integration/test/support/canvas_rig.dart
+index 498c8cdf..bcf74a4d 100644
+--- a/packages/jet_cad_2d_integration/test/support/canvas_rig.dart
++++ b/packages/jet_cad_2d_integration/test/support/canvas_rig.dart
+@@ -6,25 +6,25 @@
+ // InteractionLayer's tool controller (spec C6, ruling IT-R1). The rig's
+ // helpers are never copied (R-P14): [pumpPlanEditor] and [pressKey] are
+ // thin delegates under the names today's tests call.
+ import 'dart:ui' as ui;
+ 
+ import 'package:flutter/material.dart';
+ import 'package:flutter/services.dart' show LogicalKeyboardKey;
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
+-    show GripCache, InteractionLayer, ViewportTransform;
++    show GripCache, InteractionLayer;
+ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+-import 'editor_rig.dart' show press, pumpEditor;
++import 'editor_rig.dart' show centreCamera, press, pumpEditor;
+ 
+ export 'editor_rig.dart'
+     show activeTool, globalAt, globalOf, kitCatalog, press, pumpEditor, status;
+ 
+ Finder byKey(String k) => find.byKey(Key(k));
+ 
+ /// One field whatever its scope: the object's `property-<id>` or the
+ /// active tool's `setting-<id>` (today's shell keyed both alike; ruling
+ /// IT-R7).
+ Finder field(String id) => find.byWidgetPredicate(
+@@ -54,28 +54,21 @@ Future<void> pumpPlanEditor(WidgetTester tester, PlanController c,
+     {Size size = const Size(1440, 900),
+     Locale locale = const Locale('en')}) async {
+   await pumpEditor(tester, c, locale: locale, window: size);
+   await tester.pump();
+ }
+ 
+ /// The camera on world [centre] at [scale] px/mm, y up, turned [turn]
+ /// radians on the screen; set after the editor's first fit.
+ Future<void> frameOn(WidgetTester tester, PlanController c, Vector2 centre,
+     {required double scale, double turn = 0}) async {
+-  final size = tester.getSize(find.byType(InteractionLayer));
+-  final linear =
+-      Transform2.rotation(turn).multiply(Transform2.scale(scale, -scale));
+-  final mid = linear.transformPoint(centre);
+-  c.camera.value = ViewportTransform(
+-      worldToScreenMatrix: Transform2.translation(
+-              size.width / 2 - mid.x, size.height / 2 - mid.y)
+-          .multiply(linear));
++  centreCamera(tester, c, centre, scale: scale, turn: turn, yUp: true);
+   await tester.pump();
+ }
+ 
+ /// The world point the canvas reads at global [g]: the layer's inverse
+ /// camera (3a Task 28; dimension_shell_test.dart:111-116's).
+ Vector2 worldAt(WidgetTester tester, PlanController c, Offset g) {
+   final local = g - tester.getTopLeft(find.byType(InteractionLayer));
+   return c.camera.value.screenToWorld(Vector2(local.dx, local.dy));
+ }
+ 
+diff --git a/packages/jet_cad_2d_integration/test/support/editor_rig.dart b/packages/jet_cad_2d_integration/test/support/editor_rig.dart
+index d316db0d..1bf4e359 100644
+--- a/packages/jet_cad_2d_integration/test/support/editor_rig.dart
++++ b/packages/jet_cad_2d_integration/test/support/editor_rig.dart
+@@ -1,26 +1,27 @@
+ // The integration tests' editor rig (spec 3a C6): PlanEditor over a
+ // controller in planEditorApp, at 1440 x 900, under a zoomed, turned,
+ // non-reflecting camera; the status line, a key press, a world point's
+ // global position and the active tool; a plan holding only a page; the kit's
+ // types in an engine catalog; a controller's live objects of one type. Its
+ // own copies of the plan library's test fixtures (canvas_fixture.dart's
+ // pumpDraw and globalOf, design_harness.dart's status and press), which
+ // another package cannot import, over the public libraries only.
+ import 'dart:async' show unawaited;
+ 
++import 'package:flutter/gestures.dart' show PointerDeviceKind, kPrimaryButton;
+ import 'package:flutter/material.dart';
+ import 'package:flutter/services.dart' show LogicalKeyboardKey;
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
+-    show InteractionLayer, Tool, ViewportTransform;
++    show InteractionLayer, SelectionKey, Tool, ViewportTransform;
+ import 'package:jet_cad_2d_integration/jet_cad_2d_integration.dart';
+ import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
+ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ /// Pumps [c]'s editor in [locale] in a [window], 1440 x 900 unless
+ /// given (reset after the test). With [centre], then sets a camera turned
+ /// by [turn] at [scale] px/mm, **non-reflecting** (a reflection's `b == c`
+ /// hides a transposition), with [centre] in the middle of the drawing
+ /// area: the plan library's `pumpDraw` (canvas_fixture.dart:427-443) over
+@@ -30,33 +31,47 @@ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ Future<void> pumpEditor(WidgetTester tester, PlanController c,
+     {Locale locale = const Locale('en'),
+     Size window = const Size(1440, 900),
+     Vector2? centre,
+     double scale = 2,
+     double turn = 0.35,
+     Widget Function(Widget app)? wrap,
+     bool layerPanel = true}) async {
+   await tester.binding.setSurfaceSize(window);
+   addTearDown(() => tester.binding.setSurfaceSize(null));
++  // The editor unmounted before the controller is disposed: tear-downs run
++  // last added first, and the caller's `addTearDown(c.dispose)` comes
++  // before this call. A controller disposed under a mounted editor makes
++  // one failing test cascade into the next ("DiagnosticsLog used after
++  // dispose").
++  addTearDown(() => tester.pumpWidget(const SizedBox.shrink()));
+   final app = planEditorApp(c, locale: locale, layerPanel: layerPanel);
+   await tester.pumpWidget(wrap == null ? app : wrap(app));
+   await tester.pump();
+   if (centre == null) return;
++  centreCamera(tester, c, centre, scale: scale, turn: turn, yUp: false);
++  await tester.pump();
++}
++
++/// Sets [c]'s camera with world [centre] in the middle of the drawing
++/// area, at [scale] px/mm, turned by [turn] rad; y up when [yUp] (the
++/// canvas rig's `frameOn`), else non-reflecting ([pumpEditor]). No pump.
++void centreCamera(WidgetTester tester, PlanController c, Vector2 centre,
++    {required double scale, required double turn, required bool yUp}) {
+   final size = tester.getSize(find.byType(InteractionLayer));
+-  final linear =
+-      Transform2.rotation(turn).multiply(Transform2.scale(scale, scale));
++  final linear = Transform2.rotation(turn)
++      .multiply(Transform2.scale(scale, yUp ? -scale : scale));
+   final mid = linear.transformPoint(centre);
+   c.camera.value = ViewportTransform(
+       worldToScreenMatrix: Transform2.translation(
+               size.width / 2 - mid.x, size.height / 2 - mid.y)
+           .multiply(linear));
+-  await tester.pump();
+ }
+ 
+ /// World ([x], [y])'s global position under [c]'s camera.
+ Offset globalOf(WidgetTester tester, PlanController c, double x, double y) {
+   final s = c.camera.value.worldToScreen(Vector2(x, y));
+   return tester.getTopLeft(find.byType(InteractionLayer)) + Offset(s.x, s.y);
+ }
+ 
+ /// World [p]'s global position ([globalOf] over a point).
+ Offset globalAt(WidgetTester tester, PlanController c, Vector2 p) =>
+@@ -66,20 +81,67 @@ Offset globalAt(WidgetTester tester, PlanController c, Vector2 p) =>
+ String status(WidgetTester tester) =>
+     tester.widget<Text>(find.byKey(const Key('status-text'))).data!;
+ 
+ /// Sends [key], then a pump: whether a handler took it.
+ Future<bool> press(WidgetTester tester, LogicalKeyboardKey key) async {
+   final handled = await tester.sendKeyEvent(key);
+   await tester.pump();
+   return handled;
+ }
+ 
++/// A primary click at world [p] plus the raw offset `(dx, dy)` in mm, then
++/// a frame (R-P14: the one copy of wall_shell's, room_plans' clickAt).
++Future<void> clickAt(WidgetTester tester, PlanController c, Vector2 p,
++    [double dx = 0, double dy = 0]) async {
++  await tester.tapAt(globalAt(tester, c, Vector2(p.x + dx, p.y + dy)));
++  await tester.pump();
++}
++
++/// A mouse drag from world [from] to world [to], past the slop at once,
++/// then [pumps] frames (R-P14: the one copy of wall_shell's,
++/// opening_support's and room_plans' dragWorld; the room tests pump 2).
++Future<void> dragWorld(
++    WidgetTester tester, PlanController c, Vector2 from, Vector2 to,
++    {int pumps = 1}) async {
++  final a = globalAt(tester, c, from), b = globalAt(tester, c, to);
++  final gesture = await tester.createGesture(
++      kind: PointerDeviceKind.mouse, buttons: kPrimaryButton);
++  await gesture.down(a);
++  await gesture.moveTo(a + const Offset(12, 0));
++  await gesture.moveTo(b);
++  await gesture.up();
++  await gesture.removePointer();
++  for (var i = 0; i < pumps; i++) {
++    await tester.pump();
++  }
++}
++
++/// Cmd+Z, then [pumps] frames: the document's change stream delivers
++/// after the task (R-P14: the one copy of wall_shell's, room_plans' and
++/// opening_support's undoKey; the opening tests pump 1).
++Future<void> undoKey(WidgetTester tester, {int pumps = 2}) async {
++  await tester.sendKeyDownEvent(LogicalKeyboardKey.meta);
++  await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
++  await tester.sendKeyUpEvent(LogicalKeyboardKey.meta);
++  for (var i = 0; i < pumps; i++) {
++    await tester.pump();
++  }
++}
++
++/// The design's selection replaced by [hs], as roots, then a frame (R-P14:
++/// the one copy of room_plans' and opening_support's select).
++Future<void> select(
++    WidgetTester tester, PlanController c, List<Handle> hs) async {
++  c.activeSelection.replace([for (final h in hs) SelectionKey.root(h)]);
++  await tester.pump();
++}
++
+ /// The canvas's active tool, as its interaction layer holds it: a kit's
+ /// tool in the plan library's guard, which forwards `isMidShape`.
+ Tool activeTool(WidgetTester tester) =>
+     tester.widget<InteractionLayer>(find.byType(InteractionLayer)).tools.active;
+ 
+ /// A plan holding [page] and nothing else (no manifest kit, no DASHED
+ /// record): `jet_cad_floor_plan/test/support/box_rig.dart:16-28`'s
+ /// `boxDoc`, as the text a controller opens.
+ String pagePlanJson(PageComponent page) {
+   final doc = DraftDocument.empty();
+diff --git a/packages/jet_cad_2d_integration/test/support/opening_support.dart b/packages/jet_cad_2d_integration/test/support/opening_support.dart
+index ed4e251e..5b9e1c01 100644
+--- a/packages/jet_cad_2d_integration/test/support/opening_support.dart
++++ b/packages/jet_cad_2d_integration/test/support/opening_support.dart
+@@ -1,39 +1,47 @@
+ // The opening's C6 harness (spec 3a C6, R14-8, R14-9): plans of the
+ // architecture kit built through a temporary parametric system and opened
+ // in a PlanController over the kit, PlanEditor pumped with today's rotated
+ // camera, and today's independent oracles (jet_cad_floor_plan/test/
+ // support/opening_fixture.dart), copied: they never call the kit's
+ // geometry. The kit's own test support is not importable; the wall fixture
+ // is Task 12's and the editor rig Task 9's, re-exported (R-P14).
+-// ignore_for_file: invalid_use_of_internal_member
+ import 'dart:convert';
+ import 'dart:math' as math;
+ 
+-import 'package:flutter/gestures.dart' show PointerDeviceKind, kPrimaryButton;
+ import 'package:flutter/material.dart';
+ import 'package:flutter/services.dart' show LogicalKeyboardKey;
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ import 'package:jet_cad_2d_integration/jet_cad_2d_integration.dart';
+ import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
+ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import 'editor_rig.dart';
+ import 'wall_fixture.dart';
+ 
+ // The rig's helpers (R-P14) and Task 12's wall fixture (its owner), as the
+ // opening tests use them: no second copy here.
+ export 'editor_rig.dart'
+-    show activeTool, globalAt, globalOf, kitCatalog, press, pumpEditor, status;
++    show
++        activeTool,
++        dragWorld,
++        globalAt,
++        globalOf,
++        kitCatalog,
++        press,
++        pumpEditor,
++        select,
++        status,
++        undoKey;
+ export 'wall_fixture.dart'
+     show
+         addWall,
+         addWallLocal,
+         canon,
+         diagnosticsOf,
+         driftOf,
+         enc,
+         far,
+         groupAt,
+@@ -85,60 +93,34 @@ String openingPlanText(PageComponent page, void Function(DraftDocument d) build,
+ }
+ 
+ /// A controller over [text] and the kit, disposed at tear-down.
+ PlanController openingController(String text) {
+   final c = architectureController(json: text);
+   addTearDown(c.dispose);
+   return c;
+ }
+ 
+ /// [c]'s camera, today's `view.camera`.
++// ignore: invalid_use_of_internal_member
+ CameraController cameraOf(PlanController c) => c.toolContext.camera;
+ 
+ Future<void> tapWorld(WidgetTester tester, PlanController c, Vector2 p,
+     {bool shift = false}) async {
+   if (shift) await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+   await tester.tapAt(globalAt(tester, c, p));
+   if (shift) await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+   await tester.pump();
+ }
+ 
+-/// A mouse drag from world [from] to world [to], past the slop at once.
+-Future<void> dragWorld(
+-    WidgetTester tester, PlanController c, Vector2 from, Vector2 to) async {
+-  final a = globalAt(tester, c, from), b = globalAt(tester, c, to);
+-  final gesture = await tester.createGesture(
+-      kind: PointerDeviceKind.mouse, buttons: kPrimaryButton);
+-  await gesture.down(a);
+-  await gesture.moveTo(a + const Offset(12, 0));
+-  await gesture.moveTo(b);
+-  await gesture.up();
+-  await gesture.removePointer();
+-  await tester.pump();
+-}
+-
+-Future<void> undoKey(WidgetTester tester) async {
+-  await tester.sendKeyDownEvent(LogicalKeyboardKey.meta);
+-  await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
+-  await tester.sendKeyUpEvent(LogicalKeyboardKey.meta);
+-  await tester.pump();
+-}
+-
+-/// Today's `view.selection.replace`, then a frame.
+-Future<void> select(
+-    WidgetTester tester, PlanController c, List<Handle> hs) async {
+-  c.selection.replace([for (final h in hs) SelectionKey.root(h)]);
+-  await tester.pump();
+-}
+-
+ /// The shown object grips of [h] (today's `view.grips!.grips`).
+ List<Grip> objectGripsOf(PlanController c, Handle h) => [
++      // ignore: invalid_use_of_internal_member
+       for (final r in c.grips.grips)
+         if (r.object && r.key == SelectionKey.root(h)) r.grip,
+     ];
+ 
+ /// The page's grid point nearest [p], as the snap chain computes it.
+ Vector2 gridOf(DraftDocument doc, Vector2 p) =>
+     snapToGrid(p, gridStep, doc.components.get<PageComponent>(doc.rootHandle)!);
+ 
+ /// The door's own group: off the identity (today's `doorGroup`).
+ final Transform2 doorGroup = Transform2.translation(ox + 120, oy - 80)
+@@ -172,25 +154,27 @@ Future<void> enterAndSubmit(
+ }
+ 
+ OpeningParams paramsOf(DraftDocument doc, Handle h) =>
+     doc.components.get<OpeningParams>(h)!;
+ 
+ // The opening tools (Task 15).
+ 
+ /// The unwrapped tool [toolId] of [c]'s document (today's palette entry's
+ /// tool), as the Flutter layer's placement tool: its resolved hover point.
+ PlacementTool placementOf(PlanController c, String toolId) =>
++    // ignore: invalid_use_of_internal_member
+     c.toolFor(toolId)! as PlacementTool;
+ 
+ /// The tool [toolId]'s settings as the plan holds them, through their
+ /// `toString`, today's `'OpeningSettings($width)'` (R15-3).
+ String settingsText(PlanController c, String toolId) =>
++    // ignore: invalid_use_of_internal_member
+     '${c.servicesOf('architecture').settingsOf<Object>(toolId)}';
+ 
+ /// A tool's settings section (R15-4) and its width field.
+ Finder toolSection(String toolId) => find.byKey(Key('settings-$toolId'));
+ Finder get settingWidth => find.byKey(const Key('setting-width'));
+ 
+ /// Every opening, ascending (today's `openings`).
+ List<Handle> openings(DraftDocument doc) =>
+     doc.components.withComponent<OpeningParams>().toList();
+ 
+diff --git a/packages/jet_cad_2d_integration/test/support/room_plans.dart b/packages/jet_cad_2d_integration/test/support/room_plans.dart
+index 8920af0d..76079660 100644
+--- a/packages/jet_cad_2d_integration/test/support/room_plans.dart
++++ b/packages/jet_cad_2d_integration/test/support/room_plans.dart
+@@ -4,34 +4,42 @@
+ // over the architecture kit (spec 3a C1.9). The plan library makes the
+ // document, prepares it, installs its own system, runs the build and clears
+ // the history: the controller opens clean, as today's shell fixtures made
+ // it by hand. Each wall, separator, opening and room is one command, in the
+ // fixture's order, so the handles are the fixture's.
+ //
+ // The editor is driven through the public API only: PlanEditor in
+ // planEditorApp, the controller's camera, selection and worldToGlobal.
+ import 'dart:math' as math;
+ 
+-import 'package:flutter/gestures.dart' show PointerDeviceKind, kPrimaryButton;
+ import 'package:flutter/material.dart';
+ import 'package:flutter/services.dart' show LogicalKeyboardKey;
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+-import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
+ import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
+ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import 'editor_rig.dart';
+ import 'wall_fixture.dart';
+ 
+-export 'editor_rig.dart' show globalAt, kitCatalog, press, pumpEditor, status;
++export 'editor_rig.dart'
++    show
++        clickAt,
++        dragWorld,
++        globalAt,
++        kitCatalog,
++        press,
++        pumpEditor,
++        select,
++        status,
++        undoKey;
+ export 'wall_fixture.dart' show canon, driftOf, enc, kids, kindOf, payloadOf;
+ 
+ // ---------------------------------------------------------------------------
+ // The plan model, copied (room_fixture.dart:26-96).
+ 
+ /// A wall in plan millimetres: its centreline, thickness and justification
+ /// (centre unless given).
+ final class W {
+   const W(this.sx, this.sy, this.ex, this.ey, this.t,
+       [this.j = Justification.centre]);
+@@ -422,53 +430,17 @@ List<Handle> rooms(DraftDocument doc) =>
+ String nameOf(DraftDocument doc, Handle room) =>
+     doc.components.get<RoomParams>(room)!.name;
+ 
+ /// The rig's [pumpEditor] with a rotated, non-reflecting camera of [scale]
+ /// px per mm, turned [turn] rad, centred on [centre] (today's shell tests'
+ /// `pumpShell`, room_grips_test.dart:145-162).
+ Future<void> pumpAt(WidgetTester tester, PlanController c, Vector2 centre,
+         {double scale = 0.15, double turn = 0.35}) =>
+     pumpEditor(tester, c, centre: centre, scale: scale, turn: turn);
+ 
+-Future<void> clickAt(WidgetTester tester, PlanController c, Vector2 p) async {
+-  await tester.tapAt(globalAt(tester, c, p));
+-  await tester.pump();
+-}
+-
+-/// A mouse drag from world [from] to world [to], past the slop at once
+-/// (today's `dragWorld`, room_grips_test.dart:176-188).
+-Future<void> dragWorld(
+-    WidgetTester tester, PlanController c, Vector2 from, Vector2 to) async {
+-  final a = globalAt(tester, c, from), b = globalAt(tester, c, to);
+-  final gesture = await tester.createGesture(
+-      kind: PointerDeviceKind.mouse, buttons: kPrimaryButton);
+-  await gesture.down(a);
+-  await gesture.moveTo(a + const Offset(12, 0));
+-  await gesture.moveTo(b);
+-  await gesture.up();
+-  await gesture.removePointer();
+-  await tester.pump();
+-  await tester.pump();
+-}
+-
+-Future<void> undoKey(WidgetTester tester) async {
+-  await tester.sendKeyDownEvent(LogicalKeyboardKey.meta);
+-  await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
+-  await tester.sendKeyUpEvent(LogicalKeyboardKey.meta);
+-  await tester.pump();
+-  await tester.pump();
+-}
+-
+ Future<void> toggleF3(WidgetTester tester) async {
+   await tester.sendKeyEvent(LogicalKeyboardKey.f3);
+   await tester.pump();
+ }
+ 
+ String osnap(WidgetTester tester) =>
+     tester.widget<Text>(find.byKey(const Key('osnap-text'))).data!;
+-
+-/// The design's selection replaced by [hs], as roots.
+-Future<void> select(
+-    WidgetTester tester, PlanController c, List<Handle> hs) async {
+-  c.activeSelection.replace([for (final h in hs) SelectionKey.root(h)]);
+-  await tester.pump();
+-}
+diff --git a/packages/jet_cad_2d_integration/test/support/wall_shell.dart b/packages/jet_cad_2d_integration/test/support/wall_shell.dart
+index ebeb5a32..8719a6e7 100644
+--- a/packages/jet_cad_2d_integration/test/support/wall_shell.dart
++++ b/packages/jet_cad_2d_integration/test/support/wall_shell.dart
+@@ -1,20 +1,18 @@
+ // The wall cases' shell harness (jet_cad_floor_plan/test/wall_tool_test.dart
+ // :37-118 and wall_grips_test.dart:36-121), over the editor rig (R-P14:
+ // pumpEditor, globalOf, globalAt, status, press are the rig's): a plan of the
+ // architecture kit built in a new plan's document and saved, so the
+ // controller opens it as a file with no undo history; the pointer and key
+ // gestures of today's cases; the Wall tool's settings set through the
+ // property panel's settings fields. Public libraries only (R-P1).
+-import 'package:flutter/gestures.dart' show PointerDeviceKind, kPrimaryButton;
+ import 'package:flutter/material.dart';
+-import 'package:flutter/services.dart' show LogicalKeyboardKey;
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
+ import 'package:jet_cad_2d_integration/jet_cad_2d_integration.dart';
+ import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
+ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import 'editor_rig.dart';
+ import 'wall_fixture.dart';
+@@ -47,38 +45,24 @@ String wallPlanJson(
+   }
+ }
+ 
+ /// A controller over [plan], disposed at tear-down.
+ PlanController wallController(String plan) {
+   final c = architectureController(json: plan);
+   addTearDown(c.dispose);
+   return c;
+ }
+ 
+-/// A primary click at world [p] plus the raw offset `(dx, dy)` in mm.
+-Future<void> clickAt(WidgetTester tester, PlanController c, Vector2 p,
+-    [double dx = 0, double dy = 0]) async {
+-  await tester.tapAt(globalAt(tester, c, Vector2(p.x + dx, p.y + dy)));
+-  await tester.pump();
+-}
+-
+ /// A click near [p]: 12 mm and -9 mm off, well inside the aperture.
+ Future<void> clickNear(WidgetTester tester, PlanController c, Vector2 p) =>
+     clickAt(tester, c, p, 12, -9);
+ 
+-Future<void> undoKey(WidgetTester tester) async {
+-  await tester.sendKeyDownEvent(LogicalKeyboardKey.meta);
+-  await press(tester, LogicalKeyboardKey.keyZ);
+-  await tester.sendKeyUpEvent(LogicalKeyboardKey.meta);
+-  await tester.pump();
+-}
+-
+ /// The page grid's point nearest [p], as the drag chain computes it.
+ Vector2 gridOf(DraftDocument doc, Vector2 p) =>
+     snapToGrid(p, gridStep, doc.components.get<PageComponent>(doc.rootHandle)!);
+ 
+ /// Sets the active Wall tool's settings through the property panel's
+ /// settings fields, as today's cases set the tool's notifier
+ /// (`wallTool(tester).settings.value = ...`, ruling R12-1): [thickness]
+ /// typed and committed with Enter (which hands the focus back to the
+ /// canvas), then [justification] picked from its menu.
+ Future<void> setWallSettings(WidgetTester tester,
+@@ -98,27 +82,13 @@ Future<void> setWallSettings(WidgetTester tester,
+ Future<void> selectWall(WidgetTester tester, PlanController c, Handle h) async {
+   final w = worldWallOf(c.document, h);
+   final n = Vector2(-w.d.y, w.d.x);
+   final (l, r) = facesOf(c.document.components.get<WallParams>(h)!);
+   await tester
+       .tapAt(globalAt(tester, c, w.s + (w.e - w.s) * 0.4 + n * ((l + r) / 2)));
+   await tester.pump();
+   expect(c.activeSelection.keys, [SelectionKey.root(h)]);
+ }
+ 
+-/// A mouse drag from world [from] to world [to], past the slop at once.
+-Future<void> dragWorld(
+-    WidgetTester tester, PlanController c, Vector2 from, Vector2 to) async {
+-  final a = globalAt(tester, c, from), b = globalAt(tester, c, to);
+-  final gesture = await tester.createGesture(
+-      kind: PointerDeviceKind.mouse, buttons: kPrimaryButton);
+-  await gesture.down(a);
+-  await gesture.moveTo(a + const Offset(12, 0));
+-  await gesture.moveTo(b);
+-  await gesture.up();
+-  await gesture.removePointer();
+-  await tester.pump();
+-}
+-
+ /// Wall [h]'s end [k] in world.
+ Vector2 endOf(DraftDocument doc, Handle h, int k) =>
+     worldWallOf(doc, h).endpoint(k);
+diff --git a/packages/jet_cad_2d_integration/test/wall/wall_grips_test.dart b/packages/jet_cad_2d_integration/test/wall/wall_grips_test.dart
+index d7e10bdb..e494c86c 100644
+--- a/packages/jet_cad_2d_integration/test/wall/wall_grips_test.dart
++++ b/packages/jet_cad_2d_integration/test/wall/wall_grips_test.dart
+@@ -1,21 +1,20 @@
+ // Ported from jet_cad_floor_plan/test/wall_grips_test.dart (3a Task 12):
+ // EG1-EG6, and EG7, EG8 (3a Task 17, R-P8: their door and separator), over
+ // a PlanController of the architecture kit in PlanEditor, assertions
+ // unchanged; the provider-direct tails of EG1, EG3, EG4, EG6 and EG8 use
+ // the kit's WallGrips and run in the kit as EG1-k, EG3-k, EG4-k, EG6-k and
+ // EG8-k (R-P1, R12-3); the shown grips are the controller's grip cache
+ // (R-P9). EG9, EG10 (3a Task 21, R-P8): the panel, the Position field and
+ // the corner drag here; their adapters, band cache, attach, room inputs and
+ // grips run in the kit as EG9-k, EG10-k.
+ // WG-refuse-short is new (Review Focus 3's kit half, R-P15).
+-// ignore_for_file: invalid_use_of_internal_member
+ import 'package:flutter/foundation.dart' show Key;
+ import 'package:flutter/gestures.dart' show PointerDeviceKind, kPrimaryButton;
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
+ import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
+ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import '../support/editor_rig.dart';
+@@ -24,20 +23,21 @@ import '../support/wall_shell.dart';
+ 
+ /// A 1:20 page near the far origin with grid snap on at [gridStep], and
+ /// the walls [build] adds, as a plan with no undo history
+ /// (wall_grips_test.dart:36-56's `gripDoc`).
+ String gripPlan(void Function(DraftDocument doc) build) =>
+     wallPlanJson(wallPage(), build);
+ 
+ /// The shown grips of wall [h], as (index, x, y): the controller's grip
+ /// cache (wall_grips_test.dart:127-131's `gripsOf(view, h)`).
+ List<(int, double, double)> gripsOf(PlanController c, Handle h) => [
++      // ignore: invalid_use_of_internal_member
+       for (final r in c.grips.grips)
+         if (r.key == SelectionKey.root(h)) (r.grip.index, r.grip.x, r.grip.y),
+     ];
+ 
+ const Handle wa = Handle(1300), wb = Handle(2600), wc = Handle(3900);
+ 
+ /// An L at the far origin: A (200, centre) runs into [lCorner] and B (115,
+ /// left) runs out of it at 110 degrees, each in its own rotated group, so
+ /// their ends at the corner meet within rounding, not bitwise. C (150,
+ /// right) starts 3 mm from the corner: near it, but not joined.
+@@ -180,20 +180,21 @@ void main() {
+       'EG2 a selected wall shows two grips at the world endpoints of its '
+       'rotated group; after a drag they sit at the new world endpoints',
+       (tester) async {
+     final ctrl = wallController(gripPlan((doc) => addL(doc)));
+     final doc = ctrl.document;
+     await pumpEditor(tester, ctrl, centre: lCorner, scale: 0.15);
+     await selectWall(tester, ctrl, wb);
+     final w = worldWallOf(doc, wb);
+     expect(gripsOf(ctrl, wb), [(0, w.s.x, w.s.y), (1, w.e.x, w.e.y)],
+         reason: 'bitwise where WorldWall puts them');
++    // ignore: invalid_use_of_internal_member
+     expect(ctrl.grips.grips.every((r) => r.object), isTrue);
+     final local = doc.components.get<WallParams>(wb)!;
+     expect((local.start - w.s).length, greaterThan(1000),
+         reason: 'the group is not at the identity');
+     final q = gridOf(doc, polar(lEnd, 23 + 20, 600));
+     await dragWorld(tester, ctrl, w.e, q);
+     final after = worldWallOf(doc, wb);
+     expect(xy(after.s), xy(w.s));
+     expect((after.e - q).length, lessThan(1e-6));
+     expect(gripsOf(ctrl, wb),
+diff --git a/packages/jet_cad_2d_kit/test/authoring/text_words_conformance_test.dart b/packages/jet_cad_2d_kit/test/authoring/text_words_conformance_test.dart
+index 0fa9679a..ad94043e 100644
+--- a/packages/jet_cad_2d_kit/test/authoring/text_words_conformance_test.dart
++++ b/packages/jet_cad_2d_kit/test/authoring/text_words_conformance_test.dart
+@@ -94,11 +94,30 @@ void main() {
+         codes(problems(
+             sampleNames.merge(textsWith('de', 'text:sample.free', null)))),
+         [KitProblemCode.wordMissing]);
+     expect(
+         codes(problems(
+             sampleNames.merge(textsWith('tr', 'text:sample.free', 'Free')))),
+         [KitProblemCode.wordUntranslated]);
+     expect(codes(problems(sampleNames.merge(texts), same: sampleSameAsEnglish)),
+         [KitProblemCode.wordUntranslated, KitProblemCode.wordUntranslated]);
+   });
++
++  test(
++      "KW-conf-foreign another kit's text: word in the names is not held to "
++      'the declared locales (M-KW-conf-foreign)', () {
++    // A host's merged names may carry another kit's text in English only
++    // (`text:other.greeting`): it is that kit's to translate.
++    const foreign = KitNames({
++      'en': {'text:other.greeting': 'Hello {name}'},
++    });
++    // M-KW-conf-foreign: the kit test (`kitOfKey(...) == catalog.kit`)
++    // dropped, so every text: word in English is held to the locales.
++    expect(problems(sampleNames.merge(texts).merge(foreign)), isEmpty);
++    // Control: the same text under the sample kit's id is held to them.
++    const own = KitNames({
++      'en': {'text:sample.greeting': 'Hello {name}'},
++    });
++    expect(codes(problems(sampleNames.merge(texts).merge(own))),
++        [KitProblemCode.wordMissing, KitProblemCode.wordMissing]);
++  });
+ }
+diff --git a/packages/jet_cad_2d_kit/test/kit/object_view_test.dart b/packages/jet_cad_2d_kit/test/kit/object_view_test.dart
+index e200f92d..50d5cfe2 100644
+--- a/packages/jet_cad_2d_kit/test/kit/object_view_test.dart
++++ b/packages/jet_cad_2d_kit/test/kit/object_view_test.dart
+@@ -335,22 +335,23 @@ void main() {
+                 read: (s) => s.width,
+                 write: (s, v) => s.copyWith(width: v),
+                 visible: (s) => s.raised),
+           ]).validate(),
+           isEmpty);
+     });
+ 
+     test(
+         'PO-validate-cov the check reads settings of another T through '
+         'PropertySpec<Object> without a TypeError (M-PO-cov)', () {
+-      // M-PO-cov: validate reading `spec is LengthProperty && spec.range !=
+-      // null` instead of `needsObject` throws a TypeError here.
++      // M-PO-cov: validate reading `spec is LengthProperty<Object> &&
++      // spec.range != null` instead of `needsObject` throws a TypeError
++      // here.
+       final List<PropertySpec<Object>> held = [
+         LengthProperty<Slab>(
+             id: 'reach',
+             read: (s) => s.width,
+             write: (s, v) => s,
+             range: besidePost),
+       ];
+       expect(() => held.single.needsObject, returnsNormally);
+       expect([
+         for (final p in kitWith(held.cast<PropertySpec<Slab>>()).validate())
+diff --git a/packages/jet_cad_2d_kit/test/model/kit_text_test.dart b/packages/jet_cad_2d_kit/test/model/kit_text_test.dart
+index 4f31fdf7..b651fb47 100644
+--- a/packages/jet_cad_2d_kit/test/model/kit_text_test.dart
++++ b/packages/jet_cad_2d_kit/test/model/kit_text_test.dart
+@@ -22,20 +22,31 @@ void main() {
+         fillText('Bedroom {n} of {count}', {'n': 2}), 'Bedroom 2 of {count}');
+     // A non-String argument is printed with its toString.
+     expect(fillText('{degrees}°', {'degrees': 12.5}), '12.5°');
+     // Braces that are no placeholder.
+     expect(fillText('{ name } {} {2} {name', {'name': 'x'}),
+         '{ name } {} {2} {name');
+     expect(fillText('Yatak odası {n}', const {'n': 1}), 'Yatak odası 1');
+     expect(fillText('No placeholder', {'name': 'x'}), 'No placeholder');
+   });
+ 
++  test(
++      'KW-fill-once an argument whose value holds a placeholder is put in '
++      'as written, not filled again (M-KW-fill-once)', () {
++    // M-KW-fill-once: fillText replacing each argument's `{name}` in turn
++    // over the growing string, so a later argument fills an earlier
++    // argument's text.
++    expect(fillText('{name} seats {n}', {'name': 'Table {n}', 'n': 4}),
++        'Table {n} seats 4');
++    expect(fillText('{a}{b}', {'a': '{b}', 'b': '{a}'}), '{b}{a}');
++  });
++
+   test('KW-placeholders the set of names a template holds', () {
+     // M-KW-placeholders: placeholdersOf answers an empty set.
+     expect(placeholdersOf('{wall} {end} ({side}), {wall}'),
+         {'wall', 'end', 'side'});
+     expect(placeholdersOf('{ name } {} {2}'), isEmpty);
+     expect(placeholdersOf('Raum {n}'), {'n'});
+   });
+ 
+   test(
+       'KW-text KitText equals by its id and its arguments, whatever their '
+diff --git a/packages/jet_cad_2d_kit/test/testing/fake_plan_services_test.dart b/packages/jet_cad_2d_kit/test/testing/fake_plan_services_test.dart
+index f1f79556..237ad285 100644
+--- a/packages/jet_cad_2d_kit/test/testing/fake_plan_services_test.dart
++++ b/packages/jet_cad_2d_kit/test/testing/fake_plan_services_test.dart
+@@ -146,20 +146,42 @@ void main() {
+         () => s.shared<Duration>(
+             (services) => services.shared<Duration>((_) => Duration.zero)),
+         throwsStateError);
+     s.dispose();
+     // M-LS-fake-4b: dispose in the order made; M-LS-fake-4c: dispose
+     // leaving the shared objects alone.
+     expect(log, ['faces', 'bands']);
+     expect(() => s.shared<_Bands>((_) => _Bands(log)), throwsStateError);
+   });
+ 
++  test(
++      'LS-fake-dispose dispose releases the camera and the symbols state '
++      '(M-LS-fake-dispose-camera, M-LS-fake-dispose-state)', () {
++    final (:doc, catalog: _) = objectDocument([slabType(), postType()]);
++    addTearDown(doc.dispose);
++    final s = FakePlanServices(document: doc, scale: 0.25);
++    void listener() {}
++    // Premises: live before dispose.
++    s.camera
++      ..addListener(listener)
++      ..removeListener(listener);
++    s.symbolsState
++      ..addListener(listener)
++      ..removeListener(listener);
++    s.dispose();
++    // A disposed ChangeNotifier refuses a listener.
++    expect(() => s.camera.addListener(listener), throwsFlutterError,
++        reason: 'the camera disposed');
++    expect(() => s.symbolsState.addListener(listener), throwsFlutterError,
++        reason: 'the symbols state disposed');
++  });
++
+   test(
+       "LS-fake-5 liveTypeIdOf: the catalog's type id; null for a frozen "
+       'object, without a catalog, and for anything else', () {
+     final (:doc, :catalog) = objectDocument([slabType(), postType()]);
+     addTearDown(doc.dispose);
+     final s =
+         FakePlanServices(document: doc, catalog: catalog, frozen: {hPost});
+     addTearDown(s.dispose);
+     expect(s.liveTypeIdOf(hSlab), Slab.id);
+     // M-LS-fake-5: the frozen set not consulted.
+diff --git a/packages/jet_cad_2d_kit_architecture/lib/src/attach/wall_faces.dart b/packages/jet_cad_2d_kit_architecture/lib/src/attach/wall_faces.dart
+index 7464b14e..c6b141cc 100644
+--- a/packages/jet_cad_2d_kit_architecture/lib/src/attach/wall_faces.dart
++++ b/packages/jet_cad_2d_kit_architecture/lib/src/attach/wall_faces.dart
+@@ -22,22 +22,23 @@ import 'wall_attach.dart';
+ 
+ /// The cache of the face runs and their neighbours (spec 09c D3, D4, S-8),
+ /// shared by every query of the wall-face provider for one document.
+ ///
+ /// Built from [bands]' live walls (`WallBands.liveWalls`, which keeps
+ /// [WallBands.generation] current), the kit's reader [live], the host
+ /// predicate [accept] (the kit passes `isUsableHost`: a hidden or locked
+ /// wall hosts nothing) and the document. The runs, the neighbours and the
+ /// boxes of the document's definitions are rebuilt only when the document,
+ /// the bands' generation or the document's command state (`stateId`, D-06)
+-/// changes. A read over a cached set first runs the bands' O(walls)
+-/// liveness check (a wall frozen with no document change, spec C1.5); a
++/// changes. A read over a cached set first runs the bands' liveness check
++/// (a wall frozen with no document change, spec C1.5): O(cached objects)
++/// `liveTypeIdOf` calls, each over the catalog's types; a
+ /// query ([attach]) is then O(runs) and allocates O(1).
+ final class WallFaces {
+   WallFaces(this.bands, this.live,
+       {bool Function(DraftDocument, Handle)? accept})
+       : _accept = accept;
+ 
+   /// The kit's bands, shared with the Wall and Opening tools.
+   final WallBands bands;
+ 
+   /// Which objects are live walls (spec C1.5): a frozen wall has no face.
+diff --git a/packages/jet_cad_2d_kit_architecture/lib/src/dimension/dimension_grips.dart b/packages/jet_cad_2d_kit_architecture/lib/src/dimension/dimension_grips.dart
+index 8e21612a..231b9627 100644
+--- a/packages/jet_cad_2d_kit_architecture/lib/src/dimension/dimension_grips.dart
++++ b/packages/jet_cad_2d_kit_architecture/lib/src/dimension/dimension_grips.dart
+@@ -76,21 +76,22 @@ typedef _Dim = ({
+ /// document as it is then.
+ ///
+ /// **A freeze drops it too** (spec 3a C1.5, C1.10): the plan freezes an
+ /// object without changing the document, so no change reaches the stream,
+ /// yet every point in the memo, and `T`, was laid out among the walls live
+ /// when it was made (`wallsInDocument` reads every live wall). The memo
+ /// keeps those walls, and every preview that would read it first checks
+ /// that each is still a live wall ([live]); one that is not drops it, and
+ /// the preview lays out afresh. Freezes only remove (the plan never
+ /// unfreezes) and a new wall is a document change, so that check is the
+-/// whole of it: O(walls) calls of [live], no allocation.
++/// whole of it: O(cached walls) calls of [live] (the plan's
++/// `liveTypeIdOf`, each over the catalog's types), no allocation.
+ ///
+ /// **A broken dimension** (D15: an end that does not resolve, an offset that
+ /// is not finite, or a layout that is not finite) has no grips.
+ ///
+ /// **Movable:** the select tool moves and rotates a dimension like a box
+ /// (D11, R-19): a fixed end moves with its group, an attached end stays on
+ /// its wall.
+ final class DimensionGrips implements ObjectGripProvider {
+   DimensionGrips(
+       {required this.index, required this.objectSnap, required this.live});
+diff --git a/packages/jet_cad_2d_kit_architecture/lib/src/opening/opening_tool.dart b/packages/jet_cad_2d_kit_architecture/lib/src/opening/opening_tool.dart
+index 20139d54..ffd4ec06 100644
+--- a/packages/jet_cad_2d_kit_architecture/lib/src/opening/opening_tool.dart
++++ b/packages/jet_cad_2d_kit_architecture/lib/src/opening/opening_tool.dart
+@@ -310,21 +310,22 @@ class OpeningTool extends PlacementTool {
+   /// then, at the event's first read of the bands).
+   Handle? _hostAt(DraftDocument doc, Vector2 raw) {
+     if (identical(doc, _scanDocument) &&
+         doc.tables.mutationRevision == _scanTables &&
+         raw.x == _scanX &&
+         raw.y == _scanY) {
+       // A plan freezes a wall with no document change (spec 3a C1.5): the
+       // bands' refresh, which every other read of them runs, moves the
+       // generation if a cached wall is no longer live, so neither this
+       // scan nor the frame cache built at it outlives a freeze. Once per
+-      // pointer event: O(walls) calls of the live reader, no allocation.
++      // pointer event: O(cached objects) `liveTypeIdOf` calls, each over
++      // the catalog's types; no allocation.
+       if (!_bandsFresh) {
+         _bands.liveWalls(doc);
+         _bandsFresh = true;
+       }
+       if (_bands.generation == _scanGeneration) return _scanHost;
+     }
+     final host = _bands.hostAt(doc, raw.x, raw.y, accept: isUsableHost);
+     _bandsFresh = true;
+     _scanDocument = doc;
+     _scanGeneration = _bands.generation;
+diff --git a/packages/jet_cad_2d_kit_architecture/lib/src/room/room_inputs.dart b/packages/jet_cad_2d_kit_architecture/lib/src/room/room_inputs.dart
+index 3e797aa7..8fa9dead 100644
+--- a/packages/jet_cad_2d_kit_architecture/lib/src/room/room_inputs.dart
++++ b/packages/jet_cad_2d_kit_architecture/lib/src/room/room_inputs.dart
+@@ -258,37 +258,71 @@ final class RoomInputs implements PlaceSource, Disposable {
+   /// an input the document no longer has. The Room tool calls it at its
+   /// click and again right after its `execute`; the Separator tool at its
+   /// second click, before the trim, and again right after its `execute`;
+   /// the separator grips at release, before they trim, since they never
+   /// execute (the select tool executes the command they return).
+   void invalidate() {
+     _stale = true;
+     _generation++;
+   }
+ 
++  /// Whether a pointer event is being handled ([beginEvent]).
++  bool _inEvent = false;
++
++  /// Whether the current event has already checked every cached object's
++  /// liveness, or rebuilt the cache from live objects: read only while
++  /// [_inEvent].
++  bool _checked = false;
++
++  /// Opens one pointer event's reads (a hover, a click, a re-read after a
++  /// document change): until [endEvent], the whole-cache liveness check
++  /// ([_dropFrozen]) runs at most once, at the event's first read, and the
++  /// per-handle one ([_dropFrozenAround]) not at all after it, since that
++  /// pass checked every handle it would. A freeze happens between events,
++  /// never inside one (a plan freezes on its own, outside a tool's
++  /// handler), and an edit inside one goes through [invalidate], after
++  /// which the rebuild reads only live objects; so one check per event sees
++  /// every freeze at the next event's first read (spec 3a C1.5). The Room
++  /// and Separator tools bracket each event with it (`try`/`finally`).
++  /// Outside a bracket every read checks, as before.
++  void beginEvent() {
++    _inEvent = true;
++    _checked = false;
++  }
++
++  /// Closes the bracket [beginEvent] opened: every later read checks again
++  /// until the next [beginEvent].
++  void endEvent() {
++    _inEvent = false;
++  }
++
+   final Map<Handle, RoomInput?> _inputs = {};
+   final Map<Handle, List<Handle>> _neighbours = {};
+ 
+   /// Every contributor with an input, ascending, and its place box.
+   final List<(Handle, Aabb2)> _placed = [];
+ 
+   /// The live walls the cache was built from, then its live separators,
+   /// each ascending: what [_dropFrozen] checks.
+   final List<Handle> _held = [];
+ 
+   /// How many of [_held]'s first entries are walls.
+   int _heldWalls = 0;
+   Aabb2? _bounds;
+ 
+   /// How many times the cache was rebuilt. Never reset.
+   int debugRebuilds = 0;
+ 
++  /// How many whole-cache liveness passes ran ([_dropFrozen] over a fresh
++  /// cache): one per pointer event in steady state. Never reset.
++  int debugLivenessPasses = 0;
++
+   /// [h]'s input, or null when [h] is not a live wall or separator or is
+   /// degenerate.
+   @override
+   RoomInput? inputOf(Handle h) {
+     _dropFrozenAround(h);
+     _refresh();
+     return _inputs[h];
+   }
+ 
+   /// [h]'s place box: its input's box, or null.
+@@ -319,20 +353,22 @@ final class RoomInputs implements PlaceSource, Disposable {
+   @override
+   Aabb2? get bounds {
+     _dropFrozen();
+     _refresh();
+     return _bounds;
+   }
+ 
+   void _refresh() {
+     if (!_stale) return;
+     _stale = false;
++    // Built from live objects only: nothing for this event to re-check.
++    _checked = true;
+     debugRebuilds++;
+     _inputs.clear();
+     _neighbours.clear();
+     _placed.clear();
+     _held.clear();
+     final doc = document;
+     final walls = <WorldWall>[
+       for (final h
+           in liveObjectsOf<WallParams>(doc, live, ArchitectureTypes.wall))
+         WorldWall(h, doc.components.get<WallParams>(h)!,
+@@ -364,43 +400,47 @@ final class RoomInputs implements PlaceSource, Disposable {
+     }
+     _bounds = u.isEmpty ? null : u;
+   }
+ 
+   /// Marks the cache stale when a wall or separator it was built from is no
+   /// longer live: a plan freezes an object (spec 2a E2) without changing
+   /// the document, so no change reaches the stream, and a frozen object
+   /// must not stay an input (spec 3a C1.5; Task 12's `WallBands`
+   /// precedent). The readers whose answer can depend on any cached object
+   /// ([placedIn], [bounds], [generation]) run it. Iterates [_held] in
+-  /// place: O(n) calls of [live] for n cached objects, no allocation.
++  /// place: O(cached objects) calls of [live], the plan's `liveTypeIdOf`,
++  /// each over the catalog's types (O(cached objects × the catalog's
++  /// types)); no allocation.
+   void _dropFrozen() {
+-    if (_stale) return;
++    if (_stale || (_inEvent && _checked)) return;
++    debugLivenessPasses++;
++    _checked = true;
+     for (var i = 0; i < _held.length; i++) {
+       final want =
+           i < _heldWalls ? ArchitectureTypes.wall : ArchitectureTypes.separator;
+       if (live(_held[i]) != want) {
+         invalidate();
+         return;
+       }
+     }
+   }
+ 
+   /// [_dropFrozen] for the readers of one handle, [inputOf] and
+   /// [wallNeighboursOf]: [h]'s answer depends on [h] and, for a wall, on
+   /// its wall neighbours (a frozen neighbour leaves its joint, and the
+   /// band changes), so only those are checked. A tracer reads [bounds] and
+   /// [placedIn] first and then one [inputOf] per candidate, which this
+   /// keeps at O(neighbours) each instead of O(n). A handle the cache does
+   /// not hold answers nothing either way: a freeze only removes. No
+   /// allocation.
+   void _dropFrozenAround(Handle h) {
+-    if (_stale || !_inputs.containsKey(h)) return;
++    if (_stale || (_inEvent && _checked) || !_inputs.containsKey(h)) return;
+     final around = _neighbours[h];
+     if (around == null) {
+       if (live(h) != ArchitectureTypes.separator) invalidate();
+       return;
+     }
+     if (live(h) != ArchitectureTypes.wall) {
+       invalidate();
+       return;
+     }
+     for (var i = 0; i < around.length; i++) {
+diff --git a/packages/jet_cad_2d_kit_architecture/lib/src/room/room_plan.dart b/packages/jet_cad_2d_kit_architecture/lib/src/room/room_plan.dart
+index a5ef2808..97890510 100644
+--- a/packages/jet_cad_2d_kit_architecture/lib/src/room/room_plan.dart
++++ b/packages/jet_cad_2d_kit_architecture/lib/src/room/room_plan.dart
+@@ -66,20 +66,28 @@ final Expando<({Handle room, int state, String text})> _areaMemo =
+ /// The Area line of [object], a room (spec 10 D21, R-25; today's `_areaOf`,
+ /// selection_panel.dart:826-844): its area label's stored string, exactly
+ /// as drawn, or '—' when it has none (a file's room with no children,
+ /// today's panel line). The labels are the room's TEXT children, the name
+ /// then the area in handle order (D9, D18), so the area is the second, in
+ /// handle order, never in slot order.
+ ///
+ /// Reads the document once per room shown and per document state
+ /// (`commands.stateId`): today's panel dropped its memo on every command
+ /// change, and the state moves on exactly those.
++///
++/// The limit of that key: only a command moves `stateId`, and
++/// `notifyLoaded`/`notifyPurged` keep it. So when the plan rebuilds the
++/// document under the same state (spec 2a E3: a rollback threw and the
++/// plan is regenerated through `notifyLoaded`), a label the rebuild
++/// rewrote can be shown stale here until the next command moves the
++/// state. It is a display string only, never stored or read back, and the
++/// path is rare (a failed rollback), so the memo keeps the plain key.
+ String roomAreaText(PlanObject object) {
+   final doc = object.document;
+   final room = object.handle;
+   final state = doc.commands.stateId;
+   final memo = _areaMemo[doc];
+   if (memo != null && memo.room == room && memo.state == state) {
+     return memo.text;
+   }
+   debugRoomAreaReads++;
+   final entities = doc.entities;
+diff --git a/packages/jet_cad_2d_kit_architecture/lib/src/room/room_tool.dart b/packages/jet_cad_2d_kit_architecture/lib/src/room/room_tool.dart
+index 95234d23..a860317b 100644
+--- a/packages/jet_cad_2d_kit_architecture/lib/src/room/room_tool.dart
++++ b/packages/jet_cad_2d_kit_architecture/lib/src/room/room_tool.dart
+@@ -238,25 +238,41 @@ class RoomTool extends PlacementTool implements ToolNotice {
+       _raw.setFrom(e.world);
+       _pointer.setFrom(e.world);
+     }
+     super.onPointerDown(e, ctx);
+   }
+ 
+   /// Runs after every hover's resolution; the room reads [raw] only.
+   @override
+   void hovered(Vector2 raw) {
+     _pointer.setFrom(raw);
+-    _show(_verdictAt(raw));
++    // One liveness pass over the inputs for the whole hover, however many
++    // of their readers the verdict and its trace run (spec 3a C1.5).
++    inputs.beginEvent();
++    try {
++      _show(_verdictAt(raw));
++    } finally {
++      inputs.endEvent();
++    }
+   }
+ 
+   @override
+   void accept(Vector2 point, ToolContext ctx) {
++    inputs.beginEvent();
++    try {
++      _accept(ctx);
++    } finally {
++      inputs.endEvent();
++    }
++  }
++
++  void _accept(ToolContext ctx) {
+     inputs.invalidate();
+     final verdict = _verdictAt(_raw, contours: false);
+     _show(verdict);
+     if (verdict != _Verdict.room) return;
+     final seed = _raw.clone();
+     try {
+       commit(ctx, () {
+         final doc = ctx.document;
+         final name = _nextName(doc);
+         final h = doc.handleSeed.next();
+@@ -456,22 +472,27 @@ class RoomTool extends PlacementTool implements ToolNotice {
+   List<Handle> _liveRooms(DraftDocument doc) =>
+       liveObjectsOf<RoomParams>(doc, live, ArchitectureTypes.room);
+ 
+   /// A document change while a preview or a notice shows: the verdict at
+   /// the pointer again, among inputs rebuilt whatever order the change's
+   /// listeners run in.
+   void _onDocumentChange() {
+     if (_disposed || (_preview.isEmpty && _occupiedNotice.value == null)) {
+       return;
+     }
+-    inputs.invalidate();
+-    _show(_verdictAt(_pointer, contours: false));
++    inputs.beginEvent();
++    try {
++      inputs.invalidate();
++      _show(_verdictAt(_pointer, contours: false));
++    } finally {
++      inputs.endEvent();
++    }
+     notifyListeners();
+   }
+ 
+   /// Every cancel path (Escape with a shape pending never happens here; a
+   /// switch to another tool, the layer's deactivate and dispose) clears the
+   /// notice and the preview (R-29).
+   @override
+   void cancel(ToolContext ctx) {
+     _preview = const [];
+     _setOccupied(null);
+diff --git a/packages/jet_cad_2d_kit_architecture/lib/src/separator/separator_tool.dart b/packages/jet_cad_2d_kit_architecture/lib/src/separator/separator_tool.dart
+index 3e6cd9f7..c72762ae 100644
+--- a/packages/jet_cad_2d_kit_architecture/lib/src/separator/separator_tool.dart
++++ b/packages/jet_cad_2d_kit_architecture/lib/src/separator/separator_tool.dart
+@@ -63,38 +63,53 @@ class SeparatorTool extends PlacementTool {
+     _context = ctx;
+     super.onPointerMove(e, ctx);
+   }
+ 
+   /// Runs after every hover's resolution, so [hoverPoint] is the resolved
+   /// point. With no start pending there is no rubber band.
+   @override
+   void hovered(Vector2 raw) {
+     _bandShown = false;
+     if (points.isEmpty) return;
+-    final trimmed = trimSeparator(points.first, hoverPoint, inputs,
+-        objectSnap: _objectSnap(_context));
++    // One liveness pass over the inputs for the whole hover: the trim reads
++    // `placedIn` up to three times (spec 3a C1.5).
++    inputs.beginEvent();
++    final (Vector2, Vector2)? trimmed;
++    try {
++      trimmed = trimSeparator(points.first, hoverPoint, inputs,
++          objectSnap: _objectSnap(_context));
++    } finally {
++      inputs.endEvent();
++    }
+     if (trimmed == null) return;
+     _bandStart.setFrom(trimmed.$1);
+     _bandEnd.setFrom(trimmed.$2);
+     _bandShown = true;
+   }
+ 
+   @override
+   void accept(Vector2 point, ToolContext ctx) {
+     if (points.isEmpty) {
+       points.add(point);
+       _bandShown = false;
+       return;
+     }
+-    inputs.invalidate();
+-    final trimmed = trimSeparator(points.first, point, inputs,
+-        objectSnap: _objectSnap(ctx));
++    inputs
++      ..invalidate()
++      ..beginEvent();
++    final (Vector2, Vector2)? trimmed;
++    try {
++      trimmed = trimSeparator(points.first, point, inputs,
++          objectSnap: _objectSnap(ctx));
++    } finally {
++      inputs.endEvent();
++    }
+     if (trimmed == null) return;
+     final (s, e) = trimmed;
+     try {
+       commit(ctx, () {
+         final doc = ctx.document;
+         final h = doc.handleSeed.next();
+         return CompoundCommand([
+           AddNodeCommand(GroupNode(
+               handle: h,
+               parent: doc.rootHandle,
+diff --git a/packages/jet_cad_2d_kit_architecture/lib/src/wall/wall_bands.dart b/packages/jet_cad_2d_kit_architecture/lib/src/wall/wall_bands.dart
+index 55daaa6e..44e024fc 100644
+--- a/packages/jet_cad_2d_kit_architecture/lib/src/wall/wall_bands.dart
++++ b/packages/jet_cad_2d_kit_architecture/lib/src/wall/wall_bands.dart
+@@ -25,25 +25,26 @@ WallBands wallBandsOf(PlanServices services) =>
+ /// ([wallBandsOf]); the four tools share it.
+ ///
+ /// Per live, non-degenerate wall, ascending by handle, [_stride] doubles: the
+ /// world start and end (`WorldWall`'s own `s` and `e`, so bitwise what
+ /// `WallType` builds), the unit direction, the length, the left and right
+ /// face offsets and the thickness; and the wall's handle beside them.
+ /// Refreshed on a document change or a change in liveness: rebuilt when
+ /// the document reports a change (its `changes` stream, which delivers
+ /// after the task that made the change), when a tool calls [invalidate],
+ /// and when a read finds a cached wall no longer live (a plan freezes a
+-/// wall, spec 2a E2, with no document change: spec 3a C1.5). Un-freezing
+-/// comes with a document change (a reload or an undo), so the stream
+-/// covers it. A scan is O(walls) over the cached doubles, plus the
+-/// liveness check's O(walls) calls of the live reader, and allocates
+-/// nothing in steady state.
++/// wall, spec 2a E2, with no document change: spec 3a C1.5). A frozen
++/// object stays frozen for its document's life; a new document resets the
++/// cache. A scan is O(walls) over the cached doubles, plus the liveness
++/// check's O(cached objects) `liveTypeIdOf` calls, each over the catalog's
++/// types (O(cached objects × the catalog's types)), and allocates nothing
++/// in steady state.
+ final class WallBands implements Disposable {
+   /// [live] names the live walls (`liveObjectsOf`): a frozen wall has no
+   /// band.
+   WallBands(this._live);
+ 
+   final LiveTypeOf _live;
+ 
+   static const int _stride = 10;
+   Float64List _cache = Float64List(_stride * 16);
+   final List<Handle> _handles = <Handle>[];
+@@ -189,22 +190,23 @@ final class WallBands implements Disposable {
+       _handles.add(h);
+       _walls++;
+     }
+   }
+ 
+   /// Whether every cached wall is still a live wall by [_live]: a plan
+   /// freezes a wall (spec 2a E2) without changing the document, so no
+   /// change reaches the stream, and a frozen wall must not keep its band
+   /// (spec 3a C1.5). Runs on every read ([_refresh]), so every reader --
+   /// [liveWalls], [hostAt], [joinInto] -- is covered. Iterates the cached
+-  /// handles in place: O(walls) calls of [_live] (a set lookup and the
+-  /// engine's naming rule), no allocation.
++  /// handles in place: O(cached objects) calls of [_live], the plan's
++  /// `liveTypeIdOf` (a set lookup and the catalog's naming rule, over its
++  /// types), so O(cached objects × the catalog's types); no allocation.
+   bool _stillLive() {
+     for (var i = 0; i < _walls; i++) {
+       if (_live(_handles[i]) != ArchitectureTypes.wall) return false;
+     }
+     return true;
+   }
+ 
+   /// Cancels the document subscription: `PlanServices.shared` calls it
+   /// when the document goes.
+   @override
+diff --git a/packages/jet_cad_2d_kit_architecture/test/dimension/dimension_live_test.dart b/packages/jet_cad_2d_kit_architecture/test/dimension/dimension_live_test.dart
+index 9ba80e6f..8b44aa10 100644
+--- a/packages/jet_cad_2d_kit_architecture/test/dimension/dimension_live_test.dart
++++ b/packages/jet_cad_2d_kit_architecture/test/dimension/dimension_live_test.dart
+@@ -46,33 +46,55 @@ void main() {
+     expect(all(door), ArchitectureTypes.opening);
+     expect(frozen(cw)(cw), isNull);
+     expect(frozen(cw)(s), ArchitectureTypes.wall);
+ 
+     // -- T: the thickest live wall. C is 200, S 100.
+     expect(thickestWall(doc, all), 200, reason: 'control');
+     expect(thickestWall(doc, frozen(cw)), 100, reason: 'C frozen: S only');
+ 
+     // -- C's free start, left face (0, 100): a point of C's own children.
+     final c0 = plan.at(0, 100);
+-    List<AttachedEnd> at(Vector2 q, LiveTypeOf live) =>
++    List<AttachedEnd> at(Vector2 q, LiveTypeOf live,
++            [Map<Handle, WallPoints>? points]) =>
+         attachCandidates(doc, index, q,
+-            live: live, objectSnap: true, thickest: thickestWall(doc, live));
++            live: live,
++            objectSnap: true,
++            thickest: thickestWall(doc, live),
++            points: points);
+     expect(at(c0, all), contains(AttachedEnd(cw, 0, l)), reason: 'control');
++    // The candidate set itself, before any wall is laid out: a memo that
++    // still holds every wall's live points answers a candidate without
++    // laying it out, so a frozen wall in the set would come back from the
++    // memo (M-DG2 red here, not at a null check).
++    final held = <Handle, WallPoints>{};
++    at(c0, all, held);
++    at(plan.at(2500, 0), all, held);
++    expect(held.keys, containsAll([cw, s]), reason: 'premise: memo filled');
++    expect([
++      for (final e in at(c0, frozen(cw), {...held})) e.wall
++    ], isNot(contains(cw)),
++        reason: 'C frozen: no candidate, its points memoised');
+     expect([for (final e in at(c0, frozen(cw))) e.wall], isNot(contains(cw)),
+         reason: 'C frozen: none of its points');
+ 
+     // -- S's butt end on C's face, its centre (2500, 0): not stored on S
+     // (AM6), so only the door's host query reaches it.
+     final s0 = plan.at(2500, 0);
+     expect(at(s0, all), contains(AttachedEnd(s, 0, c)), reason: 'control');
+     expect(bruteCandidates(doc, s0), contains(AttachedEnd(s, 0, c)),
+         reason: 'premise: a point of S');
++    // The candidate set first, as above (M-DG3 red here).
++    expect([
++      for (final e in at(s0, frozen(s), {...held})) e.wall
++    ], isNot(contains(s)),
++        reason: 'S frozen: no candidate through its door, its points '
++            'memoised');
+     expect([for (final e in at(s0, frozen(s))) e.wall], isNot(contains(s)),
+         reason: 'S frozen: its door does not bring it in');
+     expect([for (final e in at(s0, frozen(door))) e.wall], isNot(contains(s)),
+         reason: 'the door frozen: no host query through it');
+   });
+ 
+   test('DG-id a dimension is stored under architecture.dimension (M-DG5)', () {
+     expect(DimensionParams.componentTypeId, ArchitectureTypes.dimension);
+     expect(ArchitectureTypes.dimension, 'architecture.dimension');
+     final plan = buildPlan(const [W(0, 0, 4000, 0, 200)], place: corpusGroups);
+diff --git a/packages/jet_cad_2d_kit_architecture/test/dimension/dimension_notice_test.dart b/packages/jet_cad_2d_kit_architecture/test/dimension/dimension_notice_test.dart
+index f035aec5..ac61e9d7 100644
+--- a/packages/jet_cad_2d_kit_architecture/test/dimension/dimension_notice_test.dart
++++ b/packages/jet_cad_2d_kit_architecture/test/dimension/dimension_notice_test.dart
+@@ -96,20 +96,33 @@ class _RingCount implements Canvas {
+ }
+ 
+ /// The attach rings [tool] paints now over [ctx]'s camera.
+ int ringsOf(PlacementTool tool, ToolContext ctx) {
+   final spy = _RingCount();
+   tool.paintOverlay(
+       spy, ctx.camera.value, const Size(1440, 900), PaperPalette.light);
+   return spy.rings;
+ }
+ 
++/// A Dimension tool over [plan]'s document and services whose frozen set
++/// grows in place, as the plan's does (a freeze emits no document change):
++/// DT-freeze's rig.
++(DimensionTool, ToolContext, Set<Handle>) freezeRigOf(Plan plan) {
++  final frozen = <Handle>{};
++  final s = FakePlanServices(
++      document: plan.doc, catalog: testCatalog(), frozen: frozen);
++  addTearDown(s.dispose);
++  final tool = dimensionPlanTool.create(s) as DimensionTool;
++  addTearDown(tool.dispose);
++  return (tool, contextOf(plan.doc), frozen);
++}
++
+ void main() {
+   test(
+       'DT-notice the notice is text:architecture.dimension-value with the '
+       'value the commit draws; every language words it alike; null after '
+       'the commit (M-DT1, M-DT2)', () {
+     final plan = lPlan();
+     final doc = plan.doc;
+     final tool = DimensionTool(live: liveOf(doc));
+     addTearDown(tool.dispose);
+     final ctx = contextOf(doc);
+@@ -198,103 +211,101 @@ void main() {
+       click(tool, ctx, plan.at(1200.5, 2600.25));
+       final d = dimsOf(doc).singleWhere((h) => !before.contains(h));
+       return doc.components.get<DimensionParams>(d)!.a;
+     }
+ 
+     expect(firstEnd(const {}), AttachedEnd(a, 0, l), reason: 'control');
+     expect(firstEnd({a}), isA<FixedEnd>(), reason: 'A frozen');
+   });
+ 
+   test(
+-      'DT-freeze the hover memo re-checks the plan\'s live types: a wall, a '
+-      'neighbour or an opening frozen after a hover (no document change) '
+-      'rings nothing at the very next hover or click (FREEZE RULE; M-DT8)', () {
+-    // A tool over services whose frozen set grows in place, as the plan's
+-    // does (a freeze emits no document change).
+-    (DimensionTool, ToolContext, Set<Handle>) rigOf(Plan plan) {
+-      final frozen = <Handle>{};
+-      final s = FakePlanServices(
+-          document: plan.doc, catalog: testCatalog(), frozen: frozen);
+-      addTearDown(s.dispose);
+-      final tool = dimensionPlanTool.create(s) as DimensionTool;
+-      addTearDown(tool.dispose);
+-      return (tool, contextOf(plan.doc), frozen);
+-    }
+-
+-    // -- The wall itself, read first by a hover at the memoised point. A.1
++      'DT-freeze-wall the hover memo re-checks the plan\'s live '
++      'types: a wall frozen after a hover (no document change) rings '
++      'nothing at the very next hover at the memoised point (FREEZE '
++      'RULE; M-DT8)', () {
++    // The wall itself, read first by a hover at the memoised point. A.1
+     // and B.0's right corners meet at the L's outer corner (4,100, −100);
+     // a hover 5 mm off snaps onto it (the aperture is 33.3 mm).
+-    {
+-      final plan = lPlan();
+-      final [a, _] = plan.walls;
+-      final (tool, ctx, frozen) = rigOf(plan);
+-      final corner = plan.at(4100, -100), near = plan.at(4103, -104);
+-      hover(tool, ctx, near);
+-      expect((tool.hoverPoint - corner).length, lessThan(dimAttach.linear),
+-          reason: 'premise: onto the corner');
+-      expect(ringsOf(tool, ctx), 1, reason: 'premise: the corner attaches');
+-      hover(tool, ctx, near);
+-      expect(ringsOf(tool, ctx), 1, reason: 'control: no freeze, a ring');
+-      final depth = plan.doc.commands.undoDepth;
+-      frozen.add(a);
+-      expect(plan.doc.commands.undoDepth, depth, reason: 'premise');
+-      hover(tool, ctx, near);
+-      expect((tool.hoverPoint - corner).length, lessThan(dimAttach.linear),
+-          reason: 'premise: the index still snaps onto the corner');
+-      // Fresh: A is no wall; B alone has a free start whose right corner
+-      // is (4,100, 0), 100 mm off.
+-      expect(ringsOf(tool, ctx), 0, reason: 'A frozen: the hover');
+-    }
++    final plan = lPlan();
++    final [a, _] = plan.walls;
++    final (tool, ctx, frozen) = freezeRigOf(plan);
++    final corner = plan.at(4100, -100), near = plan.at(4103, -104);
++    hover(tool, ctx, near);
++    expect((tool.hoverPoint - corner).length, lessThan(dimAttach.linear),
++        reason: 'premise: onto the corner');
++    expect(ringsOf(tool, ctx), 1, reason: 'premise: the corner attaches');
++    hover(tool, ctx, near);
++    expect(ringsOf(tool, ctx), 1, reason: 'control: no freeze, a ring');
++    final depth = plan.doc.commands.undoDepth;
++    frozen.add(a);
++    expect(plan.doc.commands.undoDepth, depth, reason: 'premise');
++    hover(tool, ctx, near);
++    expect((tool.hoverPoint - corner).length, lessThan(dimAttach.linear),
++        reason: 'premise: the index still snaps onto the corner');
++    // Fresh: A is no wall; B alone has a free start whose right corner
++    // is (4,100, 0), 100 mm off.
++    expect(ringsOf(tool, ctx), 0, reason: 'A frozen: the hover');
++  });
+ 
+-    // -- A neighbour, read first through B's memoised six points: a hover
++  test(
++      'DT-freeze-neighbour the hover memo re-checks the plan\'s live '
++      'types: a neighbour frozen after a hover rings nothing through '
++      'the memoised six points of the wall beside it (FREEZE RULE; '
++      'M-DT8)', () {
++    // A neighbour, read first through B's memoised six points: a hover
+     // at B's inner corner (3,900, 100) lays B out among A; A freezes; a
+     // hover at the outer corner, a point the memo never searched, finds B
+     // through its stored children and must not read B's joined points.
+-    {
+-      final plan = lPlan();
+-      final [a, _] = plan.walls;
+-      final (tool, ctx, frozen) = rigOf(plan);
+-      hover(tool, ctx, plan.at(3903, 104));
+-      expect(ringsOf(tool, ctx), 1, reason: 'premise: B laid out among A');
+-      frozen.add(a);
+-      hover(tool, ctx, plan.at(4103, -104));
+-      expect((tool.hoverPoint - plan.at(4100, -100)).length,
+-          lessThan(dimAttach.linear),
+-          reason: 'premise: onto the outer corner');
+-      expect(ringsOf(tool, ctx), 0, reason: 'A frozen: B\'s points afresh');
+-    }
++    final plan = lPlan();
++    final [a, _] = plan.walls;
++    final (tool, ctx, frozen) = freezeRigOf(plan);
++    hover(tool, ctx, plan.at(3903, 104));
++    expect(ringsOf(tool, ctx), 1, reason: 'premise: B laid out among A');
++    frozen.add(a);
++    hover(tool, ctx, plan.at(4103, -104));
++    expect((tool.hoverPoint - plan.at(4100, -100)).length,
++        lessThan(dimAttach.linear),
++        reason: 'premise: onto the outer corner');
++    expect(ringsOf(tool, ctx), 0, reason: 'A frozen: B\'s points afresh');
++  });
+ 
+-    // -- The click as first reader: a hover memoises the corner; A
++  test(
++      'DT-freeze-click the hover memo re-checks the plan\'s live '
++      'types: a wall frozen after a hover rings nothing at a click '
++      'with no move before it, the click the first reader (FREEZE '
++      'RULE; M-DT8)', () {
++    // The click as first reader: a hover memoises the corner; A
+     // freezes; a press there with no move before it places the point,
+     // whose ring is read from the memo.
+-    {
+-      final plan = lPlan();
+-      final [a, _] = plan.walls;
+-      final (tool, ctx, frozen) = rigOf(plan);
+-      final near = plan.at(4103, -104);
+-      hover(tool, ctx, near);
+-      expect(ringsOf(tool, ctx), 1, reason: 'premise: the hover rings');
+-      frozen.add(a);
+-      tool.onPointerDown(eventAt(near, buttons: kPrimaryButton), ctx);
+-      expect(tool.points, hasLength(1), reason: 'premise: placed');
+-      expect(ringsOf(tool, ctx), 0, reason: 'A frozen: the click');
+-    }
++    final plan = lPlan();
++    final [a, _] = plan.walls;
++    final (tool, ctx, frozen) = freezeRigOf(plan);
++    final near = plan.at(4103, -104);
++    hover(tool, ctx, near);
++    expect(ringsOf(tool, ctx), 1, reason: 'premise: the hover rings');
++    frozen.add(a);
++    tool.onPointerDown(eventAt(near, buttons: kPrimaryButton), ctx);
++    expect(tool.points, hasLength(1), reason: 'premise: placed');
++    expect(ringsOf(tool, ctx), 0, reason: 'A frozen: the click');
++  });
+ 
+-    // -- An opening: spike C5's T with a flush door on the stem; the
++  test(
++      'DT-freeze-opening the hover memo re-checks the plan\'s live '
++      'types: an opening frozen after a hover rings nothing at the '
++      'jamb only its host gave (FREEZE RULE; M-DT8)', () {
++    // An opening: spike C5's T with a flush door on the stem; the
+     // stem's jamb corner S/0/left (2,450, 100) attaches only through the
+     // door's host (the plan's Ruling 11-7). The door freezes.
+-    {
+-      final plan = flushT(corpusGroups);
+-      final door = plan.openings.single;
+-      final (tool, ctx, frozen) = rigOf(plan);
+-      final near = plan.at(2453, 104);
+-      hover(tool, ctx, near);
+-      expect((tool.hoverPoint - plan.at(2450, 100)).length,
+-          lessThan(dimAttach.linear),
+-          reason: 'premise: onto the jamb');
+-      expect(ringsOf(tool, ctx), 1, reason: 'premise: the jamb attaches');
+-      frozen.add(door);
+-      hover(tool, ctx, near);
+-      expect(ringsOf(tool, ctx), 0, reason: 'the door frozen: no host');
+-    }
++    final plan = flushT(corpusGroups);
++    final door = plan.openings.single;
++    final (tool, ctx, frozen) = freezeRigOf(plan);
++    final near = plan.at(2453, 104);
++    hover(tool, ctx, near);
++    expect((tool.hoverPoint - plan.at(2450, 100)).length,
++        lessThan(dimAttach.linear),
++        reason: 'premise: onto the jamb');
++    expect(ringsOf(tool, ctx), 1, reason: 'premise: the jamb attaches');
++    frozen.add(door);
++    hover(tool, ctx, near);
++    expect(ringsOf(tool, ctx), 0, reason: 'the door frozen: no host');
+   });
+ }
+diff --git a/packages/jet_cad_2d_kit_architecture/test/room/room_tool_test.dart b/packages/jet_cad_2d_kit_architecture/test/room/room_tool_test.dart
+index b7126b55..f738f9f3 100644
+--- a/packages/jet_cad_2d_kit_architecture/test/room/room_tool_test.dart
++++ b/packages/jet_cad_2d_kit_architecture/test/room/room_tool_test.dart
+@@ -1114,11 +1114,50 @@ void main() {
+         plan,
+         preview,
+         const [(100, 100), (7900, 100), (7900, 3900), (100, 3900)],
+         'the face, free');
+     pressAt(rig, p);
+     final room = rooms(doc).where((h) => h != pantry).single;
+     expect(labelStrings(doc, room), ['Room 1', '29.64 m²']);
+     expect(rig.tool.occupied.value, const RoomOccupied('Room 1'),
+         reason: 'control: the live room it made occupies the face');
+   });
++
++  test(
++      'RT-one-pass a hover checks the inputs\' liveness once, however many '
++      'readers its verdict and trace run; a read outside an event checks '
++      'every time (spec 3a C1.5; M-RT-14, M-RT-15)', () {
++    // The two-room box at the corpus far origin, every wall in its own
++    // turned group, nothing frozen: the steady state.
++    final plan = buildPlan(twoRoomWalls, place: corpusGroups);
++    final rig = roomRig(plan.doc);
++    final inputs = rig.inputs;
++    hoverTo(rig, plan.at(1500.25, 2000.5));
++    expect(rig.tool.debugPreview, hasLength(1),
++        reason: 'premise: the left face, traced and memoised');
++    final rebuilds = inputs.debugRebuilds;
++    for (final (what, p, traced) in [
++      ('the same face, reused', plan.at(1700.75, 1200.25), false),
++      ('the right face, traced', plan.at(5500.5, 2600.75), true),
++      ('the partition\'s band, traced', plan.at(3010.5, 2400.25), true),
++      ('the band, reused', plan.at(2990.25, 1700.5), false),
++    ]) {
++      final passes = inputs.debugLivenessPasses;
++      final traces = rig.tool.debugTraces;
++      hoverTo(rig, p);
++      expect(rig.tool.debugTraces - traces, traced ? 1 : 0,
++          reason: 'premise: $what');
++      expect(inputs.debugLivenessPasses - passes, 1,
++          reason: '$what: one liveness pass for the hover');
++    }
++    expect(inputs.debugRebuilds, rebuilds,
++        reason: 'premise: nothing changed, nothing rebuilt');
++
++    // Outside a pointer event every read checks again: the bracket closed.
++    final passes = inputs.debugLivenessPasses;
++    inputs
++      ..placedIn(everywhere)
++      ..placedIn(everywhere);
++    expect(inputs.debugLivenessPasses - passes, 2,
++        reason: 'two reads outside an event: two passes');
++  });
+ }
+diff --git a/packages/jet_cad_2d_kit_architecture/test/separator/separator_tool_test.dart b/packages/jet_cad_2d_kit_architecture/test/separator/separator_tool_test.dart
+index 30c83685..c5be714a 100644
+--- a/packages/jet_cad_2d_kit_architecture/test/separator/separator_tool_test.dart
++++ b/packages/jet_cad_2d_kit_architecture/test/separator/separator_tool_test.dart
+@@ -444,11 +444,42 @@ void main() {
+       // 1,170 / 1,541 ≈ 136.9, above X1's band; X1's north face, y 100,
+       // only later, inside X2's band.
+       final (s, e) = trimSeparator(a, b, rig.inputs, objectSnap: true)!;
+       expect((s.x, s.y), (a.x, a.y), reason: why);
+       final local = place.m.invert().transformPoint(e);
+       expect(local.x, closeTo(-100, 1e-6), reason: '$why: X2\'s west face');
+       expect(local.y, closeTo(1200.25 - 1400.5 * 1170 / 1541, 1e-6),
+           reason: why);
+     }
+   });
++
++  test(
++      'ST-one-pass a hover with a start pending checks the inputs\' '
++      'liveness once, though the trim reads placedIn three times (spec 3a '
++      'C1.5; M-ST-1)', () {
++    // The box at the corpus far origin, every wall in its own turned group;
++    // the hover end lies in the east wall's band, so the trim runs all its
++    // readers: both ends' bands, then the bands the trimmed end touches.
++    final plan = buildPlan(boxWalls, place: corpusGroups);
++    final rig = separatorRig(plan.doc);
++    final inputs = rig.inputs;
++    final a = plan.at(5000.25, 2000.5);
++    hoverTo(rig, a);
++    pressAt(rig, a);
++    hoverTo(rig, plan.at(8030.5, 2500.75));
++    expect(rig.tool.debugBand, isNotNull, reason: 'premise: a rubber band');
++    final rebuilds = inputs.debugRebuilds;
++    for (final p in [
++      plan.at(8040.25, 2600.5),
++      plan.at(8020.75, 1400.25),
++      plan.at(6000.5, 3000.75),
++    ]) {
++      final passes = inputs.debugLivenessPasses;
++      hoverTo(rig, p);
++      expect(rig.tool.debugBand, isNotNull, reason: 'premise: $p');
++      expect(inputs.debugLivenessPasses - passes, 1,
++          reason: 'one liveness pass for the hover at $p');
++    }
++    expect(inputs.debugRebuilds, rebuilds,
++        reason: 'premise: nothing changed, nothing rebuilt');
++  });
+ }
+diff --git a/packages/jet_cad_2d_kit_architecture/test/support/catalog.dart b/packages/jet_cad_2d_kit_architecture/test/support/catalog.dart
+index c6a9c041..d2245599 100644
+--- a/packages/jet_cad_2d_kit_architecture/test/support/catalog.dart
++++ b/packages/jet_cad_2d_kit_architecture/test/support/catalog.dart
+@@ -1,17 +1,17 @@
+ // The kit tests' engine catalog (spec 3a "Tests": every type's generate
+ // through the engine's ParametricSystem): today's global parametricCatalog
+ // and installParametric (jet_cad_floor_plan/lib/src/parametric/
+ // catalog.dart:27-39, :64-65) for the kit's own tests. The kit's raw types
+-// (no plan guard), under their ArchitectureTypes ids, in today's order --
+-// box, wall, opening, separator, room, dimension -- each type task adding
+-// its line (this task the box's).
++// (no plan guard), under their ArchitectureTypes ids, registered in
++// today's order: box, wall, opening, separator, room, dimension (one line
++// each, below).
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_kit_architecture/src/box/box.dart';
+ import 'package:jet_cad_2d_kit_architecture/src/dimension/dimension.dart';
+ import 'package:jet_cad_2d_kit_architecture/src/opening/opening.dart';
+ import 'package:jet_cad_2d_kit_architecture/src/room/room.dart';
+ import 'package:jet_cad_2d_kit_architecture/src/separator/separator.dart';
+ import 'package:jet_cad_2d_kit_architecture/src/wall/wall.dart';
+ 
+ final ParametricCatalog _testCatalog = ParametricCatalog()
+   ..register<BoxParams>(
+diff --git a/packages/jet_cad_2d_kit_architecture/test/wall/wall_regen_test.dart b/packages/jet_cad_2d_kit_architecture/test/wall/wall_regen_test.dart
+index 63ad64cb..1ffa9a9c 100644
+--- a/packages/jet_cad_2d_kit_architecture/test/wall/wall_regen_test.dart
++++ b/packages/jet_cad_2d_kit_architecture/test/wall/wall_regen_test.dart
+@@ -505,20 +505,24 @@ void main() {
+     PageComponent.register(sample.components);
+     registerKitComponents(sample.components);
+     testCatalog().registerComponents(sample.components);
+     sample.header.units = DrawingUnits.millimeters;
+     architectureKit.prepare!(sample);
+     final system = installParametric(sample);
+     addTearDown(system.dispose);
+     buildSampleFlat(
+         sample, KitNamesWords(architectureKit.names, () => const Locale('en')));
+     sample.commands.clearHistory();
++    // Non-vacuity: the sample holds live walls for the empty diagnostics
++    // to speak of: its nine walls and the column (sample_flat.dart).
++    expect(testCatalog().objectsOf<WallParams>(sample), hasLength(10),
++        reason: 'premise: the sample holds its live walls');
+     expect(diagnosticsOf(sample), isEmpty);
+     final clean = wallDoc();
+     addL(clean);
+     expect(diagnosticsOf(clean), isEmpty);
+   });
+ 
+   test(
+       'WR10 a box overlapping a wall: each regenerates on its own; the wall '
+       'ignores the box and the box ignores the wall', () {
+     final doc = wallDoc();
+diff --git a/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart b/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
+index d719a881..ebc87d5d 100644
+--- a/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
++++ b/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
+@@ -699,20 +699,21 @@ class PlanController extends ChangeNotifier {
+     final DraftDocument next;
+     try {
+       next = decodePlan(text,
+           register: _registerComponents,
+           diagnostics: diagnostics,
+           measurer: measurer);
+     } catch (_) {
+       measurer.clear();
+       rethrow;
+     }
++    _forgetPreparesAndBuild();
+     _replace(next, measurer, unsettled: false, loadDiagnostics: diagnostics);
+   }
+ 
+   /// Replaces the plan with an empty one printing [decimalSeparator] (`.`
+   /// or `,`; any other is an [ArgumentError], and nothing changes); without
+   /// one, the separator of the locale last reported, or, with none
+   /// reported yet, point and unsettled, as the constructor's plan.
+   /// Every kit prepares it (spec 3a C1.3); [build] fills it (C1.9).
+   void newPlan({String? decimalSeparator, PlanBuild? build}) {
+     final DecimalSeparator? given = switch (decimalSeparator) {
+@@ -722,25 +723,39 @@ class PlanController extends ChangeNotifier {
+       _ => throw ArgumentError.value(
+           decimalSeparator, 'decimalSeparator', 'must be "." or ","'),
+     };
+     settlePendingInput();
+     final reported = _reported;
+     final separator = given ??
+         (reported == null ? DecimalSeparator.point : _separatorOf(reported));
+     final measurer = FlutterTextMeasurer();
+     final made = newPlanDocument(measurer,
+         register: _registerComponents, decimalSeparator: separator);
++    _forgetPreparesAndBuild();
+     _prepare(made);
+     _replace(made, measurer,
+         unsettled: given == null && reported == null, build: build);
+   }
+ 
++  /// Drops the last plan's failed prepares and build (each a `hookFailed`
++  /// of subject `prepare` or of kit `plan` and subject `build`) and forgets
++  /// them, so the next plan's are reported again, with their own errors:
++  /// they spoke of a document that is being replaced. Not plan-scoped
++  /// codes ([DiagnosticsLog.planScoped] is by code, and a kit's other
++  /// `hookFailed`s are the kit set's) but the log's
++  /// [DiagnosticsLog.removeWhere], for a problem that went away. Run when a
++  /// plan is replaced, before the new one's prepares and build (newPlan,
++  /// load).
++  void _forgetPreparesAndBuild() => _diagnostics.removeWhere((d) =>
++      d.code == KitDiagnosticCode.hookFailed &&
++      (d.subject == 'prepare' || (d.kitId == 'plan' && d.subject == 'build')));
++
+   /// Every loaded kit's `prepare` on [document], a document the plan
+   /// library made (spec 3a C1.3): in load order, with no system installed,
+   /// then the history cleared, so the plan is prepared outside history. A
+   /// prepare that throws is a `hookFailed` diagnostic of its kit (subject
+   /// `prepare`); the later kits still run, and the plan opens. Never on a
+   /// loaded or imported plan: Open adds nothing (today's R-3).
+   void _prepare(DraftDocument document) {
+     for (final kit in kits.kits) {
+       final prepare = kit.prepare;
+       if (prepare == null) continue;
+@@ -960,20 +975,22 @@ class PlanController extends ChangeNotifier {
+   /// frozen for it, with its diagnostic.
+   Set<Handle> _referencesOf(DraftDocument d, Handle object) {
+     final typeId = catalog.typeIdOf(d, object);
+     final type = typeId == null ? null : kits.typeOf(typeId);
+     if (type == null) return const {};
+     for (final (id, component) in d.components.snapshotOf(object).components) {
+       if (id != typeId) continue;
+       try {
+         return {
+           for (final h in type.parametric.references(component))
++            // Defensive: the engine refuses a reference to a non-live
++            // object first (DanglingReferenceError, spec 08 D5).
+             if (catalog.typeIdOf(d, h) != null) h,
+         };
+       } catch (_) {
+         return const {};
+       }
+     }
+     return const {};
+   }
+ 
+   // ---------------------------------------------------------------------
+diff --git a/packages/jet_cad_2d_plan/test/controller/prepare_build_test.dart b/packages/jet_cad_2d_plan/test/controller/prepare_build_test.dart
+index ce0da36b..b0895c9b 100644
+--- a/packages/jet_cad_2d_plan/test/controller/prepare_build_test.dart
++++ b/packages/jet_cad_2d_plan/test/controller/prepare_build_test.dart
+@@ -283,11 +283,82 @@ void main() {
+     PageComponent page() => d.components.get<PageComponent>(d.rootHandle)!;
+     expect(page().decimalSeparator, DecimalSeparator.point, reason: 'premise');
+     c.reportLocale(const Locale('tr'));
+     // M-PB-16: the build run after the save point and the unsettled
+     // baseline (its call moved from `_open` to the constructor body, after
+     // `_unsettled` is set): the plan is not settled, and it is dirty.
+     expect(page().decimalSeparator, DecimalSeparator.comma);
+     expect(d.commands.canUndo, isFalse);
+     expect(c.dirty.value, isFalse);
+   });
++
++  testWidgets(
++      "PB12 a failed build or prepare is the current plan's: a second "
++      "failure after newPlan is reported with its own error, and a plan "
++      'that builds, prepares or loads clean leaves none (final review M4)',
++      (tester) async {
++    PlanBuild failing(String why) => (document, words) {
++          slabBuild([])(document, words);
++          throw StateError(why);
++        };
++    Object? errorOf(PlanController c, String kitId, String subject) => [
++          for (final d in c.diagnostics.value)
++            if (d.kitId == kitId &&
++                d.subject == subject &&
++                d.code == KitDiagnosticCode.hookFailed)
++              d.error,
++        ].single;
++
++    final boom = ThrowingKit(failing: ['prepare']);
++    final c = PlanController(
++        kits: [testKit(), boom.kit, prepKit()], build: failing('first'));
++    addTearDown(c.dispose);
++    expect(
++        problemsOf(c),
++        [
++          ('boom', 'prepare', KitDiagnosticCode.hookFailed),
++          ('plan', 'build', KitDiagnosticCode.hookFailed),
++        ],
++        reason: 'premise: the first plan failed both');
++    final firstPrepare = errorOf(c, 'boom', 'prepare');
++    expect((errorOf(c, 'plan', 'build')! as StateError).message, 'first');
++
++    // A second failing build and prepare, on a new plan: one each, the
++    // second's. M-PB-17: newPlan without the clear (the first's error
++    // stays, the second is refused as a duplicate).
++    c.newPlan(build: failing('second'));
++    await tester.pump();
++    expect(problemsOf(c), [
++      ('boom', 'prepare', KitDiagnosticCode.hookFailed),
++      ('plan', 'build', KitDiagnosticCode.hookFailed),
++    ]);
++    expect((errorOf(c, 'plan', 'build')! as StateError).message, 'second',
++        reason: "the current plan's build");
++    expect(errorOf(c, 'boom', 'prepare'), isNot(same(firstPrepare)),
++        reason: "the current plan's prepare");
++    expect(slabsOf(c.document), isEmpty, reason: 'premise: build undone');
++
++    // A build and a prepare that succeed after failing ones: none left.
++    boom.failing.clear();
++    c.newPlan(build: slabBuild([]));
++    await tester.pump();
++    expect(slabsOf(c.document), hasLength(1), reason: 'premise: built');
++    expect(prepared(c.document), isTrue, reason: 'premise: prepared');
++    expect(c.diagnostics.value, isEmpty);
++
++    // A load after failing ones: neither ran on the loaded plan, so none.
++    // M-PB-18: load without the clear.
++    final text = planText([testKit(), boom.kit, prepKit()], (d) {
++      addObject<SlabComponent>(
++          d, SlabComponent(width: 1200, height: 700, angle: -1.1),
++          at: Vector2(2300, 1400));
++    });
++    boom.failing.add('prepare');
++    c.newPlan(build: failing('third'));
++    await tester.pump();
++    expect(problemsOf(c), hasLength(2), reason: 'premise: failed again');
++    c.load(text);
++    await tester.pump();
++    expect(slabsOf(c.document), hasLength(1), reason: 'premise: loaded');
++    expect(c.diagnostics.value, isEmpty);
++  });
+ }
+diff --git a/packages/jet_cad_2d_plan/test/kits/guarded_notice_test.dart b/packages/jet_cad_2d_plan/test/kits/guarded_notice_test.dart
+index c384aeef..52dec686 100644
+--- a/packages/jet_cad_2d_plan/test/kits/guarded_notice_test.dart
++++ b/packages/jet_cad_2d_plan/test/kits/guarded_notice_test.dart
+@@ -80,20 +80,60 @@ void main() {
+     final notice = g.tool.notice!;
+     inner.said.value = const KitText('text:boom.alert', {'n': 1});
+     expect(notice.value, isNull);
+     boom.failing.clear();
+     // M-TN-then-null: the wrapper reads the healed value again.
+     expect(notice.value, isNull);
+     await tester.pump();
+     expect([for (final d in g.log.entries.value) (d.subject, d.code)],
+         [('boom.tool', KitDiagnosticCode.hookFailed)]);
+   });
++
++  testWidgets(
++      'TN-guard-listen a notice whose addListener or removeListener throws: '
++      'caught, one diagnostic, then no notice (M-TN-guard-add, '
++      'M-TN-guard-remove)', (tester) async {
++    void hear() {}
++    List<(String?, KitDiagnosticCode)> problems(DiagnosticsLog log) =>
++        [for (final d in log.entries.value) (d.subject, d.code)];
++
++    // addListener throws.
++    final adds = ThrowingKit(failing: ['noticeAdd']);
++    final a = BoomTool(adds);
++    final ga = guarded(a, kitId: 'boom', toolId: 'boom.tool');
++    final na = ga.tool.notice!;
++    a.said.value = const KitText('text:boom.alert', {'n': 2});
++    // M-TN-guard-add: addListener without its try/catch: BoomFailure.
++    na.addListener(hear);
++    na.addListener(hear);
++    expect(na.value, isNull, reason: 'a failed notice is none');
++    await tester.pump();
++    expect(problems(ga.log), [('boom.tool', KitDiagnosticCode.hookFailed)],
++        reason: 'reported once');
++
++    // removeListener throws.
++    final removes = ThrowingKit(failing: ['noticeRemove']);
++    final r = BoomTool(removes);
++    final gr = guarded(r, kitId: 'boom', toolId: 'boom.tool');
++    final nr = gr.tool.notice!;
++    r.said.value = const KitText('text:boom.alert', {'n': 3});
++    nr.addListener(hear);
++    expect(nr.value, const KitText('text:boom.alert', {'n': 3}),
++        reason: 'premise: adding worked');
++    // M-TN-guard-remove: removeListener without its try/catch.
++    nr.removeListener(hear);
++    nr.removeListener(hear);
++    expect(nr.value, isNull, reason: 'a failed notice is none');
++    await tester.pump();
++    expect(problems(gr.log), [('boom.tool', KitDiagnosticCode.hookFailed)],
++        reason: 'reported once');
++  });
+ }
+ 
+ /// A kit tool that has no notice.
+ final class _Silent extends Tool {
+   @override
+   String get name => 'Silent';
+   @override
+   ToolPhase get phase => ToolPhase.idle;
+   @override
+   void onPointerDown(ToolPointerEvent e, ToolContext ctx) {}
+diff --git a/packages/jet_cad_2d_plan/test/panels/property_panel_test.dart b/packages/jet_cad_2d_plan/test/panels/property_panel_test.dart
+index af9916f5..056fa83d 100644
+--- a/packages/jet_cad_2d_plan/test/panels/property_panel_test.dart
++++ b/packages/jet_cad_2d_plan/test/panels/property_panel_test.dart
+@@ -127,20 +127,38 @@ void main() {
+ 
+     await tapKey(tester, 'property-finish');
+     expect(FocusManager.instance.primaryFocus, isNot(same(canvas)),
+         reason: 'premise: the open menu has the focus');
+     await tapKey(tester, 'property-finish-gloss');
+     expect(c.document.components.get<BoxParams>(b)!.finish, BoxFinish.gloss);
+     expect(c.document.commands.undoDepth, depth + 1);
+     expect(FocusManager.instance.primaryFocus, same(canvas),
+         reason: 'the choice hands the focus back');
+ 
++    // The menu dismissed with Esc: no choice, so nothing is handed back;
++    // the focus stays on the row (the menu's route returns it there), and
++    // the Esc reaches neither the document nor the canvas's tool.
++    // M-P-choice-esc: the row hands back whenever it gains the focus.
++    final row =
++        tester.widget<DropdownButton<Object?>>(byKey('property-finish'));
++    final before = c.document.commands.undoDepth;
++    await tapKey(tester, 'property-finish');
++    expect(FocusManager.instance.primaryFocus, isNot(same(canvas)),
++        reason: 'premise: the open menu has the focus');
++    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
++    await tester.pumpAndSettle();
++    expect(c.document.components.get<BoxParams>(b)!.finish, BoxFinish.gloss);
++    expect(c.document.commands.undoDepth, before, reason: 'no choice');
++    expect(FocusManager.instance.primaryFocus, same(row.focusNode),
++        reason: 'Esc keeps the focus on the row: nothing handed back');
++    expect(status(tester), 'Select', reason: 'the tool kept');
++
+     // A second choice from the same row, then a letter: the canvas's.
+     await tapKey(tester, 'property-finish');
+     await tapKey(tester, 'property-finish-matte');
+     expect(c.document.components.get<BoxParams>(b)!.finish, BoxFinish.matte);
+     expect(FocusManager.instance.primaryFocus, same(canvas),
+         reason: 'the second choice hands it back too');
+     expect(await press(tester, LogicalKeyboardKey.keyB), isTrue);
+     expect(status(tester), startsWith('Box'));
+   });
+ 
+diff --git a/packages/jet_cad_2d_plan/test/support/throwing_kit.dart b/packages/jet_cad_2d_plan/test/support/throwing_kit.dart
+index 74b31526..ce8ee4bb 100644
+--- a/packages/jet_cad_2d_plan/test/support/throwing_kit.dart
++++ b/packages/jet_cad_2d_plan/test/support/throwing_kit.dart
+@@ -24,22 +24,23 @@ const Set<String> boomHooks = {
+   // The grip provider: its factory, then each call; Task 11 adds its
+   // dispose.
+   'gripsCreate', 'gripsOf', 'gripsDrag', 'gripsPreview', 'gripsMovable',
+   'gripsDispose',
+   // The tool's shared cache (Task 11): its dispose.
+   'cacheDispose',
+   // The tool: its factory, its events, its painting; Task 11 adds a getter
+   // (isMidShape) and its dispose.
+   'toolCreate', 'toolDown', 'toolMove', 'toolUp', 'toolExit', 'toolKey',
+   'toolCancel', 'toolPaint', 'toolMidShape', 'toolDispose',
+-  // Spec 3a C1.2: the tool's notice getter, then its value.
+-  'notice', 'noticeValue',
++  // Spec 3a C1.2: the tool's notice getter, then its value; then its
++  // addListener and removeListener (the final wave's C10).
++  'notice', 'noticeValue', 'noticeAdd', 'noticeRemove',
+   // The attachment provider: its factory, then attach.
+   'attachCreate', 'attach',
+   // Properties, the section (its builder, then the widget it returns), the
+   // colour target and the title.
+   'read', 'write', 'apply', 'section', 'sectionWidget', 'colourRead',
+   'colourWrite', 'title',
+   // Spec 3a C1.1, C1.7: a text display's read, a length's range, a spec's visible.
+   'display', 'range', 'visible',
+   // The kit's document preparation (spec 3a C1.3).
+   'prepare',
+@@ -549,24 +550,30 @@ final class BoomNotice implements ValueListenable<KitText?> {
+   final ThrowingKit kit;
+   final ValueNotifier<KitText?> _said;
+ 
+   @override
+   KitText? get value {
+     kit.check('noticeValue');
+     return _said.value;
+   }
+ 
+   @override
+-  void addListener(VoidCallback listener) => _said.addListener(listener);
++  void addListener(VoidCallback listener) {
++    kit.check('noticeAdd');
++    _said.addListener(listener);
++  }
+ 
+   @override
+-  void removeListener(VoidCallback listener) => _said.removeListener(listener);
++  void removeListener(VoidCallback listener) {
++    kit.check('noticeRemove');
++    _said.removeListener(listener);
++  }
+ }
+ 
+ /// The test edge at `y = -2000`, kind `boom-edge`, whose attach can throw.
+ final class BoomEdge extends TestEdge {
+   BoomEdge(this.kit) : super(kind: 'boom-edge', y: -2000);
+ 
+   final ThrowingKit kit;
+ 
+   @override
+   Attachment? attach(AttachmentQuery query) {

@@ -1,0 +1,657 @@
+# Review package: c91c046a..HEAD
+
+## Commits
+690e36e0 feat(kit): liveTypeIdOf and FakePlanServices (spec 3a C1.5, C1.11)
+
+## Files changed
+ docs/kits.md                                       |   3 +
+ .../specs/2026-10-13-kit-contract-design.md        |   5 +
+ .../jet_cad_2d_kit/lib/src/kit/plan_services.dart  |  13 ++
+ .../lib/src/testing/fake_plan_services.dart        | 153 ++++++++++++++++
+ packages/jet_cad_2d_kit/lib/testing.dart           |   8 +
+ .../test/testing/fake_plan_services_test.dart      | 193 +++++++++++++++++++++
+ .../lib/src/controller/plan_controller.dart        |   3 +
+ .../lib/src/controller/services.dart               |  15 ++
+ .../test/controller/live_type_test.dart            |  85 +++++++++
+ 9 files changed, 478 insertions(+)
+
+## Diff
+diff --git a/docs/kits.md b/docs/kits.md
+index 93b2aeba..5c2b09e4 100644
+--- a/docs/kits.md
++++ b/docs/kits.md
+@@ -463,20 +463,23 @@ command; the `recolor` permission gates it.
+ `PlanServices` is a live view of one plan, one per kit:
+ 
+ | Member | |
+ |---|---|
+ | `document`, `index`, `camera` | the current document, its spatial index, the camera (apertures in world units) |
+ | `objectSnap` | the effective object-snap flag: F3 and the editor's snapping |
+ | `attachments` | every loaded kit's attachment providers (§10.7) |
+ | `words` | `KitWords`: this kit's words at the plan's locale, falling back to English, read live |
+ | `settingsOf<S>(toolId)` | a tool's current settings |
+ | `shared<T>(create)` | one `T` per kit and document, made on first use: what a kit's tools, grips and providers share (a wall's bands). A `T` that implements `Disposable` is disposed with its document |
++| `liveTypeIdOf(handle)` | the type id of a live object; null for a frozen one (its code failed), a missing kit's, or anything else: what a kit's caches ask before they read an object as theirs |
++
++A kit's own tests need no plan library: `package:jet_cad_2d_kit/testing.dart`'s `FakePlanServices` is a `PlanServices` over a document, with a real spatial index, a camera at a given scale, words from `KitNames` and settings from a map. It moves with the contract, so a kit's tests compile when the contract adds a member.
+ 
+ ### 10.7 Attachment
+ 
+ An `AttachmentProvider` offers one target kind (`wall-face`). Asked with an
+ `AttachmentQuery` (the symbol's footprint and transform, the pointer, the
+ capture distances, whether it is mirrored, whether it may rotate, what to
+ exclude, the previous answer), it answers an `Attachment` (where the symbol
+ goes, where the plan library draws its marker, a token of its own) or null.
+ The plan library asks the providers of every kind in a symbol's `attachTo`
+ and keeps the answer whose marker is nearest the pointer. Under
+diff --git a/docs/superpowers/specs/2026-10-13-kit-contract-design.md b/docs/superpowers/specs/2026-10-13-kit-contract-design.md
+index 1a52f95d..e4d85b84 100644
+--- a/docs/superpowers/specs/2026-10-13-kit-contract-design.md
++++ b/docs/superpowers/specs/2026-10-13-kit-contract-design.md
+@@ -442,20 +442,25 @@ Each line is written by the 3a task that lands it (the 3a spec,
+   library, over patterns that name no plan type), `PlanWords.text` and
+   `PlanWords.decimalSeparator`, inherited by `KitWords` (the UI
+   language's separator, which the plan fills from its `PlanStrings`).
+ - **Tool notices** (3a C1.2): the surface gains `ToolNotice`, a kit tool's
+   `ValueListenable<KitText?> notice`, which the plan library reads through
+   its guard and shows on the status line.
+ - **Preparing and building a plan** (3a C1.3, C1.9): `PlanKit.prepare`
+   (`void Function(DraftDocument)?`) prepares every document the plan
+   library makes, never a loaded one; `PlanBuild` (`void
+   Function(DraftDocument, KitWords)`) is a host's build of a new plan.
++- **Live objects and the kit authors' double** (3a C1.5, C1.11):
++  `PlanServices.liveTypeIdOf(Handle)` answers a live object's type id and
++  null for a frozen one, a missing kit's, or anything else;
++  `package:jet_cad_2d_kit/testing.dart` exports `FakePlanServices`. Not
++  added: `isLocked`, `allows`, a settings listenable (no user today).
+ 
+ ## Inputs for sub-project 2
+ 
+ The final review's API risks, none needing a breaking change if settled in
+ sub-project 2's spec before the wave publishes 0.1.0:
+ 
+ - **R1 Per-unit data has no home.** `UnitComponent` sits on a definition;
+   umbrella A6's per-unit label (`assigned`, set by a kit's type) and number
+   (`numbered`) need an instance-level contract component, so
+   `registerKitComponents`' "the four and nothing else" changes. A parametric
+diff --git a/packages/jet_cad_2d_kit/lib/src/kit/plan_services.dart b/packages/jet_cad_2d_kit/lib/src/kit/plan_services.dart
+index f4fe50b3..6ca89127 100644
+--- a/packages/jet_cad_2d_kit/lib/src/kit/plan_services.dart
++++ b/packages/jet_cad_2d_kit/lib/src/kit/plan_services.dart
+@@ -128,11 +128,24 @@ abstract interface class PlanServices {
+   ///
+   /// A ref with an `add` took its handles from the document's seed, one
+   /// per definition and per leaf: call this once per placement, never per
+   /// preview. A second call for [key] before that `add` executes returns
+   /// the same ref, `add` included (spec 2b S2): execute it once.
+   SymbolDefinitionRef? symbolDefinition(String key);
+ 
+   /// The symbol libraries' state: the plan's own listenable, so a tool can
+   /// wait for `ready`.
+   ValueListenable<SymbolsState> get symbolsState;
++
++  /// The type id of [handle]'s live object (spec 3a C1.5): a root-level
++  /// group a loaded kit's type names (the engine's rule) that is not frozen
++  /// (spec 2a E2). Null for a frozen object, an object of a kit that is not
++  /// loaded (its component is kept raw), and anything else: an entity, a
++  /// nested group, an instance, the root, a handle that names nothing.
++  ///
++  /// A kit's code decides "is this a live wall" here, never by a catalog
++  /// of its own: a frozen object takes part in no regeneration, so it is
++  /// then absent from a kit's caches and previews exactly as it is from
++  /// `generate`. The plan's panels and gates read the catalog's `typeIdOf`,
++  /// which answers a frozen object's id too.
++  String? liveTypeIdOf(Handle handle);
+ }
+diff --git a/packages/jet_cad_2d_kit/lib/src/testing/fake_plan_services.dart b/packages/jet_cad_2d_kit/lib/src/testing/fake_plan_services.dart
+new file mode 100644
+index 00000000..8787d916
+--- /dev/null
++++ b/packages/jet_cad_2d_kit/lib/src/testing/fake_plan_services.dart
+@@ -0,0 +1,153 @@
++// Spec 3a C1.11: a PlanServices for a kit's tests, over a given document,
++// with the plan library's rules where a kit can see them (settingsOf's
++// refusals, shared's one per type and its disposal order).
++import 'dart:ui' show Locale;
++
++import 'package:flutter/foundation.dart' show ValueListenable, ValueNotifier;
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
++    show CameraController, ViewportTransform;
++
++import '../kit/attachment.dart';
++import '../kit/plan_services.dart';
++import '../kit/symbols_state.dart';
++import '../model/kit_names.dart';
++
++/// A [PlanServices] over [document] for a kit's tests (spec 3a C1.11):
++/// - [index]: a `SpatialIndex` over [document], made here;
++/// - [camera]: world to screen at `scale` pixels per unit (positive and
++///   finite), y up, the world origin at the screen's;
++/// - [objectSnap]: as given, for the fake's life;
++/// - [attachments]: the registry given, else one with no kind;
++/// - [words]: `names` at `locale`, numbers with `decimalSeparator`;
++/// - [settingsOf]: `settings[toolId]`, the map given read at each call
++///   (never copied), so a test changes a tool's settings between events;
++///   a tool without settings there, or settings that are not an `S`, is
++///   an [ArgumentError], as the plan's;
++/// - [shared]: one per `T`, the first call's; a `T` asked for while it is
++///   made is a [StateError]; the [Disposable] ones are disposed by
++///   [dispose], last made first;
++/// - [symbolDefinition]: null (no library); [symbolsState]: ready;
++/// - [liveTypeIdOf]: `catalog`'s `typeIdOf`, null for a handle in `frozen`
++///   and without a catalog.
++///
++/// [dispose] releases the index, the camera, the state and the shared
++/// objects; [document] is the caller's.
++final class FakePlanServices implements PlanServices {
++  FakePlanServices({
++    required this.document,
++    ParametricCatalog? catalog,
++    Set<Handle> frozen = const {},
++    double scale = 1,
++    this.objectSnap = true,
++    KitNames names = KitNames.empty,
++    Locale locale = const Locale('en'),
++    String decimalSeparator = '.',
++    Map<String, Object> settings = const {},
++    AttachmentRegistry? attachments,
++  })  : _catalog = catalog,
++        _frozen = frozen,
++        _settings = settings,
++        attachments = attachments ?? const _NoAttachments(),
++        index = SpatialIndex(document),
++        camera = CameraController(ViewportTransform(
++            worldToScreenMatrix: Transform2(scale, 0, 0, -scale, 0, 0))),
++        words = KitNamesWords(names, () => locale,
++            decimalSeparator: () => decimalSeparator);
++
++  final ParametricCatalog? _catalog;
++  final Set<Handle> _frozen;
++  final Map<String, Object> _settings;
++
++  @override
++  final DraftDocument document;
++
++  @override
++  final SpatialIndex index;
++
++  @override
++  final CameraController camera;
++
++  @override
++  final bool objectSnap;
++
++  @override
++  final AttachmentRegistry attachments;
++
++  @override
++  final KitWords words;
++
++  final ValueNotifier<SymbolsState> _symbolsState =
++      ValueNotifier(SymbolsState.ready);
++  final Map<Type, Object> _shared = {};
++  final List<Object> _made = [];
++  final Set<Type> _making = {};
++  bool _disposed = false;
++
++  @override
++  S settingsOf<S extends Object>(String toolId) {
++    final value = _settings[toolId];
++    if (value == null) {
++      throw ArgumentError.value(toolId, 'toolId', 'has no settings here');
++    }
++    if (value is! S) {
++      throw ArgumentError.value(
++          toolId, 'toolId', 'has settings of ${value.runtimeType}, not $S');
++    }
++    return value;
++  }
++
++  @override
++  T shared<T extends Object>(T Function(PlanServices) create) {
++    if (_disposed) throw StateError('shared<$T> after dispose');
++    final found = _shared[T];
++    if (found != null) return found as T;
++    if (!_making.add(T)) {
++      throw StateError('shared<$T> asked for itself while being made');
++    }
++    try {
++      final made = create(this);
++      _shared[T] = made;
++      _made.add(made);
++      return made;
++    } finally {
++      _making.remove(T);
++    }
++  }
++
++  @override
++  SymbolDefinitionRef? symbolDefinition(String key) => null;
++
++  @override
++  ValueListenable<SymbolsState> get symbolsState => _symbolsState;
++
++  @override
++  String? liveTypeIdOf(Handle handle) =>
++      _frozen.contains(handle) ? null : _catalog?.typeIdOf(document, handle);
++
++  /// Disposes the shared [Disposable]s, last made first, then the index,
++  /// the camera and the state. Once only.
++  void dispose() {
++    if (_disposed) return;
++    _disposed = true;
++    for (final value in _made.reversed) {
++      if (value is Disposable) value.dispose();
++    }
++    _made.clear();
++    _shared.clear();
++    index.dispose();
++    camera.dispose();
++    _symbolsState.dispose();
++  }
++}
++
++/// No kind, no attachment.
++final class _NoAttachments implements AttachmentRegistry {
++  const _NoAttachments();
++
++  @override
++  Set<String> get kinds => const {};
++
++  @override
++  Attachment? attach(List<String> kinds, AttachmentQuery query) => null;
++}
+diff --git a/packages/jet_cad_2d_kit/lib/testing.dart b/packages/jet_cad_2d_kit/lib/testing.dart
+new file mode 100644
+index 00000000..90559186
+--- /dev/null
++++ b/packages/jet_cad_2d_kit/lib/testing.dart
+@@ -0,0 +1,8 @@
++/// Test doubles for a kit's own tests (spec 3a C1.11): [FakePlanServices],
++/// a `PlanServices` over a document, so a kit's tools, grips and providers
++/// are tested without the plan library. It moves with the contract: a
++/// member the contract adds to `PlanServices` is added here in the same
++/// change, so a kit's tests keep compiling.
++library;
++
++export 'src/testing/fake_plan_services.dart';
+diff --git a/packages/jet_cad_2d_kit/test/testing/fake_plan_services_test.dart b/packages/jet_cad_2d_kit/test/testing/fake_plan_services_test.dart
+new file mode 100644
+index 00000000..f1f79556
+--- /dev/null
++++ b/packages/jet_cad_2d_kit/test/testing/fake_plan_services_test.dart
+@@ -0,0 +1,193 @@
++// Spec 3a C1.11 (Task 6): FakePlanServices, a kit author's PlanServices over
++// a document: a live index, a camera at a given scale, words from given
++// names, settings from a map, one shared object per type disposed with it,
++// and liveTypeIdOf over a given catalog and frozen set. The document is the
++// contract's fixture: a slab and a post in turned groups off the origin.
++import 'dart:ui' show Locale;
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:jet_cad_2d_kit/testing.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/code_fixtures.dart';
++import '../support/plan_type_fixtures.dart';
++
++/// A shared object that logs its disposal as [name].
++final class _Logged implements Disposable {
++  _Logged(this.log, this.name);
++  final List<String> log;
++  final String name;
++  @override
++  void dispose() => log.add(name);
++}
++
++/// A second shared type, so two types are kept apart.
++final class _Faces extends _Logged {
++  _Faces(List<String> log) : super(log, 'faces');
++}
++
++final class _Bands extends _Logged {
++  _Bands(List<String> log) : super(log, 'bands');
++}
++
++/// A registry with one kind and no answer.
++final class _Registry implements AttachmentRegistry {
++  @override
++  Set<String> get kinds => const {'wall-face'};
++  @override
++  Attachment? attach(List<String> kinds, AttachmentQuery query) => null;
++}
++
++AttachmentQuery query() => AttachmentQuery(
++    footprint: const Aabb2.raw(150, 210, 1750, 960),
++    current: Transform2.translation(4120.5, -2310.25)
++        .multiply(Transform2.rotation(0.4)),
++    pointer: Vector2(4120.5, -2310.25),
++    capture: 160,
++    edgeCapture: 100,
++    mirrored: false,
++    mayRotate: true);
++
++void main() {
++  test(
++      'LS-fake-1 the document, a live index over it, a camera at the scale '
++      'given (y up), the object snap given', () {
++    final (:doc, catalog: _) = objectDocument([slabType(), postType()]);
++    addTearDown(doc.dispose);
++    final s = FakePlanServices(document: doc, scale: 0.25, objectSnap: false);
++    addTearDown(s.dispose);
++    expect(identical(s.document, doc), isTrue);
++    // M-LS-fake-1a: the index made over `DraftDocument.empty()`.
++    expect(identical(s.index.document, doc), isTrue);
++    final line = addDrafted(doc, EntityKind.line,
++        linePayload(Vector2(4100.5, -2200.25), Vector2(5300.75, -1650.5)),
++        layer: ReservedHandles.layerZero);
++    doc.commands.execute(line);
++    final found = <int>[];
++    s.index.forEachLeafInBand(const Aabb2.raw(4000, -2300, 5400, -1600),
++        BandMode.crossing, const QueryFilter.picking(), found.add);
++    expect(found, [doc.entities.slotOf(line.record.handle)],
++        reason: 'the index follows the document');
++    expect(s.camera.value.scale, 0.25);
++    // M-LS-fake-1b: the camera's matrix without the y flip
++    // (`Transform2(scale, 0, 0, scale, 0, 0)`).
++    expect(
++        s.camera.value.worldToScreen(Vector2(4000, -2000)), Vector2(1000, 500));
++    // M-LS-fake-1c: `objectSnap` always true.
++    expect(s.objectSnap, isFalse);
++  });
++
++  test(
++      'LS-fake-2 the words: the names given, at the locale given, numbers '
++      'with the separator given', () {
++    final (:doc, catalog: _) = objectDocument([slabType(), postType()]);
++    addTearDown(doc.dispose);
++    final s = FakePlanServices(
++        document: doc,
++        names: const KitNames({
++          'en': {'tool:test.slab': 'Slab', 'text:test.count': '{n} slabs'},
++          'tr': {'tool:test.slab': 'Tezgâh', 'text:test.count': '{n} tezgâh'},
++        }),
++        locale: const Locale('tr'),
++        decimalSeparator: ',');
++    addTearDown(s.dispose);
++    // M-LS-fake-2a: the words at `const Locale('en')` whatever is given.
++    expect(s.words.locale, const Locale('tr'));
++    expect(s.words.word('tool:test.slab'), 'Tezgâh');
++    expect(s.words.text('text:test.count', {'n': 3}), '3 tezgâh');
++    // M-LS-fake-2b: the separator not passed to the words.
++    expect(s.words.decimalSeparator, ',');
++  });
++
++  test(
++      "LS-fake-3 settingsOf: the map's value for the tool, read at each "
++      'call; a tool without one, or settings of another type, is an '
++      'ArgumentError', () {
++    final (:doc, catalog: _) = objectDocument([slabType(), postType()]);
++    addTearDown(doc.dispose);
++    final settings = <String, Object>{'test.slab': 1250.5};
++    final s = FakePlanServices(document: doc, settings: settings);
++    addTearDown(s.dispose);
++    expect(s.settingsOf<double>('test.slab'), 1250.5);
++    // R-P12: the map given is read at each call, so a test changes a
++    // tool's settings between events. M-LS-fake-3b: the map copied in the
++    // constructor (`Map.of(settings)`).
++    settings['test.slab'] = 980.25;
++    expect(s.settingsOf<double>('test.slab'), 980.25);
++    // M-LS-fake-3: `settingsOf` as `_settings[toolId] as S` (a TypeError).
++    expect(() => s.settingsOf<String>('test.slab'), throwsArgumentError);
++    expect(() => s.settingsOf<double>('test.wall'), throwsArgumentError);
++  });
++
++  test(
++      'LS-fake-4 shared: one per type, made by the first call over these '
++      'services; dispose releases the Disposable ones, last made first, and '
++      'serves nothing after', () {
++    final (:doc, catalog: _) = objectDocument([slabType(), postType()]);
++    addTearDown(doc.dispose);
++    final s = FakePlanServices(document: doc);
++    final log = <String>[];
++    var made = 0;
++    final bands = s.shared<_Bands>((services) {
++      made++;
++      expect(identical(services, s), isTrue);
++      return _Bands(log);
++    });
++    // M-LS-fake-4a: `shared` not keeping what it made.
++    expect(identical(s.shared<_Bands>((_) => _Bands(log)), bands), isTrue);
++    expect(made, 1);
++    final faces = s.shared<_Faces>((_) => _Faces(log));
++    expect(identical(faces, bands), isFalse);
++    expect(s.shared<String>((_) => 'plain'), 'plain');
++    // A type asked for while it is made.
++    expect(
++        () => s.shared<Duration>(
++            (services) => services.shared<Duration>((_) => Duration.zero)),
++        throwsStateError);
++    s.dispose();
++    // M-LS-fake-4b: dispose in the order made; M-LS-fake-4c: dispose
++    // leaving the shared objects alone.
++    expect(log, ['faces', 'bands']);
++    expect(() => s.shared<_Bands>((_) => _Bands(log)), throwsStateError);
++  });
++
++  test(
++      "LS-fake-5 liveTypeIdOf: the catalog's type id; null for a frozen "
++      'object, without a catalog, and for anything else', () {
++    final (:doc, :catalog) = objectDocument([slabType(), postType()]);
++    addTearDown(doc.dispose);
++    final s =
++        FakePlanServices(document: doc, catalog: catalog, frozen: {hPost});
++    addTearDown(s.dispose);
++    expect(s.liveTypeIdOf(hSlab), Slab.id);
++    // M-LS-fake-5: the frozen set not consulted.
++    expect(s.liveTypeIdOf(hPost), isNull);
++    expect(catalog.typeIdOf(doc, hPost), Post.id,
++        reason: "premise: the catalog still answers a frozen object's id");
++    expect(s.liveTypeIdOf(hBare), isNull);
++    expect(s.liveTypeIdOf(doc.rootHandle), isNull);
++    final bare = FakePlanServices(document: doc);
++    addTearDown(bare.dispose);
++    expect(bare.liveTypeIdOf(hSlab), isNull);
++  });
++
++  test(
++      'LS-fake-6 no symbol library (null, ready); the attachments given, '
++      'else a registry with no kind', () {
++    final (:doc, catalog: _) = objectDocument([slabType(), postType()]);
++    addTearDown(doc.dispose);
++    final s = FakePlanServices(document: doc);
++    addTearDown(s.dispose);
++    expect(s.symbolDefinition('test.table.square.four@1'), isNull);
++    expect(s.symbolsState.value, SymbolsState.ready);
++    expect(s.attachments.kinds, isEmpty);
++    expect(s.attachments.attach(const ['wall-face'], query()), isNull);
++    final registry = _Registry();
++    final t = FakePlanServices(document: doc, attachments: registry);
++    addTearDown(t.dispose);
++    // M-LS-fake-6: the registry given ignored.
++    expect(identical(t.attachments, registry), isTrue);
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart b/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
+index 83d7acde..907f4e27 100644
+--- a/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
++++ b/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
+@@ -207,20 +207,23 @@ final class _Host implements ServicesHost {
+ 
+   @override
+   DocumentSession get session => _c._session;
+ 
+   @override
+   CameraController get camera => _c.camera;
+ 
+   @override
+   SnapSettings get snap => _c._snap;
+ 
++  @override
++  ParametricCatalog get catalog => _c.catalog;
++
+   @override
+   ToolSettingsStore get toolSettings => _c.toolSettings;
+ 
+   @override
+   PlanSymbol? symbolById(String id) => _c.symbolById(id);
+ 
+   @override
+   ValueListenable<SymbolsState> get symbolsState => _c._symbolsState;
+ 
+   @override
+diff --git a/packages/jet_cad_2d_plan/lib/src/controller/services.dart b/packages/jet_cad_2d_plan/lib/src/controller/services.dart
+index c6007da1..a4406e00 100644
+--- a/packages/jet_cad_2d_plan/lib/src/controller/services.dart
++++ b/packages/jet_cad_2d_plan/lib/src/controller/services.dart
+@@ -10,20 +10,24 @@ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+ import '../symbols/plan_symbol.dart';
+ import '../symbols/symbol_placer.dart' show definitionForEntry;
+ import 'session.dart';
+ import 'tool_settings_store.dart';
+ 
+ /// What the services read of their controller.
+ abstract interface class ServicesHost {
+   DocumentSession get session;
+   CameraController get camera;
+   SnapSettings get snap;
++
++  /// The controller's catalog: every loaded kit's types (spec 3a C1.5).
++  ParametricCatalog get catalog;
++
+   ToolSettingsStore get toolSettings;
+ 
+   /// The loaded symbol `key@version`, or null.
+   PlanSymbol? symbolById(String id);
+ 
+   /// The controller's symbol libraries' state.
+   ValueListenable<SymbolsState> get symbolsState;
+ 
+   /// The refs whose `add` has not executed yet, by key: one map per
+   /// controller, shared by every kit's services (spec 2b S2).
+@@ -98,20 +102,31 @@ final class KitServices implements PlanServices {
+           : CompoundCommand(made.commands, label: 'Add ${entry.symbol.name}'),
+       basePoint: entry.definition.basePoint.clone(),
+       top: servedTopOfEntry(entry),
+     );
+     if (ref.add != null) pending[key] = ref;
+     return ref;
+   }
+ 
+   @override
+   ValueListenable<SymbolsState> get symbolsState => _host.symbolsState;
++
++  /// Spec 3a C1.5: null for E2's frozen objects (the set the system's
++  /// `isFrozen` reads), else the catalog's type id over the current
++  /// document, which is null for a missing kit's object (kept raw) and for
++  /// anything that is no object.
++  @override
++  String? liveTypeIdOf(Handle handle) {
++    final session = _host.session;
++    if (session.frozen.contains(handle)) return null;
++    return _host.catalog.typeIdOf(session.document, handle);
++  }
+ }
+ 
+ /// The attachment registry until Task 14: no kind, no attachment.
+ final class NoAttachments implements AttachmentRegistry {
+   const NoAttachments();
+ 
+   @override
+   Attachment? attach(List<String> kinds, AttachmentQuery query) => null;
+ 
+   @override
+diff --git a/packages/jet_cad_2d_plan/test/controller/live_type_test.dart b/packages/jet_cad_2d_plan/test/controller/live_type_test.dart
+new file mode 100644
+index 00000000..2ed27fe7
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/controller/live_type_test.dart
+@@ -0,0 +1,85 @@
++// Spec 3a C1.5 (Task 6), Review Focus 5's contract half: a kit's services
++// answer liveTypeIdOf: a live object's type id, and null for a frozen
++// object (E2), whose id the catalog's typeIdOf still answers, for a
++// missing kit's object, and for anything that is no object. Squares and a
++// disc off the origin, turned.
++import 'package:flutter/material.dart' show Icons;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/box_kit.dart';
++
++/// The box kit's square, and a tool whose factory hands [see] the kit's
++/// services (a factory runs once per document; the services are the kit's
++/// for the controller's life).
++PlanKit seeingKit(Switches sw, void Function(PlanServices services) see) =>
++    PlanKit(
++      id: 'box',
++      version: '1.4.0',
++      types: [
++        PlanType<SquareParams>(
++            id: SquareParams.id,
++            fromJson: SquareParams.fromJson,
++            parametric: SquareType(sw)),
++      ],
++      tools: [
++        PlanTool(
++            id: 'box.stamp',
++            icon: Icons.crop_square,
++            create: (services) {
++              see(services);
++              return StampTool();
++            }),
++      ],
++      names: const KitNames({
++        'en': {'type:box.square': 'Square', 'tool:box.stamp': 'Stamp'},
++      }),
++    );
++
++void main() {
++  TestWidgetsFlutterBinding.ensureInitialized();
++
++  test(
++      'LS-frozen liveTypeIdOf: a live square\'s id; null for a frozen square '
++      "(the catalog's typeIdOf still answers it), a missing kit's disc, a "
++      'line, the root and a handle that names nothing', () {
++    final sw = Switches();
++    // A plan holding a disc of the ring kit, opened below without it.
++    final withRing = PlanController(kits: [seeingKit(sw, (_) {}), ringKit(sw)]);
++    addTearDown(withRing.dispose);
++    final disc = addObject(withRing.document, nearSquare(-2500.5, 1800.25, 0.7),
++        const DiscParams(radius: 400));
++    final json = withRing.save();
++
++    PlanServices? seen;
++    final c =
++        PlanController(kits: [seeingKit(sw, (s) => seen = s)], json: json);
++    addTearDown(c.dispose);
++    final s = seen!;
++    final d = c.document;
++    expect(c.locked.value, {disc}, reason: "premise: the missing kit's disc");
++    final broken =
++        addObject(d, atSquare, const SquareParams(side: 1200, poisoned: true));
++    final healthy = addObject(
++        d, nearSquare(4000, -500, 0.25), const SquareParams(side: 500));
++    final line = addLine(d, Vector2(6100.5, 2950.25), Vector2(7400.75, 3600.5));
++    expect(s.liveTypeIdOf(broken), SquareParams.id,
++        reason: 'premise: live until its code fails');
++    sw.failing.add('reach');
++    expect(c.execute(TransformNodeCommand(broken, nearSquare(100.5, 50.25, 0))),
++        isFalse);
++    expect(c.frozen, {broken}, reason: 'premise: frozen');
++    // M-LS-1: `KitServices.liveTypeIdOf` without its frozen test.
++    expect(s.liveTypeIdOf(broken), isNull);
++    expect(c.typeOf(broken)?.id, SquareParams.id,
++        reason: "the catalog's typeIdOf still answers a frozen object");
++    expect(s.liveTypeIdOf(healthy), SquareParams.id);
++    expect(s.liveTypeIdOf(disc), isNull);
++    expect(s.liveTypeIdOf(line), isNull);
++    expect(s.liveTypeIdOf(d.rootHandle), isNull);
++    expect(s.liveTypeIdOf(const Handle(0x7FFF1)), isNull);
++  });
++}

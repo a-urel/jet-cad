@@ -1,0 +1,530 @@
+# Review package: e5b2261a..HEAD
+
+## Commits
+dbaf4bd4 fix(plan): the pins 2a parked for sub-project 3 (spec 3a C1.12, D-44, D-45)
+
+## Files changed
+ .../lib/src/shortcuts/plan_shortcuts.dart          | 46 ++++++++---
+ .../test/attach/attachment_registry_test.dart      | 49 ++++++++++++
+ .../controller/attachment_controller_test.dart     | 31 ++++++++
+ .../test/shortcuts/plan_shortcuts_test.dart        | 39 ++++++++++
+ .../test/symbols/unit_copy_test.dart               | 70 +++++++++++++++++
+ .../test/tools/move_resolver_test.dart             | 88 ++++++++++++++++++++++
+ 6 files changed, 312 insertions(+), 11 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_plan/lib/src/shortcuts/plan_shortcuts.dart b/packages/jet_cad_2d_plan/lib/src/shortcuts/plan_shortcuts.dart
+index d04b0647..7da0bda1 100644
+--- a/packages/jet_cad_2d_plan/lib/src/shortcuts/plan_shortcuts.dart
++++ b/packages/jet_cad_2d_plan/lib/src/shortcuts/plan_shortcuts.dart
+@@ -53,64 +53,88 @@ class PlanShortcuts extends StatefulWidget {
+   final Future<void> Function()? onSave;
+   final Future<void> Function()? onSaveAs;
+   final Future<void> Function()? onExport;
+   final Future<void> Function()? onPrint;
+ 
+   @override
+   State<PlanShortcuts> createState() => _PlanShortcutsState();
+ }
+ 
+ class _PlanShortcutsState extends State<PlanShortcuts> {
++  /// Each controller's mounted shortcuts, in mount order: the last one
++  /// speaks for the controller's idle keys. A remount mounts the new state
++  /// before the old one is disposed (D-44), so the old one's leaving must
++  /// not undo the new one's say.
++  static final Expando<List<_PlanShortcutsState>> _speakers =
++      Expando<List<_PlanShortcutsState>>('plan shortcuts');
++
+   @override
+   void initState() {
+     super.initState();
++    _join(widget.controller);
+     widget.controller.addListener(_applyIdleKeys);
+     _applyIdleKeys();
+   }
+ 
+   @override
+   void didChangeDependencies() {
+     super.didChangeDependencies();
+     PlanLocaleScope.push(context, widget.controller);
+   }
+ 
+   @override
+   void didUpdateWidget(PlanShortcuts oldWidget) {
+     super.didUpdateWidget(oldWidget);
+     if (!identical(oldWidget.controller, widget.controller)) {
+       oldWidget.controller.removeListener(_applyIdleKeys);
+-      _restoreIdleKeys(oldWidget.controller);
++      _leave(oldWidget.controller);
++      _join(widget.controller);
+       widget.controller.addListener(_applyIdleKeys);
+       PlanLocaleScope.push(context, widget.controller);
+     }
+     _applyIdleKeys();
+   }
+ 
+   @override
+   void dispose() {
+     widget.controller.removeListener(_applyIdleKeys);
+-    _restoreIdleKeys(widget.controller);
++    _leave(widget.controller);
+     super.dispose();
+   }
+ 
+-  /// [c]'s select tool gets its idle keys back once these shortcuts no
+-  /// longer speak for it (final review): a removed `shortcuts: false`
+-  /// leaves Delete and Escape working in the canvas.
+-  static void _restoreIdleKeys(PlanController c) {
+-    if (!c.isDisposed) c.selectGates.idleKeys = true;
++  void _join(PlanController c) =>
++      (_speakers[c] ??= <_PlanShortcutsState>[]).add(this);
++
++  /// This state no longer speaks for [c]: the shortcuts mounted before it
++  /// speak again; with none left, [c]'s select tool gets its idle keys
++  /// back (final review), so a removed `shortcuts: false` leaves Delete
++  /// and Escape working in the canvas.
++  void _leave(PlanController c) {
++    final speakers = _speakers[c];
++    speakers?.remove(this);
++    if (speakers == null || speakers.isEmpty) {
++      _speakers[c] = null;
++      if (!c.isDisposed) c.selectGates.idleKeys = true;
++      return;
++    }
++    speakers.last._applyIdleKeys();
+   }
+ 
+-  /// The select tool's idle keys are the shortcuts (S-16). The gates are
+-  /// per document, so this runs again after a swap (the controller
++  /// The select tool's idle keys are the shortcuts (S-16), set by the
++  /// shortcuts that speak for the controller (mounted last). The gates
++  /// are per document, so this runs again after a swap (the controller
+   /// notifies).
+-  void _applyIdleKeys() =>
+-      widget.controller.selectGates.idleKeys = widget.shortcuts;
++  void _applyIdleKeys() {
++    final c = widget.controller;
++    if (c.isDisposed || !identical(_speakers[c]?.last, this)) return;
++    c.selectGates.idleKeys = widget.shortcuts;
++  }
+ 
+   /// Runs a file command when it can act: no shape part-way (spec 12a D6),
+   /// and a page for Print (spec 13 D9); for Export a page or an exporter
+   /// that needs none (spec 13 D8, P2: with only the built-in exporters,
+   /// the page).
+   void _run(Future<void> Function() run,
+       {bool Function(PlanController c)? can}) {
+     final c = widget.controller;
+     if (c.toolController.active.isMidShape) return;
+     if (can != null && !can(c)) return;
+diff --git a/packages/jet_cad_2d_plan/test/attach/attachment_registry_test.dart b/packages/jet_cad_2d_plan/test/attach/attachment_registry_test.dart
+index 4dc68f10..b958fa12 100644
+--- a/packages/jet_cad_2d_plan/test/attach/attachment_registry_test.dart
++++ b/packages/jet_cad_2d_plan/test/attach/attachment_registry_test.dart
+@@ -24,20 +24,40 @@ final class Rig {
+       PlanAttachmentRegistry(report: reported.add);
+   final PlanServices services = _NoServices();
+ 
+   void add(String kit, AttachmentProvider provider) =>
+       registry.add(kit, (_) => provider, services);
+ }
+ 
+ Attachment at(double dx, double dy, Object token) => attachment(
+     Transform2.translation(p.x + dx, p.y + dy), p + Vector2(dx, dy), token);
+ 
++/// A provider whose `kind` throws (2a Task 14's deviation 2: the kind is
++/// read inside the factory's guard).
++final class _NoKind implements AttachmentProvider {
++  @override
++  String get kind => throw StateError('no kind');
++  @override
++  Attachment? attach(AttachmentQuery query) => null;
++}
++
++/// A provider whose `dispose` throws (deviation 1: a guarded dispose).
++final class _BrokenDispose implements AttachmentProvider, Disposable {
++  _BrokenDispose(this.kind);
++  @override
++  final String kind;
++  @override
++  Attachment? attach(AttachmentQuery query) => null;
++  @override
++  void dispose() => throw StateError('the $kind provider broke on dispose');
++}
++
+ void main() {
+   test('AT-1 kinds: every provider\'s kind, once', () {
+     final r = Rig()
+       ..add('alpha', RecordingProvider('wall-face', (_) => null))
+       ..add('beta', RecordingProvider('wall-face', (_) => null))
+       ..add('beta', RecordingProvider('room-corner', (_) => null));
+     expect(r.registry.kinds, {'wall-face', 'room-corner'});
+     expect(() => r.registry.kinds.add('x'), throwsUnsupportedError);
+   });
+ 
+@@ -135,11 +155,40 @@ void main() {
+ 
+   test('AT-7 a factory that throws adds nothing and reports hookFailed', () {
+     final r = Rig();
+     r.registry.add('alpha', (_) => throw ArgumentError('no faces'), r.services);
+     r.add('beta', RecordingProvider('room-corner', (_) => null));
+     // M-AT7: `add` without its try/catch.
+     expect(r.registry.kinds, {'room-corner'});
+     expect([for (final d in r.reported) (d.kitId, d.subject, d.code)],
+         [('alpha', 'attachments', KitDiagnosticCode.hookFailed)]);
+   });
++
++  test(
++      'PN-kind (D-45) a provider whose kind throws adds nothing and reports '
++      "hookFailed under 'attachments'", () {
++    final r = Rig();
++    // M-PN-kind: `kind = provider.kind;` moved out of `add`'s try.
++    expect(() => r.registry.add('alpha', (_) => _NoKind(), r.services),
++        returnsNormally);
++    r.add('beta', RecordingProvider('room-corner', (_) => null));
++    expect(r.registry.kinds, {'room-corner'});
++    expect([for (final d in r.reported) (d.kitId, d.subject, d.code)],
++        [('alpha', 'attachments', KitDiagnosticCode.hookFailed)]);
++  });
++
++  test(
++      "PN-dispose (D-45) a provider's dispose that throws is reported under "
++      'its kind; the others are still disposed, and the registry empties', () {
++    final r = Rig();
++    final healthy = DisposableProvider('room-corner', (_) => null);
++    r
++      ..add('alpha', _BrokenDispose('wall-face'))
++      ..add('beta', healthy);
++    // M-PN-dispose: `dispose` calling `disposable.dispose()` bare.
++    expect(r.registry.dispose, returnsNormally);
++    expect(healthy.disposals, 1);
++    expect(r.registry.kinds, isEmpty);
++    expect([for (final d in r.reported) (d.kitId, d.subject, d.code)],
++        [('alpha', 'wall-face', KitDiagnosticCode.hookFailed)]);
++  });
+ }
+diff --git a/packages/jet_cad_2d_plan/test/controller/attachment_controller_test.dart b/packages/jet_cad_2d_plan/test/controller/attachment_controller_test.dart
+index b41eb18c..9ce86e61 100644
+--- a/packages/jet_cad_2d_plan/test/controller/attachment_controller_test.dart
++++ b/packages/jet_cad_2d_plan/test/controller/attachment_controller_test.dart
+@@ -102,20 +102,51 @@ void main() {
+             .where((p) => p.$3 == KitDiagnosticCode.attachmentKindUnoffered),
+         [('demo', 'room-corner', KitDiagnosticCode.attachmentKindUnoffered)]);
+     c.newPlan();
+     expect(
+         problemsOf(c)
+             .where((p) => p.$3 == KitDiagnosticCode.attachmentKindUnoffered),
+         hasLength(1),
+         reason: 'once per kit, subject and code');
+   });
+ 
++  test(
++      "PN-open (D-45) a new plan's providers are checked against the loaded "
++      'symbols when it opens: a kind they no longer offer is reported',
++      () async {
++    var documents = 0;
++    final c = PlanController(kits: [
++      PlanKit(id: 'demo', version: '1.0.0', symbols: [
++        SymbolLibrarySource(label: 'demo', read: () async => shelfBytes()),
++      ], attachments: [
++        (_) => RecordingProvider(
++            ++documents == 1 ? 'test-edge' : 'room-corner', (_) => null),
++      ]),
++    ]);
++    addTearDown(c.dispose);
++    await settle();
++    List<(String, String?, KitDiagnosticCode)> unoffered() => [
++          for (final p in problemsOf(c))
++            if (p.$3 == KitDiagnosticCode.attachmentKindUnoffered) p,
++        ];
++    expect(unoffered(),
++        [('demo', 'room-corner', KitDiagnosticCode.attachmentKindUnoffered)],
++        reason: 'premise: the first document offers test-edge');
++    c.newPlan();
++    expect(documents, 2, reason: 'premise: the providers ran again');
++    // M-PN-open: `_open` without its `_reportUnofferedKinds()`.
++    expect(
++        unoffered(),
++        contains(
++            ('demo', 'test-edge', KitDiagnosticCode.attachmentKindUnoffered)));
++  });
++
+   test(
+       'AT-17 plan.symbol: refused with nothing armed (T4-b); armed, it '
+       'places through the kit\'s provider; under rotate: false R is not the '
+       'tool\'s', () async {
+     final turned = Transform2.translation(4600.5, -1200.25)
+         .multiply(Transform2.rotation(0.7));
+     final edge = RecordingProvider(
+         'test-edge', (_) => attachment(turned, Vector2(4610.5, -1190.25), 'e'));
+     final c = PlanController(kits: [
+       PlanKit(id: 'demo', version: '1.0.0', symbols: [
+diff --git a/packages/jet_cad_2d_plan/test/shortcuts/plan_shortcuts_test.dart b/packages/jet_cad_2d_plan/test/shortcuts/plan_shortcuts_test.dart
+index 6bd7a2de..9f741a11 100644
+--- a/packages/jet_cad_2d_plan/test/shortcuts/plan_shortcuts_test.dart
++++ b/packages/jet_cad_2d_plan/test/shortcuts/plan_shortcuts_test.dart
+@@ -434,20 +434,59 @@ void main() {
+     // M-KB-14a: didUpdateWidget not giving the old controller its keys
+     // back.
+     expect(one.selectGates.idleKeys, isTrue);
+     expect(two.selectGates.idleKeys, isFalse);
+     await tester.pumpWidget(const SizedBox());
+     // M-KB-14b: dispose not giving them back: Delete and Escape stay dead
+     // in the canvas.
+     expect(two.selectGates.idleKeys, isTrue);
+   });
+ 
++  testWidgets(
++      'PN-remount (D-44) shortcuts: false remounted on the same controller '
++      'keeps the idle keys closed (the new one mounts before the old one is '
++      'disposed); of two at once the later speaks, and removed, the earlier '
++      'speaks again', (tester) async {
++    final c = PlanController(kits: const []);
++    addTearDown(c.dispose);
++    Widget keys(int n) => MaterialApp(
++        home: PlanShortcuts(
++            key: ValueKey(n),
++            controller: c,
++            shortcuts: false,
++            child: const SizedBox()));
++    await tester.pumpWidget(keys(1));
++    expect(c.selectGates.idleKeys, isFalse, reason: 'premise');
++    await tester.pumpWidget(keys(2));
++    // M-PN-1: `dispose` giving the keys back whoever speaks now.
++    expect(c.selectGates.idleKeys, isFalse);
++    Widget both({required bool second}) => MaterialApp(
++            home: Column(children: [
++          PlanShortcuts(
++              key: const ValueKey(2),
++              controller: c,
++              shortcuts: false,
++              child: const SizedBox()),
++          if (second)
++            PlanShortcuts(
++                key: const ValueKey(3), controller: c, child: const SizedBox()),
++        ]));
++    await tester.pumpWidget(both(second: true));
++    expect(c.selectGates.idleKeys, isTrue, reason: 'the later speaks');
++    await tester.pumpWidget(both(second: false));
++    // M-PN-2: a leaving state giving the keys back while another still
++    // speaks for the controller.
++    expect(c.selectGates.idleKeys, isFalse);
++    await tester.pumpWidget(const SizedBox());
++    expect(c.selectGates.idleKeys, isTrue, reason: 'none left: keys back');
++  });
++
+   testWidgets(
+       'T6-c unitsOnly, 1 selected: Delete and Backspace remove nothing '
+       "and reach the host's bindings; with shortcuts: Delete removes 1",
+       (tester) async {
+     final (c, reached, keys) = await mountUnitKeys(tester,
+         permissions: PlanPermissions.unitsOnly, intents: false);
+     await focusCanvas(tester);
+     c.select({'1'});
+     await tester.pump();
+     final before = encodedPlan(c);
+diff --git a/packages/jet_cad_2d_plan/test/symbols/unit_copy_test.dart b/packages/jet_cad_2d_plan/test/symbols/unit_copy_test.dart
+new file mode 100644
+index 00000000..fb07c708
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/symbols/unit_copy_test.dart
+@@ -0,0 +1,70 @@
++// D-17's SE8 (spec 3a C7, C1.12; Task 8): jet_cad_floor_plan's
++// test/symbols/seating_test.dart SE8, ported over the plan library's
++// placer. 2b's SP-1 (symbol_placer_test.dart) pins the copy's unit; SE8
++// also pins that it survives a save and goes with the definition in one
++// undo step. The library is written as the test kit's unit library is (a
++// Catalog of kit "test" with a CatalogUnit), with SE8's own table. 2b
++// replaced jetcad.seating with the contract's jetcad.unit (2b spec S2):
++// SeatingComponent(seats: 3) is UnitComponent(kind: table, capacity: 3);
++// the key test.table is test.table.plain (K2).
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/authoring.dart'
++    show Catalog, CatalogPolyline, CatalogSymbol, CatalogUnit, encodeLibrary;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:jet_cad_2d_plan/src/symbols/symbol_placer.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++/// A 600 x 400 table with one 300 x 300 seat below it, its base point at
++/// the top's centre (off the origin); three seats.
++SymbolEntry table() => SymbolLibrary.decode(encodeLibrary(Catalog(
++      kit: 'test',
++      symbols: [
++        CatalogSymbol(
++          key: 'test.table.plain',
++          name: 'Test table',
++          category: 'Tests',
++          tags: const ['table', 'test'],
++          unit: const CatalogUnit(kind: UnitKinds.table, capacity: 3),
++          base: (300, 500),
++          shapes: const [
++            CatalogPolyline([(0, 300), (600, 300), (600, 700), (0, 700)],
++                closed: true),
++            CatalogPolyline([(150, 0), (450, 0), (450, 300), (150, 300)],
++                closed: true),
++          ],
++        ),
++      ],
++    ))).entries.single;
++
++DraftDocument plan() {
++  final doc = DraftDocument.empty();
++  registerKitComponents(doc.components);
++  doc.header.units = DrawingUnits.millimeters;
++  return doc;
++}
++
++Handle definitionOfOnlyInstance(DraftDocument doc) =>
++    doc.tree.nodes.whereType<InstanceNode>().single.definition;
++
++void main() {
++  test(
++      'SE8 a quarter-turned, mirrored, off-origin placement copies the '
++      'seats with the definition, and they survive a save (M-14s-3)', () {
++    final entry = table();
++    final doc = plan();
++    doc.commands.execute(placeSymbol(doc, entry,
++        at: Vector2(12345, -6789), quarterTurns: 3, mirrored: true));
++    final def = definitionOfOnlyInstance(doc);
++    expect(doc.components.get<UnitComponent>(def),
++        UnitComponent(kind: UnitKinds.table, capacity: 3));
++    final reloaded = DraftDocumentCodec.decodeString(
++        DraftDocumentCodec.encodeToString(doc),
++        registerComponents: registerKitComponents);
++    expect(reloaded.components.get<UnitComponent>(def),
++        UnitComponent(kind: UnitKinds.table, capacity: 3));
++    // One undo step takes it away with the definition.
++    doc.commands.undo();
++    expect(doc.components.get<UnitComponent>(def), isNull);
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/tools/move_resolver_test.dart b/packages/jet_cad_2d_plan/test/tools/move_resolver_test.dart
+index bcd794ee..4fd3a5a5 100644
+--- a/packages/jet_cad_2d_plan/test/tools/move_resolver_test.dart
++++ b/packages/jet_cad_2d_plan/test/tools/move_resolver_test.dart
+@@ -133,24 +133,28 @@ void main() {
+ 
+     final off = Scene(objectSnap: false);
+     off.answer = (_) => attachment(Transform2.identity(), Vector2(1, 1), 't');
+     // M-MV2b: the object snap test dropped.
+     expect(off.resolver.resolveMove(off.ctx, off.instance, delta), isNull);
+     expect(off.edge.queries, isEmpty);
+ 
+     final scaled = Scene();
+     scaled.doc.commands.execute(TransformNodeCommand(
+         scaled.instance, Transform2.scale(2, 2).multiply(scaled.transform)));
++    // M-PN-ortho (D-45): `if (!isOrthonormal(t)) return null;` deleted in
++    // resolveMove: the scaled instance is asked.
+     expect(scaled.resolver.resolveMove(scaled.ctx, scaled.instance, delta),
+         isNull);
+     expect(scaled.edge.queries, isEmpty);
+ 
++    // A positive control: an entity is no InstanceNode (that test cannot be
++    // deleted and still compile).
+     final line = addDrafted(scaled.doc, EntityKind.line,
+         linePayload(Vector2(100500, -70500), Vector2(101500, -70100)),
+         layer: ReservedHandles.layerZero);
+     scaled.doc.commands.execute(line);
+     expect(scaled.resolver.resolveMove(scaled.ctx, line.record.handle, delta),
+         isNull);
+   });
+ 
+   test(
+       'MV-3 within one drag a query keeps the last answer; after the '
+@@ -172,11 +176,95 @@ void main() {
+   test('MV-4 the footprint is the definition\'s live leaves', () {
+     final s = Scene();
+     final node = s.doc.tree[s.instance]! as InstanceNode;
+     final box = boxOfDefinition(s.doc, node.definition)!;
+     s.answer = (_) => null;
+     s.resolver.resolveMove(s.ctx, s.instance, delta);
+     final f = s.edge.queries.single.footprint;
+     expect([f.minX, f.minY, f.maxX, f.maxY],
+         [box.left, box.front, box.right, box.back]);
+   });
++
++  test(
++      'PN-MV-nested (D-45) an instance of an attaching symbol inside a root '
++      'group is not asked: only a root-level instance attaches', () {
++    final s = Scene();
++    s.answer = (_) => attachment(Transform2.translation(99000.5, -69000.25),
++        Vector2(99010.25, -69020.5), 'face');
++    final def = (s.doc.tree[s.instance]! as InstanceNode).definition;
++    final group = s.doc.handleSeed.next();
++    final nested = s.doc.handleSeed.next();
++    s.doc.commands.execute(CompoundCommand([
++      AddNodeCommand(GroupNode(
++          handle: group,
++          parent: s.doc.rootHandle,
++          transform: Transform2.translation(98000.5, -71000.25)
++              .multiply(Transform2.rotation(0.35)),
++          children: const [])),
++      AddNodeCommand(InstanceNode(
++          handle: nested,
++          parent: group,
++          transform: Transform2.translation(420.5, -310.25),
++          definition: def,
++          layer: ReservedHandles.layerZero)),
++    ], label: 'Nest'));
++    // M-PN-nested: `|| n.parent != doc.rootHandle` deleted in resolveMove.
++    expect(s.resolver.resolveMove(s.ctx, nested, delta), isNull);
++    expect(s.edge.queries, isEmpty);
++    expect(s.asked, 0);
++    expect(s.resolver.resolveMove(s.ctx, s.instance, delta), isNotNull,
++        reason: 'positive control: the root-level instance is asked');
++  });
++
++  test(
++      'PN-MV-node (D-45) within one document state, another node starts '
++      'afresh: its first query keeps no answer', () {
++    final s = Scene();
++    final a = attachment(Transform2.translation(99000.5, -69000.25),
++        Vector2(99010.25, -69020.5), 'face');
++    s.answer = (_) => a;
++    s.doc.commands.execute(placeSymbol(s.doc, entry('demo.shelf.wall'),
++        at: Vector2(104000.75, -66000.5), quarterTurns: 3));
++    final other = s.doc.tree.nodes
++        .whereType<InstanceNode>()
++        .map((n) => n.handle)
++        .singleWhere((h) => h != s.instance);
++    s.resolver.resolveMove(s.ctx, s.instance, delta);
++    s.resolver.resolveMove(s.ctx, s.instance, delta);
++    expect(s.edge.queries.last.keep, same(a), reason: 'premise: kept');
++    s.resolver.resolveMove(s.ctx, other, delta);
++    // M-PN-node: `_sync`'s `_last = null;` under `if (node != _node)`
++    // deleted.
++    expect(s.edge.queries.last.keep, isNull);
++  });
++
++  test(
++      "PN-MV-live (D-45) the footprint is the definition's live box: an "
++      "outline edited between two asks is read again, not the entry's box", () {
++    final s = Scene();
++    s.answer = (_) => null;
++    final def = (s.doc.tree[s.instance]! as InstanceNode).definition;
++    s.resolver.resolveMove(s.ctx, s.instance, delta);
++    final e = s.doc.entities;
++    final outline = [
++      for (final slot in e.liveSlots)
++        if (e.ownerAt(slot) == def && e.kindAt(slot) == EntityKind.polyline)
++          e.handleAt(slot),
++    ].single;
++    s.doc.commands.execute(SetEntityGeometryCommand(
++        outline,
++        polylinePayload([
++          Vector2(150, 210),
++          Vector2(2050.5, 210),
++          Vector2(2050.5, 1180.25),
++          Vector2(150, 1180.25),
++        ], closed: true)));
++    final live = boxOfDefinition(s.doc, def)!;
++    expect(live, isNot(boxOfEntry(entry('demo.shelf.wall'))),
++        reason: "premise: the definition's leaves were edited");
++    s.resolver.resolveMove(s.ctx, s.instance, delta);
++    final f = s.edge.queries.last.footprint;
++    // M-PN-live: `_sync` without `_boxes.clear();`: the first ask's box.
++    expect([f.minX, f.minY, f.maxX, f.maxY],
++        [live.left, live.front, live.right, live.back]);
++  });
+ }

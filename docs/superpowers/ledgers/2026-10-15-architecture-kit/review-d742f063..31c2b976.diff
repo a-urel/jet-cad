@@ -1,0 +1,2640 @@
+# Review package: d742f063..HEAD
+
+## Commits
+31c2b976 feat(kit): object views for properties and sections; hidden fields (spec 3a C1.1, C1.7)
+
+## Files changed
+ docs/kits.md                                       |  13 +-
+ .../specs/2026-10-13-kit-contract-design.md        |   9 +
+ .../2026-10-14-plan-library-design-mode-design.md  |  18 +
+ packages/jet_cad_2d_kit/lib/src/kit/plan_kit.dart  |  12 +
+ .../jet_cad_2d_kit/lib/src/kit/plan_services.dart  |  13 +-
+ packages/jet_cad_2d_kit/lib/src/kit/plan_type.dart |  78 ++++-
+ .../jet_cad_2d_kit/lib/src/kit/properties.dart     | 240 +++++++++++---
+ .../jet_cad_2d_kit/lib/src/model/kit_problem.dart  |   4 +
+ packages/jet_cad_2d_kit/lib/src/model/model.dart   |   1 +
+ .../jet_cad_2d_kit/lib/src/model/plan_words.dart   |  15 +
+ .../jet_cad_2d_kit/test/kit/example_code_test.dart |  11 +-
+ .../jet_cad_2d_kit/test/kit/object_view_test.dart  | 363 +++++++++++++++++++++
+ .../jet_cad_2d_kit/test/kit/plan_type_test.dart    |  58 ++--
+ .../lib/src/panels/plan_property_panel.dart        |  39 ++-
+ .../test/controller/covariance_test.dart           |   8 +-
+ .../test/panels/object_view_panel_test.dart        | 236 ++++++++++++++
+ .../jet_cad_2d_plan/test/support/object_kit.dart   | 236 ++++++++++++++
+ .../jet_cad_2d_plan/test/support/panel_kits.dart   |   7 +-
+ .../jet_cad_2d_plan/test/support/test_kit.dart     |   8 +-
+ .../jet_cad_2d_plan/test/support/throwing_kit.dart |  26 +-
+ 20 files changed, 1274 insertions(+), 121 deletions(-)
+
+## Diff
+diff --git a/docs/kits.md b/docs/kits.md
+index 151dfd13..f7bebbfc 100644
+--- a/docs/kits.md
++++ b/docs/kits.md
+@@ -345,21 +345,21 @@ and runs them again, so nothing a kit holds outlives its document.
+ 
+ ### 10.2 A parametric type
+ 
+ | `PlanType` field | What it is |
+ |---|---|
+ | `id` | `<kit id>.<name>`, equal to the component's `typeId`: a plan's manifest finds its kits by it |
+ | `fromJson` | the component's factory |
+ | `parametric` | the engine's `ParametricType<T>`: `reach`, `generate`, `references`, the place hooks |
+ | `grips` | `ObjectGripProvider Function(PlanServices)?`: the Flutter layer's grips for its objects |
+ | `properties` | the panel's fields (§10.3) |
+-| `section` | the escape hatch: `(context, value, commit, words) => Widget`, for what specs cannot say; `commit(T)` is one undo step |
++| `section` | the escape hatch: `(context, section) => Widget`, for what specs cannot say; `section` (a `PlanSection`) holds the `value`, `commit` (one undo step), the kit's `words`, the `object` (document, handle, world) and the kit's `services` |
+ | `title` | a word id for the section's title, from the value; default `type:<id>` |
+ | `colour` | a `ColourTarget` (§10.4) |
+ | `exported` | false leaves the type's objects out of every export |
+ 
+ **Covariance.** The plan library holds every type as `PlanType<Component>`.
+ A member whose type takes a `T` (a section builder, a spec's `read`) fails
+ Dart's runtime type check when read through that supertype, and
+ `register` would infer `T = Component`. So `PlanType` keeps those members
+ private and offers erased operations that run over its own `T`:
+ `registerInto`, `fieldsOf`, `commitField`, `titleWordOf`, `colourOf`,
+@@ -392,32 +392,39 @@ final List<PropertySpec<CafeSign>> signProperties = [
+ ];
+ 
+ final ColourTarget<CafeSign> signColour = ColourTarget<CafeSign>(
+   read: (s) => s.swatch,
+   write: (s, swatch) => s.withSwatch(swatch),
+ );
+ ```
+ 
+ | Kind | Holds | The panel |
+ |---|---|---|
+-| `LengthProperty` | `read`, `write`, `min`, `max` | millimetres, with the plan's decimal separator |
++| `LengthProperty` | `read`, `write`, `min`, `max`, `range(value, object)` (inclusive; null refuses every value) | millimetres, with the plan's decimal separator |
+ | `AngleProperty` | `read`, `write` | radians stored, degrees shown |
+ | `NumberProperty` | `read`, `write`, `min`, `max`, `decimals` (0 to 10) | rounded to `decimals` on commit |
+ | `ChoiceProperty<T, V>` | `values`, `read`, `write` | one of `values`, compared with `==` |
+ | `ToggleProperty` | `read`, `write` | a switch |
+ | `TextProperty` | `read`, `write`, `maxLength` (code points) | a text field |
+ | `ValueDisplay` | `read`, `unit` (`length`, `area`, `angle`, `none`) | read-only: a room's area |
++| `TextDisplay` | `read(value, object)` → a `String`, or null to omit the line | read-only: a room's area as drawn |
+ | `ActionProperty` | `apply` | a button: a door's Flip hinge |
+ 
+ - Every spec has an `id` (a lower-case letter, then lower-case letters,
+   digits and hyphens), an optional `enabled(T)` that greys the field out,
+-  and an optional `gate`, the `PlanGate` permission it needs.
++  an optional visible(T) that hides the field (a hidden field takes no
++  room; an action whose gate is refused is hidden too), and an optional
++  `gate`, the `PlanGate` permission it needs.
++- A TextDisplay and a range read the object a field is shown for
++  (PlanObject: document, handle, world, the kit's words); a tool's
++  settings have none, so PlanKit.validate refuses them there
++  (settingsNeedObject).
+ - `write` and `apply` return a changed copy; the plan library commits it
+   as one `SetComponentCommand<T>`, the parametric system regenerates, and
+   the edit is one undo step.
+ - Out of range, not finite, not one of the values, too long: the input is
+   refused and the field shows its stored value again. A bad `min`, `max`,
+   `decimals`, `maxLength`, `values` or `id` is an `ArgumentError` when the
+   spec is made.
+ - Words: `property:<type id>.<id>`, a choice's values
+   `property:<type id>.<id>.<value>`.
+ 
+diff --git a/docs/superpowers/specs/2026-10-13-kit-contract-design.md b/docs/superpowers/specs/2026-10-13-kit-contract-design.md
+index 682d7de2..0af455c2 100644
+--- a/docs/superpowers/specs/2026-10-13-kit-contract-design.md
++++ b/docs/superpowers/specs/2026-10-13-kit-contract-design.md
+@@ -414,20 +414,29 @@ version's English. The umbrella's A2 now matches K5 (words on the kit, a
+ Each line is written by the 3a task that lands it (the 3a spec,
+ [2026-10-15-architecture-kit-design.md](2026-10-15-architecture-kit-design.md),
+ "Amendments to other specs").
+ 
+ - **The symbol box family** (3a C1.4): `SymbolBox`, `isOrthonormal`,
+   `boxOfLeaves`, `boxOfEntry`, `servedTopOfEntry`, `boxOfDefinition`,
+   `footprintOf` and `placementTransform` are the contract's, pure Dart in
+   the model (`lib/src/model/symbol_box.dart`), exported by both libraries;
+   moved unchanged from the plan library, which imports them from here and
+   keeps no copy.
++- **Object views and hidden fields** (3a C1.1, C1.7): the surface gains
++  `PlanObject`, `DocumentPlanObject`, `TextDisplay`,
++  `LengthProperty.range`, `PropertySpec.visible`,
++  `PropertyField.visible`, `PlanSection` (the escape hatch's one context)
++  and `KitProblemCode.settingsNeedObject`; `PlanType.fieldsOf`,
++  `commitField` and `sectionFor` take a `DraftDocument`, and `fieldsOf`
++  and `commitField` the kit's words, which the object carries
++  (`PlanObject.words`, a `PlanWords`: the pure interface `KitWords` now
++  implements, exported by both libraries).
+ 
+ ## Inputs for sub-project 2
+ 
+ The final review's API risks, none needing a breaking change if settled in
+ sub-project 2's spec before the wave publishes 0.1.0:
+ 
+ - **R1 Per-unit data has no home.** `UnitComponent` sits on a definition;
+   umbrella A6's per-unit label (`assigned`, set by a kit's type) and number
+   (`numbered`) need an instance-level contract component, so
+   `registerKitComponents`' "the four and nothing else" changes. A parametric
+diff --git a/docs/superpowers/specs/2026-10-14-plan-library-design-mode-design.md b/docs/superpowers/specs/2026-10-14-plan-library-design-mode-design.md
+index 9b591229..20ec274c 100644
+--- a/docs/superpowers/specs/2026-10-14-plan-library-design-mode-design.md
++++ b/docs/superpowers/specs/2026-10-14-plan-library-design-mode-design.md
+@@ -817,20 +817,38 @@ packages/jet_cad_2d_plan/example/      PlanEditor with no kit
+ 
+ - The service mode and everything in decision 1's 2b list, including R1 and
+   P7's 2b rows.
+ - **Sub-project 3:** the architecture kit's types, the furniture library,
+   and the wall-face provider.
+ - **Sub-project 4:** the restaurant kit, the demos, the pictures, the host
+   guide, parity, and the CI moves.
+ - Multiple selection in the property specs.
+ - Renaming the engine's `Draft*` family (decision 4).
+ 
++## Amendments
++
++From the 3a spec
++([2026-10-15-architecture-kit-design.md](2026-10-15-architecture-kit-design.md),
++"Amendments to other specs"), each written by the task that lands it.
++
++- **P3, property specs and the section builder** (3a C1.1, C1.7): a spec
++  is bound with the object it is shown for (`PlanObject`: document,
++  handle, world and the kit's words; none for a tool's settings); `TextDisplay` is a read-only
++  line read from the object, omitted when it reads nothing;
++  `LengthProperty.range` bounds a length by the object, inclusive, a null
++  range refusing every value; every spec takes `visible`, evaluated when
++  it is bound, and a hidden field takes no room; an action whose gate the
++  permissions refuse is hidden, not read-only. The escape hatch is
++  `(context, PlanSection<T>)`, the section holding the value, the commit,
++  the words, the object and the kit's services. `PlanKit.validate` refuses
++  a `TextDisplay` or a `range` in a tool's settings (`settingsNeedObject`).
++
+ ## Risks
+ 
+ - **The contract is settled against a test kit only.** Sub-project 3's six
+   types are the real test. A field they need goes into this spec as an
+   amendment before the wave publishes 0.1.0.
+ - **The guarding adapter sits on the parametric hot path.** It must
+   allocate nothing per call in steady state. The existing query-allocation
+   invariant covers it once the adapter is in the catalog.
+ - **The size of the port.** The ported tests are the oracle (A12).
+ 
+diff --git a/packages/jet_cad_2d_kit/lib/src/kit/plan_kit.dart b/packages/jet_cad_2d_kit/lib/src/kit/plan_kit.dart
+index c9c89e41..7e0fd438 100644
+--- a/packages/jet_cad_2d_kit/lib/src/kit/plan_kit.dart
++++ b/packages/jet_cad_2d_kit/lib/src/kit/plan_kit.dart
+@@ -49,20 +49,21 @@ final class PlanKit {
+         for (final tool in tools)
+           if (tool.settings case final settings?)
+             ..._specIds(tool.id, settings.specs),
+       ];
+ 
+   /// The descriptor's problems: a bad id, an empty version, a word under
+   /// another kit's id or in no known namespace (a `category:` or `unit:` word
+   /// names the kit before its `/`); a type or tool id that is not
+   /// `<this kit's id>.<name>` or is repeated; a word with no stored English
+   /// missing from English, for every word a type, tool or property needs.
++  /// A tool's setting that reads an object (spec 3a C1.1).
+   /// Empty when sound. Problems across kits are the plan library's.
+   List<KitProblem> validate() {
+     final problems = <KitProblem>[];
+     if (!isKitId(id)) {
+       problems.add(KitProblem(
+           KitProblemCode.badKitId,
+           '"$id" is not a kit id: a lower-case letter, then lower-case '
+           'letters and digits'));
+     }
+     if (version.trim().isEmpty) {
+@@ -120,20 +121,31 @@ final class PlanKit {
+     }
+     final toolIds = <String>{};
+     for (final tool in tools) {
+       if (declared('tool', tool.id, toolIds, KitProblemCode.toolOutsideKit,
+               KitProblemCode.duplicateTool) &&
+           tool.settings != null) {
+         for (final p in _specIds(tool.id, tool.settings!.specs)) {
+           needEnglish.add('property:$p');
+         }
+       }
++      // Spec 3a C1.1: a tool's settings are bound with no object.
++      for (final spec
++          in tool.settings?.specs ?? const <PropertySpec<Object>>[]) {
++        if (spec.needsObject) {
++          problems.add(KitProblem(
++              KitProblemCode.settingsNeedObject,
++              'the tool "${tool.id}"\'s setting "${spec.id}" reads the object '
++              'it is shown for (a TextDisplay or a range): a tool\'s '
++              'settings have none'));
++        }
++      }
+     }
+     final english = names.words[KitNames.english] ?? const <String, String>{};
+     for (final wordId in needEnglish) {
+       if (!english.containsKey(wordId)) {
+         problems.add(KitProblem(
+             KitProblemCode.missingEnglish, '"$wordId" has no English word'));
+       }
+     }
+     return problems;
+   }
+diff --git a/packages/jet_cad_2d_kit/lib/src/kit/plan_services.dart b/packages/jet_cad_2d_kit/lib/src/kit/plan_services.dart
+index a8e016c2..4914d83b 100644
+--- a/packages/jet_cad_2d_kit/lib/src/kit/plan_services.dart
++++ b/packages/jet_cad_2d_kit/lib/src/kit/plan_services.dart
+@@ -4,32 +4,27 @@
+ // symbol definitions a kit's types place.
+ import 'dart:ui' show Locale;
+ 
+ import 'package:flutter/foundation.dart' show ValueListenable;
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
+     show CameraController;
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import '../model/kit_names.dart';
++import '../model/plan_words.dart';
+ import 'attachment.dart';
+ import 'symbols_state.dart';
+ 
+-/// A kit's words at the plan's current locale (spec 2a P5).
+-abstract interface class KitWords {
+-  /// The word [wordId] in the locale, else in English, else [wordId] itself
+-  /// (a missing word shows its id, never nothing).
+-  String word(String wordId);
+-
+-  /// The word [wordId] in the locale, else in English, else null.
+-  String? maybe(String wordId);
+-
++/// A kit's words at the plan's current locale (spec 2a P5): the pure
++/// [PlanWords] and the locale they are in.
++abstract interface class KitWords implements PlanWords {
+   /// The locale the words are in now.
+   Locale get locale;
+ }
+ 
+ /// [KitWords] over a kit's [names], at the locale [locale] answers each
+ /// time it is read: a change of the plan's language shows at once.
+ final class KitNamesWords implements KitWords {
+   KitNamesWords(this.names, Locale Function() locale) : _locale = locale;
+ 
+   final KitNames names;
+diff --git a/packages/jet_cad_2d_kit/lib/src/kit/plan_type.dart b/packages/jet_cad_2d_kit/lib/src/kit/plan_type.dart
+index c805ba02..4edd3ca5 100644
+--- a/packages/jet_cad_2d_kit/lib/src/kit/plan_type.dart
++++ b/packages/jet_cad_2d_kit/lib/src/kit/plan_type.dart
+@@ -8,28 +8,52 @@
+ // `T = Component`. So those members are private, and the plan library calls
+ // only the erased operations below, which run over the class's own `T`, as
+ // the engine's own registration does.
+ import 'package:flutter/widgets.dart' show BuildContext, Widget;
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
+     show ObjectGripProvider;
+ import 'package:meta/meta.dart';
+ 
+ import '../model/kit_ids.dart';
++import '../model/plan_words.dart';
+ import 'colour.dart';
+ import 'plan_services.dart';
+ import 'properties.dart';
+ 
+-/// A type's escape hatch (umbrella A4): its own panel section over [value],
+-/// committing a changed copy through [commit], one undo step.
++/// A type's escape hatch (umbrella A4): its own panel section over
++/// [PlanSection.value], committing a changed copy through
++/// [PlanSection.commit], one undo step. One context, so a later field joins
++/// it without breaking a kit (spec 3a C1.1).
+ typedef PropertySectionBuilder<T> = Widget Function(
+-    BuildContext context, T value, void Function(T) commit, KitWords words);
++    BuildContext context, PlanSection<T> section);
++
++/// What a section is built over (spec 3a C1.1): the object's component, the
++/// one commit, the kit's words, the object, and the kit's services.
++@immutable
++final class PlanSection<T> {
++  const PlanSection({
++    required this.value,
++    required this.commit,
++    required this.words,
++    required this.object,
++    required this.services,
++  });
++
++  final T value;
++
++  /// Hands the plan one `SetComponentCommand<T>` of [next].
++  final void Function(T next) commit;
++  final KitWords words;
++  final PlanObject object;
++  final PlanServices services;
++}
+ 
+ /// Wraps a kit's engine type at the contract's boundary (spec 2a P4, the
+ /// failure boundary). Implemented by the plan library; [wrap] keeps `T`.
+ abstract interface class TypeGuard {
+   ParametricType<T> wrap<T extends Component>(
+       String kitId, String typeId, ParametricType<T> type);
+ }
+ 
+ @immutable
+ final class PlanType<T extends Component> {
+@@ -76,28 +100,31 @@ final class PlanType<T extends Component> {
+ 
+   /// Registers this type into [catalog] under [id], with `T` kept: through
+   /// [guard]'s wrapper when one is given (the plan library's).
+   void registerInto(ParametricCatalog catalog, {TypeGuard? guard}) {
+     final type = guard == null
+         ? parametric
+         : guard.wrap<T>(kitOfKey(id), id, parametric);
+     catalog.register<T>(id, fromJson, type);
+   }
+ 
+-  /// The fields of [group]'s `T`, bound to its current value, each under
++  /// The fields of [group]'s `T`, bound to its current value and to the
++  /// object (spec 3a C1.1) with the kit's [words] (ruling R-P4), each under
+   /// `property:<id>.<spec id>`; empty when [group] carries no `T`.
+-  List<PropertyField> fieldsOf(CommandTarget target, Handle group) {
+-    final value = target.components.get<T>(group);
++  List<PropertyField> fieldsOf(
++      DraftDocument document, Handle group, PlanWords words) {
++    final value = document.components.get<T>(group);
+     if (value == null) return const [];
++    final object = DocumentPlanObject(document, group, words);
+     return [
+       for (final spec in properties)
+-        spec.bind(value, wordId: 'property:$id.${spec.id}'),
++        spec.bind(value, wordId: 'property:$id.${spec.id}', object: object),
+     ];
+   }
+ 
+   /// The word id of [group]'s section title: `type:<id>`, unless the
+   /// type's `title` names another for its current value.
+   String titleWordOf(CommandTarget target, Handle group) {
+     final value = target.components.get<T>(group);
+     final title = _title;
+     if (value == null || title == null) return 'type:$id';
+     return title(value);
+@@ -118,47 +145,64 @@ final class PlanType<T extends Component> {
+     final colour = _colour;
+     if (value == null || colour == null) return null;
+     final next = colour.write(value, swatch);
+     if (next == value) return null;
+     return SetComponentCommand<T>(group, next);
+   }
+ 
+   /// The one command that commits [input] through [field], one of this
+   /// type's fields: bound again to [group]'s current value, so a field
+   /// read before another edit never writes back what that edit changed.
++  /// The object is the document's now, so a range is checked against it.
+   ///
+   /// Throws [ArgumentError] when [field] is not one of this type's specs,
+   /// [group] carries no `T` or the field is a display, and what the
+   /// field's commit throws (spec 2a P3: out of range, disabled).
+-  DraftCommand commitField(
+-      CommandTarget target, Handle group, PropertyField field, Object? input) {
++  DraftCommand commitField(DraftDocument document, Handle group,
++      PropertyField field, Object? input, PlanWords words) {
+     final spec = properties.firstWhere((s) => identical(s, field.spec),
+         orElse: () => throw ArgumentError.value(
+             field.wordId, 'field', 'is not a field of $id'));
+-    final value = target.components.get<T>(group);
++    final value = document.components.get<T>(group);
+     if (value == null) {
+       throw ArgumentError.value(group, 'group', 'carries no $id');
+     }
+-    final commit = spec.bind(value, wordId: field.wordId).commit;
++    final commit = spec
++        .bind(value,
++            wordId: field.wordId,
++            object: DocumentPlanObject(document, group, words))
++        .commit;
+     if (commit == null) {
+       throw ArgumentError.value(field.wordId, 'field', 'is read-only');
+     }
+     return SetComponentCommand<T>(group, commit(input) as T);
+   }
+ 
+   /// [group]'s escape-hatch section, or null without one or a `T`. Its
+-  /// commit hands [execute] one `SetComponentCommand<T>`.
+-  Widget? sectionFor(BuildContext context, CommandTarget target, Handle group,
+-      void Function(DraftCommand) execute, KitWords words) {
+-    final value = target.components.get<T>(group);
++  /// commit hands [execute] one `SetComponentCommand<T>`; [words] and
++  /// [services] are the type's kit's.
++  Widget? sectionFor(
++      BuildContext context,
++      DraftDocument document,
++      Handle group,
++      void Function(DraftCommand) execute,
++      KitWords words,
++      PlanServices services) {
++    final value = document.components.get<T>(group);
+     final section = _section;
+     if (value == null || section == null) return null;
+-    return section(context, value,
+-        (next) => execute(SetComponentCommand<T>(group, next)), words);
++    return section(
++        context,
++        PlanSection<T>(
++            value: value,
++            commit: (next) => execute(SetComponentCommand<T>(group, next)),
++            words: words,
++            object: DocumentPlanObject(document, group, words),
++            services: services));
+   }
+ 
+   /// This type's grip provider over [services], or null without one.
+   ObjectGripProvider? gripsFor(PlanServices services) => grips?.call(services);
+ 
+   @override
+   String toString() => 'PlanType($id)';
+ }
+diff --git a/packages/jet_cad_2d_kit/lib/src/kit/properties.dart b/packages/jet_cad_2d_kit/lib/src/kit/properties.dart
+index a8aa8fd1..3273e196 100644
+--- a/packages/jet_cad_2d_kit/lib/src/kit/properties.dart
++++ b/packages/jet_cad_2d_kit/lib/src/kit/properties.dart
+@@ -1,164 +1,250 @@
+ // Property specs (spec 2a P3, umbrella A4): the fields a kit's type or a
+ // tool's settings show in the plan library's property panel, as data. Each
+-// spec reads one value of its owner `T` and writes a changed copy.
++// spec reads one value of its owner `T` and writes a changed copy. A spec
++// may read the object it is shown for (spec 3a C1.1: a text display, a
++// length's range) and may be hidden (C1.7).
+ //
+ // Free of Flutter: nothing here draws. The panel (the plan library) turns a
+-// spec into a widget through the erased PropertyField.
++// spec into a widget through the erased PropertyField. The object's words
++// are the pure PlanWords (3a rulings R-P4, R-P7).
++import 'package:jet_cad_2d/jet_cad_2d.dart'
++    show DraftDocument, Handle, Transform2;
++import 'package:meta/meta.dart' show internal;
++
++import '../model/plan_words.dart';
+ 
+ /// A PlanPermissions flag a field needs (spec 2a P2, P3). A field whose gate
+-/// is off is shown read-only.
++/// is off is shown read-only; an action whose gate is off is not shown
++/// (spec 3a C1.7).
+ enum PlanGate {
+   move,
+   rotate,
+   mirror,
+   reshape,
+   delete,
+   changeLayer,
+   recolor,
+   editLayers,
+   editPage,
+ 
+   /// A unit's label (spec 2b S4; today's `renumber`).
+   relabel,
+ }
+ 
+ /// How a [ValueDisplay] prints its number: a length in mm, an area in mm²,
+ /// an angle in radians, or a plain number.
+ enum ValueUnit { length, area, angle, none }
+ 
++/// The object a property or a section is shown for (spec 3a C1.1), read
++/// only: what a spec needs beyond its owner, such as a child's text,
++/// another object's component, or the world transform.
++abstract interface class PlanObject {
++  /// The document the object lives in.
++  DraftDocument get document;
++
++  /// The object's group.
++  Handle get handle;
++
++  /// Its world transform: `document.tree.accumulatedTransform(handle)`.
++  Transform2 get world;
++
++  /// The owning kit's words at the plan's locale (rulings R-P4, R-P7): a
++  /// type's or a `text:` word, the UI language's decimal separator.
++  PlanWords get words;
++}
++
++/// A [PlanObject] over [document] and [handle], with [words]; [world] is
++/// computed on its first read.
++final class DocumentPlanObject implements PlanObject {
++  DocumentPlanObject(this.document, this.handle, this.words);
++
++  @override
++  final DraftDocument document;
++
++  @override
++  final Handle handle;
++
++  @override
++  final PlanWords words;
++
++  @override
++  late final Transform2 world = document.tree.accumulatedTransform(handle);
++}
++
+ final RegExp _specId = RegExp(r'^[a-z][a-z0-9-]*$');
+ 
+ /// One field of an owner `T`: a type's component or a tool's settings.
+ ///
+ /// Its word is `property:<owner id>.<id>` (a choice's values:
+ /// `property:<owner id>.<id>.<value>`).
+ ///
+ /// **Covariance.** The plan library holds specs of many `T`s at once. A
+-/// member whose type takes a `T` ([enabled], a kind's `read` and `write`)
+-/// throws a `TypeError` when it is read through a supertype such as
+-/// `PropertySpec<Object?>`. Only [id], [gate], a kind's bounds and [bind]
+-/// are safe there; [bind] is how the plan library uses a spec.
++/// member whose type takes a `T` ([enabled], [visible], a kind's `read`,
++/// `write` and `range`) throws a `TypeError` when it is read through a
++/// supertype such as `PropertySpec<Object?>`. Only [id], [gate], a kind's
++/// bounds and [bind] are safe there; [bind] is how the plan library uses a
++/// spec.
+ sealed class PropertySpec<T> {
+-  PropertySpec._(this.id, this.enabled, this.gate) {
++  PropertySpec._(this.id, this.enabled, this.gate, this.visible) {
+     if (!_specId.hasMatch(id)) {
+       throw ArgumentError.value(id, 'id',
+           'must be a lower-case letter, then lower-case letters, digits and hyphens');
+     }
+   }
+ 
+   /// Unique within its owner's specs.
+   final String id;
+ 
+   /// False greys the field out and its commit throws [StateError]. Null:
+   /// always enabled.
+   final bool Function(T)? enabled;
+ 
+   /// The permission the field needs, or null for none.
+   final PlanGate? gate;
+ 
+-  /// This spec bound to [value], an owner `T`, under [wordId]: the erased
+-  /// form the plan library uses (spec 2a P1, erased operations). A kit never
++  /// False hides the field: it takes no room in the panel (spec 3a C1.7).
++  /// Evaluated when the spec is bound, so a throw is the binding's. Null:
++  /// always visible.
++  final bool Function(T)? visible;
++
++  /// Whether binding needs the object (a [TextDisplay], a
++  /// [LengthProperty] with a `range`): a tool's settings, which have none,
++  /// may not hold such a spec (`PlanKit.validate`). Safe through a
++  /// supertype: it reads the spec's own members with its own `T`.
++  @internal
++  bool get needsObject => false;
++
++  /// This spec bound to [value], an owner `T`, under [wordId], for
++  /// [object] (a type's field; null for a tool's settings): the erased form
++  /// the plan library uses (spec 2a P1, erased operations). A kit never
+   /// calls it.
+   ///
+   /// The field's `commit` returns the changed owner and, when it is not
+   /// null, passes it to [onCommit] first. Throws [ArgumentError] when
+-  /// [value] is not a `T`.
++  /// [value] is not a `T`, and when the spec needs an object ([needsObject])
++  /// and [object] is null.
+   PropertyField bind(Object? value,
+-      {required String wordId, void Function(T next)? onCommit});
++      {required String wordId,
++      void Function(T next)? onCommit,
++      PlanObject? object});
+ }
+ 
+ /// A length in millimetres, within [min] and [max] (inclusive; null:
+-/// unbounded).
++/// unbounded) and, with a [range], within what it gives for the value and
++/// the object at the commit (inclusive too; spec 3a C1.1).
+ final class LengthProperty<T> extends PropertySpec<T> {
+   LengthProperty({
+     required String id,
+     required this.read,
+     required this.write,
+     this.min,
+     this.max,
++    this.range,
+     bool Function(T)? enabled,
++    bool Function(T)? visible,
+     PlanGate? gate,
+-  }) : super._(id, enabled, gate) {
++  }) : super._(id, enabled, gate, visible) {
+     _checkBounds(min, max);
+   }
+ 
+   final double Function(T) read;
+   final T Function(T, double) write;
+   final double? min;
+   final double? max;
+ 
++  /// The bounds the object allows, read at each commit: an opening's
++  /// position along its host wall. A null result refuses every value.
++  final (double, double)? Function(T value, PlanObject object)? range;
++
++  @override
++  bool get needsObject => range != null;
++
+   @override
+   PropertyField bind(Object? value,
+-      {required String wordId, void Function(T next)? onCommit}) {
++      {required String wordId,
++      void Function(T next)? onCommit,
++      PlanObject? object}) {
+     final owner = _owner<T>(value);
+-    return _BoundField<T>(
+-        this,
+-        owner,
+-        wordId,
+-        read(owner),
+-        (input) => write(owner, _inRange(_finite(input, id), min, max, id)),
+-        onCommit);
++    final range = this.range;
++    if (range != null && object == null) _noObject(wordId);
++    return _BoundField<T>(this, owner, wordId, read(owner), (input) {
++      final v = _inRange(_finite(input, id), min, max, id);
++      if (range != null) {
++        final allowed = range(owner, object!);
++        if (allowed == null) {
++          throw ArgumentError.value(v, id, 'has no range for this object');
++        }
++        _inRange(v, allowed.$1, allowed.$2, id);
++      }
++      return write(owner, v);
++    }, onCommit);
+   }
+ }
+ 
+ /// An angle, stored in radians. The field's value and its commit's input
+ /// are radians; the panel shows and parses degrees (spec 2a Task 17).
+ final class AngleProperty<T> extends PropertySpec<T> {
+   AngleProperty({
+     required String id,
+     required this.read,
+     required this.write,
+     bool Function(T)? enabled,
++    bool Function(T)? visible,
+     PlanGate? gate,
+-  }) : super._(id, enabled, gate);
++  }) : super._(id, enabled, gate, visible);
+ 
+   final double Function(T) read;
+   final T Function(T, double) write;
+ 
+   @override
+   PropertyField bind(Object? value,
+-      {required String wordId, void Function(T next)? onCommit}) {
++      {required String wordId,
++      void Function(T next)? onCommit,
++      PlanObject? object}) {
+     final owner = _owner<T>(value);
+     return _BoundField<T>(this, owner, wordId, read(owner),
+         (input) => write(owner, _finite(input, id)), onCommit);
+   }
+ }
+ 
+ /// A plain number within [min] and [max], rounded on commit to [decimals]
+ /// places (0 to 10), so what is stored is what the panel shows.
+ final class NumberProperty<T> extends PropertySpec<T> {
+   NumberProperty({
+     required String id,
+     required this.read,
+     required this.write,
+     this.min,
+     this.max,
+     this.decimals = 0,
+     bool Function(T)? enabled,
++    bool Function(T)? visible,
+     PlanGate? gate,
+-  }) : super._(id, enabled, gate) {
++  }) : super._(id, enabled, gate, visible) {
+     _checkBounds(min, max);
+     if (decimals < 0 || decimals > 10) {
+       throw ArgumentError.value(decimals, 'decimals', 'must be 0 to 10');
+     }
+   }
+ 
+   final double Function(T) read;
+   final T Function(T, double) write;
+   final double? min;
+   final double? max;
+   final int decimals;
+ 
+   @override
+   PropertyField bind(Object? value,
+-      {required String wordId, void Function(T next)? onCommit}) {
++      {required String wordId,
++      void Function(T next)? onCommit,
++      PlanObject? object}) {
+     final owner = _owner<T>(value);
+     return _BoundField<T>(this, owner, wordId, read(owner), (input) {
+       final rounded =
+           double.parse(_finite(input, id).toStringAsFixed(decimals));
+       return write(owner, _inRange(rounded, min, max, id));
+     }, onCommit);
+   }
+ }
+ 
+ /// One of [values], compared with `==`. A value's word segment is
+@@ -166,23 +252,24 @@ final class NumberProperty<T> extends PropertySpec<T> {
+ /// empty, given once, and holds no `.` or `:`, the separators of the word
+ /// id `property:<owner>.<spec>.<value>`; a value whose segment would is an
+ /// [ArgumentError] when the spec is made.
+ final class ChoiceProperty<T, V> extends PropertySpec<T> {
+   ChoiceProperty({
+     required String id,
+     required List<V> values,
+     required this.read,
+     required this.write,
+     bool Function(T)? enabled,
++    bool Function(T)? visible,
+     PlanGate? gate,
+   })  : values = List.unmodifiable(values),
+-        super._(id, enabled, gate) {
++        super._(id, enabled, gate, visible) {
+     if (this.values.isEmpty) {
+       throw ArgumentError.value(values, 'values', 'must not be empty');
+     }
+     final seen = <String>{};
+     for (final v in this.values) {
+       final segment = segmentOf(v);
+       if (segment.isEmpty || !seen.add(segment)) {
+         throw ArgumentError.value(
+             v, 'values', 'gives the word segment "$segment" twice or empty');
+       }
+@@ -196,210 +283,271 @@ final class ChoiceProperty<T, V> extends PropertySpec<T> {
+   /// The word segment of [value]: an enum's name, else `'$value'`.
+   static String segmentOf(Object? value) =>
+       value is Enum ? value.name : '$value';
+ 
+   final List<V> values;
+   final V Function(T) read;
+   final T Function(T, V) write;
+ 
+   @override
+   PropertyField bind(Object? value,
+-      {required String wordId, void Function(T next)? onCommit}) {
++      {required String wordId,
++      void Function(T next)? onCommit,
++      PlanObject? object}) {
+     final owner = _owner<T>(value);
+     return _BoundField<T>(this, owner, wordId, read(owner), (input) {
+       if (input is! V || !values.contains(input)) {
+         throw ArgumentError.value(input, id, 'is not one of $values');
+       }
+       return write(owner, input);
+     }, onCommit);
+   }
+ }
+ 
+ /// A yes or no.
+ final class ToggleProperty<T> extends PropertySpec<T> {
+   ToggleProperty({
+     required String id,
+     required this.read,
+     required this.write,
+     bool Function(T)? enabled,
++    bool Function(T)? visible,
+     PlanGate? gate,
+-  }) : super._(id, enabled, gate);
++  }) : super._(id, enabled, gate, visible);
+ 
+   final bool Function(T) read;
+   final T Function(T, bool) write;
+ 
+   @override
+   PropertyField bind(Object? value,
+-      {required String wordId, void Function(T next)? onCommit}) {
++      {required String wordId,
++      void Function(T next)? onCommit,
++      PlanObject? object}) {
+     final owner = _owner<T>(value);
+     return _BoundField<T>(this, owner, wordId, read(owner), (input) {
+       if (input is! bool) {
+         throw ArgumentError.value(input, id, 'is not a bool');
+       }
+       return write(owner, input);
+     }, onCommit);
+   }
+ }
+ 
+ /// A text of at most [maxLength] code points (null: any length).
+ final class TextProperty<T> extends PropertySpec<T> {
+   TextProperty({
+     required String id,
+     required this.read,
+     required this.write,
+     this.maxLength,
+     bool Function(T)? enabled,
++    bool Function(T)? visible,
+     PlanGate? gate,
+-  }) : super._(id, enabled, gate) {
++  }) : super._(id, enabled, gate, visible) {
+     final m = maxLength;
+     if (m != null && m < 1) {
+       throw ArgumentError.value(m, 'maxLength', 'must be at least 1');
+     }
+   }
+ 
+   final String Function(T) read;
+   final T Function(T, String) write;
+   final int? maxLength;
+ 
+   @override
+   PropertyField bind(Object? value,
+-      {required String wordId, void Function(T next)? onCommit}) {
++      {required String wordId,
++      void Function(T next)? onCommit,
++      PlanObject? object}) {
+     final owner = _owner<T>(value);
+     return _BoundField<T>(this, owner, wordId, read(owner), (input) {
+       if (input is! String) {
+         throw ArgumentError.value(input, id, 'is not a String');
+       }
+       final m = maxLength;
+       if (m != null && input.runes.length > m) {
+         throw ArgumentError.value(input, id, 'is longer than $m');
+       }
+       return write(owner, input);
+     }, onCommit);
+   }
+ }
+ 
+-/// A read-only number: a room's area, a dimension's value. Its field's
+-/// commit is null.
++/// A read-only number of the owner. Its field's commit is null.
+ final class ValueDisplay<T> extends PropertySpec<T> {
+   ValueDisplay({
+     required String id,
+     required this.read,
+     required this.unit,
+     bool Function(T)? enabled,
++    bool Function(T)? visible,
+     PlanGate? gate,
+-  }) : super._(id, enabled, gate);
++  }) : super._(id, enabled, gate, visible);
+ 
+   final double Function(T) read;
+   final ValueUnit unit;
+ 
+   @override
+   PropertyField bind(Object? value,
+-      {required String wordId, void Function(T next)? onCommit}) {
++      {required String wordId,
++      void Function(T next)? onCommit,
++      PlanObject? object}) {
+     final owner = _owner<T>(value);
+     return _BoundField<T>(this, owner, wordId, read(owner), null, onCommit);
+   }
+ }
+ 
++/// A read-only line of text read from the object (spec 3a C1.1): a room's
++/// area and a dimension's value as drawn, a dimension's axes and ends. Its
++/// field's value is the `String` and its commit is null; a null read omits
++/// the line (the field is not visible). Bound to an object only: a tool's
++/// settings may not hold one (`PlanKit.validate`).
++final class TextDisplay<T> extends PropertySpec<T> {
++  TextDisplay({
++    required String id,
++    required this.read,
++    bool Function(T)? enabled,
++    bool Function(T)? visible,
++    PlanGate? gate,
++  }) : super._(id, enabled, gate, visible);
++
++  final String? Function(T value, PlanObject object) read;
++
++  @override
++  bool get needsObject => true;
++
++  @override
++  PropertyField bind(Object? value,
++      {required String wordId,
++      void Function(T next)? onCommit,
++      PlanObject? object}) {
++    final owner = _owner<T>(value);
++    if (object == null) _noObject(wordId);
++    final text = read(owner, object);
++    return _BoundField<T>(this, owner, wordId, text, null, onCommit,
++        shown: text != null);
++  }
++}
++
+ /// A button: a door's Flip hinge. Its field's value is null and its commit
+ /// ignores its input and returns [apply] of the owner.
+ final class ActionProperty<T> extends PropertySpec<T> {
+   ActionProperty({
+     required String id,
+     required this.apply,
+     bool Function(T)? enabled,
++    bool Function(T)? visible,
+     PlanGate? gate,
+-  }) : super._(id, enabled, gate);
++  }) : super._(id, enabled, gate, visible);
+ 
+   final T Function(T) apply;
+ 
+   @override
+   PropertyField bind(Object? value,
+-      {required String wordId, void Function(T next)? onCommit}) {
++      {required String wordId,
++      void Function(T next)? onCommit,
++      PlanObject? object}) {
+     final owner = _owner<T>(value);
+     return _BoundField<T>(
+         this, owner, wordId, null, (_) => apply(owner), onCommit);
+   }
+ }
+ 
+ /// A spec bound to one owner value: one object's component or one tool's
+ /// settings (spec 2a P3). Erased: the plan library holds fields of many
+ /// owner types in one list and never sees a `T`.
+ abstract interface class PropertyField {
+   /// For [PropertySpec.id], [PropertySpec.gate], the kind (a type test) and
+   /// a kind's bounds or values only: see [PropertySpec]'s covariance note.
+   PropertySpec<Object?> get spec;
+ 
+   /// `property:<owner id>.<spec id>`.
+   String get wordId;
+ 
+   /// The spec's `enabled` of the bound owner; true when it has none.
+   bool get enabled;
+ 
++  /// The spec's `visible` of the bound owner (true when it has none), and
++  /// false for a [TextDisplay] whose read gave null (spec 3a C1.7).
++  bool get visible;
++
+   /// The bound owner's value: a `double` for a length (mm), an angle
+-  /// (radians), a number and a display; the value for a choice; a `bool`;
+-  /// a `String`; null for an action.
++  /// (radians), a number and a value display; the value for a choice; a
++  /// `bool`; a `String` for a text and a text display (null for a display
++  /// that reads nothing); null for an action.
+   Object? get value;
+ 
+-  /// Null for a [ValueDisplay]. Otherwise: the owner changed by [input]
+-  /// (an action ignores it). Throws [ArgumentError] for an input of the
+-  /// wrong type, not finite, out of range, not among a choice's values or
+-  /// too long, and [StateError] while the field is not [enabled].
++  /// Null for a [ValueDisplay] and a [TextDisplay]. Otherwise: the owner
++  /// changed by [input] (an action ignores it). Throws [ArgumentError] for
++  /// an input of the wrong type, not finite, out of range (a length's
++  /// `range` included), not among a choice's values or too long, and
++  /// [StateError] while the field is not [enabled].
+   Object? Function(Object? input)? get commit;
+ }
+ 
+ final class _BoundField<T> implements PropertyField {
+   factory _BoundField(
+       PropertySpec<T> spec,
+       T owner,
+       String wordId,
+       Object? value,
+       T Function(Object? input)? change,
+-      void Function(T next)? onCommit) {
++      void Function(T next)? onCommit,
++      {bool shown = true}) {
+     final enabled = spec.enabled?.call(owner) ?? true;
++    final visible = shown && (spec.visible?.call(owner) ?? true);
+     return _BoundField._(
+         spec,
+         wordId,
+         value,
+         enabled,
++        visible,
+         change == null
+             ? null
+             : (input) {
+                 if (!enabled) throw StateError('$wordId is not enabled');
+                 final next = change(input);
+                 onCommit?.call(next);
+                 return next;
+               });
+   }
+ 
+-  _BoundField._(this.spec, this.wordId, this.value, this.enabled, this.commit);
++  _BoundField._(this.spec, this.wordId, this.value, this.enabled, this.visible,
++      this.commit);
+ 
+   @override
+   final PropertySpec<T> spec;
+ 
+   @override
+   final String wordId;
+ 
+   @override
+   final Object? value;
+ 
+   @override
+   final bool enabled;
+ 
++  @override
++  final bool visible;
++
+   @override
+   final Object? Function(Object? input)? commit;
+ }
+ 
+ T _owner<T>(Object? value) {
+   if (value is T) return value;
+   throw ArgumentError.value(value, 'value', 'is not a $T');
+ }
+ 
++Never _noObject(String wordId) => throw ArgumentError.value(
++    wordId, 'object', 'reads the object it is shown for: bind it to one');
++
+ double _finite(Object? input, String id) {
+   if (input is num && input.isFinite) return input.toDouble();
+   throw ArgumentError.value(input, id, 'is not a finite number');
+ }
+ 
+ double _inRange(double v, double? min, double? max, String id) {
+   if ((min != null && v < min) || (max != null && v > max)) {
+     throw ArgumentError.value(
+         v, id, 'is outside [${min ?? '-∞'}, ${max ?? '∞'}]');
+   }
+diff --git a/packages/jet_cad_2d_kit/lib/src/model/kit_problem.dart b/packages/jet_cad_2d_kit/lib/src/model/kit_problem.dart
+index 667bfbc7..2376d81a 100644
+--- a/packages/jet_cad_2d_kit/lib/src/model/kit_problem.dart
++++ b/packages/jet_cad_2d_kit/lib/src/model/kit_problem.dart
+@@ -33,20 +33,24 @@ enum KitProblemCode {
+   duplicateType,
+   duplicateTool,
+   reservedKitId,
+   typeOutsideKit,
+   toolOutsideKit,
+   typePlaceConflict,
+ 
+   // Spec 2b S4: conformance, a unit kind the contract does not name with no
+   // English `unit:<kit>/<kind>` word.
+   unitKindWord,
++
++  // Spec 3a C1.1: PlanKit.validate, a tool's settings holding a spec that
++  // reads an object (a TextDisplay, a LengthProperty with a range).
++  settingsNeedObject,
+ }
+ 
+ @immutable
+ final class KitProblem {
+   const KitProblem(this.code, this.message);
+ 
+   final KitProblemCode code;
+   final String message;
+ 
+   @override
+diff --git a/packages/jet_cad_2d_kit/lib/src/model/model.dart b/packages/jet_cad_2d_kit/lib/src/model/model.dart
+index 1cb0babd..ba5ec48e 100644
+--- a/packages/jet_cad_2d_kit/lib/src/model/model.dart
++++ b/packages/jet_cad_2d_kit/lib/src/model/model.dart
+@@ -1,12 +1,13 @@
+ // The model's single export list: both public libraries export this file,
+ // so the contract and the authoring toolkit carry the same model.
+ export 'kit_ids.dart';
+ export 'kit_names.dart';
+ export 'kit_problem.dart';
+ export 'library_component.dart';
+ export 'manifest_component.dart';
++export 'plan_words.dart';
+ export 'register.dart' show registerKitComponents;
+ export 'symbol_box.dart';
+ export 'symbol_library.dart';
+ export 'symbol_component.dart';
+ export 'unit_component.dart';
+diff --git a/packages/jet_cad_2d_kit/lib/src/model/plan_words.dart b/packages/jet_cad_2d_kit/lib/src/model/plan_words.dart
+new file mode 100644
+index 00000000..363bf2c4
+--- /dev/null
++++ b/packages/jet_cad_2d_kit/lib/src/model/plan_words.dart
+@@ -0,0 +1,15 @@
++// The words a property or a section reads through its object (spec 3a
++// C1.1, rulings R-P4, R-P7): pure, so the property specs stay free of
++// Flutter. KitWords (the plan's view, with its locale) implements it.
++//
++// Pure Dart: no Flutter, no dart:io.
++
++/// A kit's words at the plan's current locale, as a property reads them.
++abstract interface class PlanWords {
++  /// The word [wordId] in the locale, else in English, else [wordId] itself
++  /// (a missing word shows its id, never nothing).
++  String word(String wordId);
++
++  /// The word [wordId] in the locale, else in English, else null.
++  String? maybe(String wordId);
++}
+diff --git a/packages/jet_cad_2d_kit/test/kit/example_code_test.dart b/packages/jet_cad_2d_kit/test/kit/example_code_test.dart
+index 5dcdb2b8..7736ba83 100644
+--- a/packages/jet_cad_2d_kit/test/kit/example_code_test.dart
++++ b/packages/jet_cad_2d_kit/test/kit/example_code_test.dart
+@@ -1,19 +1,23 @@
+ // Spec 2a P6 (R5): the code side docs/kits.md shows is the example's, and it
+ // validates, registers, edits and regenerates.
+ import 'dart:math' as math;
+ 
++import 'package:flutter/widgets.dart' show Locale;
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+ 
+ import '../../example/cafe_code.dart';
+ 
++final KitWords words = KitNamesWords(KitNames.empty, () => const Locale('en'));
++
+ void main() {
+   test('R5-1 the documented code kit validates, edits and regenerates', () {
+     expect(cafeCodeKit.validate(), isEmpty);
+     expect(cafeCodeKit.propertyIds, [
+       'cafe.sign.width',
+       'cafe.sign.face',
+       'cafe.sign.face.chalk',
+       'cafe.sign.face.board',
+       'cafe.sign.area',
+     ]);
+@@ -27,25 +31,26 @@ void main() {
+     doc.commands.execute(CompoundCommand([
+       AddNodeCommand(GroupNode(
+           handle: sign,
+           parent: doc.rootHandle,
+           transform: Transform2.translation(1820.5, 640.25)
+               .multiply(Transform2.rotation(math.pi / 5)),
+           children: const [])),
+       SetComponentCommand<CafeSign>(
+           sign, const CafeSign(width: 900, face: SignFace.chalk)),
+     ], label: 'Add sign'));
+-    final width = type.fieldsOf(doc, sign).first;
++    final width = type.fieldsOf(doc, sign, words).first;
+     expect(width.value, 900.0);
+     // M-R5: the example's `min: 300` lowered to 200.
+-    expect(() => type.commitField(doc, sign, width, 250), throwsArgumentError);
+-    doc.commands.execute(type.commitField(doc, sign, width, 1500));
++    expect(() => type.commitField(doc, sign, width, 250, words),
++        throwsArgumentError);
++    doc.commands.execute(type.commitField(doc, sign, width, 1500, words));
+     final outline = [
+       for (final slot in doc.entities.liveSlots)
+         if (doc.entities.ownerAt(slot) == sign)
+           doc.geometry.read(doc.entities.geomIndexAt(slot)).coords,
+     ].single;
+     expect(outline.sublist(0, 4), [-750.0, -40.0, 750.0, -40.0]);
+     doc.commands.execute(type.recolour(doc, sign, 'ochre')!);
+     expect(type.colourOf(doc, sign), 'ochre');
+   });
+ }
+diff --git a/packages/jet_cad_2d_kit/test/kit/object_view_test.dart b/packages/jet_cad_2d_kit/test/kit/object_view_test.dart
+new file mode 100644
+index 00000000..e200f92d
+--- /dev/null
++++ b/packages/jet_cad_2d_kit/test/kit/object_view_test.dart
+@@ -0,0 +1,363 @@
++// Spec 3a C1.1, C1.7: the object a property or a section is shown for
++// (PlanObject), the read-only text line (TextDisplay), a length's range
++// read from the object, hidden fields (visible), the section's context
++// (PlanSection), and PlanKit.validate's refusal of an object-reading spec
++// in a tool's settings. Every object sits in a turned group off the
++// origin; one sits in a nested group, so its own transform is not its
++// world.
++import 'dart:math' as math;
++
++import 'package:flutter/widgets.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++
++import '../support/code_fixtures.dart';
++import '../support/plan_type_fixtures.dart';
++
++final class _Services implements PlanServices {
++  @override
++  Object? noSuchMethod(Invocation invocation) =>
++      throw UnimplementedError('${invocation.memberName}');
++}
++
++Matcher refusedOn(String name) =>
++    throwsA(isA<ArgumentError>().having((e) => e.name, 'name', name));
++
++/// The kit's words, in German.
++final KitWords words = KitNamesWords(
++    const KitNames({
++      'en': {'type:test.slab': 'Slab'},
++      'de': {'type:test.slab': 'Platte'},
++    }),
++    () => const Locale('de'));
++
++/// The post's width read from the document through the object: the range
++/// a slab's width may take beside it. Null when the document holds no post
++/// at [hPost].
++(double, double)? besidePost(Slab s, PlanObject o) {
++  final post = o.document.components.get<Post>(hPost);
++  return post == null ? null : (post.width, post.width * 4);
++}
++
++/// The slab's world turn in whole degrees, or null when it is not turned.
++String? turnOf(Slab s, PlanObject o) {
++  final w = o.world;
++  final degrees = math.atan2(w.b, w.a) * 180 / math.pi;
++  return degrees.abs() < 1e-9 ? null : '${degrees.round()}°';
++}
++
++List<PropertySpec<Slab>> viewSpecs() => [
++      LengthProperty<Slab>(
++          id: 'width',
++          read: (s) => s.width,
++          write: (s, v) => s.copyWith(width: v),
++          min: 300,
++          max: 4800,
++          range: besidePost),
++      TextDisplay<Slab>(id: 'turn', read: turnOf),
++      TextDisplay<Slab>(
++          id: 'owner', read: (s, o) => '${o.handle.value}: ${s.label}'),
++      // R-P4: the kit's words through the object, as the dimension's End
++      // lines read theirs (Task 3 adds the separator's case, PO-words-separator).
++      TextDisplay<Slab>(
++          id: 'named', read: (s, o) => o.words.word('type:test.slab')),
++      ActionProperty<Slab>(
++          id: 'flip',
++          apply: (s) => s.copyWith(flipped: !s.flipped),
++          visible: (s) => s.raised,
++          gate: PlanGate.reshape),
++    ];
++
++PlanType<Slab> viewType({PropertySectionBuilder<Slab>? section}) =>
++    PlanType<Slab>(
++        id: Slab.id,
++        fromJson: Slab.fromJson,
++        parametric: LoggingType<Slab>(),
++        properties: viewSpecs(),
++        section: section);
++
++void main() {
++  group('PlanObject', () {
++    test(
++        'PO-object the document, the handle, and the world: the accumulated '
++        'transform of a nested group, read once', () {
++      final (:doc, catalog: _) = objectDocument([slabType(), postType()]);
++      addTearDown(doc.dispose);
++      const inner = Handle(4310);
++      final local = Transform2.translation(-120.5, 75.25)
++          .multiply(Transform2.rotation(0.3));
++      doc.commands.execute(AddNodeCommand(GroupNode(
++          handle: inner, parent: hBare, transform: local, children: const [])));
++      final o = DocumentPlanObject(doc, inner, words);
++      expect(identical(o.document, doc), isTrue);
++      expect(o.handle, inner);
++      // M-PO-object-words: DocumentPlanObject keeps no words of its own.
++      expect(identical(o.words, words), isTrue);
++      // M-PO-world: `world` reads the node's own transform: `local`, not
++      // translation(400.5, 300.25) · local.
++      final want =
++          Transform2.translation(400.5, 300.25).multiply(local).toJson();
++      for (var i = 0; i < 6; i++) {
++        expect(o.world.toJson()[i], closeTo(want[i], 1e-9), reason: '$i');
++      }
++      expect(identical(o.world, o.world), isTrue, reason: 'computed once');
++    });
++  });
++
++  group('the bound field', () {
++    // A post 600 wide: a slab beside it may be 600 to 2400.
++    final (:doc, catalog: _) =
++        objectDocument([slabType(), postType()], post: const Post(width: 600));
++    tearDownAll(doc.dispose);
++    final slabObject = DocumentPlanObject(doc, hSlab, words);
++    PropertyField bound(String id, {Slab owner = const Slab()}) => viewSpecs()
++        .firstWhere((s) => s.id == id)
++        .bind(owner, wordId: 'property:test.slab.$id', object: slabObject);
++
++    test(
++        'PO-display a text display: its value is what read gives for the '
++        'value and the object; no commit; a null read hides it', () {
++      final owner = bound('owner');
++      expect(owner.value, '${hSlab.value}: Bar top');
++      expect(owner.commit, isNull);
++      expect(owner.visible, isTrue);
++      // slabAt is turned π/7 (25.7°).
++      final turn = bound('turn');
++      expect(turn.value, '26°');
++      expect(turn.visible, isTrue);
++      // An unturned object: the line is omitted. M-PO-null: a null read
++      // leaves the field visible.
++      final bare = viewSpecs().firstWhere((s) => s.id == 'turn').bind(
++          const Slab(),
++          wordId: 'w',
++          object: DocumentPlanObject(doc, hBare, words));
++      expect(bare.value, isNull);
++      expect(bare.visible, isFalse);
++    });
++
++    test('PO-display-no-object a text display bound without an object', () {
++      final spec = viewSpecs().firstWhere((s) => s.id == 'owner');
++      // M-PO-no-object: `read(owner, object!)` (a TypeError, not a refusal).
++      expect(() => spec.bind(const Slab(), wordId: 'property:test.slab.owner'),
++          refusedOn('object'));
++      final ranged = viewSpecs().firstWhere((s) => s.id == 'width');
++      expect(
++          () => ranged.bind(const Slab(), wordId: 'property:test.slab.width'),
++          refusedOn('object'));
++    });
++
++    test(
++        'PO-range the range read from the object, inclusive, with the '
++        'constant bounds; a null range refuses every value', () {
++      expect(doc.components.get<Post>(hPost)!.width, 600,
++          reason: 'premise: the post given');
++      final f = bound('width');
++      expect(f.commit!(600), const Slab().copyWith(width: 600));
++      expect(f.commit!(2400), const Slab().copyWith(width: 2400));
++      expect(f.commit!(1875.5), const Slab().copyWith(width: 1875.5));
++      // M-PO-range: drop the range check (599 and 2400.5 pass min/max).
++      expect(() => f.commit!(599), refusedOn('width'));
++      expect(() => f.commit!(2400.5), refusedOn('width'));
++      // The constant max still holds inside a wider range.
++      expect(() => f.commit!(4800.5), refusedOn('width'));
++      // A document with no post: the range is null, every value refused.
++      // M-PO-range-null: a null range read as "unbounded".
++      final (doc: lone, catalog: _) = objectDocument([slabType(), postType()],
++          post: const Post(width: 600));
++      addTearDown(lone.dispose);
++      lone.commands.execute(RemoveNodeCommand(hPost));
++      expect(lone.components.get<Post>(hPost), isNull,
++          reason: 'premise: the post is gone with its node');
++      final none = viewSpecs().firstWhere((s) => s.id == 'width').bind(
++          const Slab(),
++          wordId: 'property:test.slab.width',
++          object: DocumentPlanObject(lone, hSlab, words));
++      for (final v in [300.0, 600.0, 1250.5, 4800.0]) {
++        expect(() => none.commit!(v), refusedOn('width'), reason: '$v');
++      }
++    });
++
++    test(
++        'PO-visible visible over the value: a raised slab shows its flip, a '
++        'flat one hides it; a spec without it is visible', () {
++      // M-PO-visible: `_BoundField` ignores the spec's visible.
++      expect(bound('flip').visible, isTrue);
++      expect(bound('flip', owner: const Slab(raised: false)).visible, isFalse);
++      expect(bound('width').visible, isTrue);
++      // Every kind takes it.
++      final settings = LengthProperty<Slab>(
++          id: 'depth',
++          read: (s) => s.depth,
++          write: (s, v) => s,
++          visible: (s) => !s.raised);
++      expect(settings.bind(const Slab(), wordId: 'w').visible, isFalse);
++      expect(settings.bind(const Slab(raised: false), wordId: 'w').visible,
++          isTrue);
++    });
++  });
++
++  group('PlanType over the object', () {
++    test(
++        'PO-fields fieldsOf binds every spec to the object it was asked for, '
++        'and commitField checks the range against the document now', () {
++      final List<PlanType<Component>> types = [viewType(), postType()];
++      final (:doc, catalog: _) =
++          objectDocument(types, post: const Post(width: 600));
++      addTearDown(doc.dispose);
++      final fields = types[0].fieldsOf(doc, hSlab, words);
++      // M-PO-fields: fieldsOf binds without the object (an ArgumentError).
++      expect(fields.singleWhere((f) => f.spec.id == 'owner').value,
++          '${hSlab.value}: Bar top');
++      final width = fields.singleWhere((f) => f.spec.id == 'width');
++      doc.commands
++          .execute(types[0].commitField(doc, hSlab, width, 2400, words));
++      expect(doc.components.get<Slab>(hSlab)!.width, 2400);
++      // The post narrows: the same field, committed again, meets the new
++      // range (commitField binds again, to the object, now).
++      doc.commands.execute(SetComponentCommand<Post>(
++          hPost, const Post(width: 400, shape: 'round')));
++      expect(() => types[0].commitField(doc, hSlab, width, 1800, words),
++          refusedOn('width'));
++      doc.commands
++          .execute(types[0].commitField(doc, hSlab, width, 1600, words));
++      expect(doc.components.get<Slab>(hSlab)!.width, 1600);
++    });
++
++    test(
++        'PO-words a text display reads the kit\'s words through the object, '
++        'in their locale (rulings R-P4, R-P7; M-PO-words)', () {
++      final List<PlanType<Component>> types = [viewType(), postType()];
++      final (:doc, catalog: _) =
++          objectDocument(types, post: const Post(width: 600));
++      addTearDown(doc.dispose);
++      // M-PO-words: fieldsOf builds the object over
++      // `KitNamesWords(KitNames.empty, () => const Locale('en'))` instead of
++      // the words given ('type:test.slab').
++      expect(
++          types[0]
++              .fieldsOf(doc, hSlab, words)
++              .singleWhere((f) => f.spec.id == 'named')
++              .value,
++          'Platte');
++    });
++
++    testWidgets(
++        'PO-section the section gets the value, the commit, the words, the '
++        'object and the services', (tester) async {
++      PlanSection<Slab>? seen;
++      final type = viewType(section: (context, section) {
++        seen = section;
++        return Text(
++            '${section.words.word('type:test.slab')} '
++            '${section.object.handle.value}',
++            textDirection: TextDirection.ltr);
++      });
++      final List<PlanType<Component>> types = [type, postType()];
++      final (:doc, catalog: _) = objectDocument(types);
++      addTearDown(doc.dispose);
++      final words = KitNamesWords(
++          const KitNames({
++            'en': {'type:test.slab': 'Slab'},
++          }),
++          () => const Locale('en'));
++      final services = _Services();
++      final executed = <DraftCommand>[];
++      await tester.pumpWidget(Builder(
++          builder: (context) => types[0].sectionFor(
++              context, doc, hSlab, executed.add, words, services)!));
++      expect(find.text('Slab ${hSlab.value}'), findsOneWidget);
++      // M-PO-section: the object of the document's root.
++      expect(seen!.object.handle, hSlab);
++      final world = seen!.object.world.toJson(), want = slabAt.toJson();
++      for (var i = 0; i < 6; i++) {
++        expect(world[i], closeTo(want[i], 1e-9), reason: '$i');
++      }
++      expect(identical(seen!.services, services), isTrue);
++      expect(identical(seen!.words, words), isTrue);
++      expect(identical(seen!.object.words, words), isTrue);
++      expect(seen!.value, const Slab());
++      seen!.commit(const Slab(label: 'Pass'));
++      expect(executed.single, isA<SetComponentCommand<Slab>>());
++    });
++  });
++
++  group('PlanKit.validate', () {
++    PlanKit kitWith(List<PropertySpec<Slab>> settings) => PlanKit(
++          id: 'test',
++          version: '1.0.0',
++          types: [viewType()],
++          tools: [
++            PlanTool(
++                id: 'test.draw',
++                icon: const IconData(0xe000),
++                settings: PlanToolSettings<Slab>(
++                    initial: const Slab(), specs: settings),
++                create: (_) => throw UnimplementedError()),
++          ],
++          names: KitNames({
++            'en': {
++              'type:test.slab': 'Slab',
++              'tool:test.draw': 'Draw',
++              for (final id in ['width', 'turn', 'owner', 'named', 'flip'])
++                'property:test.slab.$id': id,
++              for (final s in settings) 'property:test.draw.${s.id}': s.id,
++            },
++          }),
++        );
++
++    test(
++        'PO-validate a tool\'s settings may hold neither a text display nor '
++        'a ranged length; a type may, and a plain length or a visible rule '
++        'in settings is sound', () {
++      // M-PO-validate: drop the check (no problem reported).
++      final display = kitWith([
++        TextDisplay<Slab>(id: 'note', read: (s, o) => s.label),
++      ]).validate();
++      expect([for (final p in display) p.code],
++          [KitProblemCode.settingsNeedObject]);
++      expect(display.single.message, contains('"test.draw"'));
++      expect(display.single.message, contains('"note"'));
++      final ranged = kitWith([
++        LengthProperty<Slab>(
++            id: 'reach',
++            read: (s) => s.width,
++            write: (s, v) => s.copyWith(width: v),
++            range: besidePost),
++      ]).validate();
++      expect([for (final p in ranged) p.code],
++          [KitProblemCode.settingsNeedObject]);
++      // A type's specs read an object: sound.
++      expect(
++          kitWith([
++            LengthProperty<Slab>(
++                id: 'reach',
++                read: (s) => s.width,
++                write: (s, v) => s.copyWith(width: v),
++                visible: (s) => s.raised),
++          ]).validate(),
++          isEmpty);
++    });
++
++    test(
++        'PO-validate-cov the check reads settings of another T through '
++        'PropertySpec<Object> without a TypeError (M-PO-cov)', () {
++      // M-PO-cov: validate reading `spec is LengthProperty && spec.range !=
++      // null` instead of `needsObject` throws a TypeError here.
++      final List<PropertySpec<Object>> held = [
++        LengthProperty<Slab>(
++            id: 'reach',
++            read: (s) => s.width,
++            write: (s, v) => s,
++            range: besidePost),
++      ];
++      expect(() => held.single.needsObject, returnsNormally);
++      expect([
++        for (final p in kitWith(held.cast<PropertySpec<Slab>>()).validate())
++          p.code
++      ], [
++        KitProblemCode.settingsNeedObject
++      ]);
++    });
++  });
++}
+diff --git a/packages/jet_cad_2d_kit/test/kit/plan_type_test.dart b/packages/jet_cad_2d_kit/test/kit/plan_type_test.dart
+index 930ae43b..cb97fb9b 100644
+--- a/packages/jet_cad_2d_kit/test/kit/plan_type_test.dart
++++ b/packages/jet_cad_2d_kit/test/kit/plan_type_test.dart
+@@ -22,20 +22,22 @@ final class RecordingGuard implements TypeGuard {
+ 
+   @override
+   ParametricType<T> wrap<T extends Component>(
+       String kitId, String typeId, ParametricType<T> type) {
+     calls.add((kitId, typeId, T));
+     final replacement = replacements[typeId];
+     return replacement == null ? type : replacement as ParametricType<T>;
+   }
+ }
+ 
++final KitWords words = KitNamesWords(KitNames.empty, () => const Locale('en'));
++
+ final class FakeServices implements PlanServices {
+   @override
+   Object? noSuchMethod(Invocation invocation) =>
+       throw UnimplementedError('${invocation.memberName}');
+ }
+ 
+ final class FakeGrips implements ObjectGripProvider {
+   FakeGrips(this.services);
+ 
+   final PlanServices services;
+@@ -80,96 +82,97 @@ void main() {
+     expect(replacement.generated, [hSlab]);
+     expect(original.generated, isEmpty);
+   });
+ 
+   test('PT3 fieldsOf binds every spec to the object, under its word', () {
+     final List<PlanType<Component>> types = [slabType(), postType()];
+     final (:doc, catalog: _) = objectDocument(types,
+         slab: const Slab(width: 980.5, label: 'Pass'),
+         post: const Post(width: 210.25, shape: 'square'));
+     addTearDown(doc.dispose);
+-    final slabFields = types[0].fieldsOf(doc, hSlab);
++    final slabFields = types[0].fieldsOf(doc, hSlab, words);
+     // M-PT3: build the word from the spec id only.
+     expect([
+       for (final f in slabFields) f.wordId
+     ], [
+       'property:test.slab.width',
+       'property:test.slab.turn',
+       'property:test.slab.grade',
+       'property:test.slab.finish',
+       'property:test.slab.raised',
+       'property:test.slab.label',
+       'property:test.slab.area',
+       'property:test.slab.flip',
+     ]);
+     expect(slabFields[0].value, 980.5);
+     expect(slabFields[5].value, 'Pass');
+-    final postFields = types[1].fieldsOf(doc, hPost);
++    final postFields = types[1].fieldsOf(doc, hPost, words);
+     expect([for (final f in postFields) f.value], [210.25, 'square']);
+     expect(postFields[0].enabled, isFalse);
+     // Not this type's object, or no object at all.
+-    expect(types[0].fieldsOf(doc, hPost), isEmpty);
+-    expect(types[0].fieldsOf(doc, hBare), isEmpty);
++    expect(types[0].fieldsOf(doc, hPost, words), isEmpty);
++    expect(types[0].fieldsOf(doc, hBare, words), isEmpty);
+   });
+ 
+   test('PT4 commitField is one SetComponentCommand<T>, one undo step', () {
+     final List<PlanType<Component>> types = [slabType(), postType()];
+     final (:doc, catalog: _) = objectDocument(types);
+     addTearDown(doc.dispose);
+-    final width = types[0].fieldsOf(doc, hSlab).first;
+-    final command = types[0].commitField(doc, hSlab, width, 2400.75);
++    final width = types[0].fieldsOf(doc, hSlab, words).first;
++    final command = types[0].commitField(doc, hSlab, width, 2400.75, words);
+     // M-PT4: `SetComponentCommand<Component>`: the store keyed by Slab
+     // keeps the old value.
+     expect(command, isA<SetComponentCommand<Slab>>());
+     doc.commands.execute(command);
+     expect(doc.components.get<Slab>(hSlab), const Slab(width: 2400.75));
+-    final shape = types[1].fieldsOf(doc, hPost)[1];
+-    doc.commands.execute(types[1].commitField(doc, hPost, shape, 'square'));
++    final shape = types[1].fieldsOf(doc, hPost, words)[1];
++    doc.commands
++        .execute(types[1].commitField(doc, hPost, shape, 'square', words));
+     expect(doc.components.get<Post>(hPost), const Post(shape: 'square'));
+     doc.commands.undo();
+     expect(doc.components.get<Post>(hPost), const Post());
+     expect(doc.components.get<Slab>(hSlab), const Slab(width: 2400.75));
+   });
+ 
+   test('PT5 commitField binds again to the current value', () {
+     final type = slabType();
+     final (:doc, catalog: _) = objectDocument([type, postType()]);
+     addTearDown(doc.dispose);
+-    final width = type.fieldsOf(doc, hSlab).first;
++    final width = type.fieldsOf(doc, hSlab, words).first;
+     // Another edit lands between reading the field and committing it.
+-    doc.commands.execute(
+-        type.commitField(doc, hSlab, type.fieldsOf(doc, hSlab)[5], 'Pass'));
+-    doc.commands.execute(type.commitField(doc, hSlab, width, 2400.75));
++    doc.commands.execute(type.commitField(
++        doc, hSlab, type.fieldsOf(doc, hSlab, words)[5], 'Pass', words));
++    doc.commands.execute(type.commitField(doc, hSlab, width, 2400.75, words));
+     // M-PT5: commit through `field.commit` (the stale value): the label
+     // goes back to 'Bar top'.
+     expect(doc.components.get<Slab>(hSlab),
+         const Slab(width: 2400.75, label: 'Pass'));
+   });
+ 
+   test('PT6 commitField refuses a foreign field, a display, a missing T', () {
+     final List<PlanType<Component>> types = [slabType(), postType()];
+     final (:doc, catalog: _) = objectDocument(types);
+     addTearDown(doc.dispose);
+-    final postWidth = types[1].fieldsOf(doc, hPost).first;
++    final postWidth = types[1].fieldsOf(doc, hPost, words).first;
+     expect(postWidth.spec.id, 'width');
+     // M-PT6: match the spec by id: the post's width commits the slab's.
+-    expect(() => types[0].commitField(doc, hSlab, postWidth, 600),
++    expect(() => types[0].commitField(doc, hSlab, postWidth, 600, words),
+         throwsArgumentError);
+-    final area = types[0].fieldsOf(doc, hSlab)[6];
+-    expect(
+-        () => types[0].commitField(doc, hSlab, area, 1), throwsArgumentError);
+-    final width = types[0].fieldsOf(doc, hSlab).first;
+-    expect(() => types[0].commitField(doc, hBare, width, 600),
++    final area = types[0].fieldsOf(doc, hSlab, words)[6];
++    expect(() => types[0].commitField(doc, hSlab, area, 1, words),
++        throwsArgumentError);
++    final width = types[0].fieldsOf(doc, hSlab, words).first;
++    expect(() => types[0].commitField(doc, hBare, width, 600, words),
+         throwsArgumentError);
+     // Out of range: the field's own refusal, nothing executed.
+-    expect(
+-        () => types[0].commitField(doc, hSlab, width, 10), throwsArgumentError);
++    expect(() => types[0].commitField(doc, hSlab, width, 10, words),
++        throwsArgumentError);
+     expect(doc.commands.canUndo, isFalse);
+   });
+ 
+   test('PT7 colourOf and recolour over two types, one compound command', () {
+     final List<PlanType<Component>> types = [slabType(), postType()];
+     final (:doc, catalog: _) =
+         objectDocument(types, post: const Post(swatch: 'teal'));
+     addTearDown(doc.dispose);
+     expect([types[0].colourOf(doc, hSlab), types[1].colourOf(doc, hPost)],
+         ['teal', 'teal']);
+@@ -215,38 +218,41 @@ void main() {
+     doc.commands
+         .execute(SetComponentCommand<Slab>(hSlab, const Slab(raised: false)));
+     expect(types[0].titleWordOf(doc, hSlab), 'type:test.slab');
+     expect(types[1].titleWordOf(doc, hPost), 'type:test.post');
+     expect(types[0].titleWordOf(doc, hBare), 'type:test.slab');
+   });
+ 
+   testWidgets('PT10 sectionFor builds the section and commits a T',
+       (tester) async {
+     void Function(Slab)? commit;
+-    final type = slabType(section: (context, value, c, words) {
+-      commit = c;
+-      return Text('${words.word('type:test.slab')}: ${value.label}',
++    final type = slabType(section: (context, section) {
++      commit = section.commit;
++      return Text(
++          '${section.words.word('type:test.slab')}: ${section.value.label}',
+           textDirection: TextDirection.ltr);
+     });
+     final List<PlanType<Component>> types = [type, postType()];
+     final (:doc, catalog: _) = objectDocument(types);
+     addTearDown(doc.dispose);
+     final words = KitNamesWords(
+         const KitNames({
+           'tr': {'type:test.slab': 'Tezgâh'},
+         }),
+         () => const Locale('tr'));
+     final executed = <DraftCommand>[];
+     Widget? post;
+     await tester.pumpWidget(Builder(builder: (context) {
+-      post = types[1].sectionFor(context, doc, hPost, executed.add, words);
+-      return types[0].sectionFor(context, doc, hSlab, executed.add, words)!;
++      post = types[1]
++          .sectionFor(context, doc, hPost, executed.add, words, FakeServices());
++      return types[0].sectionFor(
++          context, doc, hSlab, executed.add, words, FakeServices())!;
+     }));
+     expect(find.text('Tezgâh: Bar top'), findsOneWidget);
+     expect(post, isNull);
+     commit!(const Slab(label: 'Pass'));
+     // M-PT10: hand execute a SetComponentCommand<Component>.
+     expect(executed.single, isA<SetComponentCommand<Slab>>());
+     doc.commands.execute(executed.single);
+     expect(doc.components.get<Slab>(hSlab), const Slab(label: 'Pass'));
+   });
+ 
+diff --git a/packages/jet_cad_2d_plan/lib/src/panels/plan_property_panel.dart b/packages/jet_cad_2d_plan/lib/src/panels/plan_property_panel.dart
+index 8800bcad..2145d9d9 100644
+--- a/packages/jet_cad_2d_plan/lib/src/panels/plan_property_panel.dart
++++ b/packages/jet_cad_2d_plan/lib/src/panels/plan_property_panel.dart
+@@ -326,21 +326,22 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
+   /// [t]'s fields, bound now, or null when a kit's hook threw binding them
+   /// (a spec's `read` or `enabled`): spec P4, every kit hook at the
+   /// contract's boundary. The failure is one diagnostic ([_hookFailed]);
+   /// the panel's builds, listeners and focus changes go on.
+   List<PropertyField>? _fieldsOrNull(_Target t) {
+     final c = _c;
+     switch (t) {
+       case _ObjectTarget(:final handle, :final typeId):
+         if (c.catalog.typeIdOf(c.document, handle) != typeId) return const [];
+         try {
+-          return planTypeOf(c, typeId)!.fieldsOf(c.document, handle);
++          return planTypeOf(c, typeId)!.fieldsOf(
++              c.document, handle, c.servicesOf(kitOfKey(typeId)).words);
+         } catch (error) {
+           _hookFailed(typeId, 'properties', error);
+           return null;
+         }
+       case _ToolTarget(:final toolId):
+         final settings = planToolOf(c, toolId)?.settings;
+         if (settings == null) return const [];
+         try {
+           return settings.fieldsOf(c.toolSettings.valueOf(toolId),
+               (v) => c.toolSettings.store(toolId, v),
+@@ -392,20 +393,21 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
+       case NumberProperty(:final decimals):
+         return value is double
+             ? formatPanelNumber(
+                 double.parse(value.toStringAsFixed(decimals)), _strings)
+             : null;
+       case LengthProperty():
+         return value is double ? formatPanelNumber(value, _strings) : null;
+       case ChoiceProperty() ||
+             ToggleProperty() ||
+             ValueDisplay() ||
++            TextDisplay() ||
+             ActionProperty():
+         return null;
+     }
+   }
+ 
+   double? _number(String text) {
+     final v = parsePanelNumber(text, _strings);
+     return v != null && v.isFinite ? v : null;
+   }
+ 
+@@ -431,20 +433,21 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
+       case TextProperty(:final maxLength):
+         return maxLength != null && text.runes.length > maxLength ? null : text;
+       case AngleProperty():
+         final degrees = _number(text);
+         return degrees == null ? null : degrees * math.pi / 180;
+       case LengthProperty() || NumberProperty():
+         return _number(text);
+       case ChoiceProperty() ||
+             ToggleProperty() ||
+             ValueDisplay() ||
++            TextDisplay() ||
+             ActionProperty():
+         return null;
+     }
+   }
+ 
+   /// Whether [t]'s field [id] edits (today's `_editable` and `_capable`,
+   /// `selection_panel.dart:356-391`).
+   bool _editable(_Target t, String id) {
+     final c = _c;
+     final engine = c.document.commands.permissions;
+@@ -535,22 +538,22 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
+         case _UnitTarget(:final handle):
+           final u = placedUnitOf(c.unitIndex, handle);
+           if (u == null) return;
+           final command = unitLabelCommand(c.document, u, input! as String);
+           if (command != null) c.execute(command);
+         case _ObjectTarget(:final handle, :final typeId):
+           final field = _fieldOf(t, id);
+           if (field == null || (input != null && input == field.value)) {
+             return;
+           }
+-          final command = planTypeOf(c, typeId)!
+-              .commitField(c.document, handle, field, input);
++          final command = planTypeOf(c, typeId)!.commitField(c.document, handle,
++              field, input, c.servicesOf(kitOfKey(typeId)).words);
+           // A value the spec rounds back to the stored one (2.31 at one
+           // decimal over 2.3) writes nothing: no empty undo step (final
+           // review).
+           if (command is SetComponentCommand &&
+               command.value == _componentOf(handle, typeId)) {
+             return;
+           }
+           c.execute(command);
+         case _ToolTarget():
+           final field = _fieldOf(t, id);
+@@ -745,31 +748,52 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
+             ],
+             onChanged: editable ? (v) => _act(t, id, v) : null,
+           ),
+         );
+       case ValueDisplay(:final unit):
+         return InputDecorator(
+           decoration:
+               InputDecoration(labelText: label, border: InputBorder.none),
+           child: Text(_valueText(field.value, unit), key: key),
+         );
++      case TextDisplay():
++        // Spec 3a C1.1: a read-only line, the text as the kit read it.
++        return InputDecorator(
++          decoration:
++              InputDecoration(labelText: label, border: InputBorder.none),
++          child: Text(field.value as String? ?? '', key: key),
++        );
+       case ActionProperty():
+         return Padding(
+           padding: const EdgeInsets.only(top: 8),
+           child: OutlinedButton(
+               key: key,
+               onPressed: editable ? () => _act(t, id, null) : null,
+               child: Text(label)),
+         );
+     }
+   }
+ 
++  /// Whether [field] of [t] takes a row (spec 3a C1.7): not when its
++  /// `visible` says no (a text display that read nothing included), nor an
++  /// object's action whose gate the permissions refuse (today's S-11: a
++  /// button the capabilities refuse is not shown). A hidden field takes no
++  /// room.
++  bool _shows(_Target t, PropertyField field) {
++    if (!field.visible) return false;
++    final gate = field.spec.gate;
++    return !(t is _ObjectTarget &&
++        field.spec is ActionProperty &&
++        gate != null &&
++        !_c.permissions.allows(gate));
++  }
++
+   /// One `hookFailed` diagnostic for [subject] (a type or a tool id) of its
+   /// kit: published after the frame, since a build may call it; the log
+   /// keeps one per kit, subject and code.
+   void _hookFailed(String subject, String hook, Object error) =>
+       _c.diagnosticsLog.addAfterFrame(KitDiagnostic(
+           kitId: kitOfKey(subject),
+           subject: subject,
+           code: KitDiagnosticCode.hookFailed,
+           message: '$hook: $error',
+           error: error));
+@@ -790,21 +814,22 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
+     );
+   }
+ 
+   List<Widget> _settingsSection(_ToolTarget t, TextStyle? title) {
+     final kit = kitOfKey(t.toolId);
+     final fields = _fieldsOrNull(t);
+     if (fields == null) return [_sectionFailed()];
+     return [
+       Text(planWordOf(_c, kit, 'tool:${t.toolId}') ?? t.toolId,
+           key: Key('settings-${t.toolId}'), style: title),
+-      for (final field in fields) _row(t, _Scope.tool, field, kit),
++      for (final field in fields)
++        if (_shows(t, field)) _row(t, _Scope.tool, field, kit),
+     ];
+   }
+ 
+   /// The type's title word for [t], or null when its `title` hook threw
+   /// (one diagnostic).
+   String? _titleWordOf(PlanType<Component> type, _ObjectTarget t) {
+     try {
+       return type.titleWordOf(_c.document, t.handle);
+     } catch (error) {
+       _hookFailed(t.typeId, 'title', error);
+@@ -818,35 +843,37 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
+     final type = planTypeOf(c, t.typeId)!;
+     final kit = kitOfKey(t.typeId);
+     // Spec P4: a hook that throws while the section builds (a title, a
+     // spec's read or enabled) replaces the whole section by the box.
+     final titleWord = _titleWordOf(type, t);
+     final fields = _fieldsOrNull(t);
+     if (titleWord == null || fields == null) return [_sectionFailed()];
+     return [
+       Text(planWordOf(c, kit, titleWord) ?? t.typeId,
+           key: Key('section-${t.typeId}'), style: title),
+-      for (final field in fields) _row(t, _Scope.object, field, kit),
++      for (final field in fields)
++        if (_shows(t, field)) _row(t, _Scope.object, field, kit),
+       if (type.hasSection)
+         // Spec P4: a section builder that throws shows a small box in its
+         // place (Task 11's boundary).
+         KitSectionBoundary(
+           kitId: kit,
+           typeId: t.typeId,
+           log: c.diagnosticsLog,
+           builder: (context) => type.sectionFor(
+               context,
+               doc,
+               t.handle,
+               (command) => _guarded(
+                   t, 'the section\'s commit', () => c.execute(command)),
+-              c.servicesOf(kit).words),
++              c.servicesOf(kit).words,
++              c.servicesOf(kit)),
+         ),
+     ];
+   }
+ 
+   /// The Symbol section (09c D7; `selection_panel.dart:1122-1191`).
+   List<Widget> _symbolSection(_SymbolTarget t, TextStyle? title) {
+     final c = _c;
+     final doc = c.document;
+     final h = t.handle;
+     final node = doc.tree[h]! as InstanceNode;
+diff --git a/packages/jet_cad_2d_plan/test/controller/covariance_test.dart b/packages/jet_cad_2d_plan/test/controller/covariance_test.dart
+index aef61287..ef998e3c 100644
+--- a/packages/jet_cad_2d_plan/test/controller/covariance_test.dart
++++ b/packages/jet_cad_2d_plan/test/controller/covariance_test.dart
+@@ -23,31 +23,33 @@ void main() {
+     final disc = addObject<DiscComponent>(d, DiscComponent(radius: 650),
+         at: Vector2(-3100, 2240));
+     for (final (object, typeId, length, value) in [
+       (slab, 'test.slab', 'width', 1800.0),
+       (disc, 'disc.round', 'radius', 650.0),
+     ]) {
+       final before = List.of(coordsOf(d, leavesOf(d, object).single));
+       // M-C-cov-a: typeOf answers the set's first type.
+       final PlanType<Component> type = c.typeOf(object)!;
+       expect(type.id, typeId);
+-      final fields = type.fieldsOf(d, object);
++      final fields = type.fieldsOf(
++          d, object, c.servicesOf(type.id.split('.').first).words);
+       for (final f in fields) {
+         expect(f.wordId, startsWith('property:$typeId.'));
+         expect(() => (f.value, f.enabled), returnsNormally);
+       }
+       final field = fields.singleWhere((f) => f.spec.id == length);
+       expect(field.value, value);
+-      d.commands.execute(type.commitField(d, object, field, 2345.5));
++      d.commands.execute(type.commitField(d, object, field, 2345.5,
++          c.servicesOf(type.id.split('.').first).words));
+       expect(
+           type
+-              .fieldsOf(d, object)
++              .fieldsOf(d, object, c.servicesOf(type.id.split('.').first).words)
+               .singleWhere((f) => f.spec.id == length)
+               .value,
+           2345.5);
+       expect(coordsOf(d, leavesOf(d, object).single), isNot(before),
+           reason: 'regenerated');
+       d.commands.execute(type.recolour(d, object, 'red')!);
+       expect(type.colourOf(d, object), 'red');
+     }
+     expect(
+         c.typeOf(addLine(d, Vector2(-500, 700), Vector2(1800, 2400))), isNull);
+diff --git a/packages/jet_cad_2d_plan/test/panels/object_view_panel_test.dart b/packages/jet_cad_2d_plan/test/panels/object_view_panel_test.dart
+new file mode 100644
+index 00000000..74ac4518
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/panels/object_view_panel_test.dart
+@@ -0,0 +1,236 @@
++// Spec 3a C1.1, C1.7, Review Focus 4 (the plan half): the property panel
++// over the object-view kit. A text display reads the object (a child's
++// text as drawn, the world turn) and omits its line when it reads nothing;
++// a position's range comes from the host's component, a value outside it
++// is refused with no command and no diagnostic, and a host that is no rail
++// refuses every value; a hidden field takes no room; an action whose gate
++// is refused is not shown; the section gets the object and the kit's
++// services; and the new hooks are at the failure boundary.
++import 'package:flutter/material.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/design_harness.dart';
++import '../support/object_kit.dart';
++import '../support/panel_kits.dart' show boxController, boxKit;
++import '../support/test_kit.dart' show addObject;
++import '../support/throwing_kit.dart';
++
++Finder byKey(String k) => find.byKey(Key(k));
++
++String textOf(WidgetTester tester, String key) =>
++    tester.widget<TextField>(byKey(key)).controller!.text;
++
++String shown(WidgetTester tester, String key) =>
++    tester.widget<Text>(byKey(key)).data!;
++
++Future<void> select(WidgetTester tester, PlanController c, Handle h) async {
++  c.selection.replace([SelectionKey.root(h)]);
++  await tester.pump();
++}
++
++Future<void> enterAndSubmit(
++    WidgetTester tester, String key, String text) async {
++  await tester.ensureVisible(byKey(key));
++  await tester.tap(byKey(key));
++  await tester.pump();
++  await tester.enterText(byKey(key), text);
++  await tester.testTextInput.receiveAction(TextInputAction.done);
++  await tester.pump();
++}
++
++List<KitDiagnostic> hookFailures(PlanController c) => [
++      for (final d in c.diagnostics.value)
++        if (d.code == KitDiagnosticCode.hookFailed) d
++    ];
++
++/// A 1:20 page (boxController's) with the box kit and the object kit; a
++/// rail of 3200 labelled `R-7`, turned 0.7 rad at (7010, 3020), a bead on
++/// it at 1250, a second rail unturned and unlabelled, and a bead whose
++/// host is that bead (no rail).
++({PlanController c, Handle rail, Handle bead, Handle flat, Handle stray})
++    plan() {
++  final c = boxController(kits: [boxKit, objectKit]);
++  final d = c.document;
++  final rail = addTurned(
++      d, const RailComponent(3200, label: 'R-7'), Vector2(7010, 3020), 0.7);
++  final bead =
++      addTurned(d, BeadComponent(rail, 1250), Vector2(7400, 3300), -0.4);
++  final flat = addTurned(d, const RailComponent(1800), Vector2(7600, 2900), 0);
++  final stray =
++      addTurned(d, BeadComponent(bead, 40), Vector2(7700, 3100), 0.25);
++  d.commands.clearHistory();
++  return (c: c, rail: rail, bead: bead, flat: flat, stray: stray);
++}
++
++Future<void> panel(WidgetTester tester, PlanController c) =>
++    pumpDesign(tester, c, right: PlanPropertyPanel(controller: c));
++
++void main() {
++  testWidgets(
++      'PO-panel-display a text display shows what it reads from the object: '
++      'the TEXT child as drawn, the world turn; a rail without a label shows '
++      '— and an unturned one has no Turn line (M-PO-null, M-PO-panel-row)',
++      (tester) async {
++    final p = plan();
++    await panel(tester, p.c);
++    await select(tester, p.c, p.rail);
++    expect(shown(tester, 'property-drawn'), 'R-7');
++    expect(shown(tester, 'property-turn'), '40.1°');
++    // R-P4: the object's words are its own kit's (M-PO-panel-words).
++    expect(shown(tester, 'property-named'), 'Rail');
++    // Edited: the TEXT child regenerates and the line follows.
++    await enterAndSubmit(tester, 'property-label', 'R-8');
++    expect(shown(tester, 'property-drawn'), 'R-8');
++    await select(tester, p.c, p.flat);
++    expect(shown(tester, 'property-drawn'), '—');
++    expect(byKey('property-turn'), findsNothing);
++  });
++
++  testWidgets(
++      'PO-range (Review Focus 4) a position past the host\'s length is '
++      'refused: the field shows the stored value, no command, no '
++      'diagnostic; the ends themselves are allowed; a host that is no rail '
++      'refuses every value (M-PO-range, M-PO-range-null)', (tester) async {
++    final p = plan();
++    final c = p.c;
++    await panel(tester, c);
++    await select(tester, c, p.bead);
++    BeadComponent bead() => c.document.components.get<BeadComponent>(p.bead)!;
++    final depth = c.document.commands.undoDepth;
++    await enterAndSubmit(tester, 'property-position', '3200.5');
++    expect(bead().position, 1250);
++    expect(textOf(tester, 'property-position'), '1250');
++    expect(c.document.commands.undoDepth, depth);
++    expect(hookFailures(c), isEmpty);
++    await enterAndSubmit(tester, 'property-position', '3200');
++    expect(bead().position, 3200);
++    await enterAndSubmit(tester, 'property-position', '0');
++    expect(bead().position, 0);
++    expect(c.document.commands.undoDepth, depth + 2);
++    // The stray bead's host is a bead: every value is refused, 0 included.
++    await select(tester, c, p.stray);
++    final strayDepth = c.document.commands.undoDepth;
++    for (final v in ['0', '40.5', '20']) {
++      await enterAndSubmit(tester, 'property-position', v);
++      expect(c.document.components.get<BeadComponent>(p.stray)!.position, 40,
++          reason: v);
++      expect(textOf(tester, 'property-position'), '40', reason: v);
++    }
++    expect(c.document.commands.undoDepth, strayDepth);
++    expect(hookFailures(c), isEmpty);
++  });
++
++  testWidgets(
++      'PO-hidden a field whose visible says no takes no row and no room: a '
++      'door\'s Flip shows, a window\'s does not, and the Door row moves up '
++      'by its height (M-PO-hidden)', (tester) async {
++    final p = plan();
++    final c = p.c;
++    await panel(tester, c);
++    await select(tester, c, p.bead);
++    expect(byKey('property-flip'), findsOneWidget);
++    // Measured from the row above (Position): the harness centres the
++    // panel's column vertically, so a shorter panel moves every row down
++    // by half the height it lost.
++    double doorBelowPosition() =>
++        tester.getTopLeft(byKey('property-door')).dy -
++        tester.getTopLeft(byKey('property-position')).dy;
++    final withFlip = doorBelowPosition();
++    final flipHeight = tester.getSize(byKey('property-flip')).height;
++    await tester.tap(byKey('property-door'));
++    await tester.pumpAndSettle();
++    expect(c.document.components.get<BeadComponent>(p.bead)!.door, isFalse,
++        reason: 'premise: the bead is a window now');
++    expect(byKey('property-flip'), findsNothing);
++    expect(doorBelowPosition(), lessThanOrEqualTo(withFlip - flipHeight));
++  });
++
++  testWidgets(
++      'PO-gate-hidden an action whose gate the permissions refuse is not '
++      'shown (today\'s S-11), where a gated field is read-only '
++      '(M-PO-gate-hidden)', (tester) async {
++    final p = plan();
++    final c = p.c;
++    await panel(tester, c);
++    c.permissions = PlanPermissions.full.copyWith(reshape: false);
++    await tester.pump();
++    await select(tester, c, p.bead);
++    expect(c.document.components.get<BeadComponent>(p.bead)!.door, isTrue,
++        reason: 'premise: visible says yes');
++    expect(byKey('property-flip'), findsNothing);
++    expect(byKey('property-door'), findsOneWidget);
++    c.permissions = PlanPermissions.full;
++    await tester.pump();
++    expect(byKey('property-flip'), findsOneWidget);
++    await tester.tap(byKey('property-flip'));
++    await tester.pumpAndSettle();
++    expect(c.document.components.get<BeadComponent>(p.bead)!.flipped, isTrue);
++  });
++
++  testWidgets(
++      'PO-section the section is built over the object and its own kit\'s '
++      'services (M-PO-services)', (tester) async {
++    final p = plan();
++    await panel(tester, p.c);
++    await select(tester, p.c, p.rail);
++    expect(shown(tester, 'view-rail-section'), 'Rail ${p.rail.value}');
++  });
++
++  group('the failure boundary (spec C2: the new hooks)', () {
++    ({PlanController c, ThrowingKit boom, Handle block}) boomPlan() {
++      final boom = ThrowingKit();
++      final c = boxController(kits: [boxKit, boom.kit]);
++      final block = addObject<BlockComponent>(
++          c.document, const BlockComponent(size: 400, swatch: 'purple'),
++          at: Vector2(7500, 3200));
++      return (c: c, boom: boom, block: block);
++    }
++
++    List<String> boomFailures(PlanController c) => [
++          for (final d in hookFailures(c))
++            if (d.kitId == 'boom')
++              '${d.subject}: ${(d.error! as BoomFailure).hook}',
++        ];
++
++    for (final hook in ['display', 'visible']) {
++      testWidgets(
++          'PO-G-$hook a $hook hook that throws while the section binds: the '
++          '"section failed" box, one diagnostic, no exception (M-PO-G-$hook)',
++          (tester) async {
++        final b = boomPlan();
++        await panel(tester, b.c);
++        await select(tester, b.c, b.block);
++        expect(shown(tester, 'property-shown'), '400 mm at ${b.block.value}',
++            reason: 'premise: the display reads');
++        b.boom.failing.add(hook);
++        b.c.selection.replace(const []);
++        await tester.pump();
++        await select(tester, b.c, b.block);
++        await tester.pump();
++        expect(tester.takeException(), isNull);
++        expect(byKey('kit-section-failed'), findsOneWidget);
++        expect(boomFailures(b.c), ['boom.block: $hook']);
++      });
++    }
++
++    testWidgets(
++        'PO-G-range a range that throws at the commit: one diagnostic, '
++        'nothing stored, the section stays (M-PO-G-range)', (tester) async {
++      final b = boomPlan();
++      await panel(tester, b.c);
++      await select(tester, b.c, b.block);
++      b.boom.failing.add('range');
++      await enterAndSubmit(tester, 'property-span', '640');
++      expect(tester.takeException(), isNull);
++      expect(b.c.document.components.get<BlockComponent>(b.block)!.size, 400);
++      expect(textOf(tester, 'property-span'), '400');
++      expect(byKey('kit-section-failed'), findsNothing);
++      expect(boomFailures(b.c), ['boom.block: range']);
++    });
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/support/object_kit.dart b/packages/jet_cad_2d_plan/test/support/object_kit.dart
+new file mode 100644
+index 00000000..028e2c52
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/support/object_kit.dart
+@@ -0,0 +1,236 @@
++// The object-view kit (3a Task 2, spec C1.1, C1.7): kit "view". A rail
++// (view.rail) is a line along its group's x axis, of [length], with its
++// label drawn as a TEXT child; its fields read that child's text and its
++// world turn. A bead (view.bead) sits on a host rail: its position's range
++// is read from the host's component, and its Flip shows for a door only,
++// behind reshape. Placed off the origin in turned groups (CLAUDE.md).
++import 'dart:math' as math;
++
++import 'package:flutter/material.dart' hide Tolerance;
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++@immutable
++final class RailComponent implements Component {
++  const RailComponent(this.length, {this.label = ''});
++
++  static const String componentTypeId = 'view.rail';
++
++  final double length;
++  final String label;
++
++  @override
++  String get typeId => componentTypeId;
++
++  @override
++  Map<String, Object?> toJson() => {'label': label, 'length': length};
++
++  static RailComponent fromJson(Map<String, Object?> json) =>
++      RailComponent((json['length']! as num).toDouble(),
++          label: json['label']! as String);
++
++  @override
++  bool operator ==(Object other) =>
++      other is RailComponent && other.length == length && other.label == label;
++
++  @override
++  int get hashCode => Object.hash(length, label);
++}
++
++final class RailType extends ParametricType<RailComponent> {
++  const RailType();
++
++  @override
++  Capability get editCapability => Capability.geometry;
++
++  @override
++  Aabb2 reach(RailComponent p, Transform2 toWorld) => Aabb2.fromPoints([
++        toWorld.transformPoint(Vector2(0, -200)),
++        toWorld.transformPoint(Vector2(p.length, 200)),
++        toWorld.transformPoint(Vector2(0, 200)),
++        toWorld.transformPoint(Vector2(p.length, -200)),
++      ]);
++
++  @override
++  List<Generated> generate(ParametricView view, Handle self) {
++    final p = view.paramsOf<RailComponent>(self)!;
++    return [
++      Generated(
++          EntityKind.line, linePayload(Vector2.zero(), Vector2(p.length, 0))),
++      if (p.label.isNotEmpty)
++        Generated.text(textPayload(Vector2(p.length / 2, 150), 120), p.label),
++    ];
++  }
++}
++
++/// The text of [o]'s first TEXT child, as drawn, or null without one.
++String? childText(PlanObject o) {
++  final entities = o.document.entities;
++  for (final slot in entities.liveSlots) {
++    if (entities.ownerAt(slot) == o.handle &&
++        entities.kindAt(slot) == EntityKind.text) {
++      return entities.textAt(slot);
++    }
++  }
++  return null;
++}
++
++/// [o]'s world turn in degrees, one decimal, or null when it is not turned.
++String? turnText(PlanObject o) {
++  final w = o.world;
++  final degrees = math.atan2(w.b, w.a) * 180 / math.pi;
++  return degrees.abs() < 1e-9 ? null : '${degrees.toStringAsFixed(1)}°';
++}
++
++@immutable
++final class BeadComponent implements Component {
++  const BeadComponent(this.host, this.position,
++      {this.door = true, this.flipped = false});
++
++  static const String componentTypeId = 'view.bead';
++
++  final Handle host;
++  final double position;
++  final bool door;
++  final bool flipped;
++
++  @override
++  String get typeId => componentTypeId;
++
++  BeadComponent copyWith({double? position, bool? door, bool? flipped}) =>
++      BeadComponent(host, position ?? this.position,
++          door: door ?? this.door, flipped: flipped ?? this.flipped);
++
++  @override
++  Map<String, Object?> toJson() => {
++        'door': door,
++        'flipped': flipped,
++        'host': host.value,
++        'position': position,
++      };
++
++  static BeadComponent fromJson(Map<String, Object?> json) => BeadComponent(
++      Handle(json['host']! as int), (json['position']! as num).toDouble(),
++      door: json['door']! as bool, flipped: json['flipped']! as bool);
++
++  @override
++  bool operator ==(Object other) =>
++      other is BeadComponent &&
++      other.host == host &&
++      other.position == position &&
++      other.door == door &&
++      other.flipped == flipped;
++
++  @override
++  int get hashCode => Object.hash(host, position, door, flipped);
++}
++
++final class BeadType extends ParametricType<BeadComponent> {
++  const BeadType();
++
++  @override
++  Capability get editCapability => Capability.geometry;
++
++  @override
++  Aabb2 reach(BeadComponent p, Transform2 toWorld) => Aabb2.fromPoints([
++        toWorld.transformPoint(Vector2(-60, -60)),
++        toWorld.transformPoint(Vector2(60, 60)),
++      ]);
++
++  @override
++  List<Generated> generate(ParametricView view, Handle self) =>
++      [Generated(EntityKind.circle, circlePayload(Vector2.zero(), 50))];
++}
++
++/// The host rail's length bounds a bead's position; a host that is no
++/// rail gives none (every position refused, today's opening on a non-wall).
++(double, double)? hostRange(BeadComponent b, PlanObject o) {
++  final rail = o.document.components.get<RailComponent>(b.host);
++  return rail == null ? null : (0, rail.length);
++}
++
++final PlanType<RailComponent> railType = PlanType<RailComponent>(
++  id: RailComponent.componentTypeId,
++  fromJson: RailComponent.fromJson,
++  parametric: const RailType(),
++  properties: [
++    LengthProperty<RailComponent>(
++        id: 'length',
++        read: (r) => r.length,
++        write: (r, v) => RailComponent(v, label: r.label),
++        min: 100),
++    TextProperty<RailComponent>(
++        id: 'label',
++        read: (r) => r.label,
++        write: (r, v) => RailComponent(r.length, label: v)),
++    TextDisplay<RailComponent>(
++        id: 'drawn', read: (r, o) => childText(o) ?? '—'),
++    TextDisplay<RailComponent>(id: 'turn', read: (r, o) => turnText(o)),
++    // R-P4: the kit's own words through the object.
++    TextDisplay<RailComponent>(
++        id: 'named', read: (r, o) => o.words.word('type:view.rail')),
++  ],
++  section: (context, section) => Text(
++      '${section.services.words.word('type:view.rail')} '
++      '${section.object.handle.value}',
++      key: const Key('view-rail-section')),
++);
++
++final PlanType<BeadComponent> beadType = PlanType<BeadComponent>(
++  id: BeadComponent.componentTypeId,
++  fromJson: BeadComponent.fromJson,
++  parametric: const BeadType(),
++  properties: [
++    LengthProperty<BeadComponent>(
++        id: 'position',
++        read: (b) => b.position,
++        write: (b, v) => b.copyWith(position: v),
++        range: hostRange),
++    ActionProperty<BeadComponent>(
++        id: 'flip',
++        apply: (b) => b.copyWith(flipped: !b.flipped),
++        visible: (b) => b.door,
++        gate: PlanGate.reshape),
++    ToggleProperty<BeadComponent>(
++        id: 'door', read: (b) => b.door, write: (b, v) => b.copyWith(door: v)),
++  ],
++);
++
++final PlanKit objectKit = PlanKit(
++  id: 'view',
++  version: '1.0.0',
++  types: [railType, beadType],
++  names: const KitNames({
++    'en': {
++      'type:view.rail': 'Rail',
++      'type:view.bead': 'Bead',
++      'property:view.rail.length': 'Length',
++      'property:view.rail.label': 'Label',
++      'property:view.rail.drawn': 'Drawn',
++      'property:view.rail.turn': 'Turn',
++      'property:view.rail.named': 'Named',
++      'property:view.bead.position': 'Position',
++      'property:view.bead.flip': 'Flip',
++      'property:view.bead.door': 'Door',
++    },
++  }),
++);
++
++/// [component] in a root-level group at [at] turned [turn], on the drawing
++/// layer: one step; its handle.
++Handle addTurned<T extends Component>(
++    DraftDocument d, T component, Vector2 at, double turn) {
++  final h = d.handleSeed.next();
++  d.commands.execute(CompoundCommand([
++    AddNodeCommand(GroupNode(
++        handle: h,
++        parent: d.rootHandle,
++        transform: Transform2.translation(at.x, at.y)
++            .multiply(Transform2.rotation(turn)),
++        children: const [])),
++    SetComponentCommand<T>(h, component),
++    SetComponentCommand<ObjectLayer>(h, ObjectLayer(drawingLayer(d))),
++  ], label: 'Add ${component.typeId}'));
++  return h;
++}
+diff --git a/packages/jet_cad_2d_plan/test/support/panel_kits.dart b/packages/jet_cad_2d_plan/test/support/panel_kits.dart
+index 5229586c..1729888b 100644
+--- a/packages/jet_cad_2d_plan/test/support/panel_kits.dart
++++ b/packages/jet_cad_2d_plan/test/support/panel_kits.dart
+@@ -452,26 +452,27 @@ final PlanType<DiscParams> discType = PlanType<DiscParams>(
+   parametric: const DiscType(),
+   properties: [
+     LengthProperty<DiscParams>(
+         id: 'radius',
+         read: (p) => p.radius,
+         write: (p, v) => p.withRadius(v),
+         min: 1),
+   ],
+   colour: ColourTarget<DiscParams>(
+       read: (p) => p.colour, write: (p, s) => p.withColour(s)),
+-  section: (context, value, commit, words) {
++  section: (context, section) {
++    final value = section.value;
+     if (value.radius > 5000) throw StateError('a disc over 5 m');
+     return OutlinedButton(
+         key: const Key('disc-grow'),
+-        onPressed: () => commit(value.withRadius(value.radius * 2)),
+-        child: Text(words.word('property:disc.disc.grow')));
++        onPressed: () => section.commit(value.withRadius(value.radius * 2)),
++        child: Text(section.words.word('property:disc.disc.grow')));
+   },
+ );
+ 
+ final PlanKit discKit = PlanKit(
+   id: 'disc',
+   version: '1.0.0',
+   types: [discType],
+   tools: [
+     PlanTool(
+         id: 'disc.draw',
+diff --git a/packages/jet_cad_2d_plan/test/support/test_kit.dart b/packages/jet_cad_2d_plan/test/support/test_kit.dart
+index e59119c4..faabc8a6 100644
+--- a/packages/jet_cad_2d_plan/test/support/test_kit.dart
++++ b/packages/jet_cad_2d_plan/test/support/test_kit.dart
+@@ -417,26 +417,26 @@ List<PropertySpec<SlabSettings>> slabSettingSpecs() => [
+           max: 20000),
+       LengthProperty<SlabSettings>(
+           id: 'height',
+           read: (s) => s.height,
+           write: (s, v) => s.copyWith(height: v),
+           min: 100,
+           max: 20000),
+     ];
+ 
+ /// The escape hatch: one button that widens the slab by 250 mm.
+-Widget slabSection(BuildContext context, SlabComponent value,
+-        void Function(SlabComponent) commit, KitWords words) =>
++Widget slabSection(BuildContext context, PlanSection<SlabComponent> section) =>
+     TextButton(
+         key: const Key('test-slab-widen'),
+-        onPressed: () => commit(value.copyWith(width: value.width + 250)),
+-        child: Text(words.word('property:test.slab.widen')));
++        onPressed: () => section
++            .commit(section.value.copyWith(width: section.value.width + 250)),
++        child: Text(section.words.word('property:test.slab.widen')));
+ 
+ /// A flipped slab's section is titled by another word.
+ String slabTitle(SlabComponent s) =>
+     s.flipped ? 'type:test.slab.flipped' : 'type:test.slab';
+ 
+ PlanType<SlabComponent> slabType({KitLog? log}) => PlanType<SlabComponent>(
+       id: slabTypeId,
+       fromJson: SlabComponent.fromJson,
+       parametric: const SlabType(),
+       grips: (services) => SlabGrips(
+diff --git a/packages/jet_cad_2d_plan/test/support/throwing_kit.dart b/packages/jet_cad_2d_plan/test/support/throwing_kit.dart
+index 183f6421..496511af 100644
+--- a/packages/jet_cad_2d_plan/test/support/throwing_kit.dart
++++ b/packages/jet_cad_2d_plan/test/support/throwing_kit.dart
+@@ -29,20 +29,22 @@ const Set<String> boomHooks = {
+   // The tool: its factory, its events, its painting; Task 11 adds a getter
+   // (isMidShape) and its dispose.
+   'toolCreate', 'toolDown', 'toolMove', 'toolUp', 'toolExit', 'toolKey',
+   'toolCancel', 'toolPaint', 'toolMidShape', 'toolDispose',
+   // The attachment provider: its factory, then attach.
+   'attachCreate', 'attach',
+   // Properties, the section (its builder, then the widget it returns), the
+   // colour target and the title.
+   'read', 'write', 'apply', 'section', 'sectionWidget', 'colourRead',
+   'colourWrite', 'title',
++  // Spec 3a C1.1, C1.7: a text display's read, a length's range, a spec's visible.
++  'display', 'range', 'visible',
+ };
+ 
+ /// What a failing hook throws: not an `Error`, as a kit's own exception
+ /// would not be.
+ final class BoomFailure implements Exception {
+   const BoomFailure(this.hook);
+ 
+   final String hook;
+ 
+   @override
+@@ -93,28 +95,48 @@ final class ThrowingKit {
+                 check('read');
+                 return b.size;
+               },
+               write: (b, v) {
+                 check('write');
+                 return b.copyWith(size: v);
+               },
+               min: 10,
+               max: 10000,
+               decimals: 0),
++          TextDisplay<BlockComponent>(
++              id: 'shown',
++              read: (b, o) {
++                check('display');
++                return '${b.size.round()} mm at ${o.handle.value}';
++              }),
++          LengthProperty<BlockComponent>(
++              id: 'span',
++              read: (b) => b.size,
++              write: (b, v) => b.copyWith(size: v),
++              min: 10,
++              max: 10000,
++              range: (b, o) {
++                check('range');
++                return (10, 10000);
++              }),
+           ActionProperty<BlockComponent>(
+               id: 'grow',
+               apply: (b) {
+                 check('apply');
+                 return b.copyWith(size: b.size * 2);
++              },
++              visible: (b) {
++                check('visible');
++                return true;
+               }),
+         ],
+-        section: (context, value, commit, words) {
++        section: (context, section) {
+           check('section');
+           return BoomSection(kit: this);
+         },
+         title: (b) {
+           check('title');
+           return 'type:boom.block';
+         },
+         colour: ColourTarget<BlockComponent>(read: (b) {
+           check('colourRead');
+           return b.swatch;
+@@ -164,20 +186,22 @@ final class ThrowingKit {
+       },
+     ],
+     names: const KitNames({
+       'en': {
+         'type:boom.block': 'Block',
+         'type:boom.post': 'Post',
+         'type:boom.zone': 'Zone',
+         'tool:boom.tool': 'Boom',
+         'property:boom.block.size': 'Size',
+         'property:boom.block.grow': 'Grow',
++        'property:boom.block.shown': 'Shown',
++        'property:boom.block.span': 'Span',
+       },
+     }),
+   );
+ }
+ 
+ /// The three boom components: a square of [size] (mm) centred on the
+ /// group's origin, a plan swatch, and the objects it references.
+ @immutable
+ sealed class BoomComponent implements Component {
+   const BoomComponent({required this.size, this.swatch, this.refs = const []});

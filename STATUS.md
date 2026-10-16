@@ -464,8 +464,11 @@ with 0.7.0 (below).
   [2026-10-15-architecture-kit-results.md](docs/superpowers/notes/2026-10-15-architecture-kit-results.md),
   on `feat/architecture-kit` (worktree `.claude/worktrees/architecture-kit`).
   Every task done and reviewed, the exit gate passed at `20d592d9`; the
-  whole-branch review, its fix wave and the ledger's archive are next. Not
-  merged, not pushed. The results note's "For the human" lists four open
+  whole-branch Opus review found 0 Critical, 0 Important ("ready to
+  merge"), its one fix wave (`945502cb..81950ac3`) closed 22 of 23 items
+  and was re-reviewed clean; the ledger is archived in
+  [docs/superpowers/ledgers/2026-10-15-architecture-kit/](docs/superpowers/ledgers/2026-10-15-architecture-kit/).
+  Not merged, not pushed: the merge is the human's. The results note's "For the human" lists four open
   items (a C1.5/C1.10 spec question, a `PlanServices` liveness-revision
   proposal, a possible 2a snap defect, a one-frame re-word lag). 3b
   (`apps/architecture_demo`) follows from its own spec; the human is told
@@ -607,10 +610,9 @@ in design mode) is merged at `4130ebc` and 2b (the service mode) at
 `fix/plan-library-2b-followups` (from `2b1f7a0e`) and merged at `de6abda9`,
 not pushed; the record and what is left for the human:
 [2026-10-15-plan-library-2b-followups.md](docs/superpowers/notes/2026-10-15-plan-library-2b-followups.md).
-3a (the architecture kit) passed its exit gate on `feat/architecture-kit`
-at `20d592d9`; next: the whole-branch Opus review and its fix wave, then
-the ledger archived and the merge on the human's word; then 3b's
-brainstorm.** (In flight). Where 2b stands, its gaps and rulings: the results note's
+3a (the architecture kit) is done on `feat/architecture-kit`: exit gate
+passed, whole-branch Opus review clean after one fix wave, ledger
+archived; next: the merge on the human's word, then 3b's brainstorm.** (In flight). Where 2b stands, its gaps and rulings: the results note's
 [Spec gaps](docs/superpowers/notes/2026-10-14-plan-library-2b-results.md#spec-gaps-and-interface-problems-found-while-executing)
 section and its "Final fix wave". A14's `selectTool` difference was settled
 by the human (2b spec decision 9: true kept).

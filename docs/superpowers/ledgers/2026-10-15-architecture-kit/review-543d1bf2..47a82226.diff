@@ -1,0 +1,3412 @@
+# Review package: 543d1bf2..HEAD
+
+## Commits
+47a82226 fix(architecture): a frozen wall leaves the band cache at the next read
+e8f66cad feat(architecture): the wall's type, grips, tool and settings (3a C3.2)
+
+## Files changed
+ .../test/support/wall_fixture.dart                 | 330 ++++++++++++
+ .../test/support/wall_shell.dart                   | 124 +++++
+ .../test/wall/wall_grips_test.dart                 | 398 +++++++++++++++
+ .../test/wall/wall_paint_test.dart                 | 102 ++++
+ .../test/wall/wall_tool_test.dart                  | 553 +++++++++++++++++++++
+ packages/jet_cad_2d_kit_architecture/CHANGELOG.md  |   4 +
+ .../lib/jet_cad_2d_kit_architecture.dart           |   1 +
+ .../jet_cad_2d_kit_architecture/lib/src/kit.dart   |   5 +-
+ .../lib/src/wall/wall_bands.dart                   |  29 +-
+ .../lib/src/wall/wall_grips.dart                   | 141 ++++++
+ .../lib/src/wall/wall_plan.dart                    |  75 +++
+ .../lib/src/wall/wall_tool.dart                    | 269 ++++++++++
+ .../test/support/wall_shell.dart                   |  52 ++
+ .../test/wall/wall_grips_test.dart                 | 252 ++++++++++
+ .../test/wall/wall_joint_kinds_test.dart           | 164 ++++++
+ .../test/wall/wall_live_test.dart                  |  45 ++
+ .../test/wall/wall_plan_test.dart                  | 286 +++++++++++
+ .../test/wall/wall_tool_test.dart                  | 321 ++++++++++++
+ 18 files changed, 3145 insertions(+), 6 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_integration/test/support/wall_fixture.dart b/packages/jet_cad_2d_integration/test/support/wall_fixture.dart
+new file mode 100644
+index 00000000..bd306746
+--- /dev/null
++++ b/packages/jet_cad_2d_integration/test/support/wall_fixture.dart
+@@ -0,0 +1,330 @@
++// The wall fixture of jet_cad_floor_plan/test/support/wall_fixture.dart and
++// wall_shell.dart (3a Task 12), for the integration package's wall tests:
++// public libraries only (R-P1), so `WorldWall` and `wallJoin` are
++// reproduced over the public `WallParams`, the catalog is the rig's
++// `kitCatalog` (R-P14), and the helpers that need the kit's geometry
++// (`ringOf`, `worldWall`, `spoke`, `triangulates`, `wallDoc`, `reload`)
++// stay in the kit's own copy.
++import 'dart:convert';
++import 'dart:math' as math;
++import 'dart:typed_data';
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import 'editor_rig.dart' show kitCatalog;
++
++/// Every "do these join" decision for walls, as the kit's `wallJoin`
++/// (jet_cad_floor_plan/lib/src/parametric/wall.dart:19), reproduced: the
++/// kit does not export it (R-P1).
++const Tolerance wallJoin = Tolerance(linear: 1e-6, angular: 1e-9);
++
++/// A wall in world space, as the kit's `WorldWall` builds one
++/// (wall_geometry.dart:19-62), reproduced over the public [WallParams]
++/// (R-P1): its world ends are the stored ends through the group's
++/// transform, bit for bit.
++final class WorldWall {
++  WorldWall(this.handle, WallParams p, this.toWorld)
++      : params = p,
++        s = toWorld.transformPoint(p.start),
++        e = toWorld.transformPoint(p.end),
++        t = p.thickness,
++        j = p.justification;
++
++  final Handle handle;
++  final WallParams params;
++  final Transform2 toWorld;
++  final Vector2 s, e;
++  final double t;
++  final Justification j;
++
++  /// The unit direction from start to end.
++  late final Vector2 d = (e - s).normalized();
++
++  /// The left and right face offsets along the left normal.
++  (double, double) get offsets => switch (j) {
++        Justification.centre => (t / 2, -t / 2),
++        Justification.left => (t, 0),
++        Justification.right => (0, -t),
++      };
++
++  /// The start for `k == 0`, the end otherwise.
++  Vector2 endpoint(int k) => k == 0 ? s : e;
++}
++
++/// The measurement corpus's far origin (`generate_document.dart`): one ulp
++/// is ~9.3e-10 in x here.
++const double ox = 4500000, oy = 1200000;
++
++Vector2 far(double x, double y) => Vector2(ox + x, oy + y);
++
++/// The plan point `(x, y)`, turned [deg] degrees about the far origin: every
++/// relational fixture is drawn rotated.
++Vector2 plan(double x, double y, [double deg = 23]) {
++  final r = deg * math.pi / 180;
++  final c = math.cos(r), s = math.sin(r);
++  return far(x * c - y * s, x * s + y * c);
++}
++
++/// The next double above a positive [x]: one ulp.
++double nextUp(double x) {
++  final b = ByteData(8)..setFloat64(0, x);
++  b.setInt64(0, b.getInt64(0) + 1);
++  return b.getFloat64(0);
++}
++
++/// [from] plus [len] along [deg] degrees anticlockwise from +x.
++Vector2 polar(Vector2 from, double deg, double len) {
++  final r = deg * math.pi / 180;
++  return from + Vector2(math.cos(r), math.sin(r)) * len;
++}
++
++/// Wall [h]'s own group transform: a translation near the far origin times
++/// a rotation that is never a multiple of 90°. Every wall of a joint sits in
++/// its own (06's M-06o lesson).
++Transform2 groupAt(int h) => Transform2.translation(
++        ox - 950 + 311.5 * (h % 7), oy + 420 - 173.25 * (h % 5))
++    .multiply(Transform2.rotation(0.3 + 0.7 * (h % 9)));
++
++/// The meet of line p1p2 and line q1q2 by Cramer's rule on explicit
++/// coordinates — an oracle independent of `intersect`.
++Vector2 oracleMeet(Vector2 p1, Vector2 p2, Vector2 q1, Vector2 q2) {
++  final a1 = p2.y - p1.y, b1 = p1.x - p2.x, c1 = a1 * p1.x + b1 * p1.y;
++  final a2 = q2.y - q1.y, b2 = q1.x - q2.x, c2 = a2 * q1.x + b2 * q1.y;
++  final det = a1 * b2 - a2 * b1;
++  return Vector2((b2 * c1 - b1 * c2) / det, (a1 * c2 - a2 * c1) / det);
++}
++
++/// [w]'s face line at [offset] along its left normal (start to end), as two
++/// points, from its world coordinates.
++(Vector2, Vector2) face(WorldWall w, double offset) {
++  final dx = w.e.x - w.s.x, dy = w.e.y - w.s.y;
++  final len = math.sqrt(dx * dx + dy * dy);
++  final nx = -dy / len * offset, ny = dx / len * offset;
++  return (Vector2(w.s.x + nx, w.s.y + ny), Vector2(w.e.x + nx, w.e.y + ny));
++}
++
++/// The perpendicular distance from [p] to the line through [a] and [b].
++double distToLine(Vector2 p, Vector2 a, Vector2 b) {
++  final dx = b.x - a.x, dy = b.y - a.y;
++  return (dx * (p.y - a.y) - dy * (p.x - a.x)).abs() /
++      math.sqrt(dx * dx + dy * dy);
++}
++
++/// The foot of [p] on the line through [a] and [b].
++Vector2 project(Vector2 p, Vector2 a, Vector2 b) {
++  final d = b - a;
++  return a + d * ((p - a).dot(d) / d.dot(d));
++}
++
++/// Crossing-number point-in-polygon.
++bool insideRing(Vector2 p, List<Vector2> r) {
++  var c = false;
++  for (var i = 0, j = r.length - 1; i < r.length; j = i++) {
++    final a = r[i], b = r[j];
++    if ((a.y > p.y) != (b.y > p.y) &&
++        p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x) {
++      c = !c;
++    }
++  }
++  return c;
++}
++
++/// [count] points uniform in the disk of radius [r] about [centre].
++List<Vector2> diskSamples(Vector2 centre, double r,
++    {int count = 20000, int seed = 7}) {
++  final rnd = math.Random(seed);
++  return [
++    for (var i = 0; i < count; i++)
++      () {
++        final a = rnd.nextDouble() * 2 * math.pi;
++        final rad = r * math.sqrt(rnd.nextDouble());
++        return centre + Vector2(math.cos(a), math.sin(a)) * rad;
++      }(),
++  ];
++}
++
++/// How many samples in the disk of radius [r] about [centre] lie in two or
++/// more of [rings] — the overlap census.
++int overlapCensus(List<List<Vector2>> rings, Vector2 centre, double r) => [
++      for (final p in diskSamples(centre, r))
++        if (rings.where((g) => insideRing(p, g)).length >= 2) p
++    ].length;
++
++/// The points of [a] that also occur in [b], compared bitwise.
++List<Vector2> sharedBitwise(List<Vector2> a, List<Vector2> b) => [
++      for (final p in a)
++        if (b.any((q) => q.x == p.x && q.y == p.y)) p
++    ];
++
++/// The smallest distance from [p] to any point of [ring].
++double nearestIn(List<Vector2> ring, Vector2 p) =>
++    ring.map((q) => (q - p).length).reduce(math.min);
++
++// ---------------------------------------------------------------------------
++// Documents: walls through the parametric system (Task 5 onwards).
++
++/// Creates wall [h] in its own group [at] with the local parameters [p]:
++/// one command, as the Wall tool and 06's fixtures create an object.
++DraftCommand addWallLocal(
++        DraftDocument doc, Handle h, WallParams p, Transform2 at) =>
++    CompoundCommand([
++      AddNodeCommand(GroupNode(
++          handle: h,
++          parent: doc.rootHandle,
++          transform: at,
++          children: const [])),
++      SetComponentCommand<WallParams>(h, p),
++    ], label: 'Add wall');
++
++/// Creates wall [h] from world [s] to world [e] in group [at] (default
++/// [groupAt]`(h)`): its stored endpoints are [s] and [e] taken back through
++/// [at], so a joint drawn at one world point meets within rounding, not
++/// bitwise.
++DraftCommand addWall(DraftDocument doc, Handle h, Vector2 s, Vector2 e,
++    double t, Justification j,
++    {Transform2? at}) {
++  final g = at ?? groupAt(h.value);
++  final inv = g.invert();
++  final ls = inv.transformPoint(s), le = inv.transformPoint(e);
++  return addWallLocal(doc, h, WallParams(ls.x, ls.y, le.x, le.y, t, j), g);
++}
++
++/// [spoke]'s document form: wall [h] between [hub] and the point [len]
++/// along [deg], in a group at [hub] whose hub end is local `(0, 0)`, so its
++/// world hub end is **bitwise** [hub].
++DraftCommand addSpoke(DraftDocument doc, Handle h, Vector2 hub, double deg,
++    double len, double t, Justification j,
++    {required bool fromHub}) {
++  final g = Transform2.translation(hub.x, hub.y)
++      .multiply(Transform2.rotation(0.3 + 0.7 * (h.value % 9)));
++  final tip = g.invert().transformPoint(polar(hub, deg, len));
++  return addWallLocal(
++      doc,
++      h,
++      fromHub
++          ? WallParams(0, 0, tip.x, tip.y, t, j)
++          : WallParams(tip.x, tip.y, 0, 0, t, j),
++      g);
++}
++
++/// [group]'s children, ascending.
++List<Handle> kids(DraftDocument doc, Handle group) => [
++      for (final slot in doc.entities.liveSlots)
++        if (doc.entities.ownerAt(slot) == group) doc.entities.handleAt(slot),
++    ]..sort((a, b) => a.value.compareTo(b.value));
++
++EntityKind kindOf(DraftDocument doc, Handle h) =>
++    doc.entities.kindAt(doc.entities.slotOf(h)!);
++
++GeometryPayload payloadOf(DraftDocument doc, Handle h) =>
++    doc.geometry.read(doc.entities.geomIndexAt(doc.entities.slotOf(h)!));
++
++/// The points of a polyline payload, less a closed one's repeated first
++/// point.
++List<Vector2> pointsOf(GeometryPayload p, {bool closed = false}) {
++  final c = p.coords;
++  final n = c.length ~/ 2 - (closed ? 1 : 0);
++  return [for (var i = 0; i < n; i++) Vector2(c[2 * i], c[2 * i + 1])];
++}
++
++/// Wall [h] as the geometry reads it: its stored parameters under its
++/// group's accumulated transform.
++WorldWall worldWallOf(DraftDocument doc, Handle h) => WorldWall(
++    h, doc.components.get<WallParams>(h)!, doc.tree.accumulatedTransform(h));
++
++/// Wall [h]'s stored outline (the boundary its fill names), read back to
++/// world through its group's transform. Empty when it has no fill.
++List<Vector2> worldOutline(DraftDocument doc, Handle h) {
++  final fills = [
++    for (final k in kids(doc, h))
++      if (kindOf(doc, k) == EntityKind.fill) k
++  ];
++  if (fills.isEmpty) return const [];
++  final boundary = Handle(payloadOf(doc, fills.single).scalars[0].toInt());
++  final m = doc.tree.accumulatedTransform(h);
++  return [
++    for (final q in pointsOf(payloadOf(doc, boundary), closed: true))
++      m.transformPoint(q),
++  ];
++}
++
++/// The points of [a] within [tol] of some point of [b].
++List<Vector2> sharedNear(List<Vector2> a, List<Vector2> b,
++        [double tol = 1e-6]) =>
++    [
++      for (final p in a)
++        if (b.any((q) => (q - p).length < tol)) p
++    ];
++
++/// Whether [ring] has exactly four points, one within 1e-6 of each of
++/// [want].
++bool isRectNear(List<Vector2> ring, List<Vector2> want) =>
++    ring.length == 4 && want.every((p) => nearestIn(ring, p) < 1e-6);
++
++/// `drift()` of [doc] under the kit's types.
++List<Handle> driftOf(DraftDocument doc) =>
++    ParametricSystem(doc, kitCatalog()).drift();
++
++/// `diagnostics()` of [doc] under the kit's types.
++List<Diagnostic> diagnosticsOf(DraftDocument doc) =>
++    ParametricSystem(doc, kitCatalog()).diagnostics();
++
++String enc(DraftDocument d) => DraftDocumentCodec.encodeToString(d);
++
++/// Entities sorted by handle: slot order is history, not state (06 D11).
++String canon(DraftDocument d) {
++  final j = DraftDocumentCodec.encode(d);
++  j['entities'] = List<Map<String, Object?>>.from(j['entities']! as List)
++    ..sort((a, b) => ((a['record']! as Map)['handle']! as int)
++        .compareTo((b['record']! as Map)['handle']! as int));
++  return jsonEncode(j);
++}
++
++// test/support/wall_shell.dart, unchanged.
++// Document-level assertions shared by the Wall tool's and the end grips'
++// shell tests.
++
++/// Every wall, ascending by handle.
++List<Handle> walls(DraftDocument doc) =>
++    doc.components.withComponent<WallParams>().toList();
++
++/// [p]'s coordinates, for exact list comparison.
++List<double> xy(Vector2 p) => [p.x, p.y];
++
++/// A stored wall's left and right face offsets (spec 07 D2), written out
++/// here rather than read from `WorldWall.offsets`.
++(double, double) facesOf(WallParams p) => switch (p.justification) {
++      Justification.centre => (p.thickness / 2, -p.thickness / 2),
++      Justification.left => (p.thickness, 0),
++      Justification.right => (0, -p.thickness),
++    };
++
++/// Wall [a] runs into a node that wall [b] runs out of: they share exactly
++/// two outline corners, each at the Cramer meet of the faces on its side.
++void expectMitre(DraftDocument doc, Handle a, Handle b) {
++  final wa = worldWallOf(doc, a), wb = worldWallOf(doc, b);
++  final ra = worldOutline(doc, a), rb = worldOutline(doc, b);
++  final shared = sharedNear(ra, rb);
++  expect(shared, hasLength(2), reason: '${a.toHex()} / ${b.toHex()}');
++  final (al, ar) = facesOf(doc.components.get<WallParams>(a)!);
++  final (bl, br) = facesOf(doc.components.get<WallParams>(b)!);
++  final (a1, a2) = face(wa, al);
++  final (b1, b2) = face(wb, bl);
++  final (a3, a4) = face(wa, ar);
++  final (b3, b4) = face(wb, br);
++  expect(nearestIn(shared, oracleMeet(a1, a2, b1, b2)), lessThan(1e-6));
++  expect(nearestIn(shared, oracleMeet(a3, a4, b3, b4)), lessThan(1e-6));
++}
++
++/// Wall [h]'s outline is its plain rectangle: both ends square.
++void expectSquare(DraftDocument doc, Handle h) {
++  final w = worldWallOf(doc, h);
++  final (l, r) = facesOf(doc.components.get<WallParams>(h)!);
++  final (a, b) = face(w, l);
++  final (c, d) = face(w, r);
++  expect(isRectNear(worldOutline(doc, h), [a, b, c, d]), isTrue,
++      reason: '${h.toHex()} is square at both ends');
++}
+diff --git a/packages/jet_cad_2d_integration/test/support/wall_shell.dart b/packages/jet_cad_2d_integration/test/support/wall_shell.dart
+new file mode 100644
+index 00000000..ebeb5a32
+--- /dev/null
++++ b/packages/jet_cad_2d_integration/test/support/wall_shell.dart
+@@ -0,0 +1,124 @@
++// The wall cases' shell harness (jet_cad_floor_plan/test/wall_tool_test.dart
++// :37-118 and wall_grips_test.dart:36-121), over the editor rig (R-P14:
++// pumpEditor, globalOf, globalAt, status, press are the rig's): a plan of the
++// architecture kit built in a new plan's document and saved, so the
++// controller opens it as a file with no undo history; the pointer and key
++// gestures of today's cases; the Wall tool's settings set through the
++// property panel's settings fields. Public libraries only (R-P1).
++import 'package:flutter/gestures.dart' show PointerDeviceKind, kPrimaryButton;
++import 'package:flutter/material.dart';
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
++import 'package:jet_cad_2d_integration/jet_cad_2d_integration.dart';
++import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import 'editor_rig.dart';
++import 'wall_fixture.dart';
++
++/// The pages' fixed grid step (wall_tool_test.dart:34,
++/// wall_grips_test.dart:35).
++const double gridStep = 10;
++
++/// Today's 1:20 page near the far origin, grid snap on at [gridStep].
++PageComponent wallPage() => PageComponent(
++    scaleDenominator: 20,
++    originX: ox - 2000,
++    originY: oy - 2000,
++    gridStepMm: gridStep);
++
++/// A plan of the architecture kit as a file: a new plan's document given
++/// [page], then [build] run on it (the kit's system regenerates what it
++/// adds), saved through the controller (its manifest names the kit).
++/// Opened, it has no undo history (today's fixtures' `clearHistory`).
++String wallPlanJson(
++    PageComponent page, void Function(DraftDocument doc) build) {
++  final c = architectureController();
++  try {
++    c.document.commands.execute(
++        SetComponentCommand<PageComponent>(c.document.rootHandle, page));
++    build(c.document);
++    return c.save();
++  } finally {
++    c.dispose();
++  }
++}
++
++/// A controller over [plan], disposed at tear-down.
++PlanController wallController(String plan) {
++  final c = architectureController(json: plan);
++  addTearDown(c.dispose);
++  return c;
++}
++
++/// A primary click at world [p] plus the raw offset `(dx, dy)` in mm.
++Future<void> clickAt(WidgetTester tester, PlanController c, Vector2 p,
++    [double dx = 0, double dy = 0]) async {
++  await tester.tapAt(globalAt(tester, c, Vector2(p.x + dx, p.y + dy)));
++  await tester.pump();
++}
++
++/// A click near [p]: 12 mm and -9 mm off, well inside the aperture.
++Future<void> clickNear(WidgetTester tester, PlanController c, Vector2 p) =>
++    clickAt(tester, c, p, 12, -9);
++
++Future<void> undoKey(WidgetTester tester) async {
++  await tester.sendKeyDownEvent(LogicalKeyboardKey.meta);
++  await press(tester, LogicalKeyboardKey.keyZ);
++  await tester.sendKeyUpEvent(LogicalKeyboardKey.meta);
++  await tester.pump();
++}
++
++/// The page grid's point nearest [p], as the drag chain computes it.
++Vector2 gridOf(DraftDocument doc, Vector2 p) =>
++    snapToGrid(p, gridStep, doc.components.get<PageComponent>(doc.rootHandle)!);
++
++/// Sets the active Wall tool's settings through the property panel's
++/// settings fields, as today's cases set the tool's notifier
++/// (`wallTool(tester).settings.value = ...`, ruling R12-1): [thickness]
++/// typed and committed with Enter (which hands the focus back to the
++/// canvas), then [justification] picked from its menu.
++Future<void> setWallSettings(WidgetTester tester,
++    {required String thickness, required Justification justification}) async {
++  await tester.enterText(find.byKey(const Key('setting-thickness')), thickness);
++  await tester.testTextInput.receiveAction(TextInputAction.done);
++  await tester.pump();
++  await tester.tap(find.byKey(const Key('setting-justification')));
++  await tester.pumpAndSettle();
++  await tester
++      .tap(find.byKey(Key('setting-justification-${justification.name}')).last);
++  await tester.pumpAndSettle();
++}
++
++/// Selects wall [h] with a click in the middle of its band, 40% along it,
++/// away from both of its grips (wall_grips_test.dart:84-93).
++Future<void> selectWall(WidgetTester tester, PlanController c, Handle h) async {
++  final w = worldWallOf(c.document, h);
++  final n = Vector2(-w.d.y, w.d.x);
++  final (l, r) = facesOf(c.document.components.get<WallParams>(h)!);
++  await tester
++      .tapAt(globalAt(tester, c, w.s + (w.e - w.s) * 0.4 + n * ((l + r) / 2)));
++  await tester.pump();
++  expect(c.activeSelection.keys, [SelectionKey.root(h)]);
++}
++
++/// A mouse drag from world [from] to world [to], past the slop at once.
++Future<void> dragWorld(
++    WidgetTester tester, PlanController c, Vector2 from, Vector2 to) async {
++  final a = globalAt(tester, c, from), b = globalAt(tester, c, to);
++  final gesture = await tester.createGesture(
++      kind: PointerDeviceKind.mouse, buttons: kPrimaryButton);
++  await gesture.down(a);
++  await gesture.moveTo(a + const Offset(12, 0));
++  await gesture.moveTo(b);
++  await gesture.up();
++  await gesture.removePointer();
++  await tester.pump();
++}
++
++/// Wall [h]'s end [k] in world.
++Vector2 endOf(DraftDocument doc, Handle h, int k) =>
++    worldWallOf(doc, h).endpoint(k);
+diff --git a/packages/jet_cad_2d_integration/test/wall/wall_grips_test.dart b/packages/jet_cad_2d_integration/test/wall/wall_grips_test.dart
+new file mode 100644
+index 00000000..817fc7c8
+--- /dev/null
++++ b/packages/jet_cad_2d_integration/test/wall/wall_grips_test.dart
+@@ -0,0 +1,398 @@
++// Ported from jet_cad_floor_plan/test/wall_grips_test.dart (3a Task 12):
++// EG1-EG6, over a PlanController of the architecture kit in PlanEditor,
++// assertions unchanged; the provider-direct tails of EG1, EG3, EG4 and EG6
++// use the kit's WallGrips and run in the kit as EG1-k, EG3-k, EG4-k and
++// EG6-k (R-P1, R12-3); the shown grips are the controller's grip cache
++// (R-P9). EG7, EG8 move to Task 17 and EG9, EG10 to Task 21 (R-P8).
++// WG-refuse-short is new (Review Focus 3's kit half, R-P15).
++// ignore_for_file: invalid_use_of_internal_member
++import 'package:flutter/gestures.dart' show PointerDeviceKind, kPrimaryButton;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
++import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/editor_rig.dart';
++import '../support/wall_fixture.dart';
++import '../support/wall_shell.dart';
++
++/// A 1:20 page near the far origin with grid snap on at [gridStep], and
++/// the walls [build] adds, as a plan with no undo history
++/// (wall_grips_test.dart:36-56's `gripDoc`).
++String gripPlan(void Function(DraftDocument doc) build) =>
++    wallPlanJson(wallPage(), build);
++
++/// The shown grips of wall [h], as (index, x, y): the controller's grip
++/// cache (wall_grips_test.dart:127-131's `gripsOf(view, h)`).
++List<(int, double, double)> gripsOf(PlanController c, Handle h) => [
++      for (final r in c.grips.grips)
++        if (r.key == SelectionKey.root(h)) (r.grip.index, r.grip.x, r.grip.y),
++    ];
++
++const Handle wa = Handle(1300), wb = Handle(2600), wc = Handle(3900);
++
++/// An L at the far origin: A (200, centre) runs into [lCorner] and B (115,
++/// left) runs out of it at 110 degrees, each in its own rotated group, so
++/// their ends at the corner meet within rounding, not bitwise. C (150,
++/// right) starts 3 mm from the corner: near it, but not joined.
++final Vector2 lStart = plan(0, 0), lCorner = plan(3000, 0);
++final Vector2 lEnd = polar(lCorner, 23 + 110, 2500);
++final Vector2 cStart = polar(lCorner, 23 - 120, 3);
++
++void addL(DraftDocument doc, {bool withC = true}) {
++  doc.commands
++      .execute(addWall(doc, wa, lStart, lCorner, 200, Justification.centre));
++  doc.commands
++      .execute(addWall(doc, wb, lCorner, lEnd, 115, Justification.left));
++  if (withC) {
++    doc.commands.execute(addWall(doc, wc, cStart, polar(cStart, 23 - 120, 1500),
++        150, Justification.right));
++  }
++}
++
++void main() {
++  testWidgets(
++      'EG1 a free end drags to the resolved point, stored in its own group, '
++      'the other end untouched; one undo step; a degenerate drop is refused, '
++      'and a drag back onto the grip dispatches nothing', (tester) async {
++    final ctrl = wallController(gripPlan((doc) {
++      doc.commands.execute(addWall(
++          doc, wa, plan(0, 0), plan(3000, 400), 200, Justification.centre));
++    }));
++    final doc = ctrl.document;
++    await pumpEditor(tester, ctrl, centre: plan(1500, 400), scale: 0.15);
++    final before = canon(doc);
++    final p0 = doc.components.get<WallParams>(wa)!;
++    await selectWall(tester, ctrl, wa);
++    final q = gridOf(doc, plan(3300, 1200));
++    await dragWorld(tester, ctrl, endOf(doc, wa, 1), q);
++    expect(doc.commands.undoDepth, 1);
++    final p = doc.components.get<WallParams>(wa)!;
++    expect(xy(p.start), xy(p0.start), reason: 'the start is untouched');
++    final local = doc.tree.accumulatedTransform(wa).invert().transformPoint(q);
++    expect(xy(p.end), xy(local), reason: "the group's local space, exactly");
++    expect((endOf(doc, wa, 1) - q).length, lessThan(1e-6));
++    expect([p.thickness, p.justification], [200, Justification.centre]);
++    expectSquare(doc, wa);
++    expect(driftOf(doc), isEmpty);
++    await undoKey(tester);
++    expect(canon(doc), before);
++
++    // Dropped onto its own start (object snap puts it there): the wall
++    // would be degenerate, so the drag is refused and nothing changes.
++    await dragWorld(
++        tester, ctrl, endOf(doc, wa, 1), endOf(doc, wa, 0) + Vector2(4, -3));
++    expect(doc.commands.undoDepth, 0);
++    expect(canon(doc), before);
++    // Dragged out and back onto itself: the release resolves onto the
++    // grip's own point, so the drag is a no-op and dispatches nothing
++    // (Task 7 review, m1).
++    final end = endOf(doc, wa, 1);
++    final a = globalAt(tester, ctrl, end);
++    final gesture = await tester.createGesture(
++        kind: PointerDeviceKind.mouse, buttons: kPrimaryButton);
++    await gesture.down(a);
++    await gesture.moveTo(a + const Offset(12, 0));
++    await gesture.moveTo(globalAt(tester, ctrl, plan(3600, 1500)));
++    await tester.pump();
++    await gesture.moveTo(a);
++    await gesture.up();
++    await gesture.removePointer();
++    await tester.pump();
++    expect(doc.commands.undoDepth, 0);
++    expect(canon(doc), before);
++    // The provider directly: EG1-k (the kit).
++  });
++
++  testWidgets(
++      'EG2 a selected wall shows two grips at the world endpoints of its '
++      'rotated group; after a drag they sit at the new world endpoints',
++      (tester) async {
++    final ctrl = wallController(gripPlan((doc) => addL(doc)));
++    final doc = ctrl.document;
++    await pumpEditor(tester, ctrl, centre: lCorner, scale: 0.15);
++    await selectWall(tester, ctrl, wb);
++    final w = worldWallOf(doc, wb);
++    expect(gripsOf(ctrl, wb), [(0, w.s.x, w.s.y), (1, w.e.x, w.e.y)],
++        reason: 'bitwise where WorldWall puts them');
++    expect(ctrl.grips.grips.every((r) => r.object), isTrue);
++    final local = doc.components.get<WallParams>(wb)!;
++    expect((local.start - w.s).length, greaterThan(1000),
++        reason: 'the group is not at the identity');
++    final q = gridOf(doc, polar(lEnd, 23 + 20, 600));
++    await dragWorld(tester, ctrl, w.e, q);
++    final after = worldWallOf(doc, wb);
++    expect(xy(after.s), xy(w.s));
++    expect((after.e - q).length, lessThan(1e-6));
++    expect(gripsOf(ctrl, wb),
++        [(0, after.s.x, after.s.y), (1, after.e.x, after.e.y)]);
++  });
++
++  testWidgets(
++      "EG3 dragging an L's shared end moves both walls' ends in one undo "
++      'step, still mitred; a wall 3 mm off stays (Review Focus 3, M-07q)',
++      (tester) async {
++    final ctrl = wallController(gripPlan((doc) => addL(doc)));
++    final doc = ctrl.document;
++    expect((endOf(doc, wa, 1) - endOf(doc, wb, 0)).length,
++        inExclusiveRange(0, wallJoin.linear),
++        reason: 'joined within rounding, not bitwise');
++    expectMitre(doc, wa, wb);
++    await pumpEditor(tester, ctrl, centre: lCorner, scale: 0.15);
++    final before = canon(doc);
++    final pa = doc.components.get<WallParams>(wa)!;
++    final pb = doc.components.get<WallParams>(wb)!;
++    final pc = doc.components.get<WallParams>(wc)!;
++    await selectWall(tester, ctrl, wa);
++    final q = gridOf(doc, plan(3500, -400));
++    await dragWorld(tester, ctrl, endOf(doc, wa, 1), q);
++    expect(doc.commands.undoDepth, 1, reason: 'one undo step');
++    for (final (h, k) in [(wa, 1), (wb, 0)]) {
++      final local = doc.tree.accumulatedTransform(h).invert().transformPoint(q);
++      final p = doc.components.get<WallParams>(h)!;
++      expect(xy(k == 0 ? p.start : p.end), xy(local),
++          reason: "${h.toHex()} in its own group's local space");
++      expect((endOf(doc, h, k) - q).length, lessThan(1e-6));
++    }
++    expect(xy(doc.components.get<WallParams>(wa)!.start), xy(pa.start));
++    expect(xy(doc.components.get<WallParams>(wb)!.end), xy(pb.end));
++    expect(doc.components.get<WallParams>(wc), pc, reason: 'C is not joined');
++    expectMitre(doc, wa, wb);
++    expectSquare(doc, wc);
++    expect(driftOf(doc), isEmpty);
++    expect(diagnosticsOf(doc), isEmpty);
++    await undoKey(tester);
++    expect(canon(doc), before);
++    expectMitre(doc, wa, wb);
++
++    // The provider directly: EG3-k (the kit).
++  });
++
++  testWidgets(
++      "EG4 a three-way node's end drags all three walls' ends, one undo "
++      'step', (tester) async {
++    final hub = plan(1500, 1500);
++    const spokes = [
++      (wa, 20.0, 200.0, Justification.centre, true),
++      (wb, 140.0, 115.0, Justification.left, false),
++      (wc, 255.0, 150.0, Justification.right, true),
++    ];
++    final ctrl = wallController(gripPlan((doc) {
++      for (final (h, deg, t, j, fromHub) in spokes) {
++        doc.commands.execute(
++            addSpoke(doc, h, hub, deg + 23, 2000, t, j, fromHub: fromHub));
++      }
++    }));
++    final doc = ctrl.document;
++    int hubEnd(bool fromHub) => fromHub ? 0 : 1;
++    final far = {
++      for (final (h, _, _, _, fromHub) in spokes)
++        h: endOf(doc, h, 1 - hubEnd(fromHub)),
++    };
++    await pumpEditor(tester, ctrl, centre: hub, scale: 0.15);
++    final before = canon(doc);
++    await selectWall(tester, ctrl, wb);
++    final q = gridOf(doc, polar(hub, 23 + 80, 500));
++    await dragWorld(tester, ctrl, endOf(doc, wb, 1), q);
++    expect(doc.commands.undoDepth, 1);
++    for (final (h, _, _, _, fromHub) in spokes) {
++      final k = hubEnd(fromHub);
++      expect((endOf(doc, h, k) - q).length, lessThan(1e-6),
++          reason: '${h.toHex()} follows');
++      expect(xy(endOf(doc, h, 1 - k)), xy(far[h]!),
++          reason: '${h.toHex()} keeps its far end');
++      expect(worldOutline(doc, h), isNotEmpty);
++    }
++    expect(driftOf(doc), isEmpty);
++    await undoKey(tester);
++    expect(canon(doc), before);
++    // The provider directly: EG4-k (the kit).
++  });
++
++  testWidgets(
++      'EG5 a whole-wall move detaches it: the moved wall and its old '
++      'neighbour both square their ends, in one step', (tester) async {
++    final ctrl = wallController(gripPlan((doc) => addL(doc, withC: false)));
++    final doc = ctrl.document;
++    expectMitre(doc, wa, wb);
++    final pa = doc.components.get<WallParams>(wa)!;
++    final pb = doc.components.get<WallParams>(wb)!;
++    await pumpEditor(tester, ctrl, centre: lCorner, scale: 0.15);
++    await selectWall(tester, ctrl, wb);
++    // A body drag from inside B's band, 700 mm away from A.
++    final w = worldWallOf(doc, wb);
++    final from = w.s + (w.e - w.s) * 0.5;
++    await dragWorld(tester, ctrl, from, polar(from, 23 - 30, 700));
++    expect(doc.commands.undoDepth, 1);
++    expect(doc.components.get<WallParams>(wb), pb,
++        reason: 'a move changes the group, not the parameters');
++    expect(doc.components.get<WallParams>(wa), pa);
++    expect((endOf(doc, wb, 0) - lCorner).length, greaterThan(500));
++    expectSquare(doc, wa);
++    expectSquare(doc, wb);
++    expect(driftOf(doc), isEmpty);
++    await undoKey(tester);
++    expectMitre(doc, wa, wb);
++  });
++
++  testWidgets(
++      "EG6 (post-11 (e)) an L's corner drag moves the live walls only: a "
++      "file's stray WallParams with an end on the joint, on a handle with no "
++      'node, on a group nested in a turned group and on a root-level '
++      'instance, is left alone and offers no grips; one undo step',
++      (tester) async {
++    // Built by hand: no tool makes these; only a file brings them in.
++    const plain = Handle(5000), nested = Handle(5100), bare = Handle(5200);
++    const inst = Handle(5300), def = Handle(5400);
++    final ctrl = wallController(gripPlan((doc) {
++      addL(doc);
++      doc.tree.addDefinition(Definition(
++          handle: def,
++          name: 'D',
++          basePoint: Vector2.zero(),
++          children: const []));
++      doc.commands.execute(CompoundCommand([
++        AddNodeCommand(GroupNode(
++            handle: plain,
++            parent: doc.rootHandle,
++            transform: Transform2.translation(ox + 700.25, oy - 310.5)
++                .multiply(Transform2.rotation(1.1)),
++            children: const [])),
++        AddNodeCommand(GroupNode(
++            handle: nested,
++            parent: plain,
++            transform: Transform2.translation(-250.5, 480.75)
++                .multiply(Transform2.rotation(-0.6)),
++            children: const [])),
++        AddNodeCommand(InstanceNode(
++            handle: inst,
++            parent: doc.rootHandle,
++            transform: Transform2.translation(ox + 333.5, oy - 222.25)
++                .multiply(Transform2.rotation(0.8)),
++            definition: def,
++            layer: ReservedHandles.layerZero)),
++      ], label: 'Add groups'));
++    }));
++    final doc = ctrl.document;
++    // Written straight into the store, as a file brings them in: the bare
++    // stray's start, and the nested and the instance strays' ends, sit on
++    // the corner in world.
++    final toNested = doc.tree.accumulatedTransform(nested).invert();
++    final nestedStart = toNested.transformPoint(polar(lCorner, 23 - 60, 1800));
++    final nestedEnd = toNested.transformPoint(lCorner);
++    final strayBare = WallParams(lCorner.x, lCorner.y, lCorner.x + 900.5,
++        lCorner.y - 1200.25, 120, Justification.left);
++    final strayNested = WallParams(nestedStart.x, nestedStart.y, nestedEnd.x,
++        nestedEnd.y, 90, Justification.right);
++    final toInst = doc.tree.accumulatedTransform(inst).invert();
++    final instStart = toInst.transformPoint(polar(lCorner, 23 + 150, 1400.5));
++    final instEnd = toInst.transformPoint(lCorner);
++    final strayInst = WallParams(instStart.x, instStart.y, instEnd.x, instEnd.y,
++        100, Justification.left);
++    doc.components
++      ..attach<WallParams>(bare, strayBare)
++      ..attach<WallParams>(nested, strayNested)
++      ..attach<WallParams>(inst, strayInst);
++    expect(doc.tree[bare], isNull, reason: 'no node');
++    expect(doc.tree[nested], isA<GroupNode>());
++    expect(doc.tree[inst], isA<InstanceNode>());
++    expect(doc.tree[inst]!.parent, doc.rootHandle, reason: 'root-level');
++    expect((strayNested.end - lCorner).length, greaterThan(1000),
++        reason: 'the nested group is not at the identity');
++    expect((strayInst.end - lCorner).length, greaterThan(1000),
++        reason: 'the instance is not at the identity');
++    final corner = endOf(doc, wa, 1);
++    for (final (h, k) in [(bare, 0), (nested, 1), (inst, 1)]) {
++      expect((endOf(doc, h, k) - corner).length, lessThan(wallJoin.linear),
++          reason: '${h.toHex()} is on the joint in world: only liveness '
++              'excludes it');
++    }
++
++    await pumpEditor(tester, ctrl, centre: lCorner, scale: 0.15);
++    final before = canon(doc);
++    final diagnostics = diagnosticsOf(doc);
++    final pa = doc.components.get<WallParams>(wa)!;
++    final pb = doc.components.get<WallParams>(wb)!;
++    await selectWall(tester, ctrl, wa);
++    final q = gridOf(doc, plan(3500, -400));
++    await dragWorld(tester, ctrl, corner, q);
++    expect(doc.commands.undoDepth, 1, reason: 'the commit succeeds');
++    for (final (h, k) in [(wa, 1), (wb, 0)]) {
++      expect((endOf(doc, h, k) - q).length, lessThan(1e-6),
++          reason: '${h.toHex()} follows');
++    }
++    expect(xy(doc.components.get<WallParams>(wa)!.start), xy(pa.start));
++    expect(xy(doc.components.get<WallParams>(wb)!.end), xy(pb.end));
++    expect(doc.components.get<WallParams>(bare), strayBare);
++    expect(doc.components.get<WallParams>(nested), strayNested);
++    expect(doc.components.get<WallParams>(inst), strayInst);
++    expectMitre(doc, wa, wb);
++    expect(driftOf(doc), isEmpty);
++    expect(diagnosticsOf(doc), diagnostics);
++    await undoKey(tester);
++    expect(canon(doc), before);
++    expect(doc.components.get<WallParams>(bare), strayBare);
++    expect(doc.components.get<WallParams>(nested), strayNested);
++    expect(doc.components.get<WallParams>(inst), strayInst);
++
++    // The provider directly: EG6-k (the kit).
++  });
++
++  testWidgets(
++      'WG-refuse-short (Review Focus 3, spec 3a C1.8) a wall-end grip dragged '
++      "onto the wall's other end, where the wall would be no longer than the "
++      'join tolerance: a drop there commits nothing and reports nothing; a '
++      'drag that passes it and ends on an accepted point commits that point '
++      'in one undo step; the grips stay usable', (tester) async {
++    final ctrl = wallController(gripPlan((doc) {
++      doc.commands.execute(addWall(
++          doc, wa, plan(0, 0), plan(3000, 400), 200, Justification.left));
++    }));
++    final doc = ctrl.document;
++    await pumpEditor(tester, ctrl, centre: plan(1500, 400), scale: 0.15);
++    final before = canon(doc);
++    final reports = ctrl.diagnostics.value.length;
++    await selectWall(tester, ctrl, wa);
++
++    // Through the start (object snap puts the pointer on it: the wall
++    // would be degenerate there) to an accepted grid point: one step.
++    final q = gridOf(doc, plan(3400, 1300));
++    final from = globalAt(tester, ctrl, endOf(doc, wa, 1));
++    final gesture = await tester.createGesture(
++        kind: PointerDeviceKind.mouse, buttons: kPrimaryButton);
++    await gesture.down(from);
++    await gesture.moveTo(from + const Offset(12, 0));
++    await gesture
++        .moveTo(globalAt(tester, ctrl, endOf(doc, wa, 0) + Vector2(4, -3)));
++    await tester.pump();
++    await gesture.moveTo(globalAt(tester, ctrl, q));
++    await gesture.up();
++    await gesture.removePointer();
++    await tester.pump();
++    expect(tester.takeException(), isNull);
++    expect(doc.commands.undoDepth, 1);
++    expect((endOf(doc, wa, 1) - q).length, lessThan(1e-6));
++    expect(ctrl.diagnostics.value, hasLength(reports));
++
++    // Dropped on the start: refused; nothing committed, nothing reported.
++    final moved = canon(doc);
++    await dragWorld(
++        tester, ctrl, endOf(doc, wa, 1), endOf(doc, wa, 0) + Vector2(4, -3));
++    expect(tester.takeException(), isNull);
++    expect(doc.commands.undoDepth, 1);
++    expect(canon(doc), moved);
++    expect(ctrl.diagnostics.value, hasLength(reports));
++
++    // The grips stay usable: the next drag lands, one more step.
++    final r = gridOf(doc, plan(2600, -700));
++    await dragWorld(tester, ctrl, endOf(doc, wa, 1), r);
++    expect(doc.commands.undoDepth, 2);
++    expect((endOf(doc, wa, 1) - r).length, lessThan(1e-6));
++    expect(ctrl.diagnostics.value, hasLength(reports));
++    await undoKey(tester);
++    await undoKey(tester);
++    expect(canon(doc), before);
++  });
++}
+diff --git a/packages/jet_cad_2d_integration/test/wall/wall_paint_test.dart b/packages/jet_cad_2d_integration/test/wall/wall_paint_test.dart
+new file mode 100644
+index 00000000..1e35d1c1
+--- /dev/null
++++ b/packages/jet_cad_2d_integration/test/wall/wall_paint_test.dart
+@@ -0,0 +1,102 @@
++// Ported from jet_cad_floor_plan/test/wall_paint_test.dart (3a Task 12): WP5 over a PlanController of the architecture kit in PlanEditor, assertions unchanged.
++import 'dart:typed_data';
++import 'dart:ui' as ui;
++
++import 'package:flutter/material.dart';
++import 'package:flutter/rendering.dart';
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
++    show InteractionLayer;
++import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/editor_rig.dart';
++import '../support/wall_fixture.dart';
++import '../support/wall_shell.dart';
++
++/// The wall drawn with W: 3,000 mm at 23° about the far origin, 200 mm
++/// thick by the tool's default, well inside the page.
++final Vector2 _a = plan(-1500, 0), _b = plan(1500, 0);
++
++/// Relative luminance of one RGBA pixel, 0 (black) to 1 (white).
++double _luminance(ByteData d, int i) =>
++    (0.2126 * d.getUint8(i) +
++        0.7152 * d.getUint8(i + 1) +
++        0.0722 * d.getUint8(i + 2)) /
++    255;
++
++void main() {
++  testWidgets(
++      'WP5 a wall drawn with W paints a dark band on white paper, not a '
++      'paper-white one (07 D3, smoke test)', (tester) async {
++    final ctrl = wallController(wallPlanJson(
++        PageComponent(
++            scaleDenominator: 20,
++            originX: ox - 2900,
++            originY: oy - 2000,
++            snapToGrid: false),
++        (_) {}));
++    final doc = ctrl.document;
++    expect(doc.components.get<PageComponent>(doc.rootHandle)!.background,
++        0xFFFFFFFF);
++
++    // Rotated, 0.2 px per mm: the band is 40 px wide.
++    await pumpEditor(tester, ctrl, centre: far(0, 0), scale: 0.2);
++
++    Offset globalOf(Vector2 p) {
++      final s = ctrl.camera.value.worldToScreen(p);
++      return tester.getTopLeft(find.byType(InteractionLayer)) +
++          Offset(s.x, s.y);
++    }
++
++    await tester.sendKeyEvent(LogicalKeyboardKey.keyW);
++    await tester.pump();
++    await tester.tapAt(globalOf(_a));
++    await tester.pump();
++    await tester.tapAt(globalOf(_b));
++    await tester.pump();
++    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
++    await tester.pump();
++    final walls = doc.components.withComponent<WallParams>().toList();
++    expect(walls, hasLength(1));
++    final w = worldWallOf(doc, walls.single);
++    expect(w.t, 200);
++    expect(w.j, Justification.centre);
++
++    final boundary = tester.renderObject<RenderRepaintBoundary>(find
++        .ancestor(
++            of: find.byType(InteractionLayer),
++            matching: find.byType(RepaintBoundary))
++        .last);
++    final origin = boundary.localToGlobal(Offset.zero);
++    final (pixels, width) = (await tester.runAsync(() async {
++      final image = await boundary.toImage();
++      final bytes = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
++      final width = image.width;
++      image.dispose();
++      return (bytes!, width);
++    }))!;
++    double lumAt(Vector2 p) {
++      final o = globalOf(p) - origin;
++      return _luminance(pixels, (o.dy.round() * width + o.dx.round()) * 4);
++    }
++
++    // Along the wall at fractions that sit off the 10 mm grid, on the
++    // centreline and 50 mm to either side of it (inside the 100 mm half
++    // band); and the paper 400 mm off the band, as the control.
++    final n = Vector2(-w.d.y, w.d.x);
++    for (final f in const [0.23, 0.41, 0.57, 0.77]) {
++      final c = w.s + (w.e - w.s) * f;
++      for (final off in const [0.0, 50.0, -50.0]) {
++        expect(lumAt(c + n * off), lessThan(0.2),
++            reason: 'band at $f, offset $off');
++      }
++      for (final off in const [403.0, -397.0]) {
++        expect(lumAt(c + n * off), greaterThan(0.7),
++            reason: 'paper at $f, offset $off');
++      }
++    }
++  });
++}
+diff --git a/packages/jet_cad_2d_integration/test/wall/wall_tool_test.dart b/packages/jet_cad_2d_integration/test/wall/wall_tool_test.dart
+new file mode 100644
+index 00000000..0789d05f
+--- /dev/null
++++ b/packages/jet_cad_2d_integration/test/wall/wall_tool_test.dart
+@@ -0,0 +1,553 @@
++// Ported from jet_cad_floor_plan/test/wall_tool_test.dart (3a Task 12):
++// the cases that pump the shell (WT1-WT9, WT14, RF2, WT19), over a
++// PlanController of the architecture kit in PlanEditor, assertions
++// unchanged but for R-P1's: public libraries only, so the tool's settings
++// are set through the property panel's settings fields (R12-1),
++// `isPending` is read as the guard's `isMidShape` (the rig's activeTool;
++// PlacementTool's isMidShape is its isPending, placement_tool.dart:76),
++// and the joint kinds (`classify`, a kit internal) are asserted by the
++// kit's companions WT3-k and WT9-k (R12-2). The direct cases (WT10-WT13,
++// WT15-WT18, WT20) run in the kit.
++import 'dart:math' as math;
++
++import 'package:flutter/material.dart';
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/editor_rig.dart';
++import '../support/wall_fixture.dart';
++import '../support/wall_shell.dart';
++
++// The room of WR12, turned 23° about the far origin: no corner is square,
++// no wall is axis-aligned, and every coordinate is irrational.
++final Vector2 c0 = plan(0, 0), c1 = plan(4000, 300);
++final Vector2 c2 = plan(3600, 3100), c3 = plan(-200, 2700);
++
++/// A point inside the room, off every wall: the T's stem starts here.
++final Vector2 s0 = plan(1300, 1900);
++
++final Vector2 _centre = plan(1850, 1500);
++
++/// A 1:20 page near the far origin, **grid snap on** at [gridStep], and
++/// (with [ticks]) one survey tick per point of [c0]..[c3] and [s0]: a root
++/// LINE from the point, 400 mm outward. A click near a point snaps onto the
++/// tick's endpoint (object snap beats the grid), so the snapped point is
++/// known exactly and differs from the raw pointer point.
++String wallShellPlan({bool ticks = true}) => wallPlanJson(wallPage(), (doc) {
++      for (final p in [
++        if (ticks) ...[c0, c1, c2, c3, s0]
++      ]) {
++        final out = (p - _centre).normalized() * 400;
++        doc.commands.execute(addDrafted(
++            doc, EntityKind.line, linePayload(p, p + out),
++            layer: ReservedHandles.layerZero));
++      }
++    });
++
++/// Pumps the editor over [plan] with a rotated, **non-reflecting** camera
++/// centred on the room at the far origin, 0.15 px per mm: the room is
++/// ~600 px across and the snap aperture is 10 / 0.15 ≈ 66.7 mm.
++Future<PlanController> pumpWalls(WidgetTester tester, String plan) async {
++  final pc = wallController(plan);
++  await pumpEditor(tester, pc, centre: _centre, scale: 0.15);
++  return pc;
++}
++
++/// The unit left normal of the line from [a] to [b].
++Vector2 leftOf(Vector2 a, Vector2 b) {
++  final d = (b - a).normalized();
++  return Vector2(-d.y, d.x);
++}
++
++/// Wall [stem]'s end (index 1) is a T on [host], coming from the side of
++/// [host]'s left normal given by [fromSign] (+1 left, -1 right): the stem
++/// ends on the centreline, and its two cap corners lie on the host's face
++/// on that side, far from the other face (WG4's property, in the
++/// document).
++void expectTee(DraftDocument doc, Handle host, Handle stem,
++    {required double fromSign}) {
++  final ph = doc.components.get<WallParams>(host)!;
++  final ps = doc.components.get<WallParams>(stem)!;
++  final wh = worldWallOf(doc, host);
++  expect(distToLine(ps.end, wh.s, wh.e), lessThan(wallJoin.linear),
++      reason: '${stem.toHex()} ends on the centreline');
++  // classify: WT3-k (the kit).
++  final (l, r) = facesOf(ph);
++  final (n1, n2) = face(wh, fromSign > 0 ? l : r);
++  final (f1, f2) = face(wh, fromSign > 0 ? r : l);
++  final cap = [
++    for (final q in worldOutline(doc, stem))
++      if ((q - ps.end).length < 500) q
++  ];
++  expect(cap, hasLength(2), reason: stem.toHex());
++  for (final q in cap) {
++    expect(distToLine(q, n1, n2), lessThan(1e-6), reason: stem.toHex());
++    expect(distToLine(q, f1, f2), greaterThan(150), reason: stem.toHex());
++  }
++}
++
++/// Draws one wall from world [a] to world [b] by two clicks (at those
++/// points exactly, plus the raw offsets) and Enter; returns it.
++Future<Handle> drawWall(
++    WidgetTester tester, PlanController pc, Vector2 a, Vector2 b) async {
++  await clickAt(tester, pc, a);
++  await clickAt(tester, pc, b);
++  await press(tester, LogicalKeyboardKey.enter);
++  return walls(pc.document).last;
++}
++
++void main() {
++  testWidgets(
++      'WT1 two clicks make one wall at the snapped points, stored exactly, '
++      'in a group at the identity', (tester) async {
++    final pc = await pumpWalls(tester, wallShellPlan());
++    final doc = pc.document;
++    await press(tester, LogicalKeyboardKey.keyW);
++    expect(status(tester), 'Wall');
++    await clickNear(tester, pc, c0);
++    expect(walls(doc), isEmpty);
++    await clickNear(tester, pc, c1);
++    final h = walls(doc).single;
++    final p = doc.components.get<WallParams>(h)!;
++    expect(xy(p.start), xy(c0));
++    expect(xy(p.end), xy(c1));
++    expect([p.thickness, p.justification], [200, Justification.centre]);
++    expect(doc.tree[h]!.transform, Transform2.identity());
++    final w = worldWallOf(doc, h);
++    expect(xy(w.s), xy(c0));
++    expect(xy(w.e), xy(c1));
++    expect(kids(doc, h).map((k) => kindOf(doc, k)),
++        [EntityKind.fill, EntityKind.polyline, EntityKind.polyline]);
++    expectSquare(doc, h);
++    expect(doc.commands.undoDepth, 1);
++    expect(activeTool(tester).isMidShape, isTrue,
++        reason: 'the chain continues from the new point');
++  });
++
++  testWidgets(
++      'WT2 three clicks and Enter: two walls, each in the settings current '
++      'at its click, joined bit for bit and mitred, two undo steps',
++      (tester) async {
++    final pc = await pumpWalls(tester, wallShellPlan());
++    final doc = pc.document;
++    await press(tester, LogicalKeyboardKey.keyW);
++    await clickNear(tester, pc, c0);
++    await clickNear(tester, pc, c1);
++    // Mid-chain: the next wall takes the new settings, the first keeps its.
++    await setWallSettings(tester,
++        thickness: '115', justification: Justification.left);
++    await clickNear(tester, pc, c2);
++    await press(tester, LogicalKeyboardKey.enter);
++    expect(activeTool(tester).isMidShape, isFalse);
++    final [a, b] = walls(doc);
++    final pa = doc.components.get<WallParams>(a)!;
++    final pb = doc.components.get<WallParams>(b)!;
++    expect([xy(pa.start), xy(pa.end)], [xy(c0), xy(c1)]);
++    expect([xy(pb.start), xy(pb.end)], [xy(c1), xy(c2)]);
++    expect(pa.ex == pb.sx && pa.ey == pb.sy, isTrue, reason: 'bit for bit');
++    expect([pa.thickness, pa.justification], [200, Justification.centre]);
++    expect([pb.thickness, pb.justification], [115, Justification.left]);
++    expectMitre(doc, a, b);
++    expect(driftOf(doc), isEmpty);
++    expect(doc.commands.undoDepth, 2);
++    doc.commands.undo();
++    expect(walls(doc), [a]);
++    expectSquare(doc, a);
++    doc.commands.undo();
++    expect(walls(doc), isEmpty);
++  });
++
++  testWidgets(
++      'WT3 a click on a centreline body makes a T whose stem butts the near '
++      'face; a click on a centreline end makes a node', (tester) async {
++    final pc = await pumpWalls(tester, wallShellPlan());
++    final doc = pc.document;
++    await press(tester, LogicalKeyboardKey.keyW);
++    // The through wall H.
++    await clickNear(tester, pc, c0);
++    await clickNear(tester, pc, c1);
++    await press(tester, LogicalKeyboardKey.enter);
++    // The stem S, 115 left, from s0 onto H's body: 35% along, and 20 mm
++    // off the centreline toward s0 (inside H's band).
++    await setWallSettings(tester,
++        thickness: '115', justification: Justification.left);
++    final foot = c0 + (c1 - c0) * 0.35;
++    final side = (s0 - project(s0, c0, c1)).normalized();
++    await clickNear(tester, pc, s0);
++    await clickAt(tester, pc, foot + side * 20);
++    await press(tester, LogicalKeyboardKey.enter);
++    final [h, s] = walls(doc);
++    final ps = doc.components.get<WallParams>(s)!;
++    expect(xy(ps.start), xy(s0));
++    expect(distToLine(ps.end, c0, c1), lessThan(wallJoin.linear),
++        reason: 'the stem ends on the centreline, not at the raw point');
++    // The click resolves to its grid point first (no object snap is near
++    // it); the band then projects that point onto H's centreline, exactly.
++    final clicked = gridOf(doc, foot + side * 20);
++    expect((clicked - foot).length, lessThan(30), reason: 'a grid point');
++    expect((ps.end - project(clicked, c0, c1)).length, lessThan(1e-6),
++        reason: 'the grid point of the click, projected onto H');
++    // classify: WT3-k (the kit).
++    // WG4's property, in the document: the stem's cap corners lie on H's
++    // near face (s0's side), far from its far face; H stays a rectangle.
++    final nearSign = (c1 - c0).cross(s0 - c0) > 0 ? 1.0 : -1.0; // left of H: +
++    final (n1, n2) = face(worldWallOf(doc, h), 100 * nearSign);
++    final (f1, f2) = face(worldWallOf(doc, h), -100 * nearSign);
++    final cap = [
++      for (final q in worldOutline(doc, s))
++        if ((q - ps.end).length < 500) q
++    ];
++    expect(cap, hasLength(2));
++    for (final q in cap) {
++      expect(distToLine(q, n1, n2), lessThan(1e-6));
++      expect(distToLine(q, f1, f2), greaterThan(150));
++    }
++    expectSquare(doc, h);
++
++    // D11: the tool joins a wall wherever its band is clicked, and that is
++    // the only way it makes a joint. On H (200, centre), clicks nearer a
++    // face than the centreline, on both sides; each lands on a grid point
++    // first (within ~7 mm), which the band joins onto H.
++    await setWallSettings(tester,
++        thickness: '200', justification: Justification.centre);
++    final nH = leftOf(c0, c1);
++    final inSign = nH.dot(s0 - c0) > 0 ? 1.0 : -1.0; // the room's side
++    final t1 = await drawWall(tester, pc, plan(2300, 1000),
++        c0 + (c1 - c0) * 0.6 + nH * (90 * inSign));
++    expectTee(doc, h, t1, fromSign: inSign);
++    final t2 = await drawWall(tester, pc, plan(3100, -1300),
++        c0 + (c1 - c0) * 0.8 - nH * (60 * inSign));
++    expectTee(doc, h, t2, fromSign: -inSign);
++    // Inside H's band within one thickness of its end: the new wall starts
++    // at H's end, bit for bit, and the two make a node.
++    final len = c0.distanceTo(c1);
++    final n = await drawWall(
++        tester,
++        pc,
++        c0 + (c1 - c0) * ((len - 120) / len) + nH * (70 * inSign),
++        plan(5200, 1100));
++    expect(xy(doc.components.get<WallParams>(n)!.start), xy(c1));
++    // classify: WT3-k (the kit).
++    expectMitre(doc, h, n);
++
++    // H2 (240, left) from c3 to c2: its band lies on its left only. From
++    // the room (its right), a click in the band beyond the centreline makes
++    // a T that butts the centreline face; a click as far off on the right
++    // is outside the band and stays where it is.
++    await setWallSettings(tester,
++        thickness: '240', justification: Justification.left);
++    final h2 = await drawWall(tester, pc, c3, c2);
++    final nH2 = leftOf(c3, c2);
++    expect(nH2.dot(s0 - c3), lessThan(0), reason: 'the room is on the right');
++    await setWallSettings(tester,
++        thickness: '200', justification: Justification.centre);
++    final t3 = await drawWall(
++        tester, pc, plan(1500, 2200), c3 + (c2 - c3) * 0.4 + nH2 * 180);
++    expectTee(doc, h2, t3, fromSign: -1);
++    final t4 = await drawWall(
++        tester, pc, plan(2500, 2100), c3 + (c2 - c3) * 0.7 - nH2 * 150);
++    final p4 = doc.components.get<WallParams>(t4)!;
++    expect(distToLine(p4.end, c3, c2), closeTo(150, gridStep),
++        reason: 'outside the band: not joined');
++    expect(xy(p4.end), xy(gridOf(doc, p4.end)), reason: 'a grid point');
++    // classify: WT3-k (the kit).
++    expect(driftOf(doc), isEmpty);
++
++    // A free wall X from two raw points, then a chain whose first click
++    // lands on X's end: the new wall Y starts there bit for bit.
++    final q0 = plan(900, 1200), q1 = plan(2600, 1500);
++    await clickAt(tester, pc, q0);
++    await clickAt(tester, pc, q1);
++    await press(tester, LogicalKeyboardKey.enter);
++    final x = walls(doc).last;
++    final px = doc.components.get<WallParams>(x)!;
++    await clickAt(tester, pc, px.end, -14, 11);
++    await clickNear(tester, pc, c2);
++    await press(tester, LogicalKeyboardKey.enter);
++    final y = walls(doc).last;
++    final py = doc.components.get<WallParams>(y)!;
++    expect(xy(py.start), xy(px.end));
++    expect(xy(py.end), xy(c2));
++    expectMitre(doc, x, y);
++    expect(driftOf(doc), isEmpty);
++  });
++
++  testWidgets(
++      'WT4 a closed room: four clicks and a click on the start make four '
++      'walls, four mitres and four undo steps (Review Focus 1)',
++      (tester) async {
++    final pc = await pumpWalls(tester, wallShellPlan());
++    final doc = pc.document;
++    await press(tester, LogicalKeyboardKey.keyW);
++    for (final c in [c0, c1, c2, c3]) {
++      await clickNear(tester, pc, c);
++    }
++    expect(walls(doc), hasLength(3));
++    await clickAt(tester, pc, c0, -15, 13);
++    expect(activeTool(tester).isMidShape, isFalse,
++        reason: 'the closing click ends the chain');
++    final ws = walls(doc);
++    expect(ws, hasLength(4));
++    final corners = [c0, c1, c2, c3];
++    for (var i = 0; i < 4; i++) {
++      final p = doc.components.get<WallParams>(ws[i])!;
++      expect(
++          [xy(p.start), xy(p.end)], [xy(corners[i]), xy(corners[(i + 1) % 4])]);
++      expect(worldOutline(doc, ws[i]), hasLength(4));
++    }
++    for (var i = 0; i < 4; i++) {
++      expectMitre(doc, ws[i], ws[(i + 1) % 4]);
++    }
++    expect(driftOf(doc), isEmpty);
++    expect(diagnosticsOf(doc), isEmpty);
++    expect(doc.commands.undoDepth, 4);
++    for (var i = 3; i >= 0; i--) {
++      doc.commands.undo();
++      expect(walls(doc), ws.sublist(0, i));
++    }
++  });
++
++  testWidgets(
++      'WT5 a zero-length click is refused and the chain goes on; a click on '
++      'the last point ends it', (tester) async {
++    final pc = await pumpWalls(tester, wallShellPlan());
++    final doc = pc.document;
++    await press(tester, LogicalKeyboardKey.keyW);
++    await clickNear(tester, pc, c0);
++    // Both clicks snap onto c0's tick: a zero-length wall.
++    await clickAt(tester, pc, c0, -10, 14);
++    expect(walls(doc), isEmpty);
++    expect(doc.commands.undoDepth, 0);
++    expect(activeTool(tester).isMidShape, isTrue);
++    await clickNear(tester, pc, c1);
++    final a = walls(doc).single;
++    expect(xy(doc.components.get<WallParams>(a)!.start), xy(c0));
++    // A second click on c1 is the chain's last point: it ends the chain,
++    // and the next click starts a new one.
++    await clickAt(tester, pc, c1, 16, 3);
++    expect(activeTool(tester).isMidShape, isFalse);
++    await clickNear(tester, pc, c2);
++    expect(walls(doc), [a]);
++    expect(activeTool(tester).isMidShape, isTrue);
++    await clickNear(tester, pc, c3);
++    final b = walls(doc).last;
++    expect(xy(doc.components.get<WallParams>(b)!.start), xy(c2));
++    // With one wall down, the chain's first point is an ordinary point:
++    // closing needs two walls, so this click adds a wall and goes on.
++    await clickAt(tester, pc, c2, 9, 12);
++    expect(walls(doc), hasLength(3));
++    expect(activeTool(tester).isMidShape, isTrue);
++  });
++
++  testWidgets(
++      'WT6 cmd+Z mid-chain is swallowed; Escape, then cmd+Z removes the '
++      'last wall (Ruling 07-1)', (tester) async {
++    final pc = await pumpWalls(tester, wallShellPlan());
++    final doc = pc.document;
++    await press(tester, LogicalKeyboardKey.keyW);
++    await clickNear(tester, pc, c0);
++    await clickNear(tester, pc, c1);
++    await clickNear(tester, pc, c2);
++    final ws = walls(doc);
++    final before = enc(doc);
++    await undoKey(tester);
++    expect(enc(doc), before);
++    expect(doc.commands.undoDepth, 2);
++    expect(activeTool(tester).isMidShape, isTrue);
++    await press(tester, LogicalKeyboardKey.escape);
++    expect(activeTool(tester).isMidShape, isFalse);
++    expect(status(tester), 'Wall');
++    await undoKey(tester);
++    expect(walls(doc), [ws.first]);
++    expect(doc.commands.undoDepth, 1);
++  });
++
++  testWidgets(
++      'WT7 W and the palette entry activate the Wall tool; W typed in a '
++      'panel field does not', (tester) async {
++    await pumpWalls(tester, wallShellPlan());
++    await press(tester, LogicalKeyboardKey.keyW);
++    expect(status(tester), 'Wall');
++    await press(tester, LogicalKeyboardKey.keyV);
++    expect(status(tester), 'Select');
++    await tester.tap(find.byKey(const Key('tool-architecture.wall')));
++    await tester.pump();
++    expect(status(tester), 'Wall');
++    await press(tester, LogicalKeyboardKey.keyV);
++    final field = find.descendant(
++        of: find.byKey(const Key('chrome-right')),
++        matching: find.byType(EditableText));
++    await tester.tap(field.first);
++    await tester.pump();
++    await press(tester, LogicalKeyboardKey.keyW);
++    expect(status(tester), 'Select');
++  });
++
++  testWidgets(
++      'WT8 a denied wall allocates no handle, changes nothing and ends the '
++      'chain; structure alone is enough to deny it', (tester) async {
++    final pc = await pumpWalls(tester, wallShellPlan());
++    final doc = pc.document;
++    await press(tester, LogicalKeyboardKey.keyW);
++    for (final denied in const [
++      DraftPermissions.runtime,
++      DraftPermissions(
++          transform: true, components: true, geometry: true, structure: false),
++    ]) {
++      doc.commands.permissions = DraftPermissions.all;
++      await clickNear(tester, pc, c0);
++      await clickNear(tester, pc, c1);
++      expect(activeTool(tester).isMidShape, isTrue);
++      doc.commands.permissions = denied;
++      final seed = doc.handleSeed.current;
++      final before = enc(doc);
++      final count = walls(doc).length;
++      await clickNear(tester, pc, c2);
++      expect(doc.handleSeed.current, seed);
++      expect(enc(doc), before);
++      expect(walls(doc), hasLength(count));
++      expect(activeTool(tester).isMidShape, isFalse, reason: 'the chain ends');
++    }
++  });
++
++  testWidgets(
++      'WT9 with object snap off, a click in a wall\'s band joins nothing: it '
++      'stays where it was clicked', (tester) async {
++    final pc = await pumpWalls(tester, wallShellPlan());
++    final doc = pc.document;
++    await press(tester, LogicalKeyboardKey.keyW);
++    // H, whose joint kind with T WT9-k asserts in the kit.
++    await drawWall(tester, pc, c0, c1);
++    await press(tester, LogicalKeyboardKey.f3);
++    expect(tester.widget<Text>(find.byKey(const Key('osnap-text'))).data,
++        'osnap off');
++    final nH = leftOf(c0, c1);
++    final inSign = nH.dot(s0 - c0) > 0 ? 1.0 : -1.0;
++    final target = c0 + (c1 - c0) * 0.6 + nH * (90 * inSign);
++    final t = await drawWall(tester, pc, plan(2300, 1000), target);
++    final pt = doc.components.get<WallParams>(t)!;
++    expect(distToLine(pt.end, c0, c1), closeTo(90, gridStep));
++    expect(xy(pt.end), xy(gridOf(doc, target)),
++        reason: 'the grid point of the click, not joined');
++    // classify: WT9-k (the kit).
++  });
++
++  testWidgets(
++      'WT14 with grid snap on and unrelated lines 4-7 mm from every click, a '
++      'chain lands bitwise on the grid points (smoke test)', (tester) async {
++    // Grid points of the page (origin ox - 2000, step 10): exact doubles.
++    final g = [
++      Vector2(ox - 500, oy + 600),
++      Vector2(ox + 2500, oy + 500),
++      Vector2(ox + 2700, oy + 3300),
++      Vector2(ox - 300, oy + 3500),
++    ];
++    // Hatch-like clutter: two long parallel lines beside each point, 4 and
++    // 7 mm off it, all parallel (no intersections), their ends and
++    // midpoints far outside the aperture.
++    final u = Vector2(math.cos(0.4), math.sin(0.4)), n = Vector2(-u.y, u.x);
++    final plan = wallPlanJson(wallPage(), (doc) {
++      for (final p in g) {
++        for (final off in const [4.0, -7.0]) {
++          final a = p + n * off - u * 300, b = p + n * off + u * 1700;
++          doc.commands.execute(addDrafted(
++              doc, EntityKind.line, linePayload(a, b),
++              layer: ReservedHandles.layerZero));
++        }
++      }
++    });
++    final pc = await pumpWalls(tester, plan);
++    final doc = pc.document;
++    await press(tester, LogicalKeyboardKey.keyW);
++    for (final p in g) {
++      await clickAt(tester, pc, p, 2.5, -3.5);
++    }
++    await press(tester, LogicalKeyboardKey.enter);
++    final ws = walls(doc);
++    expect(ws, hasLength(3));
++    for (var i = 0; i < 3; i++) {
++      final p = doc.components.get<WallParams>(ws[i])!;
++      expect([xy(p.start), xy(p.end)], [xy(g[i]), xy(g[i + 1])]);
++    }
++  });
++
++  testWidgets(
++      'RF2 in the shell: draw an L, select one wall, Delete: the survivor\'s '
++      'end squares; cmd+Z restores the mitre (Review Focus 2)', (tester) async {
++    final pc = await pumpWalls(tester, wallShellPlan());
++    final doc = pc.document;
++    await press(tester, LogicalKeyboardKey.keyW);
++    await clickNear(tester, pc, c0);
++    await clickNear(tester, pc, c1);
++    await clickNear(tester, pc, c2);
++    await press(tester, LogicalKeyboardKey.enter);
++    final [a, b] = walls(doc);
++    expectMitre(doc, a, b);
++    await press(tester, LogicalKeyboardKey.keyV);
++    // Inside A's band, 40% along it and 30 mm off its centreline.
++    final side = (c2 - project(c2, c0, c1)).normalized();
++    await clickAt(tester, pc, c0 + (c1 - c0) * 0.4 + side * 30);
++    expect(status(tester), 'Select — 1 selected');
++    await press(tester, LogicalKeyboardKey.delete);
++    expect(walls(doc), [b]);
++    expect(doc.tree[a], isNull);
++    expect(kids(doc, a), isEmpty);
++    expectSquare(doc, b);
++    expect(driftOf(doc), isEmpty);
++    await undoKey(tester);
++    expect(walls(doc), [a, b]);
++    expect(kids(doc, a), hasLength(3));
++    expectMitre(doc, a, b);
++    expect(driftOf(doc), isEmpty);
++  });
++
++  testWidgets(
++      'WT19 a 3.2 mm wall, 50 thick, at georeferenced mm coordinates lands '
++      'through the Wall tool: the ring keeps its winding (post-11 (B))',
++      (tester) async {
++    // UTM-like millimetres, about 499 km east and 5,499 km north. Before
++    // fix/post-11 the engine's triangulator summed the shoelace over these
++    // raw coordinates; the rounding of products near 2.7e18 swamped this
++    // band's area of 160 mm^2, flipped its sign, and the edit was refused
++    // (spec 07 D8): the click threw out of the pointer handler.
++    final s = Vector2(498765432.5, 5498765432.25);
++    final e = Vector2(498765433.7503396, 5498765435.195616);
++    expect((e - s).length, closeTo(3.2, 1e-6));
++    final plan = wallPlanJson(
++        PageComponent(
++            scaleDenominator: 20,
++            originX: s.x - 2000,
++            originY: s.y - 2000,
++            gridStepMm: gridStep), (doc) {
++      // A survey tick out of each end, so each click snaps onto it exactly.
++      for (final (p, out) in [(s, s - (e - s) * 100), (e, e + (e - s) * 100)]) {
++        doc.commands.execute(addDrafted(
++            doc, EntityKind.line, linePayload(p, out),
++            layer: ReservedHandles.layerZero));
++      }
++    });
++    final pc = wallController(plan);
++    final doc = pc.document;
++    // 100 px per mm, turned: the wall is 320 px long, the aperture 0.1 mm.
++    await pumpEditor(tester, pc, centre: (s + e) / 2, scale: 100);
++    await press(tester, LogicalKeyboardKey.keyW);
++    await setWallSettings(tester,
++        thickness: '50', justification: Justification.centre);
++    await clickAt(tester, pc, s);
++    await clickAt(tester, pc, e);
++    expect(tester.takeException(), isNull);
++    final h = walls(doc).single;
++    final p = doc.components.get<WallParams>(h)!;
++    expect(xy(p.start), xy(s));
++    expect(xy(p.end), xy(e));
++    expect(p.thickness, 50);
++    expect(doc.commands.undoDepth, 1);
++    expect(kids(doc, h).map((k) => kindOf(doc, k)),
++        [EntityKind.fill, EntityKind.polyline, EntityKind.polyline]);
++    expect(driftOf(doc), isEmpty);
++  });
++}
+diff --git a/packages/jet_cad_2d_kit_architecture/CHANGELOG.md b/packages/jet_cad_2d_kit_architecture/CHANGELOG.md
+index e5013930..93b2ac04 100644
+--- a/packages/jet_cad_2d_kit_architecture/CHANGELOG.md
++++ b/packages/jet_cad_2d_kit_architecture/CHANGELOG.md
+@@ -2,10 +2,14 @@
+ 
+ The architecture kit of jet_cad_2d plans (sub-project 3a).
+ 
+ - `architectureKit`: the kit's descriptor (id `architecture`), its type and
+   tool ids (`ArchitectureTypes`, `ArchitectureTools`), its words in
+   English, German and Turkish, and its `prepare`, which gives a plan the
+   plan library makes the separators' DASHED linetype.
+ - The box (`architecture.box`, `BoxParams`): a rectangle whose outline
+   loses what lies inside an overlapping box; its width and height in the
+   property panel; the Box tool (B).
++- The wall (`architecture.wall`, `WallParams`, `Justification`): mitred
++  joints, Ts and nodes; its two end grips, which move joined ends too; its
++  thickness and justification in the property panel; the Wall tool (W),
++  whose settings the panel edits while it is active.
+diff --git a/packages/jet_cad_2d_kit_architecture/lib/jet_cad_2d_kit_architecture.dart b/packages/jet_cad_2d_kit_architecture/lib/jet_cad_2d_kit_architecture.dart
+index 906364d8..9a25b10d 100644
+--- a/packages/jet_cad_2d_kit_architecture/lib/jet_cad_2d_kit_architecture.dart
++++ b/packages/jet_cad_2d_kit_architecture/lib/jet_cad_2d_kit_architecture.dart
+@@ -1,10 +1,11 @@
+ /// The architecture kit of jet_cad_2d plans (sub-project 3a): walls,
+ /// openings, room separators, rooms, dimensions, boxes, a furniture library
+ /// and wall attachment, as one `PlanKit` a host passes to the plan library,
+ /// `PlanController(kits: [architectureKit])`. The parameter classes and the
+ /// type ids let a host build a plan in code.
+ library;
+ 
+ export 'src/box/box.dart' show BoxParams;
+ export 'src/ids.dart' show ArchitectureTools, ArchitectureTypes;
+ export 'src/kit.dart' show architectureKit;
++export 'src/wall/wall.dart' show Justification, WallParams;
+diff --git a/packages/jet_cad_2d_kit_architecture/lib/src/kit.dart b/packages/jet_cad_2d_kit_architecture/lib/src/kit.dart
+index d17e50ce..1c7f0e05 100644
+--- a/packages/jet_cad_2d_kit_architecture/lib/src/kit.dart
++++ b/packages/jet_cad_2d_kit_architecture/lib/src/kit.dart
+@@ -1,20 +1,21 @@
+ // The architecture kit's descriptor (spec 3a C2): its types, tools,
+ // attachment providers, symbols, words and prepare. Each type task adds its
+ // own (Tasks 10-25); the tools keep today's palette order (box, wall, door,
+ // window, gap, room, separator, dimension; planner_shell.dart:546-601).
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+ 
+ import 'box/box_plan.dart';
+ import 'separator_linetype.dart';
++import 'wall/wall_plan.dart';
+ import 'words/words.dart';
+ 
+ /// The architecture kit: a host passes it to the plan library,
+ /// `PlanController(kits: [architectureKit])`.
+ final PlanKit architectureKit = PlanKit(
+   id: 'architecture',
+   version: '0.1.0',
+-  types: [boxPlanType],
+-  tools: [boxPlanTool],
++  types: [boxPlanType, wallPlanType],
++  tools: [boxPlanTool, wallPlanTool],
+   names: architectureNames,
+   prepare: ensureDashedLinetype,
+ );
+diff --git a/packages/jet_cad_2d_kit_architecture/lib/src/wall/wall_bands.dart b/packages/jet_cad_2d_kit_architecture/lib/src/wall/wall_bands.dart
+index 86a2ef53..55daaa6e 100644
+--- a/packages/jet_cad_2d_kit_architecture/lib/src/wall/wall_bands.dart
++++ b/packages/jet_cad_2d_kit_architecture/lib/src/wall/wall_bands.dart
+@@ -21,43 +21,49 @@ WallBands wallBandsOf(PlanServices services) =>
+ /// The walls' bands, cached for the tools that look for a wall under the
+ /// pointer on every move (spec 07 D11; spec 08 D14, Ruling 08-11): the Wall
+ /// tool, which joins a band it is clicked in, and the Door, Window and Gap
+ /// tools, which find their host with [hostAt]. One per kit per document
+ /// ([wallBandsOf]); the four tools share it.
+ ///
+ /// Per live, non-degenerate wall, ascending by handle, [_stride] doubles: the
+ /// world start and end (`WorldWall`'s own `s` and `e`, so bitwise what
+ /// `WallType` builds), the unit direction, the length, the left and right
+ /// face offsets and the thickness; and the wall's handle beside them.
+-/// Rebuilt only when the document reports a change (its `changes` stream,
+-/// which delivers after the task that made the change) or a tool calls
+-/// [invalidate]. A scan is O(walls) over the cached doubles and allocates
++/// Refreshed on a document change or a change in liveness: rebuilt when
++/// the document reports a change (its `changes` stream, which delivers
++/// after the task that made the change), when a tool calls [invalidate],
++/// and when a read finds a cached wall no longer live (a plan freezes a
++/// wall, spec 2a E2, with no document change: spec 3a C1.5). Un-freezing
++/// comes with a document change (a reload or an undo), so the stream
++/// covers it. A scan is O(walls) over the cached doubles, plus the
++/// liveness check's O(walls) calls of the live reader, and allocates
+ /// nothing in steady state.
+ final class WallBands implements Disposable {
+   /// [live] names the live walls (`liveObjectsOf`): a frozen wall has no
+   /// band.
+   WallBands(this._live);
+ 
+   final LiveTypeOf _live;
+ 
+   static const int _stride = 10;
+   Float64List _cache = Float64List(_stride * 16);
+   final List<Handle> _handles = <Handle>[];
+   late final List<Handle> _liveView = UnmodifiableListView(_handles);
+   int _walls = 0;
+   bool _stale = true;
+   int _generation = 0;
+   DraftDocument? _document;
+   StreamSubscription<DocChange>? _changes;
+ 
+   /// Bumped whenever the cache goes stale: on each of the document's
+-  /// changes, on [invalidate], and when a different document is scanned. A
++  /// changes, on [invalidate], when a read finds a cached wall no longer
++  /// live, and when a different document is scanned. A
+   /// tool that caches something derived from the walls compares it with
+   /// the value it built at.
+   int get generation => _generation;
+ 
+   /// The next scan rebuilds the cache: a tool that has just committed, or
+   /// is about to act on a click, must never see a band the document no
+   /// longer has.
+   void invalidate() {
+     _stale = true;
+     _generation++;
+@@ -149,20 +155,21 @@ final class WallBands implements Disposable {
+   }
+ 
+   void _refresh(DraftDocument doc) {
+     if (!identical(doc, _document)) {
+       final old = _changes;
+       if (old != null) unawaited(old.cancel());
+       _document = doc;
+       _changes = doc.changes.listen((_) => invalidate());
+       invalidate();
+     }
++    if (!_stale && !_stillLive()) invalidate();
+     if (!_stale) return;
+     _stale = false;
+     _walls = 0;
+     _handles.clear();
+     // Live walls only, by the engine's object rule through [_live] (spec 3a
+     // C1.5: a frozen wall is none). A stray `WallParams` (on a nested group,
+     // on a handle with no node, or shadowed on a group a later-registered
+     // type names: no tool makes one, but a file can bring each in) is not a
+     // wall, and must not shadow one under it. O(walls · registered types), on
+     // a rebuild only.
+@@ -177,20 +184,34 @@ final class WallBands implements Disposable {
+       final (left, right) = w.offsets;
+       _cache.setAll(_walls * _stride, [
+         w.s.x, w.s.y, w.e.x, w.e.y, w.d.x, w.d.y, //
+         w.s.distanceTo(w.e), left, right, w.t,
+       ]);
+       _handles.add(h);
+       _walls++;
+     }
+   }
+ 
++  /// Whether every cached wall is still a live wall by [_live]: a plan
++  /// freezes a wall (spec 2a E2) without changing the document, so no
++  /// change reaches the stream, and a frozen wall must not keep its band
++  /// (spec 3a C1.5). Runs on every read ([_refresh]), so every reader --
++  /// [liveWalls], [hostAt], [joinInto] -- is covered. Iterates the cached
++  /// handles in place: O(walls) calls of [_live] (a set lookup and the
++  /// engine's naming rule), no allocation.
++  bool _stillLive() {
++    for (var i = 0; i < _walls; i++) {
++      if (_live(_handles[i]) != ArchitectureTypes.wall) return false;
++    }
++    return true;
++  }
++
+   /// Cancels the document subscription: `PlanServices.shared` calls it
+   /// when the document goes.
+   @override
+   void dispose() {
+     final changes = _changes;
+     if (changes != null) unawaited(changes.cancel());
+     _changes = null;
+     _document = null;
+   }
+ }
+diff --git a/packages/jet_cad_2d_kit_architecture/lib/src/wall/wall_grips.dart b/packages/jet_cad_2d_kit_architecture/lib/src/wall/wall_grips.dart
+new file mode 100644
+index 00000000..9813d742
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/lib/src/wall/wall_grips.dart
+@@ -0,0 +1,141 @@
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../live.dart';
++import 'wall.dart';
++import 'wall_geometry.dart';
++
++/// A wall's end grips (spec 07 D11), through the render layer's object grip
++/// seam.
++///
++/// - **Grips:** two `stretch` grips at the wall's world endpoints, index 0
++///   the start and 1 the end, computed as `WorldWall` computes them, so they
++///   sit bitwise where the geometry puts the ends. None on a holder that
++///   is not a live wall object ([wallsInDocument], as [drag] and [preview]
++///   read it): a file's stray `WallParams` offers no grips.
++/// - **Drag:** one [CompoundCommand] of `SetComponentCommand<WallParams>`:
++///   the dragged end, and every other live wall's end within
++///   `wallJoin.linear` of it in world (a live wall's, by the engine's rule;
++///   a file's stray `WallParams` does not follow), ascending by handle,
++///   each written back in its own group's local space. Joined ends follow,
++///   in one undo step.
++///   A drag that would leave any of those walls no longer than
++///   `wallJoin.linear` is refused.
++/// - **Openings stay put** (spec 08 D13): joins with the opening type, in
++///   3a's Task 14.
++/// - **Preview:** the moved centrelines, in world; openings regenerate on
++///   release.
++///
++/// The dragged point is where the select tool's snap chain resolves it; it
++/// is not band-joined onto another wall as the Wall tool's clicks are.
++///
++/// A wall is [movable]: the select tool moves and rotates it (spec 08 D16).
++final class WallGrips implements ObjectGripProvider {
++  /// [live] names the live walls ([wallsInDocument]): a frozen wall offers
++  /// no grips and does not follow a joined end (spec 3a C1.5).
++  WallGrips({required LiveTypeOf live}) : _live = live;
++
++  final LiveTypeOf _live;
++
++  /// The ends [preview] moves, per grip: computed once for the grip being
++  /// dragged. The grip cache hands out new grips whenever the selected
++  /// wall changes, and [drag] always computes them afresh.
++  List<(Handle, int)>? _ends;
++  DraftDocument? _endsDocument;
++  Grip? _endsGrip;
++
++  @override
++  List<Grip> gripsOf(DraftDocument d, Handle group) {
++    final w = wallsInDocument(d, group, _live)?.host;
++    if (w == null) return const [];
++    return [
++      Grip(GripRole.stretch, 0, w.s.x, w.s.y),
++      Grip(GripRole.stretch, 1, w.e.x, w.e.y),
++    ];
++  }
++
++  @override
++  DraftCommand? drag(DraftDocument d, Handle group, Grip grip, Vector2 world) {
++    final moved = _moved(d, _endsAt(d, group, grip), world);
++    if (moved == null) return null;
++    return CompoundCommand([
++      for (final (h, p, _) in moved) SetComponentCommand<WallParams>(h, p),
++    ], label: 'Move wall ends');
++  }
++
++  @override
++  List<(EntityKind, GeometryPayload)> preview(
++      DraftDocument d, Handle group, Grip grip, Vector2 world) {
++    if (!identical(d, _endsDocument) || !identical(grip, _endsGrip)) {
++      _ends = _endsAt(d, group, grip);
++      _endsDocument = d;
++      _endsGrip = grip;
++    }
++    final moved = _moved(d, _ends!, world);
++    if (moved == null) return const [];
++    return [
++      for (final (_, _, w) in moved) (EntityKind.line, linePayload(w.s, w.e)),
++    ];
++  }
++
++  @override
++  bool movable(DraftDocument d, Handle group) => true;
++
++  /// [grip]'s end of [group], then every other live wall's end within
++  /// `wallJoin.linear` of it (world), ascending by handle, then end index.
++  /// A degenerate neighbour joins nothing (D2), so it is left where it is.
++  ///
++  /// The walls are [wallsInDocument]'s: live walls only, by the engine's
++  /// object rule through [_live]. A stray `WallParams` a file brings
++  /// in (on any holder that is not a root-level group: a handle with no
++  /// node, a nested group, a root-level instance; or shadowed on a group a
++  /// later-registered type names, such as an opening) is not a wall, so it
++  /// does not follow; writing it would be refused (spec 06 D5), or would
++  /// regenerate the object it is not.
++  List<(Handle, int)> _endsAt(DraftDocument d, Handle group, Grip grip) {
++    final walls = wallsInDocument(d, group, _live);
++    if (walls == null) return const [];
++    final at = walls.host.endpoint(grip.index);
++    final ends = <(Handle, int)>[(group, grip.index)];
++    for (final w in walls.walls) {
++      if (w.degenerate) continue;
++      for (var k = 0; k < 2; k++) {
++        if ((w.endpoint(k) - at).length <= wallJoin.linear) {
++          ends.add((w.handle, k));
++        }
++      }
++    }
++    ends.sort((a, b) {
++      final c = a.$1.value.compareTo(b.$1.value);
++      return c != 0 ? c : a.$2.compareTo(b.$2);
++    });
++    return ends;
++  }
++
++  /// Each wall of [ends] with those ends at [world], in its own group's
++  /// local space, and its moved world wall; ascending by handle. Null when
++  /// there is nothing to move, or when a moved wall would be no longer than
++  /// `wallJoin.linear` (D2's degenerate wall).
++  static List<(Handle, WallParams, WorldWall)>? _moved(
++      DraftDocument d, List<(Handle, int)> ends, Vector2 world) {
++    if (ends.isEmpty) return null;
++    final out = <(Handle, WallParams, WorldWall)>[];
++    for (final (h, k) in ends) {
++      final toWorld = d.tree.accumulatedTransform(h);
++      final local = toWorld.invert().transformPoint(world);
++      final i = out.length - 1;
++      // Both ends of one wall: it follows the same point with both.
++      final base = i >= 0 && out[i].$1 == h
++          ? out.removeLast().$2
++          : d.components.get<WallParams>(h);
++      if (base == null) return null;
++      final p =
++          k == 0 ? base.copyWith(start: local) : base.copyWith(end: local);
++      final w = WorldWall(h, p, toWorld);
++      if (!((w.e - w.s).length > wallJoin.linear)) return null;
++      out.add((h, p, w));
++    }
++    return out;
++  }
++}
+diff --git a/packages/jet_cad_2d_kit_architecture/lib/src/wall/wall_plan.dart b/packages/jet_cad_2d_kit_architecture/lib/src/wall/wall_plan.dart
+new file mode 100644
+index 00000000..6f377fe3
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/lib/src/wall/wall_plan.dart
+@@ -0,0 +1,75 @@
++// The wall as the kit declares it (spec 3a C3.2): its plan type (the
++// engine type, its grips, its thickness and justification fields) and its
++// tool (letter W, the settings the panel edits while the tool is active).
++import 'package:flutter/material.dart' show Icons;
++import 'package:jet_cad_2d/jet_cad_2d.dart' show Capability;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++
++import '../ids.dart';
++import '../live.dart';
++import 'wall.dart';
++import 'wall_bands.dart';
++import 'wall_grips.dart';
++import 'wall_tool.dart';
++
++/// [t], when a wall may have it ([isWallThickness]: strict above
++/// `wallJoin.linear`, at most [kWallMaxThickness]); else an
++/// [ArgumentError], which the panel takes as a refusal (today's
++/// `selection_panel.dart:412-414`).
++double _thickness(double t) => isWallThickness(t)
++    ? t
++    : throw ArgumentError.value(t, 'thickness', 'is not a wall thickness');
++
++/// The wall's plan type: thickness and justification, each needing the
++/// `reshape` permission (today's `_capable`, `selection_panel.dart:380-389`).
++final PlanType<WallParams> wallPlanType = PlanType<WallParams>(
++  id: ArchitectureTypes.wall,
++  fromJson: WallParams.fromJson,
++  parametric: const WallType(),
++  grips: (services) => WallGrips(live: liveTypesOf(services)),
++  properties: [
++    LengthProperty<WallParams>(
++        id: 'thickness',
++        read: (p) => p.thickness,
++        write: (p, t) => p.copyWith(thickness: _thickness(t)),
++        gate: PlanGate.reshape),
++    ChoiceProperty<WallParams, Justification>(
++        id: 'justification',
++        values: Justification.values,
++        read: (p) => p.justification,
++        write: (p, j) => p.copyWith(justification: j),
++        gate: PlanGate.reshape),
++  ],
++);
++
++/// The Wall tool, W: a chain of walls drawn with its settings, which the
++/// panel edits while it is active (no gate: a tool's settings are always
++/// editable, today's `_capable`). It consults no lock and no layer rule
++/// (today's).
++final PlanTool wallPlanTool = PlanTool(
++  id: ArchitectureTools.wall,
++  icon: Icons.maximize,
++  letter: 'W',
++  needs: const {
++    Capability.structure,
++    Capability.components,
++    Capability.geometry,
++  },
++  settings: PlanToolSettings<WallSettings>(
++    initial: const WallSettings(),
++    specs: [
++      LengthProperty<WallSettings>(
++          id: 'thickness',
++          read: (s) => s.thickness,
++          write: (s, t) => s.copyWith(thickness: _thickness(t))),
++      ChoiceProperty<WallSettings, Justification>(
++          id: 'justification',
++          values: Justification.values,
++          read: (s) => s.justification,
++          write: (s, j) => s.copyWith(justification: j)),
++    ],
++  ),
++  create: (services) => WallTool(
++      () => services.settingsOf<WallSettings>(ArchitectureTools.wall),
++      wallBandsOf(services)),
++);
+diff --git a/packages/jet_cad_2d_kit_architecture/lib/src/wall/wall_tool.dart b/packages/jet_cad_2d_kit_architecture/lib/src/wall/wall_tool.dart
+new file mode 100644
+index 00000000..9dcf898e
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/lib/src/wall/wall_tool.dart
+@@ -0,0 +1,269 @@
++import 'dart:math' as math;
++import 'dart:ui' show Canvas;
++
++import 'package:flutter/foundation.dart' show immutable, visibleForTesting;
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import 'wall.dart';
++import 'wall_bands.dart';
++
++/// The Wall tool's settings (spec 07 D11): what the next wall is drawn
++/// with. The plan keeps them (`PlanToolSettings`); its property panel edits
++/// them while the tool is active.
++@immutable
++final class WallSettings {
++  const WallSettings(
++      {this.thickness = 200, this.justification = Justification.centre});
++
++  /// In mm.
++  final double thickness;
++  final Justification justification;
++
++  WallSettings copyWith({double? thickness, Justification? justification}) =>
++      WallSettings(
++          thickness: thickness ?? this.thickness,
++          justification: justification ?? this.justification);
++
++  @override
++  bool operator ==(Object other) =>
++      other is WallSettings &&
++      other.thickness == thickness &&
++      other.justification == justification;
++
++  @override
++  int get hashCode => Object.hash(thickness, justification);
++
++  @override
++  String toString() => 'WallSettings($thickness, ${justification.name})';
++}
++
++/// Spec 07 D11, Ruling 07-1: a chain of walls, like AutoCAD's LINE.
++///
++/// - The first click sets the chain's start; each later click commits
++///   **one wall** from the previous point, one undo step each.
++/// - A wall is a group at the identity carrying [WallParams], so its stored
++///   endpoints are the snapped points themselves and a chained run meets
++///   bit for bit.
++/// - A click on the chain's first point, once two walls are down, commits
++///   the closing wall and ends the chain. A click on its last point, once
++///   a wall is down, ends it (so a double click is harmless). Before that, a
++///   click on the start is a zero-length wall and is refused, as the Line
++///   tool refuses one (M-05x).
++/// - **It joins a wall wherever its band is clicked** (D11): an accepted
++///   point, and the rubber band's end, that lies in a wall's band is moved
++///   onto that wall (see [_joinBandInto]): a T, or a node near an end.
++///   This is the only way it makes a joint; it snaps with the drawing
++///   tools' own kinds (03 D8), never `nearest`, which would pull a click
++///   onto any unrelated line near it and away from the grid.
++/// - Enter and Escape end the chain. Every other key-down is swallowed
++///   while it is pending (05 D3): undo never lands mid-chain (Ruling 07-1).
++///
++/// [points] holds the chain's first point and, once a wall is down, its
++/// last: the next wall's start.
++class WallTool extends PlacementTool {
++  /// [_settings] reads the tool's settings (`PlanServices.settingsOf`) at
++  /// each commit and each paint; [_bands] is the band cache the kit shares
++  /// with the opening tools (spec 08 D14, Ruling 08-11; [wallBandsOf]).
++  WallTool(this._settings, this._bands);
++
++  final WallSettings Function() _settings;
++
++  int _walls = 0;
++
++  /// The rubber band's far end: the hover point, joined to a wall when it
++  /// lies in one's band. Reused, never reallocated.
++  final Vector2 _bandEnd = Vector2.zero();
++
++  /// The context of the last hover, for [hovered], which has none.
++  ToolContext? _context;
++
++  /// The band scan's cache (see [_joinBandInto]), rebuilt only when the
++  /// document reports a change or [WallBands.invalidate] is called.
++  /// Shared: the tool never disposes it.
++  final WallBands _bands;
++
++  /// How many band scans have run: a test seam for the early return.
++  @visibleForTesting
++  int debugBandScans = 0;
++
++  /// The rubber band's far end, for tests.
++  @visibleForTesting
++  Vector2 get debugBandEnd => _bandEnd;
++
++  @override
++  String get name => 'Wall';
++
++  @override
++  Vector2? selfSnap(Vector2 raw, double apertureWorld) {
++    if (_walls >= 2 && raw.distanceTo(points.first) <= apertureWorld) {
++      return points.first;
++    }
++    if (_walls >= 1 && raw.distanceTo(points.last) <= apertureWorld) {
++      return points.last;
++    }
++    return null;
++  }
++
++  @override
++  void onPointerMove(ToolPointerEvent e, ToolContext ctx) {
++    _context = ctx;
++    super.onPointerMove(e, ctx);
++  }
++
++  /// Runs after every hover's resolution (and re-resolution), so
++  /// [hoverPoint] is already the resolved point. With no chain pending
++  /// there is no rubber band, and nothing to scan.
++  @override
++  void hovered(Vector2 raw) {
++    if (points.isEmpty) return;
++    final ctx = _context;
++    final p = hoverPoint;
++    if (ctx == null || !_joinBandInto(ctx, p.x, p.y, _bandEnd)) {
++      _bandEnd.setFrom(p);
++    }
++  }
++
++  @override
++  void accept(Vector2 point, ToolContext ctx) {
++    if (!acceptingSelf) {
++      // Rebuilt once per click: the change stream delivers after the
++      // current task, so an edit in the same synchronous task as this
++      // click would otherwise leave the scan on the old bands.
++      _bands.invalidate();
++      final joined = Vector2.zero();
++      if (_joinBandInto(ctx, point.x, point.y, joined)) point = joined;
++    }
++    // Until the next hover, the band ends where this click landed.
++    _bandEnd.setFrom(point);
++    if (points.isEmpty) {
++      points.add(point);
++      return;
++    }
++    if (acceptingSelf) {
++      // Ruling 05-4: the accepted point *is* the stored first point.
++      if (_walls >= 2 && identical(point, points.first)) {
++        _addWall(ctx, points.last, point);
++      }
++      clearShape();
++      return;
++    }
++    final start = points.last;
++    if (_tooShort(start, point)) return;
++    if (!_addWall(ctx, start, point)) {
++      clearShape();
++      return;
++    }
++    _walls++;
++    if (points.length == 1) {
++      points.add(point);
++    } else {
++      points[1] = point;
++    }
++  }
++
++  @override
++  void finish(ToolContext ctx) => clearShape();
++
++  @override
++  void clearShape() {
++    super.clearShape();
++    _walls = 0;
++  }
++
++  /// Spec 07 D11: the Wall tool joins a wall wherever its band is clicked.
++  ///
++  /// With object snap off (F3) nothing is joined, like every other snap
++  /// (`PlacementTool` reads the same setting). Otherwise `(px, py)` is in a
++  /// wall's band when it lies between the wall's two faces (by its
++  /// justification) and its projection lies within the centreline's
++  /// length, both within `wallJoin.linear`. Then [out] is set to:
++  /// - within one thickness of a centreline end, along the centreline, that
++  ///   end: bitwise the world endpoint `WallType` builds (`WorldWall` of the
++  ///   params and the group's transform), so the two walls make a node;
++  /// - otherwise the projection onto the centreline: a T.
++  ///
++  /// When several walls qualify, the lowest handle wins. Returns false, and
++  /// leaves [out] alone, when the point is in no wall's band.
++  ///
++  /// It runs on every pointer move while a chain is pending: an O(walls)
++  /// scan over [WallBands]' cached doubles that allocates nothing in
++  /// steady state. The cache is rebuilt after the document changes (its
++  /// `changes` stream, which delivers after the task that made the change),
++  /// after this tool's own commit, and at every click, which must never
++  /// join a band the document no longer has.
++  bool _joinBandInto(ToolContext ctx, double px, double py, Vector2 out) {
++    if (!(ctx.snap?.objectSnap ?? true)) return false;
++    debugBandScans++;
++    return _bands.joinInto(ctx.document, px, py, out);
++  }
++
++  /// Spec 07 D2: a wall no longer than `wallJoin.linear` is degenerate.
++  static bool _tooShort(Vector2 s, Vector2 e) =>
++      !(s.distanceTo(e) > wallJoin.linear);
++
++  /// One wall from [s] to [e] in world, which is its group's local space:
++  /// the group sits at the identity. None, like a denied one, when the
++  /// settings hold a thickness no wall may have (`isWallThickness`): the
++  /// panel never writes one, but a host's store may hold one.
++  bool _addWall(ToolContext ctx, Vector2 s, Vector2 e) {
++    if (_tooShort(s, e)) return false;
++    final w = _settings();
++    if (!isWallThickness(w.thickness)) return false;
++    _bands.invalidate();
++    return commit(ctx, () {
++      final doc = ctx.document;
++      final h = doc.handleSeed.next();
++      return CompoundCommand([
++        AddNodeCommand(GroupNode(
++            handle: h,
++            parent: doc.rootHandle,
++            transform: Transform2.identity(),
++            children: const [])),
++        SetComponentCommand<WallParams>(
++            h, WallParams(s.x, s.y, e.x, e.y, w.thickness, w.justification)),
++        // Spec 12b D2: a new object takes the current layer.
++        SetComponentCommand<ObjectLayer>(h, ObjectLayer(drawingLayer(doc))),
++      ], label: 'Add wall');
++    }, needs: const {
++      Capability.structure,
++      Capability.components,
++      Capability.geometry,
++    });
++  }
++
++  /// The next wall's centreline and its band at the current thickness and
++  /// justification, from the chain's last point to the hover point.
++  @override
++  void paintRubberBand(Canvas canvas, Vector2 origin, double scale) {
++    if (points.isEmpty || !hoverVisible) return;
++    final a = points.last, b = _bandEnd;
++    final ax = a.x - origin.x, ay = a.y - origin.y;
++    final bx = b.x - origin.x, by = b.y - origin.y;
++    band
++      ..reset()
++      ..moveTo(ax, ay)
++      ..lineTo(bx, by);
++    final dx = bx - ax, dy = by - ay;
++    final len = math.sqrt(dx * dx + dy * dy);
++    if (len > 0) {
++      // The left normal and the faces' offsets along it, as WorldWall's.
++      final nx = -dy / len, ny = dx / len;
++      final settings = _settings();
++      final t = settings.thickness;
++      final (l, r) = switch (settings.justification) {
++        Justification.centre => (t / 2, -t / 2),
++        Justification.left => (t, 0.0),
++        Justification.right => (0.0, -t),
++      };
++      band
++        ..moveTo(ax + nx * l, ay + ny * l)
++        ..lineTo(bx + nx * l, by + ny * l)
++        ..lineTo(bx + nx * r, by + ny * r)
++        ..lineTo(ax + nx * r, ay + ny * r)
++        ..close();
++    }
++    canvas.drawPath(band, bandPaint);
++  }
++}
+diff --git a/packages/jet_cad_2d_kit_architecture/test/support/wall_shell.dart b/packages/jet_cad_2d_kit_architecture/test/support/wall_shell.dart
+new file mode 100644
+index 00000000..8d93943c
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/test/support/wall_shell.dart
+@@ -0,0 +1,52 @@
++// Ported from jet_cad_floor_plan/test/support/wall_shell.dart (3a Task 12), unchanged but for its imports.
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit_architecture/src/wall/wall.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import 'wall_fixture.dart';
++
++// Document-level assertions shared by the Wall tool's and the end grips'
++// shell tests.
++
++/// Every wall, ascending by handle.
++List<Handle> walls(DraftDocument doc) =>
++    doc.components.withComponent<WallParams>().toList();
++
++/// [p]'s coordinates, for exact list comparison.
++List<double> xy(Vector2 p) => [p.x, p.y];
++
++/// A stored wall's left and right face offsets (spec 07 D2), written out
++/// here rather than read from `WorldWall.offsets`.
++(double, double) facesOf(WallParams p) => switch (p.justification) {
++      Justification.centre => (p.thickness / 2, -p.thickness / 2),
++      Justification.left => (p.thickness, 0),
++      Justification.right => (0, -p.thickness),
++    };
++
++/// Wall [a] runs into a node that wall [b] runs out of: they share exactly
++/// two outline corners, each at the Cramer meet of the faces on its side.
++void expectMitre(DraftDocument doc, Handle a, Handle b) {
++  final wa = worldWallOf(doc, a), wb = worldWallOf(doc, b);
++  final ra = worldOutline(doc, a), rb = worldOutline(doc, b);
++  final shared = sharedNear(ra, rb);
++  expect(shared, hasLength(2), reason: '${a.toHex()} / ${b.toHex()}');
++  final (al, ar) = facesOf(doc.components.get<WallParams>(a)!);
++  final (bl, br) = facesOf(doc.components.get<WallParams>(b)!);
++  final (a1, a2) = face(wa, al);
++  final (b1, b2) = face(wb, bl);
++  final (a3, a4) = face(wa, ar);
++  final (b3, b4) = face(wb, br);
++  expect(nearestIn(shared, oracleMeet(a1, a2, b1, b2)), lessThan(1e-6));
++  expect(nearestIn(shared, oracleMeet(a3, a4, b3, b4)), lessThan(1e-6));
++}
++
++/// Wall [h]'s outline is its plain rectangle: both ends square.
++void expectSquare(DraftDocument doc, Handle h) {
++  final w = worldWallOf(doc, h);
++  final (l, r) = facesOf(doc.components.get<WallParams>(h)!);
++  final (a, b) = face(w, l);
++  final (c, d) = face(w, r);
++  expect(isRectNear(worldOutline(doc, h), [a, b, c, d]), isTrue,
++      reason: '${h.toHex()} is square at both ends');
++}
+diff --git a/packages/jet_cad_2d_kit_architecture/test/wall/wall_grips_test.dart b/packages/jet_cad_2d_kit_architecture/test/wall/wall_grips_test.dart
+new file mode 100644
+index 00000000..bc6a87cf
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/test/wall/wall_grips_test.dart
+@@ -0,0 +1,252 @@
++// Ported from jet_cad_floor_plan/test/wall_grips_test.dart (3a Task 12,
++// R-P1): the provider-direct tails of EG1, EG3, EG4 and EG6, whose
++// WallGrips is a kit internal, assertions unchanged, each over its case's
++// fixture as the shell case leaves it there (the shell part ends undone or
++// refused, so the document is the fixture's). The shell parts run in
++// jet_cad_2d_integration. Every wall sits at the far origin in its own
++// rotated group (`groupAt`, or a spoke's group at its hub).
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit_architecture/src/wall/wall.dart';
++import 'package:jet_cad_2d_kit_architecture/src/wall/wall_grips.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/wall_fixture.dart';
++
++/// The walls [build] adds to an empty document with the kit tests' system,
++/// with no undo history (wall_grips_test.dart:36-56's `gripDoc`, without
++/// the page, which only the shell's snap reads).
++DraftDocument gripDoc(void Function(DraftDocument doc) build) {
++  final doc = wallDoc();
++  build(doc);
++  doc.commands.clearHistory();
++  return doc;
++}
++
++/// The shell case's grid point nearest [p]: its 1:20 page near the far
++/// origin, grid at 10 mm (wall_grips_test.dart:42-49, 119-121).
++Vector2 gridOf(Vector2 p) => snapToGrid(
++    p,
++    10,
++    PageComponent(
++        scaleDenominator: 20,
++        originX: ox - 2000,
++        originY: oy - 2000,
++        gridStepMm: 10));
++
++/// Wall [h]'s end [k] in world.
++Vector2 endOf(DraftDocument doc, Handle h, int k) =>
++    worldWallOf(doc, h).endpoint(k);
++
++const Handle wa = Handle(1300), wb = Handle(2600), wc = Handle(3900);
++
++/// An L at the far origin: A (200, centre) runs into [lCorner] and B (115,
++/// left) runs out of it at 110 degrees, each in its own rotated group, so
++/// their ends at the corner meet within rounding, not bitwise. C (150,
++/// right) starts 3 mm from the corner: near it, but not joined.
++final Vector2 lStart = plan(0, 0), lCorner = plan(3000, 0);
++final Vector2 lEnd = polar(lCorner, 23 + 110, 2500);
++final Vector2 cStart = polar(lCorner, 23 - 120, 3);
++
++void addL(DraftDocument doc, {bool withC = true}) {
++  doc.commands
++      .execute(addWall(doc, wa, lStart, lCorner, 200, Justification.centre));
++  doc.commands
++      .execute(addWall(doc, wb, lCorner, lEnd, 115, Justification.left));
++  if (withC) {
++    doc.commands.execute(addWall(doc, wc, cStart, polar(cStart, 23 - 120, 1500),
++        150, Justification.right));
++  }
++}
++
++void main() {
++  test(
++      'EG1-k a degenerate drop is refused by the provider: no command, no preview',
++      () {
++    final doc = gripDoc((doc) {
++      doc.commands.execute(addWall(
++          doc, wa, plan(0, 0), plan(3000, 400), 200, Justification.centre));
++    });
++    final g = WallGrips(live: liveOf(doc)).gripsOf(doc, wa)[1];
++    expect(WallGrips(live: liveOf(doc)).drag(doc, wa, g, endOf(doc, wa, 0)),
++        isNull);
++    expect(WallGrips(live: liveOf(doc)).preview(doc, wa, g, endOf(doc, wa, 0)),
++        isEmpty);
++  });
++
++  test(
++      "EG3-k an L's shared end, the provider directly: the command's members ascend by handle, the preview is both moved centrelines in world, another grip moves A's free start alone, a degenerate wall on the corner joins nothing",
++      () {
++    final doc = gripDoc((doc) => addL(doc));
++    final q = gridOf(plan(3500, -400));
++    // The provider directly: the command's members ascend by handle, and
++    // the preview is both moved centrelines, in world.
++    final grips = WallGrips(live: liveOf(doc));
++    final g = grips.gripsOf(doc, wa)[1];
++    final c = grips.drag(doc, wa, g, q)! as CompoundCommand;
++    expect([
++      for (final m in c.children) (m as SetComponentCommand<WallParams>).handle
++    ], [
++      wa,
++      wb
++    ]);
++    final pieces = grips.preview(doc, wa, g, q);
++    expect(pieces.map((p) => p.$1), [EntityKind.line, EntityKind.line]);
++    final [a0, a1] = pointsOf(pieces[0].$2);
++    final [b0, b1] = pointsOf(pieces[1].$2);
++    expect((a0 - lStart).length, lessThan(1e-6));
++    for (final p in [a1, b0]) {
++      expect((p - q).length, lessThan(1e-6));
++    }
++    expect((b1 - lEnd).length, lessThan(1e-6));
++    // Another grip of the same wall, through the same provider: A's free
++    // start moves alone.
++    final g0 = grips.gripsOf(doc, wa)[0];
++    expect(grips.preview(doc, wa, g0, q), hasLength(1));
++
++    // A degenerate wall D sitting on the corner joins nothing (D2): the
++    // drag still moves A and B, and leaves D where it is.
++    const wd = Handle(5200);
++    doc.commands
++        .execute(addWall(doc, wd, lCorner, lCorner, 90, Justification.centre));
++    final d = grips.drag(doc, wa, grips.gripsOf(doc, wa)[1], q);
++    expect([
++      for (final m in (d! as CompoundCommand).children)
++        (m as SetComponentCommand<WallParams>).handle
++    ], [
++      wa,
++      wb
++    ]);
++  });
++
++  test(
++      "EG4-k a three-way node's end, the provider directly: one command per wall, ascending by handle, whichever end is dragged",
++      () {
++    final hub = plan(1500, 1500);
++    const spokes = [
++      (wa, 20.0, 200.0, Justification.centre, true),
++      (wb, 140.0, 115.0, Justification.left, false),
++      (wc, 255.0, 150.0, Justification.right, true),
++    ];
++    final doc = gripDoc((doc) {
++      for (final (h, deg, t, j, fromHub) in spokes) {
++        doc.commands.execute(
++            addSpoke(doc, h, hub, deg + 23, 2000, t, j, fromHub: fromHub));
++      }
++    });
++    final q = gridOf(polar(hub, 23 + 80, 500));
++    // One command per wall, ascending by handle, whichever end is dragged.
++    final grips = WallGrips(live: liveOf(doc));
++    final c = grips.drag(doc, wb, grips.gripsOf(doc, wb)[1], q);
++    expect([
++      for (final m in (c! as CompoundCommand).children)
++        (m as SetComponentCommand<WallParams>).handle
++    ], [
++      wa,
++      wb,
++      wc
++    ]);
++  });
++
++  test(
++      "EG6-k an L's corner and a file's strays, the provider directly: a stray offers no grips; a live wall offers its two ends, bitwise; the command and the preview name A and B only",
++      () {
++    // Built by hand: no tool makes these; only a file brings them in.
++    const plain = Handle(5000), nested = Handle(5100), bare = Handle(5200);
++    const inst = Handle(5300), def = Handle(5400);
++    final doc = gripDoc((doc) {
++      addL(doc);
++      doc.tree.addDefinition(Definition(
++          handle: def,
++          name: 'D',
++          basePoint: Vector2.zero(),
++          children: const []));
++      doc.commands.execute(CompoundCommand([
++        AddNodeCommand(GroupNode(
++            handle: plain,
++            parent: doc.rootHandle,
++            transform: Transform2.translation(ox + 700.25, oy - 310.5)
++                .multiply(Transform2.rotation(1.1)),
++            children: const [])),
++        AddNodeCommand(GroupNode(
++            handle: nested,
++            parent: plain,
++            transform: Transform2.translation(-250.5, 480.75)
++                .multiply(Transform2.rotation(-0.6)),
++            children: const [])),
++        AddNodeCommand(InstanceNode(
++            handle: inst,
++            parent: doc.rootHandle,
++            transform: Transform2.translation(ox + 333.5, oy - 222.25)
++                .multiply(Transform2.rotation(0.8)),
++            definition: def,
++            layer: ReservedHandles.layerZero)),
++      ], label: 'Add groups'));
++    });
++    // Written straight into the store, as a file brings them in: the bare
++    // stray's start, and the nested and the instance strays' ends, sit on
++    // the corner in world.
++    final toNested = doc.tree.accumulatedTransform(nested).invert();
++    final nestedStart = toNested.transformPoint(polar(lCorner, 23 - 60, 1800));
++    final nestedEnd = toNested.transformPoint(lCorner);
++    final strayBare = WallParams(lCorner.x, lCorner.y, lCorner.x + 900.5,
++        lCorner.y - 1200.25, 120, Justification.left);
++    final strayNested = WallParams(nestedStart.x, nestedStart.y, nestedEnd.x,
++        nestedEnd.y, 90, Justification.right);
++    final toInst = doc.tree.accumulatedTransform(inst).invert();
++    final instStart = toInst.transformPoint(polar(lCorner, 23 + 150, 1400.5));
++    final instEnd = toInst.transformPoint(lCorner);
++    final strayInst = WallParams(instStart.x, instStart.y, instEnd.x, instEnd.y,
++        100, Justification.left);
++    doc.components
++      ..attach<WallParams>(bare, strayBare)
++      ..attach<WallParams>(nested, strayNested)
++      ..attach<WallParams>(inst, strayInst);
++    expect(doc.tree[bare], isNull, reason: 'no node');
++    expect(doc.tree[nested], isA<GroupNode>());
++    expect(doc.tree[inst], isA<InstanceNode>());
++    expect(doc.tree[inst]!.parent, doc.rootHandle, reason: 'root-level');
++    expect((strayNested.end - lCorner).length, greaterThan(1000),
++        reason: 'the nested group is not at the identity');
++    expect((strayInst.end - lCorner).length, greaterThan(1000),
++        reason: 'the instance is not at the identity');
++    final corner = endOf(doc, wa, 1);
++    for (final (h, k) in [(bare, 0), (nested, 1), (inst, 1)]) {
++      expect((endOf(doc, h, k) - corner).length, lessThan(wallJoin.linear),
++          reason: '${h.toHex()} is on the joint in world: only liveness '
++              'excludes it');
++    }
++    final q = gridOf(plan(3500, -400));
++    // The provider directly: a stray offers no grips, as its drag and
++    // preview do nothing; a live wall offers its two ends, bitwise.
++    final grips = WallGrips(live: liveOf(doc));
++    for (final h in [bare, nested, inst]) {
++      expect(grips.gripsOf(doc, h), isEmpty,
++          reason: '${h.toHex()} is not a live wall');
++    }
++    expect([
++      for (final g in grips.gripsOf(doc, wa)) (g.role, g.index, g.x, g.y)
++    ], [
++      for (final k in [0, 1])
++        (GripRole.stretch, k, endOf(doc, wa, k).x, endOf(doc, wa, k).y)
++    ]);
++    // The command and the preview name A and B only.
++    final g = grips.gripsOf(doc, wa)[1];
++    final c = grips.drag(doc, wa, g, q)! as CompoundCommand;
++    expect([
++      for (final m in c.children) (m as SetComponentCommand<WallParams>).handle
++    ], [
++      wa,
++      wb
++    ]);
++    final pieces = grips.preview(doc, wa, g, q);
++    expect(pieces.map((p) => p.$1), [EntityKind.line, EntityKind.line]);
++    final [a0, a1] = pointsOf(pieces[0].$2);
++    final [b0, b1] = pointsOf(pieces[1].$2);
++    expect((a0 - lStart).length, lessThan(1e-6));
++    for (final p in [a1, b0]) {
++      expect((p - q).length, lessThan(1e-6));
++    }
++    expect((b1 - lEnd).length, lessThan(1e-6));
++  });
++}
+diff --git a/packages/jet_cad_2d_kit_architecture/test/wall/wall_joint_kinds_test.dart b/packages/jet_cad_2d_kit_architecture/test/wall/wall_joint_kinds_test.dart
+new file mode 100644
+index 00000000..f11556fe
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/test/wall/wall_joint_kinds_test.dart
+@@ -0,0 +1,164 @@
++// 3a Task 12, R-P1: the joint-kind assertions of today's shell cases WT3
++// and WT9 (jet_cad_floor_plan/test/wall_tool_test.dart:273-386, :499-524),
++// whose `classify` is a kit internal the integration package cannot import.
++// Each companion replays its case's chains through the Wall tool, at the
++// points the shell resolves them to (a tick's end, exactly; a grid point of
++// the case's 1:20 page, `snapToGrid`), with the case's settings; its
++// assertions are the case's `classify` lines, unchanged. The shell halves
++// (WT3, WT9) run in jet_cad_2d_integration with every other assertion.
++import 'package:flutter/gestures.dart' show kPrimaryButton;
++import 'package:flutter/services.dart'
++    show KeyDownEvent, LogicalKeyboardKey, PhysicalKeyboardKey;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:jet_cad_2d_kit_architecture/src/wall/wall.dart';
++import 'package:jet_cad_2d_kit_architecture/src/wall/wall_bands.dart';
++import 'package:jet_cad_2d_kit_architecture/src/wall/wall_geometry.dart';
++import 'package:jet_cad_2d_kit_architecture/src/wall/wall_tool.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/wall_fixture.dart';
++import '../support/wall_shell.dart';
++
++// The room of WR12, turned 23° about the far origin (wall_tool_test.dart:
++// 20-27).
++final Vector2 c0 = plan(0, 0), c1 = plan(4000, 300);
++final Vector2 c2 = plan(3600, 3100), c3 = plan(-200, 2700);
++final Vector2 s0 = plan(1300, 1900);
++
++/// The shell cases' page: 1:20 near the far origin, grid at 10 mm.
++final PageComponent page = PageComponent(
++    scaleDenominator: 20,
++    originX: ox - 2000,
++    originY: oy - 2000,
++    gridStepMm: 10);
++
++/// The grid point the shell's click at [p] resolves to.
++Vector2 grid(Vector2 p) => snapToGrid(p, 10, page);
++
++/// The unit left normal of the line from [a] to [b].
++Vector2 leftOf(Vector2 a, Vector2 b) {
++  final d = (b - a).normalized();
++  return Vector2(-d.y, d.x);
++}
++
++/// The Wall tool over [doc] with [settings], its own band cache, a unit
++/// camera and [snap] (null: object snap on); one chain per [draw].
++final class Chains {
++  Chains(this.doc, {SnapSettings? snap}) {
++    tool = WallTool(() => settings, bands);
++    ctx = ToolContext(
++        document: doc,
++        index: index,
++        camera: camera,
++        selection: selection,
++        snap: snap);
++    addTearDown(() {
++      tool.dispose();
++      bands.dispose();
++      selection.dispose();
++      camera.dispose();
++      index.dispose();
++    });
++  }
++
++  final DraftDocument doc;
++  WallSettings settings = const WallSettings();
++  late final WallBands bands = WallBands(liveOf(doc));
++  late final SpatialIndex index = SpatialIndex(doc);
++  late final CameraController camera = CameraController(
++      ViewportTransform(worldToScreenMatrix: Transform2.identity()));
++  late final SelectionController selection = SelectionController(doc);
++  late final WallTool tool;
++  late final ToolContext ctx;
++
++  void _press(Vector2 world) => tool.onPointerDown(
++      ToolPointerEvent(
++          screen: Offset.zero,
++          world: world,
++          pointer: 1,
++          buttons: kPrimaryButton,
++          shift: false,
++          control: false,
++          meta: false,
++          alt: false,
++          pickRadiusWorld: 1),
++      ctx);
++
++  /// One wall from [a] to [b], then Enter: the new wall.
++  Handle draw(Vector2 a, Vector2 b) {
++    _press(a);
++    _press(b);
++    tool.onKey(
++        const KeyDownEvent(
++            physicalKey: PhysicalKeyboardKey.enter,
++            logicalKey: LogicalKeyboardKey.enter,
++            timeStamp: Duration.zero),
++        ctx);
++    return walls(doc).last;
++  }
++}
++
++void main() {
++  test(
++      "WT3-k WT3's joint kinds: a click on a centreline body makes a T, one "
++      'within a thickness of its end a node, one outside the band nothing', () {
++    final doc = wallDoc();
++    final k = Chains(doc);
++    final h = k.draw(c0, c1);
++    k.settings =
++        const WallSettings(thickness: 115, justification: Justification.left);
++    final foot = c0 + (c1 - c0) * 0.35;
++    final side = (s0 - project(s0, c0, c1)).normalized();
++    final s = k.draw(s0, grid(foot + side * 20));
++    expect(classify(worldWallOf(doc, s), 1, [worldWallOf(doc, h)]), isA<Tee>());
++
++    k.settings = const WallSettings();
++    final nH = leftOf(c0, c1);
++    final inSign = nH.dot(s0 - c0) > 0 ? 1.0 : -1.0;
++    final t1 = k.draw(grid(plan(2300, 1000)),
++        grid(c0 + (c1 - c0) * 0.6 + nH * (90 * inSign)));
++    expect(classify(worldWallOf(doc, t1), 1, [worldWallOf(doc, h)]), isA<Tee>(),
++        reason: t1.toHex());
++    final t2 = k.draw(grid(plan(3100, -1300)),
++        grid(c0 + (c1 - c0) * 0.8 - nH * (60 * inSign)));
++    expect(classify(worldWallOf(doc, t2), 1, [worldWallOf(doc, h)]), isA<Tee>(),
++        reason: t2.toHex());
++    final len = c0.distanceTo(c1);
++    final n = k.draw(
++        grid(c0 + (c1 - c0) * ((len - 120) / len) + nH * (70 * inSign)),
++        grid(plan(5200, 1100)));
++    expect(classify(worldWallOf(doc, n), 0, [worldWallOf(doc, h)]),
++        isA<NodeJoint>());
++
++    k.settings =
++        const WallSettings(thickness: 240, justification: Justification.left);
++    final h2 = k.draw(c3, c2);
++    final nH2 = leftOf(c3, c2);
++    k.settings = const WallSettings();
++    final t3 =
++        k.draw(grid(plan(1500, 2200)), grid(c3 + (c2 - c3) * 0.4 + nH2 * 180));
++    expect(
++        classify(worldWallOf(doc, t3), 1, [worldWallOf(doc, h2)]), isA<Tee>(),
++        reason: t3.toHex());
++    final t4 =
++        k.draw(grid(plan(2500, 2100)), grid(c3 + (c2 - c3) * 0.7 - nH2 * 150));
++    expect(
++        classify(worldWallOf(doc, t4), 1, [worldWallOf(doc, h2)]), isA<Free>());
++  });
++
++  test(
++      "WT9-k WT9's joint kind: with object snap off, a click in a wall's "
++      'band joins nothing', () {
++    final doc = wallDoc();
++    final h = Chains(doc).draw(c0, c1);
++    final k = Chains(doc, snap: SnapSettings(objectSnap: false));
++    final nH = leftOf(c0, c1);
++    final inSign = nH.dot(s0 - c0) > 0 ? 1.0 : -1.0;
++    final t = k.draw(grid(plan(2300, 1000)),
++        grid(c0 + (c1 - c0) * 0.6 + nH * (90 * inSign)));
++    expect(classify(worldWallOf(doc, t), 1, [worldWallOf(doc, h)]),
++        isNot(isA<Tee>()));
++  });
++}
+diff --git a/packages/jet_cad_2d_kit_architecture/test/wall/wall_live_test.dart b/packages/jet_cad_2d_kit_architecture/test/wall/wall_live_test.dart
+index f2f81c0b..2281d7b4 100644
+--- a/packages/jet_cad_2d_kit_architecture/test/wall/wall_live_test.dart
++++ b/packages/jet_cad_2d_kit_architecture/test/wall/wall_live_test.dart
+@@ -129,11 +129,56 @@ void main() {
+         plan(2100, -400), 150, Justification.centre));
+     await pumpEventQueue();
+     expect(bands.generation, greaterThan(g0));
+     services.dispose();
+     final g1 = bands.generation;
+     doc.commands.execute(addWall(doc, const Handle(7100), plan(-900, -1800),
+         plan(2100, -1400), 150, Justification.centre));
+     await pumpEventQueue();
+     expect(bands.generation, g1, reason: 'disposed with its services');
+   });
++
++  test(
++      'WL4 a wall frozen with no document change loses its band at the next '
++      "read, whichever reader comes first: the services' frozen set grows, "
++      'no change is reported, and joinInto, hostAt and liveWalls each see '
++      'it gone at once; the live walls keep theirs (spec 3a C1.5)', () {
++    final doc = liveDoc();
++    final frozen = <Handle>{};
++    final services =
++        FakePlanServices(document: doc, catalog: testCatalog(), frozen: frozen);
++    addTearDown(services.dispose);
++    final bands = wallBandsOf(services);
++    // Read once with every wall live: the cache holds A, B and F.
++    expect(bands.liveWalls(doc), [a, b, f]);
++    for (final h in [a, b, f]) {
++      final p = inBand(doc, h);
++      expect(bands.hostAt(doc, p.x, p.y), h, reason: h.toHex());
++    }
++    final state = doc.commands.stateId;
++
++    // F frozen; the first reader is joinInto, at F's band: no join, and
++    // [out] is left alone.
++    frozen.add(f);
++    final pf = inBand(doc, f);
++    final out = Vector2(7, 7);
++    expect(bands.joinInto(doc, pf.x, pf.y, out), isFalse);
++    expect([out.x, out.y], [7, 7]);
++    expect(bands.liveWalls(doc), [a, b]);
++    final pa = inBand(doc, a);
++    expect(bands.joinInto(doc, pa.x, pa.y, out), isTrue,
++        reason: 'A keeps its band');
++
++    // B frozen; the first reader is hostAt, at B's band.
++    frozen.add(b);
++    final pb = inBand(doc, b);
++    expect(bands.hostAt(doc, pb.x, pb.y), isNull);
++    expect(bands.hostAt(doc, pa.x, pa.y), a);
++
++    // A frozen; the first reader is liveWalls.
++    final g = bands.generation;
++    frozen.add(a);
++    expect(bands.liveWalls(doc), isEmpty);
++    expect(bands.generation, greaterThan(g), reason: 'the cache went stale');
++    expect(doc.commands.stateId, state, reason: 'no document change');
++  });
+ }
+diff --git a/packages/jet_cad_2d_kit_architecture/test/wall/wall_plan_test.dart b/packages/jet_cad_2d_kit_architecture/test/wall/wall_plan_test.dart
+new file mode 100644
+index 00000000..db7df6ad
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/test/wall/wall_plan_test.dart
+@@ -0,0 +1,286 @@
++// 3a Task 12 (spec C3.2, C1.5, C2): the wall as the kit declares it -- its
++// plan type's fields, its tool's settings and letter, the tool made over a
++// plan's services (its settings read there, the shared band cache), the
++// grips over the services' live walls, and the kit carrying both. Walls at
++// the far origin in their own turned groups, or spokes of a node at a
++// turned hub.
++import 'dart:ui' show Locale;
++
++import 'package:flutter/gestures.dart' show kPrimaryButton;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:jet_cad_2d_kit/testing.dart';
++import 'package:jet_cad_2d_kit_architecture/src/ids.dart';
++import 'package:jet_cad_2d_kit_architecture/src/kit.dart';
++import 'package:jet_cad_2d_kit_architecture/src/wall/wall.dart';
++import 'package:jet_cad_2d_kit_architecture/src/wall/wall_bands.dart';
++import 'package:jet_cad_2d_kit_architecture/src/wall/wall_plan.dart';
++import 'package:jet_cad_2d_kit_architecture/src/wall/wall_tool.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/wall_fixture.dart';
++import '../support/wall_shell.dart';
++
++/// A primary press at [world], as the canvas hands one to a tool.
++ToolPointerEvent pressEvent(Vector2 world) => ToolPointerEvent(
++    screen: Offset.zero,
++    world: world,
++    pointer: 1,
++    buttons: kPrimaryButton,
++    shift: false,
++    control: false,
++    meta: false,
++    alt: false,
++    pickRadiusWorld: 1);
++
++/// A hover at [world], no button down.
++ToolPointerEvent hoverEvent(Vector2 world) => ToolPointerEvent(
++    screen: Offset.zero,
++    world: world,
++    pointer: 1,
++    buttons: 0,
++    shift: false,
++    control: false,
++    meta: false,
++    alt: false,
++    pickRadiusWorld: 1);
++
++/// [doc]'s tool context: a unit camera, object snap on, no page.
++ToolContext contextOf(DraftDocument doc) {
++  final index = SpatialIndex(doc);
++  final camera = CameraController(
++      ViewportTransform(worldToScreenMatrix: Transform2.identity()));
++  final selection = SelectionController(doc);
++  addTearDown(() {
++    selection.dispose();
++    camera.dispose();
++    index.dispose();
++  });
++  return ToolContext(
++      document: doc, index: index, camera: camera, selection: selection);
++}
++
++/// [command]'s members' handles: a grip drag's walls, in order.
++List<Handle> handlesOf(DraftCommand command) => [
++      for (final m in (command as CompoundCommand).children)
++        (m as SetComponentCommand<WallParams>).handle,
++    ];
++
++/// The panel's words (English, no kit words: the fields need none).
++final KitWords words = KitNamesWords(KitNames.empty, () => const Locale('en'));
++
++void main() {
++  test(
++      'WT-type the wall type: thickness, strict as isWallThickness in its '
++      'write, and justification of left, centre and right, each needing '
++      'reshape, under property:architecture.wall.*', () {
++    final doc = wallDoc();
++    const h = Handle(1300);
++    doc.commands.execute(addWall(
++        doc, h, plan(-1200, 300), plan(1800, 900), 115, Justification.left));
++    final p = doc.components.get<WallParams>(h)!;
++    final [thickness, justification] = wallPlanType.fieldsOf(doc, h, words);
++    expect([
++      thickness.wordId,
++      justification.wordId
++    ], [
++      'property:architecture.wall.thickness',
++      'property:architecture.wall.justification',
++    ]);
++    expect([thickness.spec.gate, justification.spec.gate],
++        [PlanGate.reshape, PlanGate.reshape]);
++    expect([thickness.value, justification.value], [115, Justification.left]);
++    expect(
++        switch (justification.spec) {
++          ChoiceProperty(:final values) => values,
++          _ => null,
++        },
++        Justification.values);
++    for (final t in [wallJoin.linear, 0.0, -115.0, nextUp(kWallMaxThickness)]) {
++      expect(() => thickness.commit!(t), throwsArgumentError, reason: '$t');
++      expect(() => wallPlanType.commitField(doc, h, thickness, t, words),
++          throwsArgumentError,
++          reason: '$t');
++    }
++    for (final t in [nextUp(wallJoin.linear), kWallMaxThickness, 240.5]) {
++      expect(thickness.commit!(t), p.copyWith(thickness: t), reason: '$t');
++    }
++    expect(justification.commit!(Justification.right),
++        p.copyWith(justification: Justification.right));
++    expect(wallPlanType.id, ArchitectureTypes.wall);
++    expect(wallPlanType.parametric, isA<WallType>());
++  });
++
++  test(
++      "WT-settings the Wall tool: W, the commits' needs, settings from 200 "
++      'centre, the same strict thickness and the three justifications, '
++      'ungated, under property:architecture.wall.*; the tool made over a '
++      "plan's services draws with the settings it reads there", () {
++    expect(wallPlanTool.id, ArchitectureTools.wall);
++    expect(wallPlanTool.letter, 'W');
++    expect(wallPlanTool.needs, {
++      Capability.structure,
++      Capability.components,
++      Capability.geometry,
++    });
++    final settings = wallPlanTool.settings!;
++    expect(settings.initial, const WallSettings());
++    Object? stored;
++    final [thickness, justification] = settings.fieldsOf(
++        const WallSettings(thickness: 150, justification: Justification.right),
++        (v) => stored = v,
++        toolId: ArchitectureTools.wall);
++    expect([
++      thickness.wordId,
++      justification.wordId
++    ], [
++      'property:architecture.wall.thickness',
++      'property:architecture.wall.justification',
++    ]);
++    expect([thickness.spec.gate, justification.spec.gate], [null, null]);
++    expect([thickness.value, justification.value], [150, Justification.right]);
++    expect(() => thickness.commit!(wallJoin.linear), throwsArgumentError);
++    expect(() => thickness.commit!(nextUp(kWallMaxThickness)),
++        throwsArgumentError);
++    expect(stored, isNull);
++    thickness.commit!(kWallMaxThickness);
++    expect(
++        stored,
++        const WallSettings(
++            thickness: kWallMaxThickness, justification: Justification.right));
++    justification.commit!(Justification.left);
++    expect(stored,
++        const WallSettings(thickness: 150, justification: Justification.left));
++
++    final doc = wallDoc();
++    final services =
++        FakePlanServices(document: doc, catalog: testCatalog(), settings: {
++      ArchitectureTools.wall:
++          const WallSettings(thickness: 115, justification: Justification.left),
++    });
++    addTearDown(services.dispose);
++    final tool = wallPlanTool.create(services);
++    addTearDown(tool.dispose);
++    final ctx = contextOf(doc);
++    tool.onPointerDown(pressEvent(plan(0, 0)), ctx);
++    tool.onPointerDown(pressEvent(plan(3000, 400)), ctx);
++    final h = walls(doc).single;
++    final p = doc.components.get<WallParams>(h)!;
++    expect([p.thickness, p.justification], [115, Justification.left]);
++    expect(doc.tree[h]!.transform, Transform2.identity());
++  });
++
++  test(
++      "WT-bands the tool made over a plan's services scans the kit's shared "
++      'band cache: its commit invalidates wallBandsOf(services), and a new '
++      "chain's first click in the new wall's band right after joins it", () {
++    final doc = wallDoc();
++    final services = FakePlanServices(
++        document: doc,
++        catalog: testCatalog(),
++        settings: {ArchitectureTools.wall: const WallSettings()});
++    addTearDown(services.dispose);
++    final bands = wallBandsOf(services);
++    final tool = wallPlanTool.create(services);
++    addTearDown(tool.dispose);
++    final ctx = contextOf(doc);
++    final g = bands.generation;
++    tool.onPointerDown(pressEvent(plan(0, 0)), ctx);
++    tool.onPointerDown(pressEvent(plan(3000, 0)), ctx);
++    expect(bands.generation, greaterThan(g));
++    final a = worldWallOf(doc, walls(doc).single);
++    // End the chain, so the next wall does not run from A's end along A
++    // itself; then a new chain whose first click lies in A's band, 70 mm
++    // off its centreline, and a second click well away from A.
++    tool.cancel(ctx);
++    tool.onPointerDown(pressEvent(plan(1500, 70)), ctx);
++    tool.onPointerDown(pressEvent(plan(1500, 1500)), ctx);
++    expect(walls(doc), hasLength(2), reason: 'premise: the stem landed');
++    final start = doc.components.get<WallParams>(walls(doc).last)!.start;
++    expect(distToLine(start, a.s, a.e), lessThan(wallJoin.linear));
++  });
++
++  test(
++      "WT-frozen the wall's grips over a plan's services: a frozen wall "
++      'offers no grips and does not follow a joined end; with nothing '
++      'frozen it does (spec 3a C1.5)', () {
++    final hub = plan(1500, 1500);
++    const wa = Handle(1300), wb = Handle(2600), wf = Handle(3900);
++    final doc = wallDoc();
++    for (final (h, deg, t, j, fromHub) in [
++      (wa, 20.0, 200.0, Justification.centre, true),
++      (wb, 140.0, 115.0, Justification.left, false),
++      (wf, 255.0, 150.0, Justification.right, true),
++    ]) {
++      doc.commands.execute(
++          addSpoke(doc, h, hub, deg + 23, 2000, t, j, fromHub: fromHub));
++    }
++    final q = polar(hub, 23 + 80, 500);
++    final frozen =
++        FakePlanServices(document: doc, catalog: testCatalog(), frozen: {wf});
++    addTearDown(frozen.dispose);
++    final grips = wallPlanType.gripsFor(frozen)!;
++    expect(grips.gripsOf(doc, wf), isEmpty);
++    final g = grips.gripsOf(doc, wa)[0];
++    expect(handlesOf(grips.drag(doc, wa, g, q)!), [wa, wb]);
++    expect(grips.preview(doc, wa, g, q), hasLength(2));
++
++    final all = FakePlanServices(document: doc, catalog: testCatalog());
++    addTearDown(all.dispose);
++    final control = wallPlanType.gripsFor(all)!;
++    expect(control.gripsOf(doc, wf), hasLength(2));
++    expect(handlesOf(control.drag(doc, wa, control.gripsOf(doc, wa)[0], q)!),
++        [wa, wb, wf]);
++  });
++
++  test(
++      'WT-kit the kit carries the wall type after the box and the Wall tool '
++      'after the Box tool, and it validates', () {
++    expect([for (final t in architectureKit.types.take(2)) t.id],
++        [ArchitectureTypes.box, ArchitectureTypes.wall]);
++    expect(identical(architectureKit.types[1], wallPlanType), isTrue);
++    expect([for (final t in architectureKit.tools.take(2)) t.id],
++        [ArchitectureTools.box, ArchitectureTools.wall]);
++    expect(identical(architectureKit.tools[1], wallPlanTool), isTrue);
++    expect(architectureKit.validate(), isEmpty);
++  });
++
++  test(
++      "WT-frozen-hover the Wall tool made over a plan's services: a wall "
++      'frozen with no document change no longer joins the rubber band at the '
++      'next hover, nor the next click (spec 3a C1.5)', () async {
++    final doc = wallDoc();
++    final frozen = <Handle>{};
++    final services = FakePlanServices(
++        document: doc,
++        catalog: testCatalog(),
++        frozen: frozen,
++        settings: {ArchitectureTools.wall: const WallSettings()});
++    addTearDown(services.dispose);
++    final tool = wallPlanTool.create(services) as WallTool;
++    addTearDown(tool.dispose);
++    final ctx = contextOf(doc);
++    tool.onPointerDown(pressEvent(plan(0, 0)), ctx);
++    tool.onPointerDown(pressEvent(plan(3000, 400)), ctx);
++    tool.cancel(ctx);
++    await pumpEventQueue();
++    final a = walls(doc).single;
++    final wa = worldWallOf(doc, a);
++    // A new chain away from A; a hover in A's band, 70 mm off its
++    // centreline, joins it (the control).
++    tool.onPointerDown(pressEvent(plan(1500, 1800)), ctx);
++    final p = plan(1500, 270);
++    tool.onPointerMove(hoverEvent(p), ctx);
++    expect(distToLine(tool.debugBandEnd, wa.s, wa.e), lessThan(1e-6));
++    // A frozen, as the plan freezes it: no document change.
++    frozen.add(a);
++    tool.onPointerMove(hoverEvent(p), ctx);
++    expect((tool.debugBandEnd - p).length, lessThan(1e-6),
++        reason: 'the rubber band ends where the pointer is: not joined');
++    tool.onPointerDown(pressEvent(p), ctx);
++    final end = doc.components.get<WallParams>(walls(doc).last)!.end;
++    expect((end - p).length, lessThan(1e-6), reason: 'the click is not joined');
++  });
++}
+diff --git a/packages/jet_cad_2d_kit_architecture/test/wall/wall_tool_test.dart b/packages/jet_cad_2d_kit_architecture/test/wall/wall_tool_test.dart
+new file mode 100644
+index 00000000..1030af43
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/test/wall/wall_tool_test.dart
+@@ -0,0 +1,321 @@
++// Ported from jet_cad_floor_plan/test/wall_tool_test.dart (3a Task 12):
++// the cases that drive the Wall tool directly (WT10-WT13, WT15-WT18,
++// WT20), assertions unchanged. The shell cases (WT1-WT9, WT14, RF2, WT19)
++// run in jet_cad_2d_integration. The rig reads the tool's settings through
++// a function, as the plan's services give them, and builds the band cache
++// over the kit tests' catalog.
++import 'package:flutter/foundation.dart' show ValueNotifier;
++import 'package:flutter/gestures.dart' show kPrimaryButton;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:jet_cad_2d_kit_architecture/src/wall/wall.dart';
++import 'package:jet_cad_2d_kit_architecture/src/wall/wall_bands.dart';
++import 'package:jet_cad_2d_kit_architecture/src/wall/wall_tool.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/wall_fixture.dart';
++import '../support/wall_shell.dart';
++
++typedef Rig = ({
++  WallTool tool,
++  ToolContext ctx,
++  ValueNotifier<WallSettings> settings
++});
++
++/// The Wall tool driven directly, wired as the plan wires it, over [doc]:
++/// its settings read through [Rig.settings], its own band cache over the
++/// kit tests' catalog, a unit camera (a 10 mm aperture), object snap on, no
++/// page (no grid). Today's `directRig` (wall_tool_test.dart:168-189).
++Rig directRig(DraftDocument doc) {
++  final index = SpatialIndex(doc);
++  final camera = CameraController(
++      ViewportTransform(worldToScreenMatrix: Transform2.identity()));
++  final selection = SelectionController(doc);
++  final settings = ValueNotifier<WallSettings>(const WallSettings());
++  final bands = WallBands(liveOf(doc));
++  final tool = WallTool(() => settings.value, bands);
++  addTearDown(() {
++    tool.dispose();
++    bands.dispose();
++    settings.dispose();
++    selection.dispose();
++    camera.dispose();
++    index.dispose();
++  });
++  return (
++    tool: tool,
++    ctx: ToolContext(
++        document: doc, index: index, camera: camera, selection: selection),
++    settings: settings,
++  );
++}
++
++ToolPointerEvent pointerAt(Vector2 world, {int buttons = 0}) =>
++    ToolPointerEvent(
++        screen: Offset.zero,
++        world: world,
++        pointer: 1,
++        buttons: buttons,
++        shift: false,
++        control: false,
++        meta: false,
++        alt: false,
++        pickRadiusWorld: 1);
++
++void hoverTo(Rig rig, Vector2 world) =>
++    rig.tool.onPointerMove(pointerAt(world), rig.ctx);
++
++void pressAt(Rig rig, Vector2 world) =>
++    rig.tool.onPointerDown(pointerAt(world, buttons: kPrimaryButton), rig.ctx);
++
++/// Median of [xs].
++double median(List<double> xs) => (xs.toList()..sort())[xs.length ~/ 2];
++
++void main() {
++  test(
++      'WT10 a hover with no chain pending scans no wall band and leaves the '
++      'rubber band alone (review round 2, I2)', () {
++    final doc = wallDoc();
++    doc.commands.execute(addWall(doc, const Handle(1300), plan(0, 0),
++        plan(4000, 0), 200, Justification.centre));
++    final rig = directRig(doc);
++    final inBand = plan(1200, 60);
++    hoverTo(rig, inBand);
++    expect(rig.tool.debugBandScans, 0);
++    expect(xy(rig.tool.debugBandEnd), [0, 0]);
++    pressAt(rig, plan(1500, 1500));
++    final scans = rig.tool.debugBandScans;
++    hoverTo(rig, inBand);
++    expect(rig.tool.debugBandScans, scans + 1);
++    expect(distToLine(rig.tool.debugBandEnd, plan(0, 0), plan(4000, 0)),
++        lessThan(1e-6));
++  });
++
++  test(
++      'WT11 after a wall moves, a hover joins its band where it is now, not '
++      'where it was: the cache follows the document (review round 2, I2)',
++      () async {
++    final doc = wallDoc();
++    const h = Handle(1300);
++    doc.commands.execute(
++        addWall(doc, h, plan(0, 0), plan(4000, 0), 200, Justification.centre));
++    final rig = directRig(doc);
++    pressAt(rig, plan(1500, 2500));
++    hoverTo(rig, plan(1200, 60));
++    expect(distToLine(rig.tool.debugBandEnd, plan(0, 0), plan(4000, 0)),
++        lessThan(1e-6));
++    // Move H 700 mm across itself, in world.
++    final shift = plan(0, 700) - plan(0, 0);
++    doc.commands.execute(TransformNodeCommand(
++        h,
++        Transform2.translation(shift.x, shift.y)
++            .multiply(doc.tree.accumulatedTransform(h))));
++    await Future<void>.delayed(Duration.zero);
++    final w = worldWallOf(doc, h);
++    hoverTo(rig, plan(1200, 760));
++    expect(distToLine(rig.tool.debugBandEnd, w.s, w.e), lessThan(1e-6),
++        reason: 'joined onto the moved wall');
++    final old = plan(1200, 60);
++    hoverTo(rig, old);
++    expect((rig.tool.debugBandEnd - old).length, lessThan(1e-6),
++        reason: 'the old band is empty now');
++    // A click there joins the moved wall too.
++    pressAt(rig, plan(2600, 640));
++    final stem = walls(doc).last;
++    expect(distToLine(doc.components.get<WallParams>(stem)!.end, w.s, w.e),
++        lessThan(wallJoin.linear));
++  });
++
++  test(
++      'WT12 the per-hover cost at 600 walls, printed, not asserted (review '
++      'round 2, I2)', () {
++    final doc = wallDoc();
++    var next = 1000;
++    doc.commands.execute(CompoundCommand([
++      for (var i = 0; i < 30; i++)
++        for (var j = 0; j < 20; j++)
++          addWall(doc, Handle(next += 10), plan(i * 3000.0, j * 3000.0),
++              plan(i * 3000.0 + 1000, j * 3000.0), 200, Justification.centre),
++    ], label: 'Add 600 walls'));
++    expect(walls(doc), hasLength(600));
++    final rig = directRig(doc);
++    pressAt(rig, plan(-5000, -5000));
++    // Between the walls: in no band, so every hover scans all 600.
++    final p = plan(1500, 1500);
++    final raw = Vector2.zero();
++    final hover = <double>[], scan = <double>[];
++    const batch = 50;
++    for (var k = 0; k < 200; k++) {
++      final sw = Stopwatch()..start();
++      for (var i = 0; i < batch; i++) {
++        hoverTo(rig, p);
++      }
++      hover.add(sw.elapsedMicroseconds / batch);
++      sw
++        ..reset()
++        ..start();
++      for (var i = 0; i < batch; i++) {
++        rig.tool.hovered(raw);
++      }
++      scan.add(sw.elapsedMicroseconds / batch);
++    }
++    expect(xy(rig.tool.debugBandEnd), xy(p), reason: 'in no band');
++    // ignore: avoid_print
++    print('WT12 n=600: median per hover ${median(hover).toStringAsFixed(2)} '
++        'us (whole pointer move), band scan alone '
++        '${median(scan).toStringAsFixed(2)} us');
++  });
++
++  test(
++      'WT13 a click inside two crossing bands joins the lower handle '
++      '(review round 2, m4)', () {
++    final doc = wallDoc();
++    final c = plan(0, 0);
++    // Lower handle X1 along the plan's x; X2 crosses it at 60 degrees.
++    doc.commands.execute(addWall(doc, const Handle(1300), plan(-2000, 0),
++        plan(2000, 0), 200, Justification.centre));
++    doc.commands.execute(addWall(doc, const Handle(2600), polar(c, 83, -2000),
++        polar(c, 83, 2000), 200, Justification.centre));
++    final x1 = worldWallOf(doc, const Handle(1300));
++    final x2 = worldWallOf(doc, const Handle(2600));
++    final rig = directRig(doc);
++    pressAt(rig, plan(-1500, 1500));
++    // 40 along X1 and 30 off it: about 20 off X2, inside both bands and
++    // outside the 10 mm aperture of either centreline.
++    final p = plan(40, 30);
++    expect(distToLine(p, x2.s, x2.e), inInclusiveRange(15, 25));
++    pressAt(rig, p);
++    final end = doc.components.get<WallParams>(walls(doc).last)!.end;
++    expect(distToLine(end, x1.s, x1.e), lessThan(wallJoin.linear));
++    expect(distToLine(end, x2.s, x2.e), greaterThan(30));
++  });
++
++  test(
++      'WT15 a click in the same synchronous task as an edit joins the band '
++      'where the wall is now: a move, then an undo, each with no await '
++      '(Task 6 review, m1)', () async {
++    final doc = wallDoc();
++    const h = Handle(1300);
++    doc.commands.execute(
++        addWall(doc, h, plan(0, 0), plan(4000, 0), 200, Justification.centre));
++    final rig = directRig(doc);
++    // The chain's start builds the band cache with H where it is.
++    pressAt(rig, plan(1500, 2500));
++    // Move H 700 mm across itself, in world, and click in its old band
++    // before the change stream has delivered.
++    final shift = plan(0, 700) - plan(0, 0);
++    doc.commands.execute(TransformNodeCommand(
++        h,
++        Transform2.translation(shift.x, shift.y)
++            .multiply(doc.tree.accumulatedTransform(h))));
++    final old = plan(1200, 60);
++    pressAt(rig, old);
++    final first = walls(doc).last;
++    expect(first, isNot(h));
++    final end = doc.components.get<WallParams>(first)!.end;
++    expect(xy(end), xy(old), reason: 'the old band is empty: not joined');
++    // Let the stream deliver, and a hover rebuild the cache with H moved.
++    // Then undo that wall and the move and click in the moved band: H is
++    // back where it was, so the click stays where it landed.
++    await Future<void>.delayed(Duration.zero);
++    hoverTo(rig, plan(2000, 2000));
++    doc.commands.undo();
++    doc.commands.undo();
++    final moved = plan(1300, 760);
++    pressAt(rig, moved);
++    final second = walls(doc).last;
++    expect(xy(doc.components.get<WallParams>(second)!.end), xy(moved),
++        reason: 'the moved band is gone again: not joined');
++    expect(distToLine(moved, plan(0, 0), plan(4000, 0)), greaterThan(700));
++  });
++
++  test(
++      "WT16 a click right after the tool's own commit, with no await, joins "
++      "the new wall's band (Task 6 review, m2)", () {
++    final doc = wallDoc();
++    final rig = directRig(doc);
++    pressAt(rig, plan(0, 0));
++    hoverTo(rig, plan(2000, 900));
++    pressAt(rig, plan(3000, 0));
++    final a = walls(doc).single;
++    final wa = worldWallOf(doc, a);
++    pressAt(rig, plan(1500, 70));
++    final end = doc.components.get<WallParams>(walls(doc).last)!.end;
++    expect(distToLine(end, wa.s, wa.e), lessThan(wallJoin.linear),
++        reason: "on A's centreline");
++  });
++
++  test(
++      "WT17 a hover right after the tool's own commit, with no await, joins "
++      "the new wall's band (Task 6 review, m2)", () {
++    final doc = wallDoc();
++    final rig = directRig(doc);
++    pressAt(rig, plan(0, 0));
++    hoverTo(rig, plan(2000, 900));
++    pressAt(rig, plan(3000, 0));
++    final wa = worldWallOf(doc, walls(doc).single);
++    hoverTo(rig, plan(1500, 70));
++    expect(distToLine(rig.tool.debugBandEnd, wa.s, wa.e), lessThan(1e-6),
++        reason: "the rubber band ends on A's centreline");
++  });
++
++  test(
++      'WT18 settings holding a thickness at or below wallJoin.linear commit '
++      'no wall and end the chain; just above it, a wall lands (final review '
++      'm1)', () {
++    final doc = wallDoc();
++    final rig = directRig(doc);
++    for (final t in [1e-12, wallJoin.linear]) {
++      rig.settings.value = WallSettings(thickness: t);
++      final seed = doc.handleSeed.current;
++      final before = enc(doc);
++      pressAt(rig, plan(0, 0));
++      expect(rig.tool.isPending, isTrue, reason: '$t');
++      pressAt(rig, plan(3000, 0));
++      expect(walls(doc), isEmpty, reason: '$t');
++      expect(doc.handleSeed.current, seed, reason: '$t');
++      expect(enc(doc), before, reason: '$t');
++      expect(doc.commands.undoDepth, 0, reason: '$t');
++      expect(rig.tool.isPending, isFalse, reason: '$t: the chain ends');
++    }
++    rig.settings.value = WallSettings(thickness: 2 * wallJoin.linear);
++    pressAt(rig, plan(0, 0));
++    pressAt(rig, plan(3000, 0));
++    final h = walls(doc).single;
++    expect(doc.components.get<WallParams>(h)!.thickness, 2 * wallJoin.linear);
++    expect(driftOf(doc), isEmpty);
++  });
++
++  test(
++      'WT20 settings holding a thickness above kWallMaxThickness, set through '
++      "the tool's notifier, commit no wall on a diagonal click at the far "
++      'turned origin and end the chain; at the ceiling a wall lands '
++      '(post-11 (c), Q4 review m2)', () {
++    final doc = wallDoc();
++    final rig = directRig(doc);
++    // Off both axes in world, which is the wall group's local space: 1e25
++    // over this ~3,030 mm wall collapses its band (t/L ~ 3e21), and the
++    // region check would throw out of the click.
++    final s = plan(400, 900), e = plan(3400, 1300);
++    for (final t in [1e25, nextUp(kWallMaxThickness)]) {
++      rig.settings.value = WallSettings(thickness: t);
++      final seed = doc.handleSeed.current;
++      final before = enc(doc);
++      pressAt(rig, s);
++      expect(rig.tool.isPending, isTrue, reason: '$t');
++      expect(() => pressAt(rig, e), returnsNormally, reason: '$t');
++      expect(walls(doc), isEmpty, reason: '$t');
++      expect(doc.handleSeed.current, seed, reason: '$t');
++      expect(enc(doc), before, reason: '$t');
++      expect(doc.commands.undoDepth, 0, reason: '$t');
++      expect(rig.tool.isPending, isFalse, reason: '$t: the chain ends');
++    }
++    rig.settings.value = const WallSettings(thickness: kWallMaxThickness);
++    pressAt(rig, s);
++    pressAt(rig, e);
++    final h = walls(doc).single;
++    expect(doc.components.get<WallParams>(h)!.thickness, kWallMaxThickness);
++    expect(driftOf(doc), isEmpty);
++  });
++}

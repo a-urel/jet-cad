@@ -1,0 +1,1331 @@
+20d592d9 test(integration): resting-ghost reads, library order, a turned IA-alloc (3a Task 28 fix)
+ .../test/attach/against_wall_rotate_test.dart      |  54 +++--
+ .../test/attach/symbol_move_test.dart              |   2 -
+ .../test/attach/symbol_shell_test.dart             |  26 +--
+ .../test/attach/wall_attach_end_to_end_test.dart   |  25 +--
+ .../test/attach/wall_attach_tool_test.dart         | 244 +++++++++++++++------
+ .../test/controller/zone_room_test.dart            |   7 +-
+ .../test/dimension/dimension_shell_test.dart       |   9 +-
+ .../test/invariants/paint_allocation_test.dart     |  60 ++++-
+ .../test/support/attach_plans.dart                 | 104 ++++++++-
+ .../test/symbols/symbol_search_test.dart           |   8 +-
+ 10 files changed, 391 insertions(+), 148 deletions(-)
+diff --git a/packages/jet_cad_2d_integration/test/attach/against_wall_rotate_test.dart b/packages/jet_cad_2d_integration/test/attach/against_wall_rotate_test.dart
+index 794f98eb..5f0b8ac0 100644
+--- a/packages/jet_cad_2d_integration/test/attach/against_wall_rotate_test.dart
++++ b/packages/jet_cad_2d_integration/test/attach/against_wall_rotate_test.dart
+@@ -12,29 +12,40 @@
+ // Ported to jet_cad_2d_integration (3a Task 28, D-03; rulings IA-R4,
+ // IA-R5) from jet_cad_floor_plan/test/host/against_wall_rotate_test.dart:
+ // the editor is Task 26's fixture (`mountEditor`: the sample flat with 2b's
+ // units, `PlanEditor`, `editorCamera()`); the capabilities are the
+ // controller's permissions (`h.caps.value = X` → `c.permissions = X` and a
+ // pump); the Symbols tab, its search and its cell are the plan's gallery
+ // (`symbol-cell-architecture.kitchen.base.600@1`, C7 class 1); the active
+ // tool is the canvas's (`activeTool`, the rig's), plan.select's a
+ // `SelectTool` in the plan's guard: its id read through the controller.
+ // R-3's ghost reads (`tool.ghostAttachment`, `tool.ghostPlacement`, a
+-// private tool's) are the instance a click at the resting pointer commits,
+-// read and undone (IA-R4); its "with no pointer event" is the click's own
+-// event (the gate change's re-resolve is 2a's AT tests').
++// private tool's) are read from the resting ghost's own drawing, with no
++// pointer event (IA-R4, review fix 1): `restingMarker` (the hourglass the
++// tool's screen overlay draws at the attachment's marker) and
++// `restingPlacement` (the matrix its world overlay draws the ghost under);
++// the commit a click at the resting pointer makes, read and undone, is
++// checked after them.
+ import 'package:flutter/services.dart' show LogicalKeyboardKey;
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
++import '../support/attach_plans.dart'
++    show
++        answerAt,
++        armable,
++        rawWorldAt,
++        restingMarker,
++        restingPlacement,
++        screenAt;
+ import '../support/canvas_rig.dart' show byKey, pressKey;
+ import '../support/editor_fixture.dart' show mountEditor, screenOf;
+ import 'editor_tools_review_test.dart'
+     show arm, drag, gridSnapOff, hover, instancesOf, openSymbols, place;
+ 
+ /// [m]'s linear part.
+ List<double> linearOf(Transform2 m) => [m.a, m.b, m.c, m.d];
+ 
+ const List<double> unturned = [1.0, 0.0, 0.0, 1.0];
+ 
+@@ -193,32 +204,41 @@ void main() {
+   testWidgets(
+       'F-7 review R-3: the ghost attached to the east face lets go and '
+       'unturns when rotate turns false with no pointer event; full again, '
+       'it attaches turned', (tester) async {
+     final c = await mountEditor(tester);
+     gridSnapOff(c.document);
+     await openSymbols(tester, c);
+     await tester.enterText(byKey('symbol-search'), 'base unit 600');
+     await tester.pump();
+     await arm(tester, 'kitchen.base.600');
+-    final g = await hover(tester, c, Vector2(25730, 16200));
+-    // `tool.ghostAttachment` / `tool.ghostPlacement` (IA-R4): the
+-    // placement a click at the resting pointer commits, read and undone.
+-    Future<Transform2> ghost() => ghostAt(tester, c, g, Vector2(25730, 16200));
+-    var p = await ghost();
+-    expect(isFree(p, Vector2(25730, 16200)), isFalse, reason: 'premise');
+-    expect(p.a, closeTo(0, 1e-9), reason: 'premise');
++    final at = Vector2(25730, 16200);
++    final g = await hover(tester, c, at);
++    // The provider's answer at the resting pointer, under full (IA-R1).
++    final want =
++        answerAt(c, armable(c, 'kitchen.base.600'), rawWorldAt(tester, c, at))!;
++    // `tool.ghostAttachment` / `tool.ghostPlacement`, read on the resting
++    // ghost with no pointer event.
++    void expectAttached(String why) {
++      final m = restingMarker(tester, c);
++      expect(m, isNotNull, reason: why);
++      expect((m! - screenAt(c, want.marker)).distance, lessThan(1e-6),
++          reason: why);
++    }
++
++    expectAttached('premise');
++    expect(restingPlacement(tester, c)!.a, closeTo(0, 1e-9), reason: 'premise');
+     c.permissions = PlanPermissions.full.copyWith(rotate: false);
+     await tester.pump();
+-    p = await ghost();
+-    expect(isFree(p, Vector2(25730, 16200)), isTrue,
+-        reason: 'ghostAttachment isNull');
+-    expect(linearOf(p), unturned);
++    expect(restingMarker(tester, c), isNull, reason: 'ghostAttachment isNull');
++    expect(linearOf(restingPlacement(tester, c)!), unturned);
+     c.permissions = PlanPermissions.full;
+     await tester.pump();
+-    p = await ghost();
+-    expect(isFree(p, Vector2(25730, 16200)), isFalse,
+-        reason: 'ghostAttachment isNotNull');
++    expectAttached('ghostAttachment isNotNull');
++    expect(restingPlacement(tester, c)!.a, closeTo(0, 1e-9));
++    // The commit at the resting pointer is the attached one (IA-R4).
++    final p = await ghostAt(tester, c, g, at);
++    expect(isFree(p, at), isFalse, reason: 'committed attached');
+     expect(p.a, closeTo(0, 1e-9));
+     await g.removePointer();
+   });
+ }
+diff --git a/packages/jet_cad_2d_integration/test/attach/symbol_move_test.dart b/packages/jet_cad_2d_integration/test/attach/symbol_move_test.dart
+index 0844ad48..bca0e3c2 100644
+--- a/packages/jet_cad_2d_integration/test/attach/symbol_move_test.dart
++++ b/packages/jet_cad_2d_integration/test/attach/symbol_move_test.dart
+@@ -145,22 +145,20 @@ Vector2 pressOf(Scene s) => s.transform
+ Future<void> moveBy(WidgetTester tester, Scene s, Transform2 delta) async {
+   final press = pressOf(s);
+   final from = globalAt(tester, s.c, press);
+   final to = globalAt(tester, s.c, delta.transformPoint(press));
+   final canvas = tester.getRect(find.byType(InteractionLayer));
+   expect(canvas.contains(from) && canvas.contains(to), isTrue,
+       reason: 'premise: the drag is on the canvas');
+   await drag(tester, from, to);
+ }
+ 
+-List<double> partsOf(Transform2 t) => [t.a, t.b, t.c, t.d, t.e, t.f];
+-
+ /// The plain move `delta · before` (the resolver's null), within 1e-9.
+ void expectPlain(
+     Transform2 got, Transform2 delta, Transform2 before, String reason) {
+   final want = partsOf(delta.multiply(before));
+   final parts = partsOf(got);
+   for (var i = 0; i < 6; i++) {
+     expect(parts[i], closeTo(want[i], 1e-9), reason: '$reason [$i]');
+   }
+ }
+ 
+diff --git a/packages/jet_cad_2d_integration/test/attach/symbol_shell_test.dart b/packages/jet_cad_2d_integration/test/attach/symbol_shell_test.dart
+index a57750e4..9570ec6e 100644
+--- a/packages/jet_cad_2d_integration/test/attach/symbol_shell_test.dart
++++ b/packages/jet_cad_2d_integration/test/attach/symbol_shell_test.dart
+@@ -19,60 +19,42 @@
+ import 'package:flutter/gestures.dart';
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_integration/jet_cad_2d_integration.dart';
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+ import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
+ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import '../support/attach_plans.dart';
+-import '../support/canvas_rig.dart'
+-    show globalAt, pumpPlanEditor, symbolsReady, worldAt;
++import '../support/canvas_rig.dart' show globalAt, pumpPlanEditor, symbolsReady;
+ import '../support/plans.dart' show polar, walls;
+ import '../support/room_plans.dart' show undoKey;
+ 
+-List<InstanceNode> instancesOf(DraftDocument doc) =>
+-    doc.tree.nodes.whereType<InstanceNode>().toList();
+-
+-List<double> partsOf(Transform2 t) => [t.a, t.b, t.c, t.d, t.e, t.f];
+-
+ /// Today's `addAttachWall`: a wall at 30°, 3600 long and 150 thick,
+ /// justified left, in its own rotated group near (1e5, −7e4) (no tool
+ /// runs), as the plan file [c] opens, the editor pumped, the furniture
+ /// loaded and the camera aimed at it. Returns the wall and its left face.
+ Future<(PlanController, Handle, FaceLine)> addAttachWall(
+     WidgetTester tester) async {
+   final s = farAt(1234.5, 678.25);
+   final plan = attachPlan([(s, polar(s, 30, 3600), 150, Justification.left)]);
+   final c = architectureController(json: plan.json);
+   addTearDown(c.dispose);
+   await pumpPlanEditor(tester, c);
+   expect(await symbolsReady(tester, c), isTrue,
+       reason: 'premise: the furniture library loaded');
+   await aimCamera(tester, c, polar(s, 30, 1800));
+   final h = plan.walls.single;
+   return (c, h, faceLineOf(c.document, h, left: true));
+ }
+ 
+-/// The raw world point the layer computes for a pointer at world [p].
+-Vector2 rawAt(WidgetTester tester, PlanController c, Vector2 p) =>
+-    worldAt(tester, c, globalAt(tester, c, p));
+-
+-/// The provider's answer for [e] at the raw point [raw] (IA-R1).
+-Attachment? answerAt(PlanController c, PlanSymbol e, Vector2 raw) => attachOf(
+-    c.document,
+-    e.entry,
+-    raw,
+-    placementTransform(at: raw, basePoint: e.entry.definition.basePoint),
+-    c.camera.value.scale);
+-
+ void main() {
+   group('the wall attachment (spec 09c D6)', () {
+     testWidgets(
+         'SS16 a fresh shell where no Wall or Opening tool ran: a base unit '
+         'attaches to a 30° face, a second placed after it snaps to its '
+         'side; one undo step each (W-5)', (tester) async {
+       final (c, wall, run) = await addAttachWall(tester);
+       final doc = c.document;
+       final unit = armable(c, 'kitchen.base.600');
+       await armBySymbolsTab(tester, c, unit);
+@@ -85,30 +67,30 @@ void main() {
+         final mouse = await tester.createGesture(
+             kind: PointerDeviceKind.mouse, buttons: kPrimaryButton);
+         await mouse.down(globalAt(tester, c, p));
+         await tester.pump();
+         await mouse.up();
+         await mouse.removePointer();
+         await tester.pump();
+       }
+ 
+       final p1 = onRun(run, 1000, 120);
+-      final want1 = answerAt(c, unit, rawAt(tester, c, p1))!;
++      final want1 = answerAt(c, unit, rawWorldAt(tester, c, p1))!;
+       await click(p1);
+       final first = instancesOf(doc).single;
+       expect(partsOf(first.transform), partsOf(want1.transform));
+       expect(doc.commands.undoDepth, depth + 1);
+ 
+       // 60 mm (inside the 100 mm edge capture) right of the first's side.
+       final p2 = onRun(run, 1000 + 600 + 60, 90);
+       // The answer the release finds: the first unit its neighbour.
+-      final want2 = answerAt(c, unit, rawAt(tester, c, p2));
++      final want2 = answerAt(c, unit, rawWorldAt(tester, c, p2));
+       await click(p2);
+       final second = instancesOf(doc).last;
+       expect(instancesOf(doc), hasLength(2));
+       final q2 = second.transform.transformPoint(box.backCentre);
+       expect((q2 - run.a).dot(run.t), closeTo(1600, 1e-6),
+           reason: 'its left side on the first\'s right side');
+       expect((q2 - run.a).dot(run.m), closeTo(0, 1e-6), reason: 'on the face');
+       // `tool.ghostAttachment` (IA-R4): the answer the release used.
+       expect(want2, isNotNull);
+       expect(partsOf(second.transform), partsOf(want2!.transform));
+@@ -165,21 +147,21 @@ void main() {
+         // `isUsableHost(doc, wall)` is the kit's (not exported): the
+         // wall's layer is visible and unlocked.
+         final l = doc.tables.layers[on]!;
+         expect(l.visible && !l.locked, hosts, reason: 'premise: $why');
+         final p = onRun(run, 1100 + 250.0 * i, 80);
+         await mouse.moveTo(globalAt(tester, c, p));
+         await tester.pump();
+         // `tool.ghostVisible` and `tool.ghostAttachment != null` (IA-R4):
+         // the placement a click at the resting pointer commits, undone.
+         final depth = doc.commands.undoDepth;
+-        final want = answerAt(c, toilet, rawAt(tester, c, p));
++        final want = answerAt(c, toilet, rawWorldAt(tester, c, p));
+         await mouse.down(globalAt(tester, c, p));
+         await tester.pump();
+         await mouse.up();
+         await tester.pump();
+         expect(doc.commands.undoDepth, depth + 1, reason: '$why: placed');
+         final placed = instancesOf(doc).last.transform;
+         final back = placed.transformPoint(box.backCentre);
+         final attached = (back - run.a).dot(run.m).abs() < 1e-6 &&
+             (placed.c + run.m.x).abs() < 1e-12 &&
+             (placed.d + run.m.y).abs() < 1e-12;
+diff --git a/packages/jet_cad_2d_integration/test/attach/wall_attach_end_to_end_test.dart b/packages/jet_cad_2d_integration/test/attach/wall_attach_end_to_end_test.dart
+index 8dabbf7b..c49f03be 100644
+--- a/packages/jet_cad_2d_integration/test/attach/wall_attach_end_to_end_test.dart
++++ b/packages/jet_cad_2d_integration/test/attach/wall_attach_end_to_end_test.dart
+@@ -35,29 +35,24 @@ import 'package:flutter/gestures.dart';
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_integration/jet_cad_2d_integration.dart';
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+ import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
+ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import '../support/attach_plans.dart';
+ import '../support/canvas_rig.dart'
+-    show activeTool, globalAt, pumpPlanEditor, symbolsReady, worldAt;
++    show activeTool, globalAt, pumpPlanEditor, symbolsReady;
+ import '../support/plans.dart' show polar, walls;
+ import '../support/room_plans.dart' show undoKey;
+ 
+-List<InstanceNode> instancesOf(DraftDocument doc) =>
+-    doc.tree.nodes.whereType<InstanceNode>().toList();
+-
+-List<double> partsOf(Transform2 t) => [t.a, t.b, t.c, t.d, t.e, t.f];
+-
+ /// A mouse that hovers at world [hover], then presses there, moves and
+ /// releases at world [release]. Returns the raw world points of the hover
+ /// and of the release.
+ Future<({Vector2 hoverRaw, Vector2 releaseRaw})> hoverPressRelease(
+     WidgetTester tester,
+     PlanController c,
+     Vector2 hover,
+     Vector2 release) async {
+   final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+   await mouse.addPointer(
+@@ -69,22 +64,22 @@ Future<({Vector2 hoverRaw, Vector2 releaseRaw})> hoverPressRelease(
+   // hovered attachment (`tool.ghostAttachment`), a private tool's.
+   await mouse.down(globalAt(tester, c, hover));
+   await tester.pump();
+   await mouse.moveTo(globalAt(tester, c, release));
+   await tester.pump();
+   await mouse.up();
+   await tester.pump();
+   await mouse.removePointer();
+   await tester.pump();
+   return (
+-    hoverRaw: worldAt(tester, c, globalAt(tester, c, hover)),
+-    releaseRaw: worldAt(tester, c, globalAt(tester, c, release)),
++    hoverRaw: rawWorldAt(tester, c, hover),
++    releaseRaw: rawWorldAt(tester, c, release),
+   );
+ }
+ 
+ /// The drawn vertices of [instance]'s definition, in world: every line's
+ /// two ends and every polyline's points, through the instance's transform.
+ /// Read from the document's entities, not from `SymbolBox`.
+ List<Vector2> drawnVertices(DraftDocument doc, InstanceNode instance) {
+   final g = doc.tree.accumulatedTransform(instance.handle);
+   final e = doc.entities;
+   final out = <Vector2>[];
+@@ -145,32 +140,20 @@ void expectFlush(
+       (g.transformPoint(Vector2(box.right, box.back)) - run.a).dot(run.t);
+   return u1 <= u2 ? (lo: u1, hi: u2) : (lo: u2, hi: u1);
+ }
+ 
+ /// The L's corner, and its two walls' world angles: A (100 thick, right
+ /// justified) runs 4000 at 30° into the corner, B (240 thick, left
+ /// justified) runs 3000 out of it at 120°: a left turn, so the left faces
+ /// are inside.
+ final Vector2 corner = farAt(-321.75, 987.5);
+ 
+-/// The provider's answer for [e] at the raw world point [raw] on [c]'s
+-/// camera (IA-R1), its free placement the raw point's.
+-Attachment? answerAt(PlanController c, PlanSymbol e, Vector2 raw) {
+-  final scale = c.camera.value.scale;
+-  return attachOf(
+-      c.document,
+-      e.entry,
+-      raw,
+-      placementTransform(at: raw, basePoint: e.entry.definition.basePoint),
+-      scale);
+-}
+-
+ void main() {
+   testWidgets(
+       'WE1 an L of 100 and 240 mm walls, one at 30°, far from the origin, '
+       'at 0.1 px/mm: the double bed armed from the Symbols tab lands flush '
+       'and turned on the outside face; three base units from the inside '
+       'corner, each against the previous; undo three, redo three, bytes '
+       'equal; Save As -> Open -> Save byte-identical', (tester) async {
+     // Today's handles 7 and 8 (the launch document's first two after its
+     // DASHED record at 6) turned the two groups.
+     final plan = attachPlan([
+@@ -255,21 +238,21 @@ void main() {
+     final unit = armable(c, 'kitchen.base.600');
+     expect(unit.component.attachTo, contains('wall-face'), reason: 'premise');
+     final unitBox = boxOfEntry(unit.entry)!;
+     await armBySymbolsTab(tester, c, unit);
+     final armed = activeTool(tester);
+     final units = <InstanceNode>[];
+     for (final (i, (u, s))
+         in [(360.0, 110.0), (970.0, 90.0), (1445.0, 130.0)].indexed) {
+       // The answer over the document as the release finds it: the placed
+       // instances are its neighbours.
+-      final raw = worldAt(tester, c, globalAt(tester, c, onRun(inside, u, s)));
++      final raw = rawWorldAt(tester, c, onRun(inside, u, s));
+       final want = answerAt(c, unit, raw)!;
+       final at = await hoverPressRelease(
+           tester, c, onRun(inside, u, s), onRun(inside, u, s));
+       expect(at.releaseRaw, raw, reason: 'premise: the same raw point');
+       expect(faceDistance(doc, hA, want.marker, left: true), lessThan(1e-6),
+           reason: 'premise: unit $i inside');
+       final placed = instancesOf(doc).last;
+       expect(instancesOf(doc), hasLength(2 + i));
+       expect(partsOf(placed.transform), partsOf(want.transform),
+           reason: 'unit $i: attachToWall\'s transform, bytes');
+diff --git a/packages/jet_cad_2d_integration/test/attach/wall_attach_tool_test.dart b/packages/jet_cad_2d_integration/test/attach/wall_attach_tool_test.dart
+index 390df938..a00b1d98 100644
+--- a/packages/jet_cad_2d_integration/test/attach/wall_attach_tool_test.dart
++++ b/packages/jet_cad_2d_integration/test/attach/wall_attach_tool_test.dart
+@@ -7,53 +7,58 @@
+ // expected transforms are `attachToWall`'s over the rig's own runs (pinned
+ // by `wall_attach_test.dart`) and checked against hand arithmetic along the
+ // run (`q = a + u·t`, the rotation `t`).
+ //
+ // Ported to jet_cad_2d_integration (3a Task 28, D-02; rulings IA-R1,
+ // IA-R4) from jet_cad_floor_plan/test/symbols/symbol_place_tool_test.dart's
+ // group "the wall attachment (spec 09c D6)" (:1368-1740), 12 of its 13
+ // cases, and the rig parts they use. The plan's plan.symbol is internal, so
+ // each case is driven on the canvas: `c.armSymbol`, a mouse click, the keys
+ // R, M and Shift+R, F3. A ghost read (`ghostPlacement`, `ghostAttachment`,
+-// `ghostAt`, `quarterTurns`) at a pointer is the instance one click commits
+-// there (2a's AT-9 pins that the release uses the ghost's attachment),
+-// read and then undone, so the document, the undo depth and the instance
+-// count stay the source's; an attached ghost is a commit equal to the
+-// provider's answer, a free one a commit equal to the free placement. The
++// `ghostAt`, `quarterTurns`) that follows a pointer event is the instance
++// one click commits at that pointer (2a's AT-9 pins that the release uses
++// the ghost's attachment), read and then undone, so the document, the undo
++// depth and the instance count stay the source's; an attached ghost is a
++// commit equal to the provider's answer, a free one a commit equal to the
++// free placement. A click re-resolves the ghost, so a read that must see
++// what a key, a camera change or a re-arm did with NO pointer event is
++// read from the resting ghost's own drawing instead (review fix 1):
++// `restingPlacement` (the matrix the tool's world overlay draws the ghost
++// under) and `restingMarker` (the hourglass its screen overlay draws at the
++// attachment's marker), with the mouse resting on the canvas. The
+ // oracle is the kit's provider through the contract (IA-R1): `want.q` is
+ // `want.marker`, `want.run` the marker on that face's line. The symbols
+ // are the kit's furniture (C7 classes 1 and 2: `architecture.*`, the tag
+ // against-wall is `attachTo: ['wall-face']`).
+ //
+ // Fixture changes: the camera is centred on the wall's middle at 0.05 px/mm
+ // (every click lands on the canvas); the source's pA, 20 m from the wall
+ // and off the canvas, is [away], 2 m into the room from the face.
+ //
+ // Not ported: "a tool given no wall faces never attaches (09b's
+ // behaviour)": its premise (a tool built without faces) cannot be built,
+ // plan.symbol always has the registry (C7, premise impossible).
+ import 'package:flutter/gestures.dart' show PointerDeviceKind;
+ import 'package:flutter/services.dart' show LogicalKeyboardKey;
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
+-    show InteractionLayer;
++    show InteractionLayer, kSnapMarkerPixels;
+ import 'package:jet_cad_2d_integration/jet_cad_2d_integration.dart';
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+ import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
+ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import '../support/attach_plans.dart' hide attachOf;
+ import '../support/attach_plans.dart' as support show attachOf;
+ import '../support/canvas_rig.dart';
+-import '../support/editor_fixture.dart' show drag;
+ import '../support/plans.dart' show polar, worldEndsOf;
+ 
+ /// The camera's pixels per mm: the aperture is 200 mm.
+ const double scale = 0.05;
+ 
+ /// The line's start: the object snap target, off the grid.
+ final Vector2 e0 = Vector2(73250.5, -41810.25);
+ 
+ /// The page grid: 25 mm from an origin off every round number.
+ const double gridStep = 25;
+@@ -81,45 +86,51 @@ SceneWall attachWall(double deg, Justification j) {
+ /// Which face of the wall (today's `FaceSide`, the kit's, not exported).
+ enum FaceSide { left, right }
+ 
+ /// P-2's two angles, each with a non-centre justification and the face the
+ /// pointer rests on.
+ const List<(double, Justification, FaceSide)> attachCases = [
+   (30, Justification.left, FaceSide.left),
+   (-112.5, Justification.right, FaceSide.right),
+ ];
+ 
+-List<double> partsOf(Transform2 t) => [t.a, t.b, t.c, t.d, t.e, t.f];
+-
+ /// The box's four corners under [t].
+ List<Vector2> footprint(SymbolBox b, Transform2 t) => [
+       for (final (x, y) in [
+         (b.left, b.front),
+         (b.right, b.front),
+         (b.right, b.back),
+         (b.left, b.back),
+       ])
+         t.transformPoint(Vector2(x, y)),
+     ];
+ 
+ /// A point away from the wall, beyond the capture (the source's pA, which
+ /// is off this camera's canvas): 2 m into the room at 0.37 along [r].
+ Vector2 away(FaceLine r) => onRun(r, r.length * 0.37, 2000);
+ 
++/// The one mouse of a test: a second mouse on the same device trips the
++/// mouse tracker, so every hover, click and drag goes through this one,
++/// which stays on the canvas (the ghost rests) until the next rig or the
++/// test's end.
++TestGesture? _mouse;
++
+ /// Today's `Rig(walls: [...])` over the editor: the walls in their groups,
+ /// the rig's page (its 25 mm grid off every round number) and its line
+ /// `e0`, the camera on the wall at [scale], the canvas focused.
+ final class Rig {
+   Rig._(this.tester, this.c, this.wallHandles);
+ 
+   static Future<Rig> mount(WidgetTester tester,
+       {required List<SceneWall> walls, bool objectSnap = true}) async {
++    await _mouse?.removePointer();
++    _mouse = null;
+     final plan = attachPlan(walls, extra: (d) {
+       d.commands.execute(SetComponentCommand<PageComponent>(
+           d.rootHandle,
+           PageComponent(
+               originX: gridOriginX,
+               originY: gridOriginY,
+               gridStepMm: gridStep)));
+       d.commands.execute(addDrafted(
+           d, EntityKind.line, linePayload(e0, e0 + Vector2(1200, 700)),
+           layer: ReservedHandles.layerZero));
+@@ -197,40 +208,98 @@ final class Rig {
+           e.entry,
+           w,
+           placementTransform(
+               at: gridOf(w),
+               basePoint: e.entry.definition.basePoint,
+               quarterTurns: turns,
+               mirrored: mirrored),
+           k,
+           mirrored: mirrored);
+ 
++  /// The mouse moved to rest at global [g] (a hover).
++  Future<void> restAt(Offset g) async {
++    final m = _mouse;
++    if (m == null) {
++      final added = await tester.createGesture(kind: PointerDeviceKind.mouse);
++      await added.addPointer(location: g - const Offset(3, 3));
++      _mouse = added;
++      addTearDown(() async {
++        await _mouse?.removePointer();
++        _mouse = null;
++      });
++    }
++    await _mouse!.moveTo(g);
++    await tester.pump();
++  }
++
++  /// The mouse resting at world [p]: today's `rig.hover(p)`.
++  Future<void> rest(Vector2 p) => restAt(globalAt(tester, c, p));
++
++  /// A press and a release of the resting mouse at global [g].
++  Future<void> clickAt(Offset g) async {
++    await restAt(g);
++    await _mouse!.down(g);
++    await tester.pump();
++    await _mouse!.up();
++    await tester.pump();
++  }
++
++  /// A press at world [from], eight moves, a release at world [to]: today's
++  /// `rig.down(from); rig.up(to)` with the pointer moving between.
++  Future<void> drag(Vector2 from, Vector2 to) async {
++    final a = globalAt(tester, c, from), b = globalAt(tester, c, to);
++    await restAt(a);
++    await _mouse!.down(a);
++    await tester.pump();
++    for (var i = 1; i <= 8; i++) {
++      await _mouse!.moveTo(Offset.lerp(a, b, i / 8)!);
++      await tester.pump();
++    }
++    await _mouse!.up();
++    await tester.pump();
++  }
++
+   /// A click at global [g]: the placement one click commits there, read and
+   /// undone (IA-R4: today's ghost read at that pointer).
+   Future<Transform2> ghostAtGlobal(Offset g) async {
+     final n = instances.length, depth = document.commands.undoDepth;
+-    await mouseClick(tester, g);
++    await clickAt(g);
+     expect(instances, hasLength(n + 1),
+         reason: 'premise: the click placed one instance');
+     final t = instances.last.transform;
+     c.undo();
+     await tester.pump();
+     expect(document.commands.undoDepth, depth, reason: 'premise: undone');
+     return t;
+   }
+ 
+   /// [ghostAtGlobal] at world [p].
+   Future<Transform2> ghostAt(Vector2 p) =>
+       ghostAtGlobal(globalAt(tester, c, p));
+ 
+   /// A placement at [p]: today's `rig.down(p); rig.up(p)`.
+-  Future<void> click(Vector2 p) => mouseClick(tester, globalAt(tester, c, p));
++  Future<void> click(Vector2 p) => clickAt(globalAt(tester, c, p));
++
++  /// The resting ghost's placement, read with no pointer event (today's
++  /// `rig.tool.ghostPlacement!`).
++  Transform2 resting() {
++    final t = restingPlacement(tester, c);
++    expect(t, isNotNull, reason: 'premise: the ghost is drawn');
++    return t!;
++  }
++
++  /// The resting ghost's marker on the canvas, null when free (today's
++  /// `rig.tool.ghostAttachment` through the camera).
++  Offset? marker() => restingMarker(tester, c);
++
++  /// [w] on the canvas.
++  Offset screen(Vector2 w) => screenAt(c, w);
+ 
+   /// Where an instance put its symbol's base point: its `at`.
+   Vector2 placedAt(InstanceNode n) => n.transform
+       .transformPoint(document.tree.definition(n.definition)!.basePoint);
+ }
+ 
+ void main() {
+   group('the wall attachment (spec 09c D6)', () {
+     /// A point 0.37 along [r] and 160 mm (half the capture) into the room.
+     Vector2 nearFace(FaceLine r) => onRun(r, r.length * 0.37, 160);
+@@ -298,22 +367,21 @@ void main() {
+               partsOf(ghost),
+               isNot(
+                   partsOf(rig.freeOf(toilet, p, turns: 1, mirrored: mirrored))),
+               reason: '$why: not the free placement');
+           // Pressed away from the wall, released on it.
+           expect(
+               partsOf(await rig.ghostAt(away(run))),
+               partsOf(
+                   rig.freeOf(toilet, away(run), turns: 1, mirrored: mirrored)),
+               reason: '$why: free');
+-          await drag(tester, globalAt(tester, rig.c, away(run)),
+-              globalAt(tester, rig.c, p));
++          await rig.drag(away(run), p);
+           expect(
+               partsOf(rig.instances.single.transform), partsOf(want.transform),
+               reason: '$why: the instance');
+           expect(rig.document.commands.undoDepth, 1, reason: why);
+         }
+       }
+     });
+ 
+     testWidgets(
+         'the capture is kWallAttachPixels (16 px), not the snap aperture: '
+@@ -383,178 +451,221 @@ void main() {
+     // Not ported (ruling IA-R4): expect(rig.tool.faces, isNull) (:1499).
+ 
+     testWidgets(
+         'M while attached mirrors in place: the footprint stays, the '
+         'transform is the mirrored attachment (M-09c-j)', (tester) async {
+       for (final (deg, j, side) in attachCases) {
+         final rig = await Rig.mount(tester, walls: [attachWall(deg, j)]);
+         final toilet = armable(rig.c, 'bath.toilet');
+         await rig.arm(toilet);
+         final p = nearFace(rig.runOn(side));
+-        final p0 = await rig.ghostAt(p);
++        await rig.rest(p);
++        final p0 = rig.resting();
+         expect(partsOf(p0), partsOf(rig.attachOf(toilet, p)!.transform));
++        // The ghost's commit at the pointer is the same (IA-R4).
++        expect(partsOf(await rig.ghostAt(p)), partsOf(p0));
+         await rig.key(LogicalKeyboardKey.keyM);
+         // Not ported (ruling IA-R4): expect(rig.notifications, [false],
+         // reason: '$deg°: one repaint').
+-        final p1 = await rig.ghostAt(p);
++        // Read with no pointer event: the key itself re-asked the faces.
++        final p1 = rig.resting();
+         final want = rig.attachOf(toilet, p, mirrored: true)!;
+         expect(partsOf(p1), partsOf(want.transform), reason: '$deg°');
+         expect(p0.a * p0.d - p0.b * p0.c, greaterThan(0));
+         expect(p1.a * p1.d - p1.b * p1.c, lessThan(0),
+             reason: '$deg°: mirrored');
+         // The same four corners, the mirror swapping left and right.
+         final box = boxOfEntry(toilet.entry)!;
+         final f0 = footprint(box, p0), f1 = footprint(box, p1);
+         for (final (i, k) in [(0, 1), (1, 0), (2, 3), (3, 2)]) {
+           expect(f1[i].distanceTo(f0[k]), lessThan(1e-6),
+               reason: '$deg°: corner $i in place');
+         }
+         await rig.click(p);
+         expect(partsOf(rig.instances.single.transform), partsOf(want.transform),
+             reason: '$deg°: placed mirrored');
+         await rig.key(LogicalKeyboardKey.keyM);
+-        expect(partsOf(await rig.ghostAt(p)), partsOf(p0),
+-            reason: '$deg°: M again');
++        expect(partsOf(rig.resting()), partsOf(p0), reason: '$deg°: M again');
+       }
+     });
+ 
+     testWidgets(
+         'R and Shift+R while attached change the turn count only: the ghost '
+         'does not turn; off the face the count applies (M-09c-k)',
+         (tester) async {
+       final rig = await Rig.mount(tester,
+           walls: [attachWall(-112.5, Justification.right)]);
+       final toilet = armable(rig.c, 'bath.toilet');
+       await rig.arm(toilet);
+       final run = rig.runOn(FaceSide.right);
+       final p = nearFace(run);
+       final pA = away(run);
+-      final p0 = partsOf(await rig.ghostAt(p));
++      await rig.rest(p);
++      final p0 = partsOf(rig.resting());
+       await rig.key(LogicalKeyboardKey.keyR);
+-      // `rig.tool.quarterTurns` read off the face, where the count applies.
++      // `rig.tool.quarterTurns` (1): read off the face, where the count
++      // applies, as the commit there (IA-R4).
++      expect(partsOf(rig.resting()), p0, reason: 'R');
+       expect(partsOf(await rig.ghostAt(pA)),
+           partsOf(rig.freeOf(toilet, pA, turns: 1)),
+           reason: 'quarterTurns 1');
+-      expect(partsOf(await rig.ghostAt(p)), p0, reason: 'R');
++      await rig.rest(p);
+       await rig.key(LogicalKeyboardKey.keyR);
+       await rig.key(LogicalKeyboardKey.keyR);
+       await rig.shiftR();
++      expect(partsOf(rig.resting()), p0, reason: 'R, R, Shift+R');
+       expect(partsOf(await rig.ghostAt(pA)),
+           partsOf(rig.freeOf(toilet, pA, turns: 2)),
+           reason: 'quarterTurns 2');
+-      expect(partsOf(await rig.ghostAt(p)), p0, reason: 'R, R, Shift+R');
+       await rig.click(p);
+       expect(partsOf(rig.instances.single.transform), p0,
+           reason: 'placed unturned');
+       // Off the face: the two quarter turns apply.
++      await rig.rest(pA);
++      expect(rig.marker(), isNull);
++      expect(partsOf(rig.resting()), partsOf(rig.freeOf(toilet, pA, turns: 2)));
+       await rig.click(pA);
+-      final free = rig.instances.last;
+-      expect(
+-          partsOf(free.transform), partsOf(rig.freeOf(toilet, pA, turns: 2)));
+-      expectAt(rig.placedAt(free), gridOf(rig.worldOf(pA)), 'free at the grid');
++      expectAt(rig.placedAt(rig.instances.last), gridOf(rig.worldOf(pA)),
++          'free at the grid');
+     });
+ 
+     testWidgets(
+         'the marker is the nearest glyph at the face point q, not at the '
+         'raw or the resolved point', (tester) async {
+       final rig =
+           await Rig.mount(tester, walls: [attachWall(30, Justification.left)]);
+       final toilet = armable(rig.c, 'bath.toilet');
+       await rig.arm(toilet);
+       final p = nearFace(rig.runOn(FaceSide.left));
++      await rig.rest(p);
++      // `rig.tool.ghostAttachment!.q`: the provider's marker, the ghost the
++      // resting pointer shows being that attachment.
+       final want = rig.attachOf(toilet, p)!;
+-      final placed = await rig.ghostAt(p);
+-      expect(partsOf(placed), partsOf(want.transform),
+-          reason: 'premise: the click committed the answer');
+-      // The committed marker: the back-centre the answer stands on q.
+-      final q = placed.transformPoint(boxOfEntry(toilet.entry)!.backCentre);
+-      expect(q.distanceTo(want.marker), lessThan(1e-6));
+-      // Not ported (ruling IA-R4): the paintOverlay lines (:1572-1604): the
+-      // RecordingCanvas, `canvas.named('drawRect')` isEmpty, the hourglass's
+-      // four drawLine calls, their centre on q and the glyph's corners.
++      expect(partsOf(rig.resting()), partsOf(want.transform),
++          reason: 'premise: attached');
++      final q = want.marker;
++      // `rig.tool.paintOverlay(canvas, ...)`: the canvas's own call
++      // (`Tool.paintOverlay`, through the plan's guard) on the drawing
++      // area's size.
++      final canvas = overlayOf(tester, rig.c);
++      expect(canvas.named('drawRect'), isEmpty);
++      final lines = canvas.named('drawLine').toList();
++      expect(lines, hasLength(4), reason: 'the hourglass');
++      final ends = [
++        for (final l in lines) ...[
++          l.positionalArguments[0] as Offset,
++          l.positionalArguments[1] as Offset
++        ]
++      ];
++      final cx = ends.map((o) => o.dx).reduce((a, b) => a + b) / 8;
++      final cy = ends.map((o) => o.dy).reduce((a, b) => a + b) / 8;
+       final sq = rig.c.camera.value.worldToScreen(q);
++      expect(cx, closeTo(sq.x, 1e-9));
++      expect(cy, closeTo(sq.y, 1e-9));
++      // The glyph: top and bottom edges, then the two diagonals.
++      const h = kSnapMarkerPixels / 2;
++      for (final (o, dx, dy) in [
++        (ends[0], -h, -h),
++        (ends[1], h, -h),
++        (ends[3], -h, h),
++        (ends[4], -h, h),
++        (ends[5], h, h),
++        (ends[7], -h, -h),
++      ]) {
++        expect(o.dx, closeTo(sq.x + dx, 1e-9));
++        expect(o.dy, closeTo(sq.y + dy, 1e-9));
++      }
+       for (final w in [rig.worldOf(p), gridOf(rig.worldOf(p))]) {
+         final sw = rig.c.camera.value.worldToScreen(w);
+         expect(sw.distanceTo(sq), greaterThan(5),
+             reason: 'q is not the raw or the resolved point');
+       }
+     });
+ 
+     testWidgets(
+         'a camera zoom that brings the face within capture attaches the '
+         'resting ghost (M-09c-ak)', (tester) async {
+       final rig =
+           await Rig.mount(tester, walls: [attachWall(30, Justification.left)]);
+       final toilet = armable(rig.c, 'bath.toilet');
+       await rig.arm(toilet);
+       final run = rig.runOn(FaceSide.left);
+       // 400 mm off the face: outside 320 mm, inside 640 mm.
+       final p = onRun(run, run.length * 0.37, 400);
+       final g = globalAt(tester, rig.c, p);
+-      expect(
+-          partsOf(await rig.ghostAtGlobal(g)), partsOf(rig.freeOf(toilet, p)),
++      await rig.restAt(g);
++      expect(rig.marker(), isNull, reason: 'premise: too far');
++      expect(partsOf(rig.resting()), partsOf(rig.freeOf(toilet, p)),
+           reason: 'premise: too far');
+       final s = g - tester.getTopLeft(find.byType(InteractionLayer));
+       // Not ported (ruling IA-R4): rig.notifications.clear() and
+       // expect(rig.notifications, [false]).
+       rig.c.camera.zoomAt(s, 0.5);
+       await tester.pump();
+       final k = rig.c.camera.value.scale;
+       expect(k, closeTo(scale / 2, 1e-15));
+       final w = rig.c.camera.value.screenToWorld(Vector2(s.dx, s.dy));
+       final want = rig.attachAt(toilet, w, k: k)!;
+-      expect(partsOf(await rig.ghostAtGlobal(g)), partsOf(want.transform));
++      // Read with no pointer event: the camera change alone re-resolved.
++      final m = rig.marker();
++      expect(m, isNotNull);
++      expect((m! - rig.screen(want.marker)).distance, lessThan(1e-6));
++      expect(partsOf(rig.resting()), partsOf(want.transform));
+       // And back out: free again.
+       rig.c.camera.zoomAt(s, 2);
+       await tester.pump();
++      expect(rig.marker(), isNull);
+       final back = rig.c.camera.value.screenToWorld(Vector2(s.dx, s.dy));
+-      expect(
+-          partsOf(await rig.ghostAtGlobal(g)),
+-          partsOf(placementTransform(
+-              at: gridOf(back), basePoint: toilet.entry.definition.basePoint)));
++      final free = placementTransform(
++          at: gridOf(back), basePoint: toilet.entry.definition.basePoint);
++      expect(partsOf(rig.resting()), partsOf(free));
++      // The commit at the same pointer agrees (IA-R4).
++      expect(partsOf(await rig.ghostAtGlobal(g)), partsOf(free));
+     });
+ 
+     testWidgets(
+         'a re-arm between a tagged and an untagged entry while the ghost '
+         'rests near a face switches the attachment on and off', (tester) async {
+       final rig = await Rig.mount(tester,
+           walls: [attachWall(-112.5, Justification.right)]);
+       final toilet = armable(rig.c, 'bath.toilet');
+       final island = armable(rig.c, 'kitchen.island');
+       await rig.arm(island);
+       final p = nearFace(rig.runOn(FaceSide.right));
+-      expect(partsOf(await rig.ghostAt(p)), partsOf(rig.freeOf(island, p)),
+-          reason: 'the island: free');
++      await rig.rest(p);
++      expect(rig.marker(), isNull, reason: 'the island: free');
++      final w = rig.worldOf(p);
++      // Each re-arm read with no pointer event: the re-arm re-resolved.
+       await rig.arm(toilet);
+-      expect(partsOf(await rig.ghostAt(p)),
+-          partsOf(rig.attachOf(toilet, p)!.transform),
++      final want = rig.attachAt(toilet, w)!;
++      final m = rig.marker();
++      expect(m, isNotNull, reason: 'the toilet');
++      expect((m! - rig.screen(want.marker)).distance, lessThan(1e-6),
+           reason: 'the toilet');
++      expect(partsOf(rig.resting()), partsOf(want.transform));
+       await rig.arm(island);
+-      expect(partsOf(await rig.ghostAt(p)), partsOf(rig.freeOf(island, p)),
+-          reason: 'the island again');
+-      // Hidden (the pointer gone from the canvas), a re-arm still drops the
+-      // tagged entry's attachment: what the island places is its own.
++      expect(rig.marker(), isNull, reason: 'the island again');
++      expect(partsOf(rig.resting()), partsOf(rig.freeOf(island, p)));
++      // Hidden (no context to re-resolve with), a re-arm still drops the
++      // tagged entry's attachment: the stored placement is the new entry's.
+       await rig.arm(toilet);
+-      expect(partsOf(await rig.ghostAt(p)),
+-          partsOf(rig.attachOf(toilet, p)!.transform),
+-          reason: 'premise: the toilet attached');
+-      final exit = await tester.createGesture(kind: PointerDeviceKind.mouse);
+-      await exit.addPointer(location: globalAt(tester, rig.c, p));
+-      await tester.pump();
+-      await exit.moveTo(tester.getTopLeft(find.byType(InteractionLayer)) -
++      expect(rig.marker(), isNotNull);
++      await rig.restAt(tester.getTopLeft(find.byType(InteractionLayer)) -
+           const Offset(4, 4));
+-      await tester.pump();
+-      await exit.removePointer();
+-      await tester.pump();
++      expect(restingPlacement(tester, rig.c), isNull,
++          reason: 'premise: the ghost hidden');
+       await rig.arm(island);
+-      expect(partsOf(await rig.ghostAt(p)), partsOf(rig.freeOf(island, p)),
+-          reason: 'hidden re-arm');
++      // Not ported (IA-R4: the read needs a pointer event, which
++      // re-resolves): expect(rig.tool.ghostAttachment, isNull, reason:
++      // 'hidden re-arm') and expect(partsOf(rig.tool.ghostPlacement!),
++      // partsOf(rig.freeOf(island)), reason: 'hidden re-arm'). A hidden
++      // ghost draws nothing, and bringing the pointer back re-resolves.
+     });
+ 
+     testWidgets(
+         'W-5: a unit placed right after another along the face snaps to it '
+         'before the change stream delivers; one undo step each (M-09c-ap)',
+         (tester) async {
+       final rig =
+           await Rig.mount(tester, walls: [attachWall(30, Justification.left)]);
+       final base600 = armable(rig.c, 'kitchen.base.600');
+       await rig.arm(base600);
+@@ -563,21 +674,22 @@ void main() {
+       final p1 = onRun(run, 1000, 200);
+       await rig.click(p1);
+       final first = rig.instances.single.transform;
+       expect((first.transformPoint(box.backCentre) - run.a).dot(run.t),
+           closeTo(1000, 1e-6));
+       // A second unit 120 mm (inside the 200 mm edge capture) to the right
+       // of the first's right side, mirrored and turned.
+       await rig.key(LogicalKeyboardKey.keyM);
+       await rig.key(LogicalKeyboardKey.keyR);
+       // Not ported (IA-R4: the kit's bands are the plan's services' own,
+-      // no public read): final gen = bands.generation.
++      // no public read): final gen = bands.generation. The kit pins the
++      // before-delivery path (D-06's stateId) in wall_face_provider_test.dart.
+       // 250 mm: outside the edge capture (10 px), inside the attach capture
+       // (16 px): attached, not snapped.
+       final beyond = await rig.ghostAt(onRun(run, 1000 + 600 + 250, 150));
+       expect((beyond.transformPoint(box.backCentre) - run.a).dot(run.t),
+           closeTo(1850, 1e-6),
+           reason: 'beyond the edge capture: not snapped');
+       final p2 = onRun(run, 1000 + 600 + 120, 150);
+       final second = await rig.ghostAt(p2);
+       // Not ported (as above): expect(bands.generation, gen, reason: 'no
+       // change delivered meanwhile').
+@@ -602,21 +714,27 @@ void main() {
+           await Rig.mount(tester, walls: [attachWall(30, Justification.left)]);
+       final toilet = armable(rig.c, 'bath.toilet');
+       await rig.arm(toilet);
+       final p = nearFace(rig.runOn(FaceSide.left));
+       rig.document.commands.permissions = const DraftPermissions(
+           transform: true, components: true, geometry: true, structure: false);
+       final seed = rig.document.handleSeed.current;
+       // Not ported (IA-R4: no public read of the kit's bands): final gen =
+       // rig.bands!.generation.
+       await rig.click(p);
+-      expect(rig.attachOf(toilet, p), isNotNull, reason: 'premise');
++      // `rig.tool.ghostAttachment` isNotNull, read on the resting ghost.
++      final want = rig.attachOf(toilet, p);
++      expect(want, isNotNull, reason: 'premise');
++      final m = rig.marker();
++      expect(m, isNotNull, reason: 'premise');
++      expect((m! - rig.screen(want!.marker)).distance, lessThan(1e-6),
++          reason: 'premise');
+       expect(rig.document.handleSeed.current, seed);
+       expect(rig.instances, isEmpty);
+       // Not ported (as above): expect(rig.bands!.generation, gen, reason:
+       // 'nothing to see').
+       rig.document.commands.permissions = DraftPermissions.all;
+       await rig.click(p);
+       expect(partsOf(rig.instances.single.transform),
+           partsOf(rig.attachOf(toilet, p)!.transform));
+     });
+   });
+diff --git a/packages/jet_cad_2d_integration/test/controller/zone_room_test.dart b/packages/jet_cad_2d_integration/test/controller/zone_room_test.dart
+index fc5cbef3..3a0846f9 100644
+--- a/packages/jet_cad_2d_integration/test/controller/zone_room_test.dart
++++ b/packages/jet_cad_2d_integration/test/controller/zone_room_test.dart
+@@ -14,25 +14,24 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
+     show ViewportTransform;
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show kUnitLabelTag;
+ import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
+ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+ 
+ import '../support/units.dart' show fxKit, unitsLabelled;
+ import '../support/zone_plan.dart';
+ 
+ /// The floor a framing shows round its units, per side, and the least span
+-/// it shows per axis, in millimetres; the default zoom bounds (copied from
+-/// jet_cad_2d_plan/lib/src/units/unit_fit.dart:15-19 and
+-/// lib/src/controller/camera_bounds.dart:13-14).
++/// it shows per axis, in millimetres (copied from
++/// jet_cad_2d_plan/lib/src/units/unit_fit.dart:15-19; the default zoom
++/// bounds `kPlanMinScale`, `kPlanMaxScale` are the plan barrel's).
+ const double kUnitFitMarginMm = 500, kUnitFitMinSpanMm = 3000;
+-const double kPlanMinScale = 0.001, kPlanMaxScale = 100.0;
+ 
+ /// The camera that frames [box], a non-empty world bound of units, in a
+ /// drawing area of [viewport] (zone spec Z3): the plan's `frameUnits`,
+ /// copied as the oracle (jet_cad_2d_plan/lib/src/units/unit_fit.dart:
+ /// 21-64): [box] grown by [kUnitFitMarginMm] per side, then about its
+ /// centre to at least [kUnitFitMinSpanMm] per axis, fitted as
+ /// [ViewportTransform.fit] fits (5 % margin, y flipped), its scale clamped
+ /// to `[minScale, maxScale]` about the same centre.
+ ViewportTransform frameUnits(Aabb2 box, Size viewport,
+     {double minScale = kPlanMinScale, double maxScale = kPlanMaxScale}) {
+diff --git a/packages/jet_cad_2d_integration/test/dimension/dimension_shell_test.dart b/packages/jet_cad_2d_integration/test/dimension/dimension_shell_test.dart
+index d78c794c..fdf525a0 100644
+--- a/packages/jet_cad_2d_integration/test/dimension/dimension_shell_test.dart
++++ b/packages/jet_cad_2d_integration/test/dimension/dimension_shell_test.dart
+@@ -40,21 +40,21 @@ import 'package:flutter/material.dart';
+ import 'package:flutter/services.dart' show LogicalKeyboardKey;
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ import 'package:jet_cad_2d_integration/jet_cad_2d_integration.dart';
+ import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
+ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import '../support/canvas_rig.dart'
+-    show globalAt, gripsOf, indexOf, press, pumpEditor;
++    show globalAt, gripsOf, indexOf, press, pumpEditor, worldAt;
+ import '../support/plans.dart'
+     show dimLines, dimText, driftOf, kids, pageOf, walls;
+ 
+ const l = WallSide.left;
+ 
+ /// The sample plan as the app opens it. With [gridSnap] false the page's
+ /// grid snap is off, so a drag or a hover resolves to its raw point: a page
+ /// change that no dimension regenerates for (D3's page key is the unit and
+ /// the scale), made through a system of its own and cleared from the
+ /// history, as a fresh document has none.
+@@ -101,27 +101,20 @@ Future<void> pinCamera(
+       worldToScreenMatrix: Transform2(
+           pxPerMm,
+           0,
+           0,
+           -pxPerMm,
+           size.width / 2 - pxPerMm * at.x + 0.37,
+           size.height / 2 + pxPerMm * at.y + 0.61));
+   await tester.pump();
+ }
+ 
+-/// The world point the canvas reads at global [g] (the layer's inverse
+-/// camera).
+-Vector2 worldAt(WidgetTester tester, PlanController c, Offset g) {
+-  final local = g - tester.getTopLeft(find.byType(InteractionLayer));
+-  return c.camera.value.screenToWorld(Vector2(local.dx, local.dy));
+-}
+-
+ /// The select tool's pick radius on [c]'s camera, world mm.
+ double pickRadius(PlanController c) => kPickRadiusPixels / c.camera.value.scale;
+ 
+ /// A primary click at world [p].
+ Future<void> tapWorld(WidgetTester tester, PlanController c, Vector2 p) async {
+   await tester.tapAt(globalAt(tester, c, p));
+   await tester.pump();
+   await tester.pump(const Duration(milliseconds: 500));
+ }
+ 
+diff --git a/packages/jet_cad_2d_integration/test/invariants/paint_allocation_test.dart b/packages/jet_cad_2d_integration/test/invariants/paint_allocation_test.dart
+index 23a170ea..6227d564 100644
+--- a/packages/jet_cad_2d_integration/test/invariants/paint_allocation_test.dart
++++ b/packages/jet_cad_2d_integration/test/invariants/paint_allocation_test.dart
+@@ -1,51 +1,95 @@
+ // The plan library's paint-allocation invariant (CLAUDE.md: the frame path
+ // allocates nothing per entity in steady state, and O(1) per flush) with
+ // the architecture kit loaded, over the sample flat (spec C6, Tests "The
+ // non-negotiables"). The harness is jet_cad_2d_plan/test/invariants/
+ // canvas_paint_allocation_test.dart's CV-alloc (3a Task 28): ten rebuilt
+-// frames of PlanCanvas, the camera moving one pixel, 50 root entities
+-// selected so the overlay draws outlines and grips; the same canvas state,
+-// painter, sink and Paint, and a capacity that holds still.
++// frames of PlanCanvas, the camera moving between the fit and the fit
++// turned 0.2 rad about the canvas's centre, 50 root entities and the placed
++// furniture selected so the overlay draws outlines and grips; the same
++// canvas state, painter, sink and Paint, and a capacity that holds still.
++// The kit's furniture is placed first (armed and clicked, as a user places
++// it: five `architecture.*` symbols, the base unit twice, so one definition
++// is drawn by two instances), so the instance paint path is measured with
++// the kit loaded (review fix 3).
+ import 'package:flutter/material.dart';
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ import 'package:jet_cad_2d_integration/jet_cad_2d_integration.dart';
+ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/canvas_rig.dart' show globalAt, mouseClick, symbolsReady;
+ 
+ void main() {
+   testWidgets(
+       'IA-alloc a rebuilt steady-state PlanCanvas frame over the sample flat '
+       'allocates O(1) per flush, the kit loaded (M-IA-alloc)', (tester) async {
+     final c = sampleFlatController();
+     addTearDown(c.dispose);
+     await tester.binding.setSurfaceSize(const Size(1440, 900));
+     addTearDown(() => tester.binding.setSurfaceSize(null));
+     await tester.pumpWidget(
+         MaterialApp(home: Scaffold(body: PlanCanvas(controller: c))));
+     await tester.pump();
++    expect(await symbolsReady(tester, c), isTrue,
++        reason: 'premise: the furniture library loaded');
+ 
+     final doc = c.document;
++    final size = tester.getSize(find.byType(InteractionLayer));
++    final a = ViewportTransform.fit(doc.extents, size);
++    c.camera.value = a;
++    await tester.pump();
++    final placed = <Handle>[];
++    for (final (key, x, y) in const [
++      ('architecture.bed.double', 15300.5, 11200.25),
++      ('architecture.sofa.three', 18400.75, 14100.5),
++      ('architecture.bath.toilet', 21250.25, 10300.75),
++      ('architecture.kitchen.base.600', 23800.5, 12600.25),
++      ('architecture.kitchen.base.600', 24600.25, 12600.75),
++      ('architecture.dining.table.round', 19700.5, 11900.5),
++    ]) {
++      final before = {
++        for (final n in doc.tree.nodes.whereType<InstanceNode>()) n.handle
++      };
++      expect(c.armSymbol(c.symbols.singleWhere((s) => s.component.key == key)),
++          isTrue);
++      await tester.pump();
++      await mouseClick(tester, globalAt(tester, c, Vector2(x, y)));
++      final added = [
++        for (final n in doc.tree.nodes.whereType<InstanceNode>())
++          if (!before.contains(n.handle)) n.handle
++      ];
++      expect(added, hasLength(1), reason: 'premise: $key placed');
++      placed.add(added.single);
++    }
++    expect(c.selectTool('plan.select'), isTrue);
++    await tester.pump();
++
+     final roots = [
+       for (final slot in doc.entities.liveSlots)
+         if (doc.entities.ownerAt(slot) == doc.rootHandle)
+           doc.entities.handleAt(slot),
+     ].take(50).toList();
+     expect(roots, hasLength(50), reason: 'premise: root entities to select');
+-    c.activeSelection.replace([for (final h in roots) SelectionKey.root(h)]);
++    c.activeSelection.replace([
++      for (final h in [...roots, ...placed]) SelectionKey.root(h)
++    ]);
+ 
+-    final size = tester.getSize(find.byType(InteractionLayer));
+-    final a = ViewportTransform.fit(doc.extents, size);
++    // Turned about the canvas's centre, not only panned.
+     final b = ViewportTransform(
+-        worldToScreenMatrix:
+-            Transform2.translation(1, -1).multiply(a.worldToScreenMatrix));
++        worldToScreenMatrix: Transform2.translation(
++                size.width / 2, size.height / 2)
++            .multiply(Transform2.rotation(0.2))
++            .multiply(Transform2.translation(-size.width / 2, -size.height / 2))
++            .multiply(a.worldToScreenMatrix));
+     Future<void> frames(int n) async {
+       for (var i = 0; i < n; i++) {
+         c.camera.value = i.isEven ? a : b;
+         tester.element(find.byType(PlanCanvas)).markNeedsBuild();
+         await tester.pump();
+       }
+     }
+ 
+     await frames(6);
+     final state = tester.state<DraftCanvasState>(find.byType(DraftCanvas));
+diff --git a/packages/jet_cad_2d_integration/test/support/attach_plans.dart b/packages/jet_cad_2d_integration/test/support/attach_plans.dart
+index 87d0a54e..53fb0acf 100644
+--- a/packages/jet_cad_2d_integration/test/support/attach_plans.dart
++++ b/packages/jet_cad_2d_integration/test/support/attach_plans.dart
+@@ -1,31 +1,33 @@
+ // Today's wall-attachment scenes (jet_cad_floor_plan/test/support/
+ // wall_attach_fixture.dart, plan P-2) as plan files for the integration
+ // tests (3a Task 28), and the oracle of ruling IA-R1: the kit's own
+ // wall-face provider asked through the contract, as plan.symbol and
+ // plan.select ask it.
+ import 'dart:io';
++import 'dart:typed_data';
++import 'dart:ui' as ui;
+ 
+ import 'package:flutter/material.dart' show Key, TextInputAction;
+ import 'package:flutter/services.dart' show LogicalKeyboardKey;
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart'; // kSnapAperturePixels is the engine's (drag_snap.dart:14)
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+ import 'package:jet_cad_2d_kit/testing.dart';
+ import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
+-    show InteractionLayer, ViewportTransform;
++    show InteractionLayer, PaperPalette, ViewportTransform;
+ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart'
+     show PlanController, PlanSymbol;
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+-import 'canvas_rig.dart' show press;
++import 'canvas_rig.dart' show activeTool, globalAt, press, worldAt;
+ import 'plans.dart';
+ 
+ /// The attach capture in pixels (plan.symbol's `kAttachPixels`,
+ /// jet_cad_2d_plan/lib/src/tools/plan_symbol_tool.dart, not exported).
+ const double kAttachPixels = 16;
+ 
+ /// The kit's furniture library, read from its committed asset.
+ final SymbolLibrary furniture = SymbolLibrary.decode(
+     File('../jet_cad_2d_kit_architecture/assets/library/furniture.jetlib')
+         .readAsBytesSync());
+@@ -207,10 +209,108 @@ Future<void> armBySymbolsTab(
+ /// Cmd+Shift+Z: the plan's redo chord (room_plans.dart's `undoKey`'s
+ /// partner).
+ Future<void> redoKey(WidgetTester tester) async {
+   await tester.sendKeyDownEvent(LogicalKeyboardKey.meta);
+   await tester.sendKeyDownEvent(LogicalKeyboardKey.shift);
+   await press(tester, LogicalKeyboardKey.keyZ);
+   await tester.sendKeyUpEvent(LogicalKeyboardKey.shift);
+   await tester.sendKeyUpEvent(LogicalKeyboardKey.meta);
+   await tester.pump();
+ }
++
++// Shared reads of the attachment tests (3a Task 28 review).
++
++/// The document's instances, in tree order.
++List<InstanceNode> instancesOf(DraftDocument doc) =>
++    doc.tree.nodes.whereType<InstanceNode>().toList();
++
++/// [t]'s six numbers, for exact comparison.
++List<double> partsOf(Transform2 t) => [t.a, t.b, t.c, t.d, t.e, t.f];
++
++/// The raw world point the canvas reads for a pointer resting at world
++/// [p] (the screen round trip, as the tool receives it).
++Vector2 rawWorldAt(WidgetTester tester, PlanController c, Vector2 p) =>
++    worldAt(tester, c, globalAt(tester, c, p));
++
++/// The provider's answer for [e] at the raw world point [raw] on [c]'s
++/// camera (IA-R1), its free placement the raw point's (the query's
++/// `current` is read only under `mayRotate: false`).
++Attachment? answerAt(PlanController c, PlanSymbol e, Vector2 raw) => attachOf(
++    c.document,
++    e.entry,
++    raw,
++    placementTransform(at: raw, basePoint: e.entry.definition.basePoint),
++    c.camera.value.scale);
++
++/// A canvas that records every call (today's `RecordingCanvas`,
++/// symbol_place_tool_test.dart:265-275) and the last matrix handed to
++/// `transform`.
++final class RecordingCanvas implements ui.Canvas {
++  final List<Invocation> calls = [];
++  Float64List? matrix;
++
++  Iterable<Invocation> named(String name) =>
++      calls.where((c) => c.memberName == Symbol(name));
++
++  @override
++  void transform(Float64List matrix4) {
++    matrix = Float64List.fromList(matrix4);
++    calls.add(Invocation.method(#transform, [matrix4]));
++  }
++
++  @override
++  dynamic noSuchMethod(Invocation invocation) {
++    calls.add(invocation);
++    return null;
++  }
++}
++
++/// What the active tool's screen overlay draws now (`Tool.paintOverlay`,
++/// the call the canvas's `SelectionOverlayPainter` makes,
++/// selection_overlay.dart:219), recorded with no pointer event: for
++/// plan.symbol, the resting ghost's marker.
++RecordingCanvas overlayOf(WidgetTester tester, PlanController c) {
++  final canvas = RecordingCanvas();
++  activeTool(tester).paintOverlay(canvas, c.camera.value,
++      tester.getSize(find.byType(InteractionLayer)), PaperPalette.light);
++  return canvas;
++}
++
++/// The resting ghost's attachment marker on the canvas (today's
++/// `ghostAttachment!.q` through the camera), read with no pointer event:
++/// the centre of the hourglass plan.symbol's overlay draws there (its four
++/// lines, the attachment's nearest glyph, plan_symbol_tool.dart:465-472).
++/// Null when the overlay draws no hourglass: a free ghost (its snap or
++/// grid marker) or a hidden one (nothing).
++ui.Offset? restingMarker(WidgetTester tester, PlanController c) {
++  final lines = overlayOf(tester, c).named('drawLine').toList();
++  if (lines.length != 4) return null;
++  final ends = [
++    for (final l in lines) ...[
++      l.positionalArguments[0] as ui.Offset,
++      l.positionalArguments[1] as ui.Offset,
++    ]
++  ];
++  // The hourglass: its top edge horizontal, then a diagonal.
++  if (ends[0].dy != ends[1].dy || ends[2].dx == ends[3].dx) return null;
++  return ui.Offset(ends.map((o) => o.dx).reduce((a, b) => a + b) / 8,
++      ends.map((o) => o.dy).reduce((a, b) => a + b) / 8);
++}
++
++/// The resting ghost's placement (today's `ghostPlacement`), read with no
++/// pointer event: the matrix plan.symbol's world overlay draws the ghost
++/// under (`Tool.paintWorldOverlay` at the rebase origin 0, so its
++/// translation is the placement's own, symbol_ghost.dart:94-97). Null when
++/// the ghost is not drawn.
++Transform2? restingPlacement(WidgetTester tester, PlanController c) {
++  final canvas = RecordingCanvas();
++  activeTool(tester).paintWorldOverlay(
++      canvas, Vector2.zero(), c.camera.value.scale, PaperPalette.light);
++  final m = canvas.matrix;
++  return m == null ? null : Transform2(m[0], m[1], m[4], m[5], m[12], m[13]);
++}
++
++/// [w] on [c]'s canvas, in the drawing area's own pixels.
++ui.Offset screenAt(PlanController c, Vector2 w) {
++  final s = c.camera.value.worldToScreen(w);
++  return ui.Offset(s.x, s.y);
++}
+diff --git a/packages/jet_cad_2d_integration/test/symbols/symbol_search_test.dart b/packages/jet_cad_2d_integration/test/symbols/symbol_search_test.dart
+index b59bec83..803ed0da 100644
+--- a/packages/jet_cad_2d_integration/test/symbols/symbol_search_test.dart
++++ b/packages/jet_cad_2d_integration/test/symbols/symbol_search_test.dart
+@@ -267,21 +267,27 @@ void main() {
+     expect(ids(await searchSymbols(tester, 'Dining CHAIR')),
+         [kit('dining.chair@1')]);
+   });
+ 
+   testWidgets('an empty or blank query matches every symbol, in library order',
+       (tester) async {
+     final entries = await openLibrary(tester);
+     final lib = furniture;
+     for (final query in ['', ' ', ' \t\n  ']) {
+       final all = await searchSymbols(tester, query);
+-      expect(ids(all), entries.map((e) => e.id).toList(), reason: '"$query"');
++      // Library order: the asset's, not the loaded symbols' (review fix 2).
++      expect(
++          ids(all),
++          lib.entries
++              .map((e) => '${e.symbol.key}@${e.symbol.version}')
++              .toList(),
++          reason: '"$query"');
+       expect(categoriesOf(all), lib.categories, reason: '"$query"');
+       for (final g in all) {
+         expect(
+             g.ids.every((id) =>
+                 entries.singleWhere((e) => e.id == id).category == g.category),
+             isTrue);
+       }
+     }
+     expect(lib.categories, hasLength(6));
+     expect(lib.entries, hasLength(41));
