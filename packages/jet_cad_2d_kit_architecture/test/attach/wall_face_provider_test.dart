@@ -212,6 +212,12 @@ void main() {
       expect(provider.attach(query(footprintOf(box), p)), isNull,
           reason: '$name: the first query after the toggle');
       expect(wallFacesOf(s).builds, builds + 1, reason: name);
+      // The same query over the unchanged state rebuilds nothing (D-06's
+      // steady state: the frame path never rebuilds per pointer move).
+      expect(provider.attach(query(footprintOf(box), p)), isNull,
+          reason: '$name: the same query again');
+      expect(wallFacesOf(s).builds, builds + 1,
+          reason: '$name: no rebuild over an unchanged state');
       sc.doc.commands.undo();
       expect(provider.attach(query(footprintOf(box), p)), isNotNull,
           reason: '$name: the toggle undone');
@@ -287,6 +293,8 @@ void main() {
       expect(faces.builds, builds + 1, reason: '$reader: one rebuild');
       expect([for (final r in faces.runsOf(sc.doc)) r.wall], everyElement(b),
           reason: reader);
+      expect(faces.builds, builds + 1,
+          reason: '$reader: no rebuild at the next read');
     }
   });
 

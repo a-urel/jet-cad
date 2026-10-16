@@ -29,8 +29,9 @@ import 'wall_attach.dart';
 /// wall hosts nothing) and the document. The runs, the neighbours and the
 /// boxes of the document's definitions are rebuilt only when the document,
 /// the bands' generation or the document's command state (`stateId`, D-06)
-/// changes; a query over a cached set ([attach]) is O(runs) and allocates
-/// O(1).
+/// changes. A read over a cached set first runs the bands' O(walls)
+/// liveness check (a wall frozen with no document change, spec C1.5); a
+/// query ([attach]) is then O(runs) and allocates O(1).
 final class WallFaces {
   WallFaces(this.bands, this.live,
       {bool Function(DraftDocument, Handle)? accept})
