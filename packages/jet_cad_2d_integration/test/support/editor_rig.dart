@@ -37,6 +37,12 @@ Future<void> pumpEditor(WidgetTester tester, PlanController c,
     bool layerPanel = true}) async {
   await tester.binding.setSurfaceSize(window);
   addTearDown(() => tester.binding.setSurfaceSize(null));
+  // The editor unmounted before the controller is disposed: tear-downs run
+  // last added first, and the caller's `addTearDown(c.dispose)` comes
+  // before this call. A controller disposed under a mounted editor makes
+  // one failing test cascade into the next ("DiagnosticsLog used after
+  // dispose").
+  addTearDown(() => tester.pumpWidget(const SizedBox.shrink()));
   final app = planEditorApp(c, locale: locale, layerPanel: layerPanel);
   await tester.pumpWidget(wrap == null ? app : wrap(app));
   await tester.pump();
