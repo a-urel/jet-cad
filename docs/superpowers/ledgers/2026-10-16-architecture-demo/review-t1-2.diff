@@ -1,0 +1,515 @@
+22611489 test(demo): AS-dispose distinguishes a reparent from an unmount
+a66b3807 feat(demo): scaffold apps/architecture_demo on the plan library and the architecture kit
+42e3fa4c feat(plan): export showPlanExportDialog and kFileChords for hosts
+ apps/architecture_demo/analysis_options.yaml       |  34 +
+ apps/architecture_demo/lib/main.dart               |  86 +++
+ apps/architecture_demo/macos/.gitignore            |   7 +
+ .../macos/Flutter/Flutter-Debug.xcconfig           |   1 +
+ .../macos/Flutter/Flutter-Release.xcconfig         |   1 +
+ .../macos/Runner.xcodeproj/project.pbxproj         | 729 +++++++++++++++++++++
+ .../xcshareddata/IDEWorkspaceChecks.plist          |   8 +
+ .../xcshareddata/xcschemes/Runner.xcscheme         | 117 ++++
+ .../Runner.xcworkspace/contents.xcworkspacedata    |   7 +
+ .../xcshareddata/IDEWorkspaceChecks.plist          |   8 +
+ .../macos/Runner/AppDelegate.swift                 |  13 +
+ .../AppIcon.appiconset/Contents.json               |  68 ++
+ .../AppIcon.appiconset/app_icon_1024.png           | Bin 0 -> 102994 bytes
+ .../AppIcon.appiconset/app_icon_128.png            | Bin 0 -> 5680 bytes
+ .../AppIcon.appiconset/app_icon_16.png             | Bin 0 -> 520 bytes
+ .../AppIcon.appiconset/app_icon_256.png            | Bin 0 -> 14142 bytes
+ .../AppIcon.appiconset/app_icon_32.png             | Bin 0 -> 1066 bytes
+ .../AppIcon.appiconset/app_icon_512.png            | Bin 0 -> 36406 bytes
+ .../AppIcon.appiconset/app_icon_64.png             | Bin 0 -> 2218 bytes
+ .../macos/Runner/Base.lproj/MainMenu.xib           | 343 ++++++++++
+ .../macos/Runner/Configs/AppInfo.xcconfig          |  14 +
+ .../macos/Runner/Configs/Debug.xcconfig            |   2 +
+ .../macos/Runner/Configs/Release.xcconfig          |   2 +
+ .../macos/Runner/Configs/Warnings.xcconfig         |  13 +
+ .../macos/Runner/DebugProfile.entitlements         |  16 +
+ apps/architecture_demo/macos/Runner/Info.plist     |  32 +
+ .../macos/Runner/MainFlutterWindow.swift           |  30 +
+ .../macos/Runner/Release.entitlements              |  12 +
+ .../macos/RunnerTests/RunnerTests.swift            |  12 +
+ apps/architecture_demo/pubspec.yaml                |  34 +
+ apps/architecture_demo/test/app_shell_test.dart    |  80 +++
+ apps/architecture_demo/test/boundary_test.dart     |  29 +
+ apps/architecture_demo/web/favicon.png             | Bin 0 -> 917 bytes
+ apps/architecture_demo/web/icons/Icon-192.png      | Bin 0 -> 5292 bytes
+ apps/architecture_demo/web/icons/Icon-512.png      | Bin 0 -> 8252 bytes
+ .../web/icons/Icon-maskable-192.png                | Bin 0 -> 5594 bytes
+ .../web/icons/Icon-maskable-512.png                | Bin 0 -> 20998 bytes
+ apps/architecture_demo/web/index.html              |  46 ++
+ apps/architecture_demo/web/manifest.json           |  35 +
+ packages/jet_cad_2d_plan/CHANGELOG.md              |   2 +
+ packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart  |   4 +-
+ packages/jet_cad_2d_plan/test/barrel_test.dart     |   8 +
+ pubspec.yaml                                       |   1 +
+ 43 files changed, 1793 insertions(+), 1 deletion(-)
+diff --git a/apps/architecture_demo/analysis_options.yaml b/apps/architecture_demo/analysis_options.yaml
+new file mode 100644
+index 00000000..4a13c8c7
+--- /dev/null
++++ b/apps/architecture_demo/analysis_options.yaml
+@@ -0,0 +1,34 @@
++# This file configures the analyzer, which statically analyzes Dart code to
++# check for errors, warnings, and lints.
++#
++# The issues identified by the analyzer are surfaced in the UI of Dart-enabled
++# IDEs (https://dart.dev/tools#ides-and-editors). The analyzer can also be
++# invoked from the command line by running `flutter analyze`.
++
++# The following line activates a set of recommended lints for Flutter apps,
++# packages, and plugins designed to encourage good coding practices.
++include: package:flutter_lints/flutter.yaml
++
++analyzer:
++  exclude:
++    - build/**
++    - web/**
++    - macos/**
++
++linter:
++  # The lint rules applied to this project can be customized in the
++  # section below to disable rules from the `package:flutter_lints/flutter.yaml`
++  # included above or to enable additional rules. A list of all available lints
++  # and their documentation is published at https://dart.dev/lints.
++  #
++  # Instead of disabling a lint rule for the entire project in the
++  # section below, it can also be suppressed for a single line of code
++  # or a specific dart file by using the `// ignore: name_of_lint` and
++  # `// ignore_for_file: name_of_lint` syntax on the line or in the file
++  # producing the lint.
++  rules:
++    # avoid_print: false  # Uncomment to disable the `avoid_print` rule
++    # prefer_single_quotes: true  # Uncomment to enable the `prefer_single_quotes` rule
++
++# Additional information about this file can be found at
++# https://dart.dev/guides/language/analysis-options
+diff --git a/apps/architecture_demo/lib/main.dart b/apps/architecture_demo/lib/main.dart
+new file mode 100644
+index 00000000..200845d2
+--- /dev/null
++++ b/apps/architecture_demo/lib/main.dart
+@@ -0,0 +1,86 @@
++import 'package:flutter/material.dart';
++import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++
++/// The app's theme seed, light and dark alike (the old app's).
++const Color kAppSeed = Color(0xFF2266CC);
++
++Future<void> main() async {
++  WidgetsFlutterBinding.ensureInitialized();
++  try {
++    await ensurePlanFonts();
++  } catch (error, stack) {
++    // A failed registration is reported, not fatal: the app still starts.
++    FlutterError.reportError(FlutterErrorDetails(
++        exception: error,
++        stack: stack,
++        library: 'architecture_demo',
++        context: ErrorDescription('while registering the plan font')));
++  }
++  registerFontLicences();
++  runApp(const ArchitectureDemoApp());
++}
++
++class ArchitectureDemoApp extends StatefulWidget {
++  const ArchitectureDemoApp(
++      {super.key, this.printer = const PrintingPagePrinter()});
++
++  /// Where Print hands the page's PDF: the platform's dialog unless a test
++  /// gives a fake.
++  final PagePrinter printer;
++
++  @override
++  State<ArchitectureDemoApp> createState() => ArchitectureDemoAppState();
++}
++
++class ArchitectureDemoAppState extends State<ArchitectureDemoApp> {
++  final GlobalKey<NavigatorState> _navigator = GlobalKey<NavigatorState>();
++
++  /// The symbol loader is given to the controller, which never disposes a
++  /// loader it was given, so this state does, after the controller.
++  final PlanSymbolLoader _symbols = PlanSymbolLoader();
++
++  /// The app's one controller: New, Open sample and Open replace the plan
++  /// inside it, so the editor, its panels and its caches stay.
++  late final PlanController _controller =
++      PlanController(kits: [architectureKit], symbols: _symbols);
++
++  @visibleForTesting
++  PlanController get controller => _controller;
++
++  /// Marks a file chord handled, and does nothing.
++  static void _consume() {}
++
++  @override
++  void dispose() {
++    _controller.dispose();
++    _symbols.dispose();
++    super.dispose();
++  }
++
++  @override
++  Widget build(BuildContext context) => MaterialApp(
++        navigatorKey: _navigator,
++        title: 'jet-cad',
++        debugShowCheckedModeBanner: false,
++        supportedLocales: planSupportedLocales,
++        localizationsDelegates: planLocalizationsDelegates,
++        theme: ThemeData(colorSchemeSeed: kAppSeed),
++        darkTheme:
++            ThemeData(colorSchemeSeed: kAppSeed, brightness: Brightness.dark),
++        themeMode: ThemeMode.system,
++        // The file chords once more above the Navigator, consume-only: a
++        // dialog's route is outside the editor's focus chain, and on the
++        // web an unhandled Cmd/Ctrl+S opens the browser's Save Page. The
++        // editor's own bindings run the commands when the home route has
++        // the focus.
++        builder: (context, child) => CallbackShortcuts(
++          bindings: <ShortcutActivator, VoidCallback>{
++            for (final chord in kFileChords) chord: _consume,
++          },
++          child: child!,
++        ),
++        home: Scaffold(
++            body: PlanEditor(controller: _controller, printer: widget.printer)),
++      );
++}
+diff --git a/apps/architecture_demo/pubspec.yaml b/apps/architecture_demo/pubspec.yaml
+new file mode 100644
+index 00000000..91f9ca3d
+--- /dev/null
++++ b/apps/architecture_demo/pubspec.yaml
+@@ -0,0 +1,34 @@
++name: architecture_demo
++description: >-
++  The architecture kit's demo: the plan library's editor over the
++  architecture kit, with the document flows (new, open sample, open, save,
++  save as, export, print, exit) on macOS and the web.
++publish_to: none
++version: 0.0.1
++resolution: workspace
++
++environment:
++  # The old floor_planner's bounds, for its reasons: printing 5.15 needs
++  # Flutter 3.41 and pdf 3.13 needs Dart 3.12 (Flutter 3.44); the sdk
++  # bound sets the language version, kept at 3.5 so the formatter's style
++  # matches the copied files.
++  sdk: ^3.5.0
++  flutter: ">=3.44.0"
++
++dependencies:
++  file_selector: ^1.1.0
++  flutter:
++    sdk: flutter
++  jet_cad_2d_kit_architecture: ^0.1.0
++  jet_cad_2d_plan: ^0.8.0
++  # The print wrapper names PdfPageFormat (PagePrinter's signature).
++  pdf: ^3.13.1
++  web: ^1.1.0
++
++dev_dependencies:
++  flutter_test:
++    sdk: flutter
++  flutter_lints: ^6.0.0
++
++flutter:
++  uses-material-design: true
+diff --git a/apps/architecture_demo/test/app_shell_test.dart b/apps/architecture_demo/test/app_shell_test.dart
+new file mode 100644
+index 00000000..5976ac95
+--- /dev/null
++++ b/apps/architecture_demo/test/app_shell_test.dart
+@@ -0,0 +1,80 @@
++// The app shell (spec B1): one controller, one editor, the file chords
++// consumed above the Navigator.
++import 'package:architecture_demo/main.dart';
++import 'package:flutter/material.dart';
++import 'package:flutter/services.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++
++Future<ArchitectureDemoAppState> pumpApp(WidgetTester tester) async {
++  await tester.binding.setSurfaceSize(const Size(1400, 900));
++  addTearDown(() => tester.binding.setSurfaceSize(null));
++  await tester.pumpWidget(const ArchitectureDemoApp());
++  await tester.pump();
++  return tester
++      .state<ArchitectureDemoAppState>(find.byType(ArchitectureDemoApp));
++}
++
++void main() {
++  testWidgets('AS1 the app pumps: one editor, the kit\'s Symbols tab, clean',
++      (tester) async {
++    final app = await pumpApp(tester);
++    expect(find.byType(PlanEditor), findsOneWidget);
++    expect(find.text('Symbols'), findsWidgets);
++    expect(app.controller.dirty.value, isFalse);
++  });
++
++  for (final modifier in [
++    LogicalKeyboardKey.meta,
++    LogicalKeyboardKey.control
++  ]) {
++    testWidgets('CH-consume ${modifier.keyLabel}+S over a dialog is handled',
++        (tester) async {
++      final app = await pumpApp(tester);
++      final navigator = tester.state<NavigatorState>(find.byType(Navigator));
++      showDialog<void>(
++          context: navigator.context,
++          builder: (_) =>
++              const AlertDialog(content: TextField(key: Key('dialog-field'))));
++      await tester.pumpAndSettle();
++      expect(find.byKey(const Key('dialog-field')), findsOneWidget);
++      await tester.tap(find.byKey(const Key('dialog-field')));
++      await tester.pump();
++
++      await tester.sendKeyDownEvent(modifier);
++      final handled = await tester.sendKeyEvent(LogicalKeyboardKey.keyS);
++      await tester.sendKeyUpEvent(modifier);
++      await tester.pump();
++
++      expect(handled, isTrue, reason: 'the chord is consumed above the route');
++      expect(find.byKey(const Key('dialog-field')), findsOneWidget,
++          reason: 'dialog stays');
++      expect(app.controller.dirty.value, isFalse);
++      expect(tester.takeException(), isNull);
++    });
++  }
++
++  testWidgets(
++      'AS-dispose the controller lives across a reparent, and dies '
++      'with the unmount', (tester) async {
++    await tester.binding.setSurfaceSize(const Size(1400, 900));
++    addTearDown(() => tester.binding.setSurfaceSize(null));
++    final key = GlobalKey<ArchitectureDemoAppState>();
++    final app = ArchitectureDemoApp(key: key);
++    await tester.pumpWidget(Align(child: app));
++    final controller = key.currentState!.controller;
++
++    // A reparent deactivates and reactivates the state without disposing.
++    await tester.pumpWidget(Padding(padding: EdgeInsets.zero, child: app));
++    await tester.pump();
++    expect(tester.takeException(), isNull);
++    expect(() => controller.dirty.addListener(() {}), returnsNormally,
++        reason: 'not disposed by a reparent');
++
++    await tester.pumpWidget(const SizedBox());
++    await tester.pump();
++    expect(tester.takeException(), isNull);
++    expect(() => controller.dirty.addListener(() {}), throwsFlutterError,
++        reason: 'disposed by the unmount');
++  });
++}
+diff --git a/apps/architecture_demo/test/boundary_test.dart b/apps/architecture_demo/test/boundary_test.dart
+new file mode 100644
+index 00000000..7f303225
+--- /dev/null
++++ b/apps/architecture_demo/test/boundary_test.dart
+@@ -0,0 +1,29 @@
++// N1 (spec B6): the app names neither old package.
++import 'dart:io';
++
++import 'package:flutter_test/flutter_test.dart';
++
++const _banned = ['jet_cad_floor_plan', 'jet_cad_restaurant_symbols'];
++
++void main() {
++  test('N1 the pubspec and every Dart file name no old package', () {
++    final files = <File>[
++      File('pubspec.yaml'),
++      for (final dir in ['lib', 'test'])
++        ...Directory(dir)
++            .listSync(recursive: true)
++            .whereType<File>()
++            .where((f) => f.path.endsWith('.dart')),
++    ];
++    final hits = <String>[];
++    for (final f in files) {
++      if (f.path.endsWith('boundary_test.dart')) continue;
++      final text = f.readAsStringSync();
++      for (final name in _banned) {
++        if (text.contains(name)) hits.add('${f.path}: $name');
++      }
++    }
++    expect(files.length, greaterThan(2), reason: 'the walk found the files');
++    expect(hits, isEmpty);
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/CHANGELOG.md b/packages/jet_cad_2d_plan/CHANGELOG.md
+index bd6a6103..69fb5eb0 100644
+--- a/packages/jet_cad_2d_plan/CHANGELOG.md
++++ b/packages/jet_cad_2d_plan/CHANGELOG.md
+@@ -14,20 +14,22 @@ The plan library of jet_cad_2d, in design mode (sub-project 2a).
+   enforced at the select gates, the palette, the panels and the bar.
+ - Symbol libraries loaded asynchronously by `PlanSymbolLoader`, shareable
+   across controllers; the gallery.
+ - Attachment of symbols through the kits' providers; `plan.symbol`.
+ - Export and import registries: `plan.pdf` and `plan.png` built in, a
+   host's own beside them; printing.
+ - The widgets: `PlanCanvas`, `PlanToolPalette`, `PlanSymbolGallery`,
+   `PlanPropertyPanel`, `PlanLayerPanel`, `PlanPagePanel`, `PlanShortcuts`,
+   and `PlanEditor` with `PlanEditorBar`.
+ - Words in English, German and Turkish; `PlanTheme`; the bundled Roboto.
++- For hosts that wrap the editor: `showPlanExportDialog` (the built-in export
++  dialog) and `kFileChords` (the file commands' chords).
+ 
+ The service mode (sub-project 2b).
+ 
+ - Units: a placed symbol instance whose definition carries `jetcad.unit`,
+   or one a kit's parametric type generates (a seat in a row); identified
+   by its label (the `UNIT` attribute), numbered on placement when the
+   unit is `numbered`; `units`, `unitDetails`, `unitAt`, `select`,
+   `fitToUnits`, `labelWarnings`, `unitChanges`; host data and colour
+   (`setUnitData`, `setUnitColour`, `setUnitLabel` and their plural forms).
+ - `PlanMode` and `setMode`: the service mode works on a copy of the design
+diff --git a/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart b/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart
+index 2b601a11..cf59fcac 100644
+--- a/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart
++++ b/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart
+@@ -16,21 +16,22 @@ export 'src/controller/plan_change.dart'
+         PlanChange,
+         PlanObjectAdded,
+         PlanObjectChanged,
+         PlanObjectRemoved,
+         PlanReplaced;
+ export 'src/controller/plan_controller.dart'
+     show PlanController, kPlanThumbnailCapacity;
+ export 'src/editor/plan_editor.dart' show PlanEditor, PlanFileCallback;
+ export 'src/editor/plan_editor_bar.dart' show PlanEditorAction, PlanEditorBar;
+ export 'src/editor/plan_tool_palette.dart' show PlanToolPalette;
+-export 'src/export/export_dialog.dart' show PlanExportDialog;
++export 'src/export/export_dialog.dart'
++    show PlanExportDialog, showPlanExportDialog;
+ export 'src/export/page_printer.dart' show PagePrinter, PrintingPagePrinter;
+ export 'src/export/registries.dart'
+     show
+         PlanExport,
+         PlanExportAnswer,
+         PlanExportChoice,
+         PlanExportDpi,
+         PlanExportFonts,
+         PlanExportRequest,
+         PlanExporter,
+@@ -70,20 +71,21 @@ export 'src/service/service_state.dart' show UnitGroup, UnitStatus;
+ export 'src/service/service_tool.dart' show PlanFloorDrag, PlanLongPress;
+ export 'src/service/view/plan_service_bar.dart'
+     show PlanServiceAction, PlanServiceBar;
+ export 'src/service/view/plan_service_view.dart' show PlanServiceView;
+ export 'src/service/view/unit_overlays.dart'
+     show
+         PlanOverlayLayout,
+         PlanOverlaySize,
+         PlanUnitOverlay,
+         PlanUnitOverlayBuilder;
++export 'src/shortcuts/chords.dart' show kFileChords;
+ export 'src/shortcuts/plan_shortcut_guard.dart' show PlanShortcutGuard;
+ export 'src/shortcuts/plan_shortcuts.dart' show PlanShortcuts;
+ export 'src/symbols/plan_symbol.dart' show PlanSymbol;
+ export 'src/symbols/plan_symbol_loader.dart'
+     show PlanSymbolLoad, PlanSymbolLoader;
+ export 'src/theme/plan_theme.dart' show PlanTheme, kUnitColourOpacity;
+ export 'src/units/unit_detail.dart'
+     show
+         PlanUnit,
+         PlanUnitAdded,
+diff --git a/packages/jet_cad_2d_plan/test/barrel_test.dart b/packages/jet_cad_2d_plan/test/barrel_test.dart
+index 0ee975a0..e1916f5a 100644
+--- a/packages/jet_cad_2d_plan/test/barrel_test.dart
++++ b/packages/jet_cad_2d_plan/test/barrel_test.dart
+@@ -78,23 +78,31 @@ void main() {
+       'PlanMode',
+       // 2b Task 12
+       'UnitGroup', 'UnitStatus',
+       // 2b Task 13
+       'ServiceRestore',
+       // 2b Task 16
+       'kUnitColourOpacity', 'UnitProblem',
+       'PlanLongPress', 'PlanFloorDrag', 'PlanServiceAction', 'PlanServiceBar',
+       'PlanServiceView', 'PlanUnitOverlay', 'PlanUnitOverlayBuilder',
+       'PlanOverlaySize', 'PlanOverlayLayout',
++      // 3b Task 1
++      'showPlanExportDialog', 'kFileChords',
+     });
+   });
+ 
++  test('the barrel exports the export dialog and the file chords', () {
++    const PlanExportDialog dialog = showPlanExportDialog;
++    expect(dialog, isNotNull);
++    expect(kFileChords, isNotEmpty);
++  });
++
+   testWidgets('ED-9b the editor\'s names, through the barrel alone',
+       (tester) async {
+     final c = PlanController(kits: const []);
+     addTearDown(c.dispose);
+     PlanExport? last;
+     const PagePrinter printer = PrintingPagePrinter();
+     await tester.pumpWidget(MaterialApp(
+         home: Scaffold(
+             body: PlanEditor(
+                 controller: c,
+diff --git a/pubspec.yaml b/pubspec.yaml
+index 32e72915..e72a0f6e 100644
+--- a/pubspec.yaml
++++ b/pubspec.yaml
+@@ -9,14 +9,15 @@ workspace:
+   - packages/jet_cad_2d_gpu
+   - packages/jet_cad_2d_kit
+   - packages/jet_cad_2d_plan
+   - packages/jet_cad_2d_kit_architecture
+   - packages/jet_cad_2d_integration
+   - apps/dev_harness
+   - apps/dev_harness_2d
+   - packages/jet_cad_floor_plan
+   - packages/jet_cad_restaurant_symbols
+   - apps/floor_planner
++  - apps/architecture_demo
+   - apps/restaurant_demo
+   - tool/ci
+   - tool/screenshots
+   - tool/readme_probe
+
+## macos/web: names-only diff
++++ b/apps/architecture_demo/macos/.gitignore
++++ b/apps/architecture_demo/macos/Flutter/Flutter-Debug.xcconfig
++++ b/apps/architecture_demo/macos/Flutter/Flutter-Release.xcconfig
++++ b/apps/architecture_demo/macos/Runner.xcodeproj/project.pbxproj
++			name = "Flutter Assemble";
++			name = "Bundle Framework";
++		331C80D5294CF71000263BE5 /* RunnerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RunnerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
++		33CC10ED2044A3C60003C045 /* architecture_demo.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "architecture_demo.app"; sourceTree = BUILT_PRODUCTS_DIR; };
++		33CC10F22044A3C60003C045 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Assets.xcassets; path = Runner/Assets.xcassets; sourceTree = "<group>"; };
++		33CC10F52044A3C60003C045 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.xib; name = Base; path = Base.lproj/MainMenu.xib; sourceTree = "<group>"; };
++		33CC10F72044A3C60003C045 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; name = Info.plist; path = Runner/Info.plist; sourceTree = "<group>"; };
++		33CEB47722A0578A004F2AC0 /* Flutter-Generated.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = "Flutter-Generated.xcconfig"; path = "ephemeral/Flutter-Generated.xcconfig"; sourceTree = "<group>"; };
++		33E51913231747F40026EE4D /* DebugProfile.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = DebugProfile.entitlements; sourceTree = "<group>"; };
++		33E51914231749380026EE4D /* Release.entitlements */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.entitlements; path = Release.entitlements; sourceTree = "<group>"; };
++		78E0A7A72DC9AD7400C4905E /* FlutterGeneratedPluginSwiftPackage */ = {isa = PBXFileReference; lastKnownFileType = wrapper; name = FlutterGeneratedPluginSwiftPackage; path = ephemeral/Packages/FlutterGeneratedPluginSwiftPackage; sourceTree = "<group>"; };
++				33CC10ED2044A3C60003C045 /* architecture_demo.app */,
++			name = Products;
++			name = Resources;
++				33E51913231747F40026EE4D /* DebugProfile.entitlements */,
++				33E51914231749380026EE4D /* Release.entitlements */,
++			name = Frameworks;
++			name = RunnerTests;
++			name = Runner;
++			productReference = 33CC10ED2044A3C60003C045 /* architecture_demo.app */;
++			shellScript = "echo \"$PRODUCT_NAME.app\" > \"$PROJECT_DIR\"/Flutter/ephemeral/.app_filename && \"$FLUTTER_ROOT\"/packages/flutter_tools/bin/macos_assemble.sh embed\n";
++			name = MainMenu.xib;
++				BUNDLE_LOADER = "$(TEST_HOST)";
++				PRODUCT_BUNDLE_IDENTIFIER = dev.jetcad.architectureDemo.RunnerTests;
++				PRODUCT_NAME = "$(TARGET_NAME)";
++				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/architecture_demo.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/architecture_demo";
++			name = Debug;
++				BUNDLE_LOADER = "$(TEST_HOST)";
++				PRODUCT_BUNDLE_IDENTIFIER = dev.jetcad.architectureDemo.RunnerTests;
++				PRODUCT_NAME = "$(TARGET_NAME)";
++				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/architecture_demo.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/architecture_demo";
++			name = Release;
++				BUNDLE_LOADER = "$(TEST_HOST)";
++				PRODUCT_BUNDLE_IDENTIFIER = dev.jetcad.architectureDemo.RunnerTests;
++				PRODUCT_NAME = "$(TARGET_NAME)";
++				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/architecture_demo.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/architecture_demo";

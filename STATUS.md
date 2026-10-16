@@ -484,12 +484,14 @@ with 0.7.0 (below).
   test audit with its "Closed (3b)" section (194 rows, none open),
   results [2026-10-16-architecture-demo-results.md](docs/superpowers/notes/2026-10-16-architecture-demo-results.md),
   on `feat/architecture-demo` (worktree `.claude/worktrees/architecture-demo`).
-  **In flight, not merged, not pushed.** Tasks 1-8 done and gated (app 171,
-  plan 1558, integration 228, builds and the publish dry-run clean); left:
-  the controller's smoke run, the whole-branch Sonnet review and its one fix
-  wave (the parked minors in the results note), the ledger archived onto the
-  branch, then tell the human the demo runs on the new packages and offer the
-  merge menu.
+  **Done, not merged, not pushed.** Tasks 1-8 (plus 4b, a library settle
+  fix under decision 10) done and Sonnet-reviewed; the whole-branch Sonnet
+  review (0 Critical, 1 Important) and its one fix wave were re-reviewed
+  clean (app 176, plan 1558, integration 228, the macOS smoke integration
+  test, builds and the publish dry-run clean); the ledger is archived in
+  [docs/superpowers/ledgers/2026-10-16-architecture-demo/](docs/superpowers/ledgers/2026-10-16-architecture-demo/).
+  The demo runs on the new packages; the merge is the human's. The results
+  note's "For the human" lists five items.
 
 - **The packages' READMEs, screenshots and funding links** (the human,
   2026-10-13), on `feat/package-readmes`, cut by hand from `main` at
@@ -630,8 +632,9 @@ not pushed; the record and what is left for the human:
 3a (the architecture kit) is done on `feat/architecture-kit` and merged
 at `d68e79dd`, not pushed: exit gate passed, whole-branch Opus review
 clean after one fix wave, ledger archived. 3b (the architecture demo) is
-built on `feat/architecture-demo`, not merged, not pushed; resume at the
-controller's smoke run, then the whole-branch review (see the results note).** (In flight). Where 2b stands, its gaps and rulings: the results note's
+done on `feat/architecture-demo`: whole-branch Sonnet review clean after
+one fix wave, macOS smoke integration test green, ledger archived; next: the
+merge on the human's word, then sub-project 4.** (In flight). Where 2b stands, its gaps and rulings: the results note's
 [Spec gaps](docs/superpowers/notes/2026-10-14-plan-library-2b-results.md#spec-gaps-and-interface-problems-found-while-executing)
 section and its "Final fix wave". A14's `selectTool` difference was settled
 by the human (2b spec decision 9: true kept).

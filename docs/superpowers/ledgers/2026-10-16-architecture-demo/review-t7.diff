@@ -1,0 +1,2107 @@
+40ec1062 test(demo,plan): the library gaps pinned
+486e19be test(demo): symbols and layers through the app
+ .../test/layers/layers_end_to_end_test.dart        | 250 +++++++++++++++
+ apps/architecture_demo/test/library_gaps_test.dart | 340 +++++++++++++++++++++
+ .../architecture_demo/test/support/symbol_rig.dart | 312 +++++++++++++++++++
+ .../test/symbols/symbol_library_loader_test.dart   |  94 ++++++
+ .../symbols/symbol_palette_end_to_end_test.dart    | 231 ++++++++++++++
+ .../symbols/symbol_section_end_to_end_test.dart    | 256 ++++++++++++++++
+ .../test/symbols/symbol_shell_test.dart            | 319 +++++++++++++++++++
+ .../test/layers/layer_picker_types_test.dart       | 108 +++++++
+ .../test/export/export_dialog_test.dart            |  35 +++
+ .../test/export/page_printer_test.dart             |  73 +++++
+ 10 files changed, 2018 insertions(+)
+diff --git a/apps/architecture_demo/test/layers/layers_end_to_end_test.dart b/apps/architecture_demo/test/layers/layers_end_to_end_test.dart
+new file mode 100644
+index 00000000..950196b8
+--- /dev/null
++++ b/apps/architecture_demo/test/layers/layers_end_to_end_test.dart
+@@ -0,0 +1,250 @@
++// Ported from apps/floor_planner/test/layers/layers_end_to_end_test.dart
++// (audit docs/superpowers/specs/2026-10-16-architecture-demo-test-audit.md,
++// section "layers/layers_end_to_end_test.dart"): E2E PORT; palette keys
++// `tool-plan.line`, `tool-architecture.wall`; the painted-frame check goes
++// through the canvas painter.
++//
++// Layers end to end, in the app, over a scripted `FakeDocumentFiles`: a line
++// on layer 0; a new layer through the panel's +, named and recoloured there;
++// made current; a line and a wall drawn with the real tools land on it;
++// layer 0 made current again and the new layer hidden -- the painted frame
++// (the canvas's own painter, `debugOnVisit`) loses both, keeps layer 0's
++// line -- and shown; the wall moved to layer 0 with the Selection section's
++// picker; the new layer made current again; Save, Open, Save:
++// byte-identical, the current layer and every layer kept.
++//
++// Not degenerate: the camera is rotated and centred far from the origin,
++// nothing is drawn at the origin, the new layer is ACI 3 (not 7), and the
++// saved current layer is not layer 0.
++import 'package:flutter/material.dart';
++import 'package:flutter/rendering.dart' show RenderCustomPaint;
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
++    show DraftCanvas, DraftCanvasState, SelectionKey;
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/app_fakes.dart';
++import '../support/app_rig.dart';
++
++Finder byKey(String k) => find.byKey(Key(k));
++
++Future<void> tapKey(WidgetTester tester, String key) async {
++  await tester.tap(byKey(key));
++  await tester.pump();
++  await tester.pump();
++}
++
++/// The entity records the parametric object [group] owns.
++Set<Handle> childrenOf(DraftDocument doc, Handle group) => {
++      for (final slot in doc.entities.liveSlots)
++        if (doc.entities.ownerAt(slot) == group) doc.entities.handleAt(slot),
++    };
++
++Handle layerOf(DraftDocument doc, Handle h) =>
++    doc.entities.layerAt(doc.entities.slotOf(h)!);
++
++/// Lines in [doc] owned by the root, ascending.
++List<Handle> linesOf(DraftDocument doc) => [
++      for (final slot in doc.entities.liveSlots)
++        if (doc.entities.kindAt(slot) == EntityKind.line &&
++            doc.entities.ownerAt(slot) == doc.rootHandle)
++          doc.entities.handleAt(slot),
++    ]..sort((a, b) => a.value.compareTo(b.value));
++
++/// One line from [a] to [b] through the Line tool's palette entry, then
++/// Escape twice: the chain ended, back to Select.
++Future<void> drawLine(
++    WidgetTester tester, PlanController c, Vector2 a, Vector2 b) async {
++  await tapKey(tester, 'tool-plan.line');
++  await clickAt(tester, c, a);
++  await clickAt(tester, c, b);
++  await press(tester, LogicalKeyboardKey.escape);
++  await press(tester, LogicalKeyboardKey.escape);
++  expect(c.activeTool.value, 'plan.select', reason: 'premise: back to Select');
++}
++
++/// One wall from [a] to [b] through the Wall tool's palette entry (two
++/// clicks, Enter), then Escape to Select.
++Future<void> drawWallByPalette(
++    WidgetTester tester, PlanController c, Vector2 a, Vector2 b) async {
++  await tapKey(tester, 'tool-architecture.wall');
++  await clickAt(tester, c, a);
++  await clickAt(tester, c, b);
++  await press(tester, LogicalKeyboardKey.enter);
++  await press(tester, LogicalKeyboardKey.escape);
++  expect(c.activeTool.value, 'plan.select', reason: 'premise: back to Select');
++}
++
++/// Whether layer [h]'s row shows the current mark.
++bool isCurrentRow(WidgetTester tester, Handle h) =>
++    tester
++        .widget<Icon>(find.descendant(
++            of: byKey('layer-current-${h.toHex()}'),
++            matching: find.byType(Icon)))
++        .icon ==
++    Icons.radio_button_checked;
++
++String nameOfRow(WidgetTester tester, Handle h) => tester
++    .widget<Text>(find.descendant(
++        of: byKey('layer-name-${h.toHex()}'), matching: find.byType(Text)))
++    .data!;
++
++void main() {
++  testWidgets(
++      'E2E make a layer, make it current, draw a line and a wall on it, hide '
++      'it (both leave the painted frame), show it, move the wall to layer 0 '
++      'with the picker, Save, Open, Save: byte-identical, the current layer '
++      'and every layer kept', (tester) async {
++    final files = FakeDocumentFiles();
++    final rig = await pumpApp(tester, files: files);
++    final c = rig.controller;
++    final doc = c.document;
++    final zero = ReservedHandles.layerZero;
++    expect(doc.tables.layers.records.map((r) => r.handle), [zero],
++        reason: 'premise: a new document has layer 0 only');
++    await aimCamera(tester, c, Vector2(8400.5, 5300.25));
++
++    // A line on layer 0: what the frame keeps throughout.
++    await drawLine(
++        tester, c, Vector2(6200.5, 4100.25), Vector2(7900.75, 4600.5));
++    final keep = linesOf(doc).single;
++    expect(layerOf(doc, keep), zero);
++
++    // + adds `Layer 1` and opens its name field: name it, recolour it.
++    await tapKey(tester, 'layers-add');
++    final l =
++        doc.tables.layers.records.singleWhere((r) => r.handle != zero).handle;
++    final hex = l.toHex();
++    expect(doc.tables.layers[l]!.name, 'Layer 1');
++    await tester.enterText(byKey('layer-name-field-$hex'), 'Furniture');
++    await tester.testTextInput.receiveAction(TextInputAction.done);
++    await tester.pump();
++    await tester.pump();
++    await tester.tap(byKey('layer-colour-$hex'));
++    await tester.pumpAndSettle();
++    await tester.tap(byKey('layer-colour-item-3'));
++    await tester.pumpAndSettle();
++    expect(doc.tables.layers[l]!.name, 'Furniture');
++    expect(doc.tables.layers[l]!.color, const IndexedColor(3));
++
++    // Make it current; the tools draw on it.
++    await tapKey(tester, 'layer-current-$hex');
++    expect(doc.header.currentLayer, l);
++    expect(drawingLayer(doc), l);
++    await drawLine(
++        tester, c, Vector2(7000.25, 5900.5), Vector2(9800.5, 6300.75));
++    final line = linesOf(doc).last;
++    expect(line, isNot(keep));
++    expect(layerOf(doc, line), l);
++    await drawWallByPalette(
++        tester, c, Vector2(6500.5, 7300.25), Vector2(10200.75, 7600.5));
++    final wall = wallsOf(c).single;
++    expect(doc.components.get<ObjectLayer>(wall)?.layer, l);
++    final wallChildren = childrenOf(doc, wall);
++    expect(wallChildren, isNotEmpty, reason: 'premise: the wall generated');
++    for (final k in wallChildren) {
++      expect(layerOf(doc, k), l, reason: 'wall child ${k.toHex()}');
++    }
++
++    // The painted frame: the canvas's own painter reports every leaf it
++    // hands the sink.
++    final canvas = tester.state<DraftCanvasState>(find.byType(DraftCanvas));
++    final visited = <Handle>{};
++    canvas.painter.debugOnVisit = visited.add;
++    addTearDown(() => canvas.painter.debugOnVisit = null);
++    RenderCustomPaint paintBox() => tester
++        .renderObjectList<RenderCustomPaint>(find.descendant(
++            of: find.byType(DraftCanvas), matching: find.byType(CustomPaint)))
++        .first;
++    paintBox().markNeedsPaint();
++    await tester.pump();
++    expect(visited, containsAll({keep, line, ...wallChildren}),
++        reason: 'not vacuous: everything draws first');
++
++    // The current layer cannot be hidden: make layer 0 current, then hide.
++    expect(tester.widget<IconButton>(byKey('layer-eye-$hex')).onPressed, isNull,
++        reason: 'premise: decision 7');
++    await tapKey(tester, 'layer-current-${zero.toHex()}');
++    expect(drawingLayer(doc), zero);
++    visited.clear();
++    await tapKey(tester, 'layer-eye-$hex');
++    expect(doc.tables.layers[l]!.visible, isFalse);
++    await tester.pump();
++    expect(visited, contains(keep), reason: 'the frame was repainted');
++    expect(visited, isNot(contains(line)), reason: 'the line is hidden');
++    for (final k in wallChildren) {
++      expect(visited, isNot(contains(k)), reason: 'wall child ${k.toHex()}');
++    }
++
++    // Show it: both come back.
++    visited.clear();
++    await tapKey(tester, 'layer-eye-$hex');
++    expect(doc.tables.layers[l]!.visible, isTrue);
++    await tester.pump();
++    expect(visited, containsAll({keep, line, ...wallChildren}),
++        reason: 'shown again');
++
++    // Move the wall to layer 0 with the picker: select it by a click on
++    // its middle, open the menu, choose 0.
++    final depth = doc.commands.undoDepth;
++    await clickAt(tester, c, Vector2(8350.625, 7450.375));
++    expect(c.activeSelection.keys, {SelectionKey.root(wall)},
++        reason: 'premise: the click selected the wall');
++    expect(tester.widget<Text>(byKey('layer-picker-value')).data, 'Furniture');
++    await tester.tap(byKey('layer-picker'));
++    await tester.pumpAndSettle();
++    await tester.tap(byKey('layer-picker-item-${zero.toHex()}'));
++    await tester.pumpAndSettle();
++    expect(doc.commands.undoDepth, depth + 1, reason: 'one undo step');
++    expect(doc.components.get<ObjectLayer>(wall)?.layer, zero);
++    for (final k in childrenOf(doc, wall)) {
++      expect(layerOf(doc, k), zero, reason: 'wall child ${k.toHex()}');
++    }
++    expect(layerOf(doc, line), l, reason: 'the line stayed');
++
++    // The new layer current again, so the file's current layer is not 0.
++    await tapKey(tester, 'layer-current-$hex');
++    expect(doc.header.currentLayer, l);
++    final layersBefore = {
++      for (final r in doc.tables.layers.records)
++        r.handle: (r.name, r.color, r.visible, r.locked),
++    };
++    expect(layersBefore, hasLength(2));
++    expect(c.dirty.value, isTrue);
++
++    // Save, Open, Save.
++    files.scriptSaveLocation(name: 'layers.jetplan', location: '/p/layers');
++    await tapKey(tester, 'toolbar-save');
++    noDialog(tester);
++    expect(files.writes, hasLength(1), reason: 'premise: saved');
++    final first = files.writes.single.bytes;
++    expect(c.dirty.value, isFalse);
++
++    files.scriptOpen(
++        name: 'layers.jetplan', bytes: first, location: '/p/layers');
++    await rig.host.openFlow();
++    await tester.pump();
++    await tester.pump();
++    noDialog(tester);
++    final opened = c.document;
++    expect(identical(opened, doc), isFalse, reason: 'premise: reopened');
++    expect(opened.header.currentLayer, l, reason: 'the current layer kept');
++    expect(drawingLayer(opened), l);
++    expect({
++      for (final r in opened.tables.layers.records)
++        r.handle: (r.name, r.color, r.visible, r.locked),
++    }, layersBefore, reason: 'every layer kept');
++    expect(isCurrentRow(tester, l), isTrue, reason: 'the panel shows it');
++    expect(nameOfRow(tester, l), 'Furniture');
++    expect(layerOf(opened, line), l);
++    expect(opened.components.get<ObjectLayer>(wall)?.layer, zero);
++
++    await tapKey(tester, 'toolbar-save');
++    noDialog(tester);
++    expect(files.writes, hasLength(2), reason: 'saved in place');
++    expect(files.writes[1].bytes, first, reason: 'byte-identical');
++  });
++}
+diff --git a/apps/architecture_demo/test/library_gaps_test.dart b/apps/architecture_demo/test/library_gaps_test.dart
+new file mode 100644
+index 00000000..c076e4a8
+--- /dev/null
++++ b/apps/architecture_demo/test/library_gaps_test.dart
+@@ -0,0 +1,340 @@
++// The library gaps (spec decision 10, audit "Library facts" 7 and the
++// decision list's item 5): `PlanEditor` behaviours that no test in
++// packages/jet_cad_2d_plan pinned when the audit grepped it, pinned here
++// through the app. Each case names the library mutation that turns it red
++// (task-7-report.md lists them, with every other test the mutation reds).
++//
++//   LG1  the file buttons and chords are gated while a tool is part-way
++//        (`_idleFlag` in the editor's file commands)
++//   LG2  the Meta forms of the file and print chords (`_chord` in
++//        chords.dart)
++//   LG3  the redo chords: Cmd+Shift+Z, Ctrl+Shift+Z, Ctrl+Y (kRedoChords)
++//   LG4  focus in the Symbols gallery (the strip and the cells never take
++//        it; Tab walks past them) and tab switches arm no tool
++//   LG5  the gallery's search text survives a tab switch and a New
++//        (`_symbolQuery` in the editor)
++//   LG6  Export and Print follow the page: detached, undone, redone
++//        (the editor's `_exportFlag` and `_printFlag`)
++//
++// Several of these are also pinned by Task 4's and Task 6's ports (DC2, DC4,
++// DC5, PR6, EX9b, SS12, SS13-open): the library mutations in the report show
++// which tests each one reds. The per-platform tooltip glyphs are DC1b's.
++//
++// Decided: premise impossible (LG6: "the page panel's off switch"): the page
++// panel has no switch that detaches the page, only the document's command
++// (`SetComponentCommand<PageComponent>(root, null)`) does, as EX9b has it.
++//
++// Decided: premise differs (LG4: "Tab moves from the search field to the
++// first cell"): the gallery is wrapped in `ExcludeFocus` (Ruling 05-6), so a
++// cell is never in the focus order; Tab from the search field lands on the
++// canvas, and the case pins exactly that.
++import 'package:flutter/gestures.dart';
++import 'package:flutter/material.dart';
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart'
++    show PageComponent, SetComponentCommand;
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
++    show InteractionLayer, SymbolGallery;
++
++import 'support/app_fakes.dart';
++import 'support/app_rig.dart';
++import 'support/export_rig.dart';
++import 'support/symbol_rig.dart';
++
++/// Presses [key] with every key of [modifiers] held; whether the key-down
++/// was handled.
++Future<bool> pressWith(WidgetTester tester, List<LogicalKeyboardKey> modifiers,
++    LogicalKeyboardKey key) async {
++  for (final m in modifiers) {
++    await tester.sendKeyDownEvent(m);
++  }
++  final handled = await tester.sendKeyEvent(key);
++  for (final m in modifiers.reversed) {
++    await tester.sendKeyUpEvent(m);
++  }
++  await tester.pump();
++  return handled;
++}
++
++final Map<String, LogicalKeyboardKey> _modifiers = {
++  'Cmd': LogicalKeyboardKey.meta,
++  'Ctrl': LogicalKeyboardKey.control,
++};
++
++void main() {
++  group('LG1 the file buttons and chords wait for a part-way shape', () {
++    testWidgets(
++        'with the Wall tool pressed and not released New, Open, Save and Save '
++        'As are disabled, a tap does nothing, and neither Cmd+S nor Ctrl+S '
++        'writes; after Escape both work', (tester) async {
++      final rig = await pumpApp(tester);
++      final c = rig.controller;
++      final files = rig.files;
++      files.scriptSaveLocation(name: 'plan.jetplan', location: '/p/plan');
++      await aimCamera(tester, c, kFar);
++      await press(tester, LogicalKeyboardKey.keyW);
++      final mouse = await tester.createGesture(
++          kind: PointerDeviceKind.mouse, buttons: kPrimaryButton);
++      await mouse.down(globalOf(tester, c, kFar));
++      await tester.pump();
++      expect(activeTool(tester).isMidShape, isTrue, reason: 'premise');
++
++      IconButton button(String id) =>
++          tester.widget<IconButton>(find.byKey(Key('toolbar-$id')));
++      for (final id in ['new', 'open', 'save', 'save-as']) {
++        expect(button(id).onPressed, isNull, reason: id);
++        await rig.tapKey('toolbar-$id');
++      }
++      for (final modifier in _modifiers.values) {
++        await pressWith(tester, [modifier], LogicalKeyboardKey.keyS);
++      }
++      await tester.pump();
++      expect(files.writes, isEmpty, reason: 'nothing written');
++      expect(files.saveLocationCalls, isEmpty, reason: 'nothing asked');
++      expect(files.openCalls, 0);
++      expect(rig.session.busy.value, isFalse);
++
++      await mouse.up();
++      await mouse.removePointer();
++      await tester.pump();
++      expect(activeTool(tester).isMidShape, isTrue,
++          reason: 'premise: a wall chain goes on after the release');
++      await press(tester, LogicalKeyboardKey.escape);
++      expect(activeTool(tester).isMidShape, isFalse, reason: 'premise');
++      for (final id in ['new', 'open', 'save', 'save-as']) {
++        expect(button(id).onPressed, isNotNull, reason: id);
++      }
++      await pressWith(
++          tester, [LogicalKeyboardKey.meta], LogicalKeyboardKey.keyS);
++      await tester.pump();
++      expect(files.writes, hasLength(1), reason: 'Cmd+S saves once idle');
++    });
++  });
++
++  group('LG2 the Meta forms of the chords run the flows the Ctrl forms do', () {
++    for (final entry in _modifiers.entries) {
++      final label = entry.key;
++      final modifier = entry.value;
++
++      testWidgets('$label+S saves (asks, writes plan.jetplan)', (tester) async {
++        final rig = await pumpApp(tester);
++        rig.files.scriptSaveLocation(name: 'plan.jetplan', location: '/p/plan');
++        await rig.editOnce();
++        await pressWith(tester, [modifier], LogicalKeyboardKey.keyS);
++        await tester.pump();
++        expect(rig.files.saveLocationCalls, ['Untitled.jetplan']);
++        expect(rig.files.writes.map((w) => w.location), ['/p/plan']);
++        expect(rig.controller.dirty.value, isFalse);
++      });
++
++      testWidgets('$label+Shift+S asks where', (tester) async {
++        final rig = await pumpApp(tester);
++        rig.files.scriptSaveCancel();
++        await pressWith(tester, [modifier, LogicalKeyboardKey.shift],
++            LogicalKeyboardKey.keyS);
++        await tester.pump();
++        expect(rig.files.saveLocationCalls, hasLength(1));
++        expect(rig.files.writes, isEmpty);
++      });
++
++      testWidgets('$label+O opens: the file picker is asked once',
++          (tester) async {
++        final rig = await pumpApp(tester);
++        rig.files.scriptOpenCancel();
++        await pressWith(tester, [modifier], LogicalKeyboardKey.keyO);
++        await tester.pump();
++        expect(rig.files.openCalls, 1);
++      });
++
++      testWidgets(
++          '$label+N from an edited plan asks Save / Don\'t Save, and Don\'t '
++          'Save starts a new plan', (tester) async {
++        final rig = await pumpApp(tester);
++        await rig.editOnce();
++        final before = rig.controller.document;
++        await pressWith(tester, [modifier], LogicalKeyboardKey.keyN);
++        await tester.pump();
++        await answerReplace(tester, 'replace-discard');
++        noDialog(tester);
++        expect(identical(rig.controller.document, before), isFalse);
++        expect(rig.controller.document.entities.liveCount, 0);
++      });
++
++      testWidgets('$label+P prints once', (tester) async {
++        final printer = FakePagePrinter();
++        await pumpFlat(tester, printer: printer);
++        await pressWith(tester, [modifier], LogicalKeyboardKey.keyP);
++        await settleUntil(tester, () => printer.calls.isNotEmpty);
++        await tester.pump();
++        expect(printer.calls, hasLength(1));
++      });
++    }
++  });
++
++  testWidgets(
++      'LG3 the redo chords: Cmd+Shift+Z, Ctrl+Shift+Z and Ctrl+Y each redo '
++      'one undone step, and no other key does', (tester) async {
++    final rig = await pumpApp(tester);
++    final c = rig.controller;
++    final doc = c.document;
++    await rig.editOnce();
++    final done = doc.commands.stateId;
++    final redoChords = <(String, List<LogicalKeyboardKey>, LogicalKeyboardKey)>[
++      (
++        'Cmd+Shift+Z',
++        [LogicalKeyboardKey.meta, LogicalKeyboardKey.shift],
++        LogicalKeyboardKey.keyZ
++      ),
++      (
++        'Ctrl+Shift+Z',
++        [LogicalKeyboardKey.control, LogicalKeyboardKey.shift],
++        LogicalKeyboardKey.keyZ
++      ),
++      ('Ctrl+Y', [LogicalKeyboardKey.control], LogicalKeyboardKey.keyY),
++    ];
++    for (final (name, mods, key) in redoChords) {
++      expect(
++          await pressWith(
++              tester, [LogicalKeyboardKey.meta], LogicalKeyboardKey.keyZ),
++          isTrue,
++          reason: 'premise: Cmd+Z undoes');
++      expect(doc.commands.undoDepth, 0, reason: 'undone before $name');
++      expect(doc.commands.canRedo, isTrue);
++      expect(await pressWith(tester, mods, key), isTrue, reason: name);
++      expect(doc.commands.undoDepth, 1, reason: name);
++      expect(doc.commands.stateId, done, reason: '$name redoes the step');
++    }
++    // Shift+Z with neither Cmd nor Ctrl is no redo chord.
++    doc.commands.undo();
++    await tester.pump();
++    await pressWith(
++        tester, [LogicalKeyboardKey.shift], LogicalKeyboardKey.keyZ);
++    expect(doc.commands.undoDepth, 0, reason: 'Shift+Z alone is no redo');
++  });
++
++  group('LG4 focus and tabs in the Symbols gallery', () {
++    testWidgets(
++        'Tab from the search field lands on the canvas, Shift+Tab on neither '
++        'the strip nor a cell: the cells and the strip are not in the focus '
++        'order', (tester) async {
++      await pumpSymbolsApp(tester);
++      await tapFinder(tester, tabSymbols);
++      bool under(Finder f) => focusNodesUnder(tester, f)
++          .contains(FocusManager.instance.primaryFocus);
++
++      await tester.tap(searchField);
++      await tester.pump();
++      expect(FocusManager.instance.primaryFocus,
++          tester.widget<TextField>(searchField).focusNode,
++          reason: 'premise: the search field has the focus');
++      await press(tester, LogicalKeyboardKey.tab);
++      final afterTab = FocusManager.instance.primaryFocus;
++      expect(
++          find
++              .descendant(
++                  of: find.byType(InteractionLayer),
++                  matching:
++                      find.byElementPredicate((e) => e == afterTab!.context),
++                  matchRoot: true)
++              .evaluate(),
++          isNotEmpty,
++          reason: 'Tab walks past the cells to the canvas');
++
++      for (var i = 0; i < 6; i++) {
++        await press(tester, LogicalKeyboardKey.tab);
++        expect(under(find.byType(SymbolGallery)), isFalse, reason: 'tab $i');
++        expect(under(strip), isFalse, reason: 'tab $i');
++      }
++      await tester.tap(searchField);
++      await tester.pump();
++      for (var i = 0; i < 6; i++) {
++        await pressWith(
++            tester, [LogicalKeyboardKey.shift], LogicalKeyboardKey.tab);
++        expect(under(find.byType(SymbolGallery)), isFalse,
++            reason: 'shift+tab $i');
++        expect(under(strip), isFalse, reason: 'shift+tab $i');
++      }
++    });
++
++    testWidgets(
++        'switching tabs back and forth, with the Wall tool and with an armed '
++        'symbol, changes no tool', (tester) async {
++      final rig = await pumpSymbolsApp(tester);
++      final c = rig.controller;
++      await press(tester, LogicalKeyboardKey.keyW);
++      expect(c.activeTool.value, 'architecture.wall', reason: 'premise');
++      for (var i = 0; i < 2; i++) {
++        await tapFinder(tester, tabSymbols);
++        expect(c.activeTool.value, 'architecture.wall', reason: 'to Symbols');
++        await tapFinder(tester, tabTools);
++        expect(c.activeTool.value, 'architecture.wall', reason: 'to Tools');
++      }
++      await armBySymbolsTab(tester, c, symbolOf(c, 'bed.double'));
++      await tapFinder(tester, tabTools);
++      expect(c.activeTool.value, 'plan.symbol', reason: 'armed, to Tools');
++      expect(c.armedSymbol.value, isNotNull);
++      await tapFinder(tester, tabSymbols);
++      expect(c.activeTool.value, 'plan.symbol', reason: 'armed, to Symbols');
++      expect(galleryOf(tester).selectedId, symbolOf(c, 'bed.double').id);
++    });
++  });
++
++  testWidgets(
++      'LG5 the gallery\'s search text survives a tab switch and a New: the '
++      'field reads it and the gallery is filtered', (tester) async {
++    final rig = await pumpSymbolsApp(tester);
++    final c = rig.controller;
++    await tapFinder(tester, tabSymbols);
++    await tester.enterText(searchField, 'sofa');
++    await tester.pump();
++    final sofas = galleryIdsOf(tester);
++    expect(sofas, isNotEmpty);
++    expect(sofas.length, lessThan(41), reason: 'premise: filtered');
++
++    await tapFinder(tester, tabTools);
++    await rig.host.newFlow();
++    await tester.pump();
++    await tapFinder(tester, tabSymbols);
++    expect(tester.widget<TextField>(searchField).controller!.text, 'sofa');
++    expect(galleryIdsOf(tester), sofas);
++    expect(galleryIdsOf(tester), idsMatching(c, 'sofa'));
++  });
++
++  testWidgets(
++      'LG6 Export and Print follow the page: detached they are disabled, '
++      'the undo enables them, the redo disables them', (tester) async {
++    final rig = await pumpFlat(tester);
++    final c = rig.controller;
++    final root = c.document.rootHandle;
++    bool both() => on(tester, 'export') && on(tester, 'print');
++    bool neither() => !on(tester, 'export') && !on(tester, 'print');
++    Future<void> settle() async {
++      await tester.pump();
++      await tester.pump(const Duration(milliseconds: 100));
++      await tester.pump();
++    }
++
++    expect(both(), isTrue, reason: 'premise: a page');
++    c.document.commands.execute(SetComponentCommand<PageComponent>(root, null));
++    await settle();
++    expect(pageOf(c), isNull, reason: 'premise: detached');
++    expect(neither(), isTrue, reason: 'detached');
++    expect(
++        await pressWith(
++            tester, [LogicalKeyboardKey.meta], LogicalKeyboardKey.keyZ),
++        isTrue);
++    await settle();
++    expect(pageOf(c), isNotNull, reason: 'premise: undone');
++    expect(both(), isTrue, reason: 'attached again by the undo');
++    expect(
++        await pressWith(
++            tester,
++            [LogicalKeyboardKey.meta, LogicalKeyboardKey.shift],
++            LogicalKeyboardKey.keyZ),
++        isTrue);
++    await settle();
++    expect(pageOf(c), isNull, reason: 'premise: redone');
++    expect(neither(), isTrue, reason: 'redone');
++  });
++}
+diff --git a/apps/architecture_demo/test/support/symbol_rig.dart b/apps/architecture_demo/test/support/symbol_rig.dart
+new file mode 100644
+index 00000000..ed6c123c
+--- /dev/null
++++ b/apps/architecture_demo/test/support/symbol_rig.dart
+@@ -0,0 +1,312 @@
++// The Symbols tab through the app: waiting for the furniture library, the
++// gallery's ids, arming a cell, the placed instances. The symbol tests'
++// helper set (R-P14, with app_rig.dart's): no copies elsewhere.
++import 'dart:math' as math;
++
++import 'package:flutter/gestures.dart';
++import 'package:flutter/material.dart';
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
++    show InteractionLayer, SymbolGallery, ViewportTransform;
++import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import 'app_rig.dart';
++
++final Finder tabTools = find.byKey(const Key('tab-tools'));
++final Finder tabSymbols = find.byKey(const Key('tab-symbols'));
++final Finder strip = find.byKey(const Key('left-tabs'));
++final Finder searchField = find.byKey(const Key('symbol-search'));
++
++/// Waits, in real time, for the furniture library to load (bounded: 400
++/// rounds of 20 ms) and fails the premise when it did not.
++Future<void> symbolsReady(WidgetTester tester, PlanController c) async {
++  for (var i = 0; i < 400 && c.symbolsState.value != SymbolsState.ready; i++) {
++    await tester
++        .runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
++    await tester.pump();
++  }
++  expect(c.symbolsState.value, SymbolsState.ready,
++      reason: 'premise: the furniture library loaded');
++}
++
++/// The app with its furniture loaded.
++Future<AppRig> pumpSymbolsApp(WidgetTester tester) async {
++  final rig = await pumpApp(tester);
++  await symbolsReady(tester, rig.controller);
++  return rig;
++}
++
++/// Taps [f], then one frame.
++Future<void> tapFinder(WidgetTester tester, Finder f) async {
++  await tester.tap(f);
++  await tester.pump();
++}
++
++SymbolGallery galleryOf(WidgetTester tester) =>
++    tester.widget<SymbolGallery>(find.byType(SymbolGallery));
++
++/// The gallery's cell ids, in order.
++List<String> galleryIdsOf(WidgetTester tester) => [
++      for (final c in galleryOf(tester).categories)
++        for (final s in c.symbols) s.id,
++    ];
++
++/// The gallery's category names, in order.
++List<String> categoryNamesOf(WidgetTester tester) =>
++    [for (final c in galleryOf(tester).categories) c.name];
++
++/// The ids of the loaded symbols whose stored name, category or a tag
++/// carries [word], computed apart from the widget (the library's folding
++/// is not needed for the lower-case words the tests use).
++List<String> idsMatching(PlanController c, String word) => [
++      for (final s in c.symbols)
++        if ([s.component.name, s.component.category, ...s.component.tags]
++            .any((t) => t.toLowerCase().contains(word)))
++          s.id,
++    ];
++
++/// The loaded symbol whose stored key is the kit's `architecture.<key>`.
++PlanSymbol symbolOf(PlanController c, String key) =>
++    c.symbols.singleWhere((s) => s.component.key == 'architecture.$key');
++
++/// Opens the Symbols tab, filters the gallery to [symbol]'s name (the cells
++/// are built lazily), hands the focus back with the search action and taps
++/// the cell: [c] has it armed and `plan.symbol` is the active tool.
++Future<void> armBySymbolsTab(
++    WidgetTester tester, PlanController c, PlanSymbol symbol) async {
++  await tapFinder(tester, tabSymbols);
++  await tester.enterText(searchField, symbol.component.name);
++  await tester.pump();
++  await tester.testTextInput.receiveAction(TextInputAction.search);
++  await tester.pump();
++  final cell = find.byKey(Key('symbol-cell-${symbol.id}'));
++  await tester.ensureVisible(cell);
++  await tester.pump();
++  await tester.tap(cell);
++  await tester.pump();
++  expect(c.activeTool.value, 'plan.symbol', reason: 'premise: armed');
++  expect(c.armedSymbol.value, same(symbol), reason: 'premise: armed');
++}
++
++/// The document's instances, in tree order.
++List<InstanceNode> instancesOf(DraftDocument doc) =>
++    doc.tree.nodes.whereType<InstanceNode>().toList();
++
++/// [t]'s six numbers, for exact comparison.
++List<double> partsOf(Transform2 t) => [t.a, t.b, t.c, t.d, t.e, t.f];
++
++/// The raw world point the canvas reads for a pointer at world [p] (the
++/// screen round trip, as the tool receives it).
++Vector2 rawWorldAt(WidgetTester tester, PlanController c, Vector2 p) {
++  final local =
++      globalOf(tester, c, p) - tester.getTopLeft(find.byType(InteractionLayer));
++  return c.camera.value.screenToWorld(Vector2(local.dx, local.dy));
++}
++
++/// The canvas's focus node: the primary focus, inside the interaction layer.
++FocusNode canvasFocus(WidgetTester tester) {
++  final node = FocusManager.instance.primaryFocus!;
++  expect(
++      find
++          .descendant(
++              of: find.byType(InteractionLayer),
++              matching: find.byElementPredicate((e) => e == node.context),
++              matchRoot: true)
++          .evaluate(),
++      isNotEmpty,
++      reason: 'premise: the canvas has the focus');
++  return node;
++}
++
++/// Every focus node whose widget sits under [of].
++List<FocusNode> focusNodesUnder(WidgetTester tester, Finder of) => [
++      for (final n in FocusManager.instance.rootScope.descendants)
++        if (n.context != null &&
++            find
++                .descendant(
++                    of: of,
++                    matching: find.byElementPredicate((e) => e == n.context))
++                .evaluate()
++                .isNotEmpty)
++          n,
++    ];
++
++/// Cmd+Shift+Z: the editor's redo binding.
++Future<void> redoKey(WidgetTester tester) async {
++  await tester.sendKeyDownEvent(LogicalKeyboardKey.meta);
++  await tester.sendKeyDownEvent(LogicalKeyboardKey.shift);
++  await press(tester, LogicalKeyboardKey.keyZ);
++  await tester.sendKeyUpEvent(LogicalKeyboardKey.shift);
++  await tester.sendKeyUpEvent(LogicalKeyboardKey.meta);
++  await tester.pump();
++}
++
++/// As [aimCamera], at [scale] px/mm.
++Future<void> aimCameraAt(
++    WidgetTester tester, PlanController c, Vector2 centre, double scale) async {
++  final size = tester.getSize(find.byType(InteractionLayer));
++  final linear =
++      Transform2.rotation(0.3).multiply(Transform2.scale(scale, scale));
++  final mid = linear.transformPoint(centre);
++  c.camera.value = ViewportTransform(
++      worldToScreenMatrix: Transform2.translation(
++              size.width / 2 - mid.x, size.height / 2 - mid.y)
++          .multiply(linear));
++  await tester.pump();
++}
++
++/// The live line entities' slots, ascending.
++List<int> lineSlotsOf(DraftDocument doc) => [
++      for (final s in doc.entities.liveSlots)
++        if (doc.entities.kindAt(s) == EntityKind.line) s,
++    ]..sort();
++
++// ---------------------------------------------------------------------------
++// Walls added through the document's commands, and the symbols placed
++// against them (the old wall_attach_fixture.dart and wall_fixture.dart
++// helpers, over the kit's `WallParams`; the integration package's
++// attach_plans.dart has the same in its own tests).
++
++/// The attachment fixtures' far point.
++const double attachX = 1e5, attachY = -7e4;
++
++/// The point `(x, y)` from the far point (1e5, -7e4).
++Vector2 farAt(double x, double y) => Vector2(attachX + x, attachY + y);
++
++/// [from] moved [len] along [deg] degrees anticlockwise from +x.
++Vector2 polar(Vector2 from, double deg, double len) {
++  final r = deg * math.pi / 180;
++  return from + Vector2(math.cos(r), math.sin(r)) * len;
++}
++
++/// Wall [h]'s group: a translation near the far point times a rotation that
++/// is never a multiple of 90 degrees.
++Transform2 attachGroup(int h) => Transform2.translation(
++        attachX - 950 + 311.5 * (h % 7), attachY + 420 - 173.25 * (h % 5))
++    .multiply(Transform2.rotation(0.3 + 0.7 * (h % 9)));
++
++/// One wall from world [s] to world [e], [t] thick, in its own turned group,
++/// one command; returns its handle. The wall's stored ends are [s] and [e]
++/// taken back through the group.
++Handle addWallAt(
++    PlanController c, Vector2 s, Vector2 e, double t, Justification j) {
++  final doc = c.document;
++  final h = doc.handleSeed.next();
++  final g = attachGroup(h.value);
++  final inv = g.invert();
++  final ls = inv.transformPoint(s), le = inv.transformPoint(e);
++  doc.commands.execute(CompoundCommand([
++    AddNodeCommand(GroupNode(
++        handle: h, parent: doc.rootHandle, transform: g, children: const [])),
++    SetComponentCommand<WallParams>(
++        h, WallParams(ls.x, ls.y, le.x, le.y, t, j)),
++  ], label: 'Add wall'));
++  return h;
++}
++
++/// A wall's face as the kit frames it: `m` the unit normal out of the wall
++/// into the room, `t = (-m.y, m.x)`, `a` the end with the smaller `.t`.
++typedef FaceLine = ({Vector2 a, Vector2 t, Vector2 m, double length});
++
++/// Wall [h]'s [left] face (or right), by hand from its stored parameters
++/// for a wall nothing joins in an unmirrored group.
++FaceLine faceLineOf(DraftDocument doc, Handle h, {required bool left}) {
++  final w = doc.components.get<WallParams>(h)!;
++  final (l, r) = switch (w.justification) {
++    Justification.centre => (w.thickness / 2, -w.thickness / 2),
++    Justification.left => (w.thickness, 0.0),
++    Justification.right => (0.0, -w.thickness),
++  };
++  final g = doc.tree.accumulatedTransform(h);
++  final s = g.transformPoint(w.start), e = g.transformPoint(w.end);
++  final dx = e.x - s.x, dy = e.y - s.y;
++  final len = math.sqrt(dx * dx + dy * dy);
++  final offset = left ? l : r;
++  final nx = -dy / len * offset, ny = dx / len * offset;
++  final p = Vector2(s.x + nx, s.y + ny), q = Vector2(e.x + nx, e.y + ny);
++  final d = g.transformDirection((w.end - w.start).normalized()).normalized();
++  final n = Vector2(-d.y, d.x);
++  final m = left ? n : -n;
++  final t = Vector2(-m.y, m.x);
++  return (a: p.dot(t) <= q.dot(t) ? p : q, t: t, m: m, length: (q - p).length);
++}
++
++/// The point `a + t*u + m*s` of face [r].
++Vector2 onRun(FaceLine r, double u, double s) =>
++    Vector2(r.a.x + r.t.x * u + r.m.x * s, r.a.y + r.t.y * u + r.m.y * s);
++
++/// The drawn vertices of [instance]'s definition, in world: every line's
++/// two ends and every polyline's points, through the instance's transform.
++List<Vector2> drawnVertices(DraftDocument doc, InstanceNode instance) {
++  final g = doc.tree.accumulatedTransform(instance.handle);
++  final e = doc.entities;
++  final out = <Vector2>[];
++  for (final slot in e.liveSlots) {
++    if (e.ownerAt(slot) != instance.definition) continue;
++    final p = doc.geometry.read(e.geomIndexAt(slot));
++    final kind = e.kindAt(slot);
++    final n = kind == EntityKind.line
++        ? 2
++        : kind == EntityKind.polyline
++            ? p.pointCount
++            : 0;
++    for (var i = 0; i < n; i++) {
++      out.add(g.transformPoint(Vector2(p.coords[2 * i], p.coords[2 * i + 1])));
++    }
++  }
++  return out;
++}
++
++/// Asserts [instance] stands flush against [run], turned to it: its drawn
++/// vertices all on the room side, the nearest exactly on the face line, those
++/// on the face spanning [width] along it; local `+y` (towards the back) on
++/// `-m` (into the wall) and local `+x` on `t` (mirrored: `-t`).
++void expectFlush(
++    DraftDocument doc, InstanceNode instance, FaceLine run, double width,
++    {required bool mirrored, required String why}) {
++  final tol = 1e-9 * run.a.length;
++  final vs = drawnVertices(doc, instance);
++  expect(vs.length, greaterThan(4), reason: '$why: premise: drawn');
++  final ss = [for (final v in vs) (v - run.a).dot(run.m)];
++  final nearest = ss.reduce((a, b) => a < b ? a : b);
++  expect(nearest.abs(), lessThanOrEqualTo(tol),
++      reason: '$why: the back on the face line (nearest s $nearest)');
++  final onFace = [
++    for (var i = 0; i < vs.length; i++)
++      if (ss[i].abs() <= tol) (vs[i] - run.a).dot(run.t),
++  ];
++  final span = onFace.reduce((a, b) => a > b ? a : b) -
++      onFace.reduce((a, b) => a < b ? a : b);
++  expect(span, closeTo(width, tol),
++      reason: '$why: the whole back edge on the face');
++  final g = instance.transform;
++  final sx = mirrored ? -1.0 : 1.0;
++  expect(g.c, closeTo(-run.m.x, 1e-12), reason: '$why: +y into the wall');
++  expect(g.d, closeTo(-run.m.y, 1e-12), reason: '$why: +y into the wall');
++  expect(g.a, closeTo(sx * run.t.x, 1e-12), reason: '$why: +x along t');
++  expect(g.b, closeTo(sx * run.t.y, 1e-12), reason: '$why: +x along t');
++}
++
++/// A mouse that hovers at world [hover], presses there, moves and releases
++/// at world [release].
++Future<void> hoverPressRelease(WidgetTester tester, PlanController c,
++    Vector2 hover, Vector2 release) async {
++  final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
++  await mouse.addPointer(
++      location: globalOf(tester, c, hover) + const Offset(9, 7));
++  await tester.pump();
++  await mouse.moveTo(globalOf(tester, c, hover));
++  await tester.pump();
++  await mouse.down(globalOf(tester, c, hover));
++  await tester.pump();
++  await mouse.moveTo(globalOf(tester, c, release));
++  await tester.pump();
++  await mouse.up();
++  await tester.pump();
++  await mouse.removePointer();
++  await tester.pump();
++}
+diff --git a/apps/architecture_demo/test/symbols/symbol_library_loader_test.dart b/apps/architecture_demo/test/symbols/symbol_library_loader_test.dart
+new file mode 100644
+index 00000000..959cd19e
+--- /dev/null
++++ b/apps/architecture_demo/test/symbols/symbol_library_loader_test.dart
+@@ -0,0 +1,94 @@
++// Ported from apps/floor_planner/test/symbols/symbol_library_loader_test.dart
++// (audit docs/superpowers/specs/2026-10-16-architecture-demo-test-audit.md,
++// section "symbols/symbol_library_loader_test.dart"): SL9b SPLIT. The other
++// rows are COVERED (SL1-SL8, SL9, SL10, SL11) or DROPPED (SL9c, SL12) and
++// need no app test.
++//
++// COVERED, checked (each opened and read), in packages:
++//   SL premise (41 symbols, six categories)  jet_cad_2d_kit_architecture/test/
++//        furniture/furniture_library_test.dart:68 ("ships 41 symbols in six
++//        categories")
++//   SL1  jet_cad_2d_plan/test/controller/symbols_controller_test.dart:44
++//        (S-9: loading, then ready, started with the controller);
++//        symbols/plan_symbol_loader_test.dart:161 (S-7, read once)
++//   SL2-SL5  symbols/plan_symbol_loader_test.dart:110 (S-5: a throwing read,
++//        bytes that do not decode, a Error as well as an Exception)
++//   SL6, SL7  symbols_controller_test.dart:148 (S-12: retry reaches ready;
++//        from ready it reads nothing again); panels/
++//        plan_symbol_gallery_test.dart:174 ("a failed load shows its message
++//        and Retry; Retry reaches ready")
++//   SL8  symbols/plan_symbol_loader_test.dart:192 (S-8: a disposed loader
++//        refuses), symbols_controller_test.dart:204 (S-13: a late load
++//        neither notifies nor throws)
++//   SL9  jet_cad_2d_integration/test/furniture/furniture_load_test.dart:26
++//        (FU-load, through the bundle); jet_cad_2d_kit_architecture/test/
++//        furniture/package_assets_test.dart:43 (PA2)
++//   SL10, SL11  symbols_controller_test.dart:109 (S-11: a shared loader is
++//        not disposed, the controller's own is); plan_symbol_loader_test.dart
++//        :161 (S-7)
++//
++// SL9b-open: the app reads the architecture kit's furniture and nothing else
++// (41 symbols, six categories, every id the kit's), through the app's
++// controller and the real bundle. Pinned through the app so a controller
++// without the kit's symbol source shows an empty gallery. The intent (the
++// thumbnail cache holds at least the symbol count, `kPlanThumbnailCapacity`
++// = 128) was unpinned; SL9b pins it.
++//
++// Not pinned, and why: the app hands the controller a `PlanSymbolLoader` it
++// owns (`symbols: _symbols`). A controller given no loader makes and
++// disposes its own over the same sources, so removing the argument changes
++// nothing the app can show; the loader's ownership is the library's
++// (symbols_controller_test.dart S-11).
++import 'package:flutter/material.dart' show Key;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++
++import '../support/symbol_rig.dart';
++
++void main() {
++  testWidgets(
++      'SL9b-open the app\'s Symbols tab lists the architecture kit\'s 41 '
++      'furniture symbols in six categories, in the kit\'s order, and no '
++      'other kit\'s', (tester) async {
++    final rig = await pumpSymbolsApp(tester);
++    final c = rig.controller;
++    await tapFinder(tester, tabSymbols);
++    final ids = galleryIdsOf(tester);
++    expect(ids, hasLength(41));
++    expect(ids.toSet(), hasLength(41), reason: 'each id once');
++    expect(
++        categoryNamesOf(tester),
++        [
++          'Dining Room',
++          'Kitchen',
++          'Bed Room',
++          'Living Room',
++          'Bathroom',
++          'Office',
++        ],
++        reason: 'the kit\'s six categories, in the library\'s order');
++    expect([for (final s in c.symbols) s.id], ids,
++        reason: 'the gallery shows the controller\'s symbols in load order');
++    expect({for (final s in c.symbols) s.kitId}, {'architecture'});
++    expect(ids.every((id) => id.startsWith('architecture.')), isTrue);
++    expect(ids.first, 'architecture.dining.table.square.two@1');
++    expect(ids.last, 'architecture.office.bookshelf@1');
++    expect(ids, contains('architecture.bed.double@1'));
++    expect(c.diagnostics.value, isEmpty, reason: 'no library problem');
++    // The first cells are built and keyed by their ids (the gallery builds
++    // lazily).
++    expect(find.byKey(Key('symbol-cell-${ids.first}')), findsOneWidget);
++  });
++
++  testWidgets(
++      'SL9b the thumbnail cache holds at least every symbol: the capacity '
++      'is not below the 41 the app lists', (tester) async {
++    final rig = await pumpSymbolsApp(tester);
++    final c = rig.controller;
++    expect(c.symbols, hasLength(41));
++    expect(c.thumbnails.maxEntries, kPlanThumbnailCapacity);
++    expect(c.thumbnails.maxEntries, greaterThanOrEqualTo(c.symbols.length),
++        reason: 'one entry per symbol: scrolling the gallery does not '
++            'evict what the next cell draws');
++  });
++}
+diff --git a/apps/architecture_demo/test/symbols/symbol_palette_end_to_end_test.dart b/apps/architecture_demo/test/symbols/symbol_palette_end_to_end_test.dart
+new file mode 100644
+index 00000000..33d8eea7
+--- /dev/null
++++ b/apps/architecture_demo/test/symbols/symbol_palette_end_to_end_test.dart
+@@ -0,0 +1,231 @@
++// Ported from apps/floor_planner/test/symbols/symbol_palette_end_to_end_test
++// .dart (audit docs/superpowers/specs/2026-10-16-architecture-demo-test-audit
++// .md, section "symbols/symbol_palette_end_to_end_test.dart"): E2E PORT.
++// `bed.double@1` is `architecture.bed.double@1`.
++//
++// The symbol palette through the app's real widgets, focus and key path,
++// from the Symbols tab to a byte-identical save round trip. No tool method
++// is called directly.
++//
++// Fixtures: the app over a scripted `FakeDocumentFiles`; the kit's furniture
++// loaded through the controller. The camera is rotated, at 0.1 px/mm,
++// centred far from the origin; `bed.double`'s base point is off its origin
++// (checked); the press and the release are far from the origin and from each
++// other; the release lands near a line drawn with the Line tool, so the
++// snapped point (the line's end) differs from the raw one.
++//
++// Decided: premise impossible (the old test passed its own recording
++// thumbnail cache to the app and matched the cell's image to the cache's
++// futures): the app does not inject a cache, so the cell is checked to show
++// an image (a non-null `RawImage` of the size the gallery asked for) once
++// the cache has rendered it.
++import 'dart:ui' as ui;
++
++import 'package:flutter/gestures.dart';
++import 'package:flutter/material.dart' hide Tolerance;
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
++    show InteractionLayer;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show placementTransform;
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/app_fakes.dart';
++import '../support/app_rig.dart';
++import '../support/symbol_rig.dart';
++
++const String bedId = 'architecture.bed.double@1';
++final Finder bedCell = find.byKey(const Key('symbol-cell-$bedId'));
++
++/// Whether the primary focus sits inside the canvas's interaction layer.
++bool canvasFocused(WidgetTester tester) {
++  final node = FocusManager.instance.primaryFocus;
++  if (node?.context == null) return false;
++  return find
++      .descendant(
++          of: find.byType(InteractionLayer),
++          matching: find.byElementPredicate((e) => e == node!.context),
++          matchRoot: true)
++      .evaluate()
++      .isNotEmpty;
++}
++
++void main() {
++  testWidgets(
++      'E2E the Symbols tab, search "bed", a tap on the double bed, a press '
++      'far from the origin, R mid-press, a release near a line: one '
++      'instance at the snapped release point, one quarter turn; undo and '
++      'redo through the editor; Save As -> Open -> Save byte-identical',
++      (tester) async {
++    final files = FakeDocumentFiles();
++    await tester.binding.setSurfaceSize(const Size(1440, 900));
++    addTearDown(() => tester.binding.setSurfaceSize(null));
++    final rig = await pumpApp(tester, files: files);
++    final c = rig.controller;
++    await symbolsReady(tester, c);
++    final bed = symbolOf(c, 'bed.double');
++    expect(bed.id, bedId);
++    final base = bed.entry.definition.basePoint;
++    expect(base.x != 0 && base.y != 0, isTrue,
++        reason: 'the base point is off the origin on both axes');
++
++    final doc = c.document;
++    // A short line through the Line tool, drawn zoomed in (a fine grid),
++    // so its end is off the coarse grid of the placement's zoom: the
++    // release then snaps onto that end by the object snap alone.
++    final lineStart = kFar + Vector2(-1820.3, 960.7);
++    await aimCameraAt(tester, c, lineStart + Vector2(45, 24), 2.5);
++    await press(tester, LogicalKeyboardKey.keyL);
++    expect(c.activeTool.value, 'plan.line', reason: 'premise');
++    await clickAt(tester, c, lineStart);
++    await clickAt(tester, c, lineStart + Vector2(90.35, 47.85));
++    await press(tester, LogicalKeyboardKey.escape);
++    await press(tester, LogicalKeyboardKey.escape);
++    expect(c.activeTool.value, 'plan.select', reason: 'premise');
++
++    await aimCamera(tester, c, kFar);
++    expect(c.camera.value.scale, isNot(1.0), reason: 'a non-unit scale');
++    final line = lineSlotsOf(doc).single;
++    final coords = doc.geometry.read(doc.entities.geomIndexAt(line)).coords;
++    final lineEnd = Vector2(coords[2], coords[3]);
++    expect(lineEnd.length, greaterThan(40000), reason: 'premise: far');
++
++    // The Symbols tab; "bed" typed in the search field; the search action
++    // hands the focus back to the canvas.
++    await tapFinder(tester, tabSymbols);
++    await tester.enterText(searchField, 'bed');
++    await tester.pump();
++    expect(canvasFocused(tester), isFalse, reason: 'premise: the field');
++    await tester.testTextInput.receiveAction(TextInputAction.search);
++    await tester.pump();
++    expect(canvasFocused(tester), isTrue, reason: 'Enter hands focus back');
++    final shownIds = galleryIdsOf(tester);
++    expect(shownIds, contains(bedId));
++    expect(shownIds, isNot(contains('architecture.dining.chair@1')),
++        reason: 'the search filtered');
++    expect(shownIds.length, lessThan(c.symbols.length),
++        reason: 'the search filtered');
++    expect(shownIds, idsMatching(c, 'bed'));
++
++    // The thumbnails come from the controller's cache (rendered in real
++    // time, under runAsync).
++    await tester.ensureVisible(bedCell);
++    await tester.pump();
++    ui.Image? shown;
++    for (var i = 0; i < 400 && shown == null; i++) {
++      await tester.runAsync(
++          () => Future<void>.delayed(const Duration(milliseconds: 20)));
++      await tester.pump();
++      shown = tester
++          .widget<RawImage>(
++              find.descendant(of: bedCell, matching: find.byType(RawImage)))
++          .image;
++    }
++    expect(shown, isNotNull, reason: 'the double bed\'s cell shows an image');
++    expect(shown!.width, greaterThan(0));
++
++    // The tap arms the placement tool, through the editor.
++    expect(c.activeTool.value, 'plan.select', reason: 'premise');
++    await tester.tap(bedCell);
++    await tester.pump();
++    expect(c.activeTool.value, 'plan.symbol');
++    expect(c.armedSymbol.value, same(bed));
++    expect(canvasFocused(tester), isTrue, reason: 'the cell took no focus');
++    expect(instancesOf(doc), isEmpty, reason: 'premise');
++    final undoDepth = doc.commands.undoDepth;
++
++    // Press far from the origin and from the line; R mid-press; move;
++    // release near the line's end.
++    final pressAt = kFar + Vector2(900.5, -650.25);
++    final releaseRaw = lineEnd + Vector2(62.5, -55.25);
++    final mouse = await tester.createGesture(
++        kind: PointerDeviceKind.mouse, buttons: kPrimaryButton);
++    await mouse.down(globalOf(tester, c, pressAt));
++    await tester.pump();
++    expect(activeTool(tester).isMidShape, isTrue, reason: 'premise: pressed');
++    await tester.sendKeyEvent(LogicalKeyboardKey.keyR);
++    await tester.pump();
++    expect(c.activeTool.value, 'plan.symbol',
++        reason: 'R reached the tool, not the Rectangle binding');
++    await mouse.moveTo(globalOf(tester, c, pressAt) + const Offset(-25, 18));
++    await tester.pump();
++    final releaseAt = globalOf(tester, c, releaseRaw);
++    await mouse.moveTo(releaseAt);
++    await mouse.up();
++    await mouse.removePointer();
++    await tester.pump();
++
++    // The release resolves to the line's end by the object snap alone: the
++    // raw point is far from it, and so is where the page's grid would put
++    // it (the snap chain is internal to the library; the line's end is the
++    // oracle).
++    final raw = rawWorldAt(tester, c, releaseRaw);
++    final snapped = lineEnd;
++    final page =
++        c.document.components.get<PageComponent>(c.document.rootHandle);
++    final scale = c.camera.value.scale;
++    expect(snapped.distanceTo(raw), greaterThan(50),
++        reason: 'premise: snapped != raw');
++    expect(page, isNotNull, reason: 'premise: the plan has a page');
++    final step = dragGridStepMm(page, scale);
++    final gridOnly = step == null ? raw : snapToGrid(raw, step, page!);
++    expect(snapped.distanceTo(gridOnly), greaterThan(10),
++        reason: 'premise: the grid alone resolves elsewhere: the object '
++            'snap (at ${kSnapAperturePixels / scale} mm) decides');
++    expect(
++        snapped.distanceTo(rawWorldAt(tester, c, pressAt)), greaterThan(1000),
++        reason: 'premise: the press resolves elsewhere');
++
++    final placed = instancesOf(doc).single;
++    expect(doc.commands.undoDepth, undoDepth + 1, reason: 'one undo step');
++    final definition = placed.definition;
++    expect(doc.tree.definition(definition)!.basePoint, base);
++    final want = placementTransform(
++        at: snapped, basePoint: base, quarterTurns: 1, mirrored: false);
++    final t = placed.transform;
++    expect([t.a, t.b, t.c, t.d], [want.a, want.b, want.c, want.d],
++        reason: 'one quarter turn, not mirrored: exact');
++    expect([want.a, want.b, want.c, want.d], [0.0, 1.0, -1.0, 0.0],
++        reason: 'premise: a counter-clockwise quarter turn');
++    expect(
++        Tolerance.standard.eq(t.e, want.e) &&
++            Tolerance.standard.eq(t.f, want.f),
++        isTrue,
++        reason: 'translation ${[t.e, t.f]} vs ${[want.e, want.f]}');
++    final placedHandle = placed.handle;
++    final placedTransform = partsOf(t);
++
++    // Undo and redo through the editor's chords; the tool is armed, idle.
++    await undoKey(tester);
++    expect(instancesOf(doc), isEmpty, reason: 'undo removes the instance');
++    expect(doc.tree.definition(definition), isNull,
++        reason: 'and its definition');
++    expect(c.activeTool.value, 'plan.symbol', reason: 'still armed');
++    await redoKey(tester);
++    final again = instancesOf(doc).single;
++    expect(again.handle, placedHandle);
++    expect(again.definition, definition);
++    expect(doc.tree.definition(definition), isNotNull);
++    expect(partsOf(again.transform), placedTransform);
++
++    // Save As -> Open those bytes -> Save: the second bytes are the first.
++    files.scriptSaveLocation(name: 'beds.jetplan', location: '/plans/beds');
++    expect(await rig.host.saveAsStep(), isTrue);
++    await tester.pump();
++    final first = files.writes.single;
++    expect(first.bytes, bytesOf(c), reason: 'the codec\'s bytes');
++    files.scriptOpen(
++        name: 'beds.jetplan', bytes: first.bytes, location: '/plans/beds');
++    await rig.host.openFlow();
++    await tester.pump();
++    noDialog(tester);
++    final opened = c.document;
++    expect(identical(opened, doc), isFalse, reason: 'premise: swapped');
++    expect(partsOf(instancesOf(opened).single.transform), placedTransform);
++    expect(await rig.host.saveStep(), isTrue);
++    await tester.pump();
++    expect(files.writes, hasLength(2));
++    expect(files.writes.last.bytes, first.bytes, reason: 'byte-identical');
++  });
++}
+diff --git a/apps/architecture_demo/test/symbols/symbol_section_end_to_end_test.dart b/apps/architecture_demo/test/symbols/symbol_section_end_to_end_test.dart
+new file mode 100644
+index 00000000..63de24ba
+--- /dev/null
++++ b/apps/architecture_demo/test/symbols/symbol_section_end_to_end_test.dart
+@@ -0,0 +1,256 @@
++// Ported from apps/floor_planner/test/symbols/symbol_section_end_to_end_test
++// .dart (audit docs/superpowers/specs/2026-10-16-architecture-demo-test-audit
++// .md, section "symbols/symbol_section_end_to_end_test.dart"): WE3 PORT.
++//
++// The wall-aware move and the Symbol section through the app's real widgets,
++// from a placement to a byte-identical save round trip.
++//
++// Fixtures: two walls far from the origin, each in its own turned group, at
++// 30 and 120 degrees, 150 and 200 mm thick, justified differently, added
++// through the document's commands (no Wall tool runs); a camera at 0.1 px/mm,
++// rotated, so the attach capture is 160 mm and the edge capture 100 mm. Every
++// pointer is a mouse gesture on the canvas and every section row is tapped or
++// typed into; no tool or panel method is called directly.
++//
++// Decided: premise impossible (the old test compared each move's transform,
++// byte for byte, with `attachToWall` over the plain-moved back-centre): the
++// plan's move resolver is internal and its query carries the drag's own
++// `keep` and `exclude`; the library pins that the drop commits the resolver's
++// answer (jet_cad_2d_integration attach/symbol_move_test.dart MV4). Here the
++// committed transform is checked for what the answer is: flush against the
++// face the drag ended at (`expectFlush`, the drawn vertices against the face
++// line), turned to it, one undo step, and slid along the face by the drag.
++// Library halves: jet_cad_2d_integration attach/symbol_move_test.dart MV4,
++// jet_cad_2d_plan panels/symbol_section_test.dart SW2, SW3.
++import 'dart:convert';
++import 'dart:math' as math;
++
++import 'package:flutter/gestures.dart';
++import 'package:flutter/material.dart' hide Tolerance;
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart'
++    show SymbolBox, SymbolComponent, boxOfEntry;
++import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/app_fakes.dart';
++import '../support/app_rig.dart';
++import '../support/symbol_rig.dart';
++
++/// A mouse press at world [from], a move halfway, a move to world [to] and
++/// a release there.
++Future<void> dragBody(
++    WidgetTester tester, PlanController c, Vector2 from, Vector2 to) async {
++  final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
++  await mouse.addPointer(location: globalOf(tester, c, from));
++  await tester.pump();
++  await mouse.down(globalOf(tester, c, from));
++  await tester.pump();
++  await mouse.moveTo(globalOf(tester, c, (from + to) / 2));
++  await tester.pump();
++  await mouse.moveTo(globalOf(tester, c, to));
++  await tester.pump();
++  await mouse.up();
++  await tester.pump();
++  await mouse.removePointer();
++  await tester.pump();
++}
++
++/// Types [text] into the Rotation row and presses Enter.
++Future<void> typeRotation(WidgetTester tester, String text) async {
++  await tester.pump(kDoubleTapTimeout * 2);
++  await tester.tap(find.byKey(const Key('symbol-rotation')));
++  await tester.pump();
++  await tester.enterText(find.byKey(const Key('symbol-rotation')), text);
++  await tester.testTextInput.receiveAction(TextInputAction.done);
++  await tester.pump();
++  await tester.pump();
++}
++
++/// [box]'s four corners through [t].
++List<Vector2> cornersOf(Transform2 t, SymbolBox box) => [
++      for (final (x, y) in [
++        (box.left, box.back),
++        (box.right, box.back),
++        (box.right, box.front),
++        (box.left, box.front),
++      ])
++        t.transformPoint(Vector2(x, y)),
++    ];
++
++/// The turn of the (unmirrored) [t]'s x axis, in degrees from 0 up to 360.
++double rotationOf(Transform2 t) =>
++    (math.atan2(t.b, t.a) * 180 / math.pi + 360) % 360;
++
++void main() {
++  testWidgets(
++      'WE3 the double bed placed on a 30 degree wall, dragged about 700 mm '
++      'along it, then onto a 120 degree wall: each move flush, one step; the '
++      'Size menu, Rotation and Mirror rows, one step each; undo four, redo '
++      'four, bytes equal; Save As -> Open -> Save byte-identical',
++      (tester) async {
++    final files = FakeDocumentFiles();
++    final rig = await pumpApp(tester, files: files);
++    final c = rig.controller;
++    await symbolsReady(tester, c);
++    final doc = c.document;
++
++    final startA = farAt(-321.75, 987.5);
++    final hA = addWallAt(
++        c, startA, polar(startA, 30, 3600), 150, Justification.centre);
++    final startB = farAt(2200.25, 3600.5);
++    final hB =
++        addWallAt(c, startB, polar(startB, 120, 3600), 200, Justification.left);
++    await aimCamera(tester, c, farAt(1300, 3300));
++    expect(c.camera.value.scale, closeTo(0.1, 1e-12),
++        reason: 'premise: capture 160 mm, edge capture 100 mm');
++    final runA = faceLineOf(doc, hA, left: true);
++    final runB = faceLineOf(doc, hB, left: true);
++
++    // 1. The double bed, armed from the Symbols tab, placed against A's
++    // left face, then Escape to Select.
++    final bed = symbolOf(c, 'bed.double');
++    final bedBox = boxOfEntry(bed.entry)!;
++    await armBySymbolsTab(tester, c, bed);
++    await hoverPressRelease(
++        tester, c, onRun(runA, 1500, 100), onRun(runA, 1500, 100));
++    final handle = instancesOf(doc).single.handle;
++    InstanceNode node() => doc.tree[handle]! as InstanceNode;
++    expectFlush(doc, node(), runA, 1600, mirrored: false, why: 'placed');
++    await press(tester, LogicalKeyboardKey.escape);
++    expect(c.activeTool.value, 'plan.select', reason: 'premise');
++
++    // 2. Dragged by its front edge about 700 mm along A and 60 mm into the
++    // room: the back-centre plain-moved off the face attaches flush again,
++    // further along by the drag's own slide.
++    var depth = doc.commands.undoDepth;
++    var t = node().transform;
++    final from1 = t.transformPoint(Vector2(400, 0));
++    await dragBody(tester, c, from1, from1 + runA.t * 700 + runA.m * 60);
++    expect(doc.commands.undoDepth, depth + 1, reason: 'one step');
++    expect(c.activeSelection.keys, {SelectionKey.root(handle)},
++        reason: 'the drag selected it');
++    expectFlush(doc, node(), runA, 1600, mirrored: false, why: 'moved');
++    final u0 = (t.transformPoint(bedBox.backCentre) - runA.a).dot(runA.t);
++    final u1 = (node().transform.transformPoint(bedBox.backCentre) - runA.a)
++        .dot(runA.t);
++    // The page grid snaps the drag points: the slide is the tool's delta
++    // along the face, which is not 700 mm exactly.
++    expect(u1 - u0, closeTo(700, 100), reason: 'premise: about 700 mm');
++    expect(u1 - u0, isNot(closeTo(0, 100)), reason: 'it slid');
++    final afterMove = jsonDecode(c.save()) as Map;
++
++    // 3. Dragged so its back-centre's plain move ends 50 mm off B's left
++    // face: it attaches there, turned to B.
++    depth = doc.commands.undoDepth;
++    t = node().transform;
++    final from2 = t.transformPoint(Vector2(400, 0));
++    await dragBody(tester, c, from2,
++        from2 + onRun(runB, 1500, 50) - t.transformPoint(bedBox.backCentre));
++    expect(doc.commands.undoDepth, depth + 1);
++    expectFlush(doc, node(), runB, 1600, mirrored: false, why: 'on B');
++    expect(partsOf(node().transform).take(4), isNot(partsOf(t).take(4)),
++        reason: 'turned from A\'s direction to B\'s');
++
++    // 4. The Size menu: 1800 wide, one step; the back-left corner stays,
++    // the back stays on B's face.
++    expect(find.byKey(const Key('symbol-section')), findsOneWidget);
++    expect(tester.widget<Text>(find.byKey(const Key('symbol-size'))).data,
++        '1600 × 2000');
++    depth = doc.commands.undoDepth;
++    t = node().transform;
++    final corner = t.transformPoint(Vector2(bedBox.left, bedBox.back));
++    await tester.tap(find.byKey(const Key('symbol-size-menu')));
++    await tester.pumpAndSettle();
++    await tester.tap(
++        find.byKey(const Key('symbol-size-architecture.bed.double.1800')).last);
++    await tester.pumpAndSettle();
++    expect(doc.commands.undoDepth, depth + 1, reason: 'one Change size step');
++    expect(doc.components.get<SymbolComponent>(node().definition)!.key,
++        'architecture.bed.double.1800');
++    final wide = boxOfEntry(symbolOf(c, 'bed.double.1800').entry)!;
++    expect(partsOf(node().transform).take(4), partsOf(t).take(4),
++        reason: 'the linear part kept');
++    final corner2 =
++        node().transform.transformPoint(Vector2(wide.left, wide.back));
++    expect((corner2 - corner).length, lessThan(1e-6),
++        reason: 'the back-left corner stays');
++    expectFlush(doc, node(), runB, 1800, mirrored: false, why: 'resized');
++    expect(tester.widget<Text>(find.byKey(const Key('symbol-size'))).data,
++        '1800 × 2000');
++
++    // 5. Rotation 45, about the insertion point: one step.
++    depth = doc.commands.undoDepth;
++    t = node().transform;
++    final basePoint = doc.tree.definition(node().definition)!.basePoint;
++    expect(rotationOf(t), isNot(closeTo(45, 1)), reason: 'premise');
++    await typeRotation(tester, '45');
++    expect(doc.commands.undoDepth, depth + 1, reason: 'one Rotate step');
++    expect(rotationOf(node().transform), closeTo(45, 1e-9));
++    expect(
++        (node().transform.transformPoint(basePoint) -
++                t.transformPoint(basePoint))
++            .length,
++        lessThan(1e-6),
++        reason: 'about the insertion point');
++
++    // 6. Mirror: one step, the footprint kept, the handedness flipped.
++    depth = doc.commands.undoDepth;
++    t = node().transform;
++    await tester.tap(find.byKey(const Key('symbol-mirror')));
++    await tester.pump();
++    expect(doc.commands.undoDepth, depth + 1, reason: 'one Mirror step');
++    final m = node().transform;
++    expect(m.a * m.d - m.b * m.c, closeTo(-1, 1e-12), reason: 'mirrored');
++    final before = cornersOf(t, wide), after = cornersOf(m, wide);
++    for (final p in before) {
++      expect(after.any((q) => (q - p).length < 1e-6), isTrue,
++          reason: 'the footprint kept');
++    }
++    final edited = bytesOf(c);
++
++    // 7. Undo four times (mirror, rotate, size, the move to B): the
++    // document after the move along A. Redo four times: the edited bytes.
++    for (var k = 0; k < 4; k++) {
++      await undoKey(tester);
++    }
++    // Handles are never reissued: the seed keeps the copied 1800
++    // definition's handles; nothing else differs.
++    final undone = jsonDecode(c.save()) as Map;
++    final seed = (jsonDecode(utf8.decode(edited)) as Map)['handleSeed'];
++    expect(undone['handleSeed'], seed, reason: 'the seed does not rewind');
++    expect(afterMove['handleSeed'], isNot(seed),
++        reason: 'premise: the size copy allocated handles');
++    expect(
++        {...undone}..remove('handleSeed'), {...afterMove}..remove('handleSeed'),
++        reason: 'undo four restores the document after the move along A');
++    for (var k = 0; k < 4; k++) {
++      await redoKey(tester);
++    }
++    expect(bytesOf(c), edited, reason: 'redo four restores the bytes');
++
++    // 8. Save As -> Open those bytes -> Save: the second bytes are the
++    // first.
++    files.scriptSaveLocation(name: 'b.jetplan', location: '/plans/b');
++    expect(await rig.host.saveAsStep(), isTrue);
++    await tester.pump();
++    final first = files.writes.single;
++    expect(first.bytes, edited, reason: 'the codec\'s bytes');
++    files.scriptOpen(name: 'b.jetplan', bytes: first.bytes, location: '/p/b');
++    await rig.host.openFlow();
++    await tester.pump();
++    noDialog(tester);
++    final opened = c.document;
++    expect(identical(opened, doc), isFalse, reason: 'premise: swapped');
++    expect([for (final n in instancesOf(opened)) partsOf(n.transform)],
++        [partsOf(m)]);
++    expect(await rig.host.saveStep(), isTrue);
++    await tester.pump();
++    expect(files.writes, hasLength(2));
++    expect(files.writes.last.bytes, first.bytes, reason: 'byte-identical');
++  });
++}
+diff --git a/apps/architecture_demo/test/symbols/symbol_shell_test.dart b/apps/architecture_demo/test/symbols/symbol_shell_test.dart
+new file mode 100644
+index 00000000..c6c38e49
+--- /dev/null
++++ b/apps/architecture_demo/test/symbols/symbol_shell_test.dart
+@@ -0,0 +1,319 @@
++// Ported from apps/floor_planner/test/symbols/symbol_shell_test.dart (audit
++// docs/superpowers/specs/2026-10-16-architecture-demo-test-audit.md, section
++// "symbols/symbol_shell_test.dart"): SS2, SS6, SS12 PORT; SS7, SS8, SS13,
++// SS14 SPLIT (the -open half is what the app does now; the intent half is
++// the library's, cited, or pinned here as SS7 by spec decision 7); SS1, SS3,
++// SS4, SS5, SS9, SS10, SS11 COVERED; SS15 DROPPED (`PlannerShell(symbols:)`
++// is gone). SS16 and SS17 went to 3a.
++//
++// COVERED, checked (each opened and read), in packages/jet_cad_2d_plan/test
++// unless a package is named:
++//   SS1  editor/plan_editor_test.dart:111 (ED-2: Tools and Symbols tabs,
++//        Tools first), :72 (ED-1); the app's own half is SS1-app below
++//   SS3  panels/plan_symbol_gallery_test.dart:426 ("the highlight follows the
++//        active tool and the armed entry"); controller/plan_controller_test
++//        .dart:196 (C9: a kit tool clears the selection);
++//        controller/symbols_controller_test.dart:224 (S-14)
++//   SS4  tools/plan_symbol_tool_test.dart:844 ("keys compose (R, R, M) and
++//        work mid-press"), :945 ("armed, not pressed: every key but R and M
++//        bubbles"); jet_cad_2d_integration/test/attach/
++//        wall_attach_tool_test.dart:492 (R and Shift+R while attached)
++//   SS5  panels/plan_symbol_gallery_test.dart:426 (another tool chosen
++//        clears the highlight); shortcuts/plan_shortcuts_test.dart:255
++//        (KB-4: idle Escape arms plan.select)
++//   SS9, SS10, SS11  controller/symbols_controller_test.dart:109 (S-11: a
++//        shared loader and cache are not disposed, its own are)
++// Intent halves of the SPLIT rows: controller/lifetimes_test.dart:23
++// (C-life1, `activeTool == plan.select` after a swap), tools/
++// plan_symbol_tool_test.dart:406 (`isMidShape` between press and release),
++// panels/plan_symbol_gallery_test.dart:289 ("the gallery gone, the
++// controller stays usable").
++//
++// Decided: premise impossible (SS7: the old test expected the armed symbol
++// cleared by a swap; spec decision 7: the library keeps `armedSymbol` on the
++// controller across `newPlan` and `load`): SS7-open pins that it survives;
++// SS7 pins the intent that remains (the active tool is Select, the gallery
++// shows no armed cell).
++// Decided: premise impossible (SS13, SS14: the old shell and its panel were
++// rebuilt at each swap; the editor and its search controller are the app's
++// one, kept): the -open halves pin that the text survives and that the
++// controller goes with the editor.
++//
++// F-2 arms a furniture cell through the app; the palette's own count and
++// categories are pinned in symbol_library_loader_test.dart (SL9b-open).
++import 'package:flutter/gestures.dart';
++import 'package:flutter/material.dart';
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
++    show SelectionKey, SymbolGallery;
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/app_rig.dart';
++import '../support/symbol_rig.dart';
++
++void _noop() {}
++
++void main() {
++  group(
++      'the furniture palette through the app (the loader test pins its count)',
++      () {
++    testWidgets(
++        'F-2 a cell tap arms the symbol it shows: plan.symbol is the active '
++        'tool, the cell is the highlighted one, the selection is cleared',
++        (tester) async {
++      final rig = await pumpSymbolsApp(tester);
++      final c = rig.controller;
++      await rig.editOnce();
++      final wall = wallsOf(c).single;
++      c.activeSelection.replace([SelectionKey.root(wall)]);
++      await tester.pump();
++      expect(c.activeSelection.keys, hasLength(1), reason: 'premise');
++      final bed = symbolOf(c, 'bed.double');
++      expect(bed.entry.definition.basePoint.x, isNot(0),
++          reason: 'premise: the base point is off the origin');
++      await armBySymbolsTab(tester, c, bed);
++      expect(c.activeSelection.keys, isEmpty);
++      expect(galleryOf(tester).selectedId, bed.id);
++      expect(tester.widget<Text>(find.byKey(const Key('status-text'))).data,
++          isNotEmpty);
++    });
++  });
++
++  testWidgets('SS1-app the app\'s editor has the tab strip, Tools first',
++      (tester) async {
++    final rig = await pumpSymbolsApp(tester);
++    expect(strip, findsOneWidget);
++    expect(tabTools, findsOneWidget);
++    expect(tabSymbols, findsOneWidget);
++    expect(find.byType(PlanToolPalette), findsOneWidget,
++        reason: 'Tools is the default tab');
++    expect(find.byType(PlanSymbolGallery), findsNothing);
++    expect(rig.controller.symbols, hasLength(41));
++  });
++
++  testWidgets('SS2 the tabs switch the panel\'s content and change no tool',
++      (tester) async {
++    final rig = await pumpSymbolsApp(tester);
++    await press(tester, LogicalKeyboardKey.keyW);
++    final wall = activeTool(tester);
++    expect(rig.controller.activeTool.value, 'architecture.wall',
++        reason: 'premise');
++
++    await tapFinder(tester, tabSymbols);
++    expect(find.byType(PlanSymbolGallery), findsOneWidget);
++    expect(find.byType(PlanToolPalette), findsNothing);
++    expect(activeTool(tester), same(wall));
++    expect(rig.controller.activeTool.value, 'architecture.wall');
++
++    await tapFinder(tester, tabTools);
++    expect(find.byType(PlanToolPalette), findsOneWidget);
++    expect(find.byType(PlanSymbolGallery), findsNothing);
++    expect(activeTool(tester), same(wall));
++    expect(rig.controller.activeTool.value, 'architecture.wall');
++  });
++
++  testWidgets(
++      'SS6 the tab strip and the cells take no focus: the canvas keeps it, '
++      'on a tap and when asked', (tester) async {
++    final rig = await pumpSymbolsApp(tester);
++    await tapFinder(tester, tabSymbols);
++    final canvas = canvasFocus(tester);
++
++    await armBySymbolsTab(
++        tester, rig.controller, symbolOf(rig.controller, 'bed.double'));
++    expect(FocusManager.instance.primaryFocus, same(canvas));
++
++    final stripNodes = focusNodesUnder(tester, strip);
++    expect(stripNodes, isNotEmpty, reason: 'premise: the segments\' nodes');
++    for (final n in stripNodes) {
++      n.requestFocus();
++      await tester.pump();
++      expect(FocusManager.instance.primaryFocus, same(canvas),
++          reason: 'a segment cannot take the focus');
++    }
++    final cellNodes = focusNodesUnder(tester, find.byType(SymbolGallery));
++    expect(cellNodes, isNotEmpty, reason: 'premise: the cells\' nodes');
++    for (final n in cellNodes) {
++      n.requestFocus();
++      await tester.pump();
++      expect(FocusManager.instance.primaryFocus, same(canvas),
++          reason: 'a cell cannot take the focus');
++    }
++    await tapFinder(tester, tabTools);
++    expect(FocusManager.instance.primaryFocus, same(canvas));
++  });
++
++  group('a document swap and the armed symbol (spec decision 7)', () {
++    testWidgets(
++        'SS7-open after New the armed furniture symbol is still the '
++        'controller\'s armed symbol, the active tool is Select',
++        (tester) async {
++      final rig = await pumpSymbolsApp(tester);
++      final c = rig.controller;
++      final bed = symbolOf(c, 'bed.double');
++      await armBySymbolsTab(tester, c, bed);
++      expect(rig.controller.dirty.value, isFalse, reason: 'premise: clean');
++      final document = c.document;
++
++      await rig.host.newFlow();
++      await tester.pump();
++      expect(c.document, isNot(same(document)), reason: 'premise: swapped');
++      expect(c.armedSymbol.value, same(bed),
++          reason: 'today\'s library: armedSymbol survives newPlan');
++      expect(c.activeTool.value, 'plan.select');
++    });
++
++    testWidgets(
++        'SS7 a document swap (New, clean) leaves no armed tool: the active '
++        'tool is Select, Tools is the tab, and the gallery shows no armed '
++        'cell', (tester) async {
++      final rig = await pumpSymbolsApp(tester);
++      final c = rig.controller;
++      final bed = symbolOf(c, 'bed.double');
++      await armBySymbolsTab(tester, c, bed);
++      expect(galleryOf(tester).selectedId, bed.id, reason: 'premise: armed');
++      final armedTool = activeTool(tester);
++      expect(rig.controller.dirty.value, isFalse, reason: 'premise: clean');
++      final document = c.document;
++
++      await rig.host.newFlow();
++      await tester.pump();
++      expect(c.document, isNot(same(document)), reason: 'premise: swapped');
++
++      expect(activeTool(tester), isNot(same(armedTool)),
++          reason: 'the armed placement tool is not the active one');
++      expect(c.activeTool.value, 'plan.select');
++      // The tab stays where the user left it (the editor is the same one):
++      // the Symbols gallery is still shown, and highlights no cell.
++      expect(find.byType(SymbolGallery), findsOneWidget);
++      expect(galleryOf(tester).selectedId, isNull);
++      await tapFinder(tester, tabTools);
++      expect(find.byType(PlanToolPalette), findsOneWidget);
++      await tapFinder(tester, tabSymbols);
++      expect(galleryOf(tester).selectedId, isNull);
++    });
++  });
++
++  testWidgets(
++      'SS8-open the mid-shape rule: during a symbol placement press the '
++      'toolbar\'s Save is disabled; after the release it is enabled again',
++      (tester) async {
++    final rig = await pumpSymbolsApp(tester);
++    final c = rig.controller;
++    await aimCamera(tester, c, kFar);
++    await armBySymbolsTab(tester, c, symbolOf(c, 'bed.double'));
++    VoidCallback? save() => tester
++        .widget<IconButton>(find.byKey(const Key('toolbar-save')))
++        .onPressed;
++    expect(save(), isNotNull, reason: 'premise: Save enabled');
++
++    final a = kFar + Vector2(310.5, -220.25);
++    final mouse = await tester.createGesture(
++        kind: PointerDeviceKind.mouse, buttons: kPrimaryButton);
++    await mouse.down(globalOf(tester, c, a));
++    await tester.pump();
++    expect(activeTool(tester).isMidShape, isTrue, reason: 'premise');
++    expect(save(), isNull);
++
++    await mouse.moveTo(globalOf(tester, c, a) + const Offset(30, 20));
++    await tester.pump();
++    expect(save(), isNull);
++    await mouse.up();
++    await mouse.removePointer();
++    await tester.pump();
++    expect(instancesOf(c.document), hasLength(1), reason: 'premise: placed');
++    expect(save(), isNotNull);
++  });
++
++  group('the search text', () {
++    testWidgets(
++        'SS12 "bed" typed, Tools and back: the field reads "bed" and the '
++        'gallery is filtered', (tester) async {
++      final rig = await pumpSymbolsApp(tester);
++      final c = rig.controller;
++      await tapFinder(tester, tabSymbols);
++      final all = galleryIdsOf(tester);
++      await tester.enterText(searchField, 'bed');
++      await tester.pump();
++      final beds = galleryIdsOf(tester);
++      expect(beds, idsMatching(c, 'bed'), reason: 'premise: filtered');
++      expect(beds.length, lessThan(all.length), reason: 'premise');
++      expect(beds, contains('architecture.bed.double@1'));
++
++      await tapFinder(tester, tabTools);
++      expect(find.byType(PlanSymbolGallery), findsNothing,
++          reason: 'the gallery is removed on the Tools tab');
++      // A second build of the editor while the gallery is away.
++      await press(tester, LogicalKeyboardKey.keyW);
++      await tapFinder(tester, tabSymbols);
++      expect(tester.widget<TextField>(searchField).controller!.text, 'bed');
++      expect(galleryIdsOf(tester), beds);
++      expect(categoryNamesOf(tester), ['Bed Room']);
++      expect(find.byKey(const Key('symbol-search-clear')), findsOneWidget);
++    });
++
++    testWidgets(
++        'SS13-open a document replacement keeps it: New, then Open sample, '
++        'and the Symbols tab still reads "bed" (the editor is the same one)',
++        (tester) async {
++      final rig = await pumpSymbolsApp(tester);
++      final c = rig.controller;
++      await tapFinder(tester, tabSymbols);
++      await tester.enterText(searchField, 'bed');
++      await tester.pump();
++      final given = tester.widget<TextField>(searchField).controller!;
++      final editor = tester.state(find.byType(PlanEditor));
++
++      for (final replace in [
++        () => rig.host.newFlow(),
++        () => rig.host.openSampleFlow(),
++      ]) {
++        final before = c.document;
++        await replace();
++        await tester.pump();
++        expect(c.document, isNot(same(before)), reason: 'premise: replaced');
++        expect(tester.state(find.byType(PlanEditor)), same(editor),
++            reason: 'the same editor');
++
++        await tapFinder(tester, tabTools);
++        await tapFinder(tester, tabSymbols);
++        expect(tester.widget<TextField>(searchField).controller, same(given));
++        expect(given.text, 'bed');
++        expect(galleryIdsOf(tester), idsMatching(c, 'bed'));
++      }
++    });
++
++    testWidgets(
++        'SS14-open the search controller is the editor\'s: the gallery gone '
++        'it stays usable, it goes with the editor, and a new app starts '
++        'empty', (tester) async {
++      await pumpSymbolsApp(tester);
++      await tapFinder(tester, tabSymbols);
++      await tester.enterText(searchField, 'bed');
++      await tester.pump();
++      final given = tester.widget<TextField>(searchField).controller!;
++
++      await tapFinder(tester, tabTools);
++      expect(find.byType(PlanSymbolGallery), findsNothing, reason: 'premise');
++      // Not disposed with the gallery: it still takes text and listeners.
++      given.text = 'sofa';
++      given.addListener(_noop);
++      given.removeListener(_noop);
++      await tapFinder(tester, tabSymbols);
++      expect(tester.widget<TextField>(searchField).controller!.text, 'sofa');
++      expect(galleryIdsOf(tester),
++          allOf(isNotEmpty, everyElement(contains('sofa'))));
++
++      await tester.pumpWidget(const SizedBox());
++      expect(() => given.addListener(_noop), throwsFlutterError,
++          reason: 'disposed with the editor');
++      await pumpSymbolsApp(tester);
++      await tapFinder(tester, tabSymbols);
++      expect(
++          tester.widget<TextField>(searchField).controller, isNot(same(given)));
++      expect(tester.widget<TextField>(searchField).controller!.text, isEmpty);
++    });
++  });
++}
+diff --git a/packages/jet_cad_2d_integration/test/layers/layer_picker_types_test.dart b/packages/jet_cad_2d_integration/test/layers/layer_picker_types_test.dart
+new file mode 100644
+index 00000000..68d22545
+--- /dev/null
++++ b/packages/jet_cad_2d_integration/test/layers/layer_picker_types_test.dart
+@@ -0,0 +1,108 @@
++// Task 7 of 3b (audit docs/superpowers/specs/2026-10-16-architecture-demo-
++// test-audit.md, "layers/layer_picker_test.dart", the SPLIT row "every
++// registered parametric type (box, wall, opening, separator, room,
++// dimension) alone"): the -open half. Ported from apps/floor_planner/test/
++// layers/layer_picker_test.dart:403-451.
++//
++// The six architecture types, alone, enable the picker and show their
++// layer; one of them moves with one command. The intent half (a registered
++// parametric type, whatever it is, is a layer-bearing object) is jet_cad_2d_
++// plan's panels/layer_picker_test.dart "every registered parametric type
++// (the mark kit's one type, on four layers) alone".
++//
++// P-6's layers `A` (ACI 1) and `B` (ACI 5, locked) with a wall and a room on
++// A, a door and a dimension on B; a visible layer D (ACI 2) with a box on it
++// (turned, off the origin); a separator on layer 0 (turned, off the origin).
++import 'package:flutter/material.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
++import 'package:jet_cad_2d_integration/jet_cad_2d_integration.dart';
++import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++
++import '../support/canvas_rig.dart';
++import '../support/layer_plan.dart';
++import '../support/plans.dart';
++
++const PlanStringsEn _en = PlanStringsEn();
++
++/// Every entity record the parametric object [group] owns, with its layer.
++List<Handle> childLayers(DraftDocument doc, Handle group) => [
++      for (final slot in doc.entities.liveSlots)
++        if (doc.entities.ownerAt(slot) == group) doc.entities.layerAt(slot),
++    ];
++
++bool pickerEnabled(WidgetTester tester) =>
++    tester.widget<PopupMenuButton<Handle>>(byKey('layer-picker')).enabled;
++
++String pickerTooltip(WidgetTester tester) => tester
++    .widget<Tooltip>(find.ancestor(
++        of: byKey('layer-picker'), matching: find.byType(Tooltip)))
++    .message!;
++
++String valueOf(WidgetTester tester) =>
++    tester.widget<Text>(byKey('layer-picker-value')).data!;
++
++void main() {
++  testWidgets(
++      'every registered parametric type (box, wall, opening, separator, room, '
++      'dimension) alone: the picker is enabled and shows the object\'s layer '
++      '(Task 10 review finding 1, R-own-5)', (tester) async {
++    late LayerPlan l;
++    late Handle d, box, separator;
++    final json = planWith((doc) {
++      l = layerFixture(doc);
++      final zero = doc.tables.layers[ReservedHandles.layerZero]!;
++      d = doc.handleSeed.next();
++      doc.commands.execute(AddLayerCommand(LayerRecord(
++          handle: d,
++          name: 'D',
++          color: const IndexedColor(2),
++          linetype: zero.linetype,
++          lineweight: zero.lineweight,
++          transparency: zero.transparency)));
++      box = addObjectOn(doc, const BoxParams(1200.5, 800.25), d,
++          at: Transform2.translation(-6400.5, 9100.25)
++              .multiply(Transform2.rotation(0.7)));
++      separator = addObjectOn(
++          doc,
++          const SeparatorParams(150.5, -320.25, 1650.75, 410.5),
++          ReservedHandles.layerZero,
++          at: Transform2.translation(-9800.25, -7300.5)
++              .multiply(Transform2.rotation(-0.3)));
++    });
++    final c = architectureController(json: json);
++    addTearDown(c.dispose);
++    await pumpPlanEditor(tester, c);
++    final doc = c.document;
++    final cases = <(String, Handle, String, String)>[
++      ('box', box, 'D', ArchitectureTypes.box),
++      ('wall', l.walls[0], 'A', ArchitectureTypes.wall),
++      ('opening', l.openings[0], 'B', ArchitectureTypes.opening),
++      ('separator', separator, '0', ArchitectureTypes.separator),
++      ('room', l.room!, 'A', ArchitectureTypes.room),
++      ('dimension', l.dimension!, 'B', ArchitectureTypes.dimension),
++    ];
++    for (final (type, h, name, typeId) in cases) {
++      expect(c.typeOf(h)?.id, typeId, reason: '$type: premise: its type');
++      c.activeSelection.replace([SelectionKey.root(h)]);
++      await tester.pump();
++      expect(pickerEnabled(tester), isTrue, reason: type);
++      expect(pickerTooltip(tester), isNot(_en.plainGroupNoLayer), reason: type);
++      expect(valueOf(tester), name, reason: type);
++    }
++    // And one of them moves: the separator, from layer 0 to D.
++    c.activeSelection.replace([SelectionKey.root(separator)]);
++    await tester.pump();
++    final depth = doc.commands.undoDepth;
++    await tester.tap(byKey('layer-picker'));
++    await tester.pumpAndSettle();
++    await tester.tap(byKey('layer-picker-item-${d.toHex()}'));
++    await tester.pumpAndSettle();
++    expect(doc.commands.undoDepth, depth + 1);
++    expect(objectLayerOf(doc, separator), d);
++    expect(childLayers(doc, separator), isNotEmpty, reason: 'premise');
++    expect(childLayers(doc, separator).toSet(), {d});
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/export/export_dialog_test.dart b/packages/jet_cad_2d_plan/test/export/export_dialog_test.dart
+index 9c262309..965e88be 100644
+--- a/packages/jet_cad_2d_plan/test/export/export_dialog_test.dart
++++ b/packages/jet_cad_2d_plan/test/export/export_dialog_test.dart
+@@ -1,9 +1,10 @@
+ // Spec P5: the export dialog lists the registry; the resolution is asked
+ // for an image format only; OK answers the choice, Cancel null.
+ import 'package:flutter/material.dart';
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d_plan/src/export/builtin_exporters.dart';
+ import 'package:jet_cad_2d_plan/src/export/export_dialog.dart';
+ import 'package:jet_cad_2d_plan/src/export/registries.dart';
+ 
+ import '../support/recording_exporters.dart';
+@@ -67,7 +68,41 @@ void main() {
+         reason: 'the initial answer it was given');
+     await tester.tap(byKey('export-cancel'));
+     await tester.pumpAndSettle();
+     expect(done, isTrue);
+     expect(got, isNull);
+   });
++
++  testWidgets(
++      'X-9b Escape closes the dialog and answers null, as Cancel does '
++      '(3b Task 7; the old PlanExportDialog Escape)', (tester) async {
++    final exporters = <PlanExporter>[
++      const PlanPdfExporter(),
++      const PlanPngExporter(),
++    ];
++    PlanExportAnswer? got = const PlanExportAnswer(
++        exporter: 'unset', choice: PlanExportChoice.initial);
++    var done = false;
++    await tester.pumpWidget(MaterialApp(
++        home: Builder(
++            builder: (context) => TextButton(
++                key: const Key('open'),
++                onPressed: () async {
++                  got = await showPlanExportDialog(
++                      context, PlanExportAnswer.initial, exporters);
++                  done = true;
++                },
++                child: const Text('open')))));
++    await tester.tap(byKey('open'));
++    await tester.pumpAndSettle();
++    // A choice made before Escape must not leak into the answer.
++    await tester.tap(byKey('export-format-plan.png'));
++    await tester.pump();
++    expect(byKey('export-dialog'), findsOneWidget, reason: 'premise: up');
++    expect(done, isFalse);
++    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
++    await tester.pumpAndSettle();
++    expect(byKey('export-dialog'), findsNothing);
++    expect(done, isTrue);
++    expect(got, isNull);
++  });
+ }
+diff --git a/packages/jet_cad_2d_plan/test/export/page_printer_test.dart b/packages/jet_cad_2d_plan/test/export/page_printer_test.dart
+new file mode 100644
+index 00000000..b125ae65
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/export/page_printer_test.dart
+@@ -0,0 +1,73 @@
++// Spec 13 D9, F-16 (3b Task 7, the old floor planner's PR8): the production
++// printer hands the platform's print dialog the document's name and the
++// page's size, lays the bytes out once, and answers when the dialog is done.
++// Run at the `printing` package's platform channel, as the package's own
++// protocol has it (printing 5.15.1, method_channel.dart): Dart asks
++// `printPdf`, the platform calls back `onLayout` for the bytes and
++// `onCompleted` when the dialog closes.
++import 'dart:async';
++import 'dart:typed_data';
++
++import 'package:flutter/services.dart' show MethodCall, MethodChannel;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:pdf/pdf.dart' show PdfPageFormat;
++
++void main() {
++  testWidgets(
++      'PP-1 PrintingPagePrinter asks the dialog for the name, the page in pt '
++      'and no dynamic layout, and lays out the given bytes whatever paper '
++      'the dialog asks for (F-16)', (tester) async {
++    const channel = MethodChannel('net.nfet.printing');
++    final messenger = tester.binding.defaultBinaryMessenger;
++    Map<Object?, Object?>? asked;
++    messenger.setMockMethodCallHandler(channel, (call) async {
++      if (call.method == 'printPdf') {
++        asked = call.arguments as Map<Object?, Object?>;
++        return 1;
++      }
++      return null;
++    });
++    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
++    Future<Object?> fromPlatform(String method, Map<String, Object?> args) {
++      final reply = Completer<Object?>();
++      messenger.handlePlatformMessage(
++          channel.name,
++          channel.codec.encodeMethodCall(MethodCall(method, args)),
++          (data) => reply.complete(
++              data == null ? null : channel.codec.decodeEnvelope(data)));
++      return reply.future;
++    }
++
++    // A page that is neither the library's default (A4 portrait, 595.28 x
++    // 841.89) nor square, with a name that is not the default either.
++    final pdf = Uint8List.fromList(List.generate(64, (i) => (i * 37) % 251));
++    const format = PdfPageFormat(1190.5, 841.75);
++    var done = false;
++    final printing = const PrintingPagePrinter()
++        .print(pdf, 'flat', format)
++        .then((_) => done = true);
++    await tester.pump();
++    expect(asked, isNotNull, reason: 'the dialog was asked for');
++    expect(asked!['name'], 'flat');
++    expect(asked!['width'], 1190.5);
++    expect(asked!['height'], 841.75);
++    expect(asked!['dynamic'], isFalse);
++    final job = asked!['job'];
++    // The dialog asks for another paper (A4 portrait): the same bytes.
++    final laid = await fromPlatform('onLayout', {
++      'job': job,
++      'width': 595.0,
++      'height': 842.0,
++      'marginLeft': 0.0,
++      'marginTop': 0.0,
++      'marginRight': 0.0,
++      'marginBottom': 0.0,
++    });
++    expect(laid, pdf);
++    expect(done, isFalse, reason: 'it waits for the dialog');
++    await fromPlatform('onCompleted', {'job': job, 'completed': true});
++    await printing;
++    expect(done, isTrue);
++  });
++}

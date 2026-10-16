@@ -1,0 +1,1172 @@
+1b00fdaa fix(demo): the document name fits the bar at 800 px; the settle cases run
+1233a6ca fix(plan): settling finishes an open text entry and hands panel focus back
+00dc9c44 test(demo): N2, N4, save during a write, a failed open
+f311b08e test(demo): the document flows' tests, ported
+c5671088 fix(demo): read dirty after the change stream, guard a swap during a write
+d4fa1f34 feat(demo): the document session and host over PlanController
+ apps/architecture_demo/lib/document_host.dart      | 467 +++++++++++
+ apps/architecture_demo/lib/document_session.dart   |  76 ++
+ apps/architecture_demo/lib/main.dart               |  75 +-
+ apps/architecture_demo/pubspec.yaml                |   7 +
+ apps/architecture_demo/test/app_shell_test.dart    |  13 +-
+ apps/architecture_demo/test/app_words_test.dart    |  68 +-
+ .../test/document_commands_test.dart               | 916 +++++++++++++++++++++
+ .../test/document_files_sources_test.dart          |  13 +-
+ .../architecture_demo/test/document_host_test.dart | 363 ++++++++
+ .../architecture_demo/test/document_open_test.dart | 346 ++++++++
+ .../test/document_replace_test.dart                | 687 ++++++++++++++++
+ .../test/document_sample_test.dart                 | 179 ++++
+ .../architecture_demo/test/document_save_test.dart | 292 +++++++
+ .../test/document_separator_test.dart              | 138 ++++
+ .../test/document_settle_test.dart                 | 439 ++++++++++
+ apps/architecture_demo/test/support/app_rig.dart   | 254 ++++++
+ .../lib/src/canvas/text_entry_overlay.dart         |  22 +
+ .../lib/src/panels/plan_page_panel.dart            |   7 +-
+ .../test/panels/page_scale_field_test.dart         |  41 +
+ 19 files changed, 4378 insertions(+), 25 deletions(-)
+diff --git a/apps/architecture_demo/lib/document_host.dart b/apps/architecture_demo/lib/document_host.dart
+new file mode 100644
+index 00000000..ce949fc7
+--- /dev/null
++++ b/apps/architecture_demo/lib/document_host.dart
+@@ -0,0 +1,467 @@
++// The document host (spec B2, decision 5): the widget that runs the
++// document flows -- New, Open sample, Open, Save and Save As, asking first
++// when unsaved work would be lost -- over the app's one PlanController, and
++// builds the editor. Ported from apps/floor_planner/lib/document_host.dart
++// (DocumentHostState and the dialogs); the document, its codec, the save
++// point and the settle registry are the controller's now.
++//
++// Two questions about the controller, answered from its source:
++//
++// * Does `newPlan` settle pending input? Yes: `newPlan`, `load`, `save` and
++//   `markSaved` each call `settlePendingInput` first (plan_controller.dart
++//   :678, :687, :696, :726). That method is `@internal`, so the host cannot
++//   call it; `PlanEditor` settles before it calls `onNew`/`onOpen`/`onSave`/
++//   `onSaveAs`, which is the path of every toolbar button and chord. A flow
++//   called directly (the tests) therefore reads `dirty` before the settle
++//   that `newPlan` or `load` would do; Task 5's exit request will settle
++//   with a discarded `controller.save()`.
++// * Does `dirty` update synchronously after a command? No. `_refreshFlags`
++//   (plan_controller.dart :1935) sets `_dirty` from `commands.stateId !=
++//   _savedState`, but the commit path reaches it through the document's
++//   change stream (:1685, `_onDesignChange`), which delivers a microtask
++//   after the command. A settle's own commit -- a typed panel value -- is
++//   therefore not on `dirty` yet when the editor calls the host back.
++//   `_mayDiscard` yields one microtask before it reads (see there); the
++//   old app read the dispatcher's `differsFromSave` instead, and the save
++//   point is private to the controller.
++import 'dart:async';
++import 'dart:convert';
++import 'dart:typed_data';
++
++import 'package:flutter/material.dart';
++import 'package:flutter/scheduler.dart';
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart'
++    show buildSampleFlat;
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++
++import 'app_strings.dart';
++import 'document_files.dart';
++import 'document_session.dart';
++import 'exit_guard.dart';
++
++/// What a save encoded: the plan's document (to tell a swap during the
++/// write) and its bytes.
++typedef _Encoded = ({Object plan, Uint8List bytes});
++
++/// The answer to the Save / Don't Save / Cancel dialog.
++enum SaveChoice { save, discard, cancel }
++
++/// Runs the document flows over [controller] and [session] and builds the
++/// editor. The flows are public for the tests; the editor reaches them
++/// through its file callbacks, which do nothing while a flow runs.
++///
++/// Each flow sets [DocumentSession.busy] for its whole span when it is the
++/// outermost flow, and clears it in a `finally`; a flow called inside
++/// another leaves busy to the outer one.
++class DocumentHost extends StatefulWidget {
++  const DocumentHost(
++      {super.key,
++      required this.controller,
++      required this.session,
++      required this.files,
++      this.exitGuard,
++      this.printer = const PrintingPagePrinter()});
++
++  final PlanController controller;
++  final DocumentSession session;
++  final DocumentFiles files;
++
++  /// The exit guard the host will arm while the plan is dirty (Task 5); the
++  /// platform's when null.
++  final ExitGuard? exitGuard;
++
++  /// Where Print hands the page's PDF.
++  final PagePrinter printer;
++
++  @override
++  State<DocumentHost> createState() => DocumentHostState();
++}
++
++class DocumentHostState extends State<DocumentHost> {
++  PlanController get _controller => widget.controller;
++  DocumentSession get _session => widget.session;
++
++  /// Runs [body] as a flow: busy for its whole span when no flow is running
++  /// yet, cleared however it ends; inside another flow, busy is the outer
++  /// one's.
++  Future<T> _flow<T>(Future<T> Function() body) async {
++    final busy = _session.busy;
++    if (busy.value) return body();
++    busy.value = true;
++    try {
++      return await body();
++    } finally {
++      busy.value = false;
++    }
++  }
++
++  /// A file callback that does nothing while a flow runs (decision 5): the
++  /// editor has no hook to grey its buttons out.
++  PlanFileCallback _idle(Future<Object?> Function() flow) => () async {
++        if (_session.busy.value) return;
++        await flow();
++      };
++
++  /// Whether the current plan may go, asked inside the caller's flow. Clean:
++  /// yes, without a dialog. Dirty: the Save / Don't Save / Cancel dialog.
++  /// Save runs [saveStep] inside the caller's busy span; a cancelled or
++  /// failed save is a no, and a save that succeeded while an edit landed
++  /// during the write (dirty again) asks again rather than lose that edit.
++  /// Don't Save: yes. Cancel: no. Dirty is the controller's.
++  Future<bool> _mayDiscard() async {
++    // `dirty` lags a command by one microtask (the change stream): the
++    // editor has just settled pending input, and a typed value's commit is
++    // not on it yet. Without this turn a clean-looking plan with a typed,
++    // uncommitted value is replaced without asking.
++    await Future<void>.value();
++    while (_controller.dirty.value) {
++      switch (await _askToSave()) {
++        case SaveChoice.save:
++          if (!await saveStep()) return false;
++        case SaveChoice.discard:
++          return true;
++        case SaveChoice.cancel:
++          return false;
++      }
++    }
++    return true;
++  }
++
++  Future<SaveChoice> _askToSave() async {
++    if (!mounted) return SaveChoice.cancel;
++    final choice = await showDialog<SaveChoice>(
++      context: context,
++      barrierDismissible: false,
++      builder: (_) => _SaveChangesDialog(name: _session.name),
++    );
++    return choice ?? SaveChoice.cancel;
++  }
++
++  /// New: the empty plan, untitled and clean, once the current one may go.
++  Future<void> newFlow() => _flow(() async {
++        if (!await _mayDiscard()) return;
++        _controller.newPlan();
++        _session.named(null, null);
++      });
++
++  /// Open sample: the sample flat, untitled and clean with nothing to
++  /// undo, once the current plan may go.
++  Future<void> openSampleFlow() => _flow(() async {
++        if (!await _mayDiscard()) return;
++        _controller.newPlan(build: buildSampleFlat);
++        _session.named(null, null);
++      });
++
++  /// Open: once the current plan may go -- asked before the picker -- pick,
++  /// decode and load. Any object thrown while reading or loading (a
++  /// `PlanFormatException`, a `FormatException` from the bytes, anything)
++  /// shows an error dialog naming the file and changes nothing: `load`
++  /// throws before it replaces the plan, and the session is named only
++  /// after it returned. A cancel does nothing.
++  Future<void> openFlow() => _flow(() async {
++        if (!await _mayDiscard()) return;
++        final file = await _pick();
++        if (file == null) return;
++        try {
++          _controller.load(utf8.decode(file.bytes));
++        } catch (e) {
++          await _showError((w) => w.couldNotOpen(file.name), e);
++          return;
++        }
++        _session.named(file.name, file.location);
++      });
++
++  Future<({String name, Uint8List bytes, Object? location})?> _pick() async {
++    try {
++      return await widget.files.open();
++    } catch (e) {
++      await _showError((w) => w.couldNotOpenFile, e);
++      return null;
++    }
++  }
++
++  /// Save: true when the bytes were written. An untitled plan, or one whose
++  /// location the files object cannot write in place to, is saved as
++  /// ([saveAsStep]'s path); on the web a titled plan downloads under its
++  /// name without asking.
++  Future<bool> saveStep() => _flow(() async {
++        final encoded = await _encode();
++        if (encoded == null) return false;
++        final fileName = _session.fileName;
++        final location = _session.location;
++        if (fileName != null) {
++          if (!widget.files.writesInPlace) {
++            return _write(encoded, location ?? fileName, fileName);
++          }
++          if (location != null) return _write(encoded, location, fileName);
++        }
++        return _saveAs(encoded);
++      });
++
++  /// Save As: asks where, then writes; false when cancelled or failed.
++  Future<bool> saveAsStep() => _flow(() async {
++        final encoded = await _encode();
++        if (encoded == null) return false;
++        return _saveAs(encoded);
++      });
++
++  /// The plan's bytes, read in one synchronous block (`save` settles
++  /// pending input first and remembers the state it encoded): the save
++  /// point is that state, whatever happens while the write is pending. A
++  /// throw shows the save error and answers null.
++  Future<_Encoded?> _encode() async {
++    final String text;
++    try {
++      text = _controller.save();
++    } catch (e) {
++      await _showError((w) => w.couldNotSave(_session.name), e);
++      return null;
++    }
++    return (
++      plan: _controller.document,
++      bytes: Uint8List.fromList(utf8.encode(text))
++    );
++  }
++
++  Future<bool> _saveAs(_Encoded encoded) async {
++    final ({String name, Object location})? place;
++    try {
++      place = await widget.files.saveLocation('${_session.name}.jetplan');
++    } catch (e) {
++      await _showError((w) => w.couldNotSave(_session.name), e);
++      return false;
++    }
++    if (place == null) return false;
++    return _write(encoded, place.location, place.name);
++  }
++
++  /// Writes, then moves the save point to the encoded state and names the
++  /// plan after the file; on a failure shows the error and leaves the save
++  /// point where it was.
++  ///
++  /// `markSaved` marks the state `save` encoded -- not the current one -- so
++  /// an edit made during the write stays dirty. The app's own entry points
++  /// cannot start New, Open sample or Open during the write (decision 5:
++  /// the file callbacks do nothing while busy), but a flow called inside
++  /// this one can (the exit request, the tests): if it replaced the plan, a
++  /// save point and a file name mean nothing for the new one, so neither is
++  /// given (the old `identical(document, ...)` guard, kept).
++  Future<bool> _write(
++      _Encoded encoded, Object location, String fileName) async {
++    try {
++      await widget.files.write(location, fileName, encoded.bytes);
++    } catch (e) {
++      await _showError((w) => w.couldNotSave(fileName), e);
++      return false;
++    }
++    if (identical(_controller.document, encoded.plan)) {
++      _controller.markSaved();
++      _session.named(fileName, location);
++    }
++    return true;
++  }
++
++  /// The error dialog of a failed Open or Save: what failed and the thrown
++  /// object's text. The flow waits for it, so it stays busy while the
++  /// dialog is up.
++  Future<void> _showError(
++      String Function(AppStrings words) title, Object error) async {
++    if (!mounted) return;
++    final words = AppStrings.of(context);
++    await showDialog<void>(
++      context: context,
++      builder: (context) => AlertDialog(
++        key: const Key('document-error'),
++        title: Text(title(words), key: const Key('document-error-title')),
++        content: Text(error.toString(), key: const Key('document-error-text')),
++        actions: [
++          TextButton(
++            key: const Key('document-error-ok'),
++            onPressed: () => Navigator.of(context).pop(),
++            child: Text(AppStrings.of(context).ok),
++          ),
++        ],
++      ),
++    );
++  }
++
++  @override
++  void didChangeDependencies() {
++    super.didChangeDependencies();
++    if (_session.setUntitledName(AppStrings.of(context).untitled)) {
++      // Not during this build: the app's title listens to the session.
++      SchedulerBinding.instance.addPostFrameCallback((_) {
++        if (mounted) _session.nameChanged();
++      });
++    }
++  }
++
++  @override
++  Widget build(BuildContext context) => ListenableBuilder(
++        listenable: _session,
++        builder: (context, _) => Scaffold(
++          body: PlanEditor(
++            controller: _controller,
++            onNew: _idle(newFlow),
++            onOpen: _idle(openFlow),
++            onSave: _idle(saveStep),
++            onSaveAs: _idle(saveAsStep),
++            printer: widget.printer,
++            exportName: _session.name,
++            bar: PlanEditorBar(leading: [
++              _DocumentTitle(session: _session, controller: _controller),
++              _OpenSampleButton(onPressed: _idle(openSampleFlow)),
++            ]),
++          ),
++        ),
++      );
++}
++
++/// The plan's name, with `• ` in front and an `Edited` tooltip while it is
++/// dirty, cut with an ellipsis at 160 px: with the Open sample button and the
++/// library's bar that leaves the top bar fitting 800 px.
++class _DocumentTitle extends StatelessWidget {
++  const _DocumentTitle({required this.session, required this.controller});
++
++  final DocumentSession session;
++  final PlanController controller;
++
++  @override
++  Widget build(BuildContext context) => ConstrainedBox(
++        constraints: const BoxConstraints(maxWidth: 160),
++        child: ListenableBuilder(
++          listenable: Listenable.merge([session, controller.dirty]),
++          builder: (context, _) {
++            final dirty = controller.dirty.value;
++            final text = Text(dirty ? '• ${session.name}' : session.name,
++                key: const Key('document-name'),
++                maxLines: 1,
++                softWrap: false,
++                overflow: TextOverflow.ellipsis);
++            return dirty
++                ? Tooltip(message: PlanStrings.of(context).edited, child: text)
++                : text;
++          },
++        ),
++      );
++}
++
++/// The bar's Open sample button (decision 8): not a `PlanEditorAction`, so
++/// the app's own widget in `PlanEditorBar.leading`.
++class _OpenSampleButton extends StatelessWidget {
++  const _OpenSampleButton({required this.onPressed});
++
++  final PlanFileCallback onPressed;
++
++  @override
++  Widget build(BuildContext context) => IconButton(
++        key: const Key('toolbar-open-sample'),
++        icon: const Icon(Icons.home_work_outlined),
++        iconSize: 20,
++        visualDensity: VisualDensity.compact,
++        tooltip: AppStrings.of(context).openSample,
++        onPressed: () => unawaited(onPressed()),
++      );
++}
++
++/// Save / Don't Save / Cancel for the plan [name]. Pops its [SaveChoice];
++/// Escape pops [SaveChoice.cancel]; Save has the focus.
++class _SaveChangesDialog extends StatelessWidget {
++  const _SaveChangesDialog({required this.name});
++
++  final String name;
++
++  @override
++  Widget build(BuildContext context) {
++    void choose(SaveChoice choice) => Navigator.of(context).pop(choice);
++    return CallbackShortcuts(
++      bindings: <ShortcutActivator, VoidCallback>{
++        const SingleActivator(LogicalKeyboardKey.escape): () =>
++            choose(SaveChoice.cancel),
++      },
++      child: AlertDialog(
++        key: const Key('replace-dialog'),
++        title: Text(AppStrings.of(context).saveChangesTo(name),
++            key: const Key('replace-title')),
++        content: Text(AppStrings.of(context).changesLost),
++        actions: [
++          TextButton(
++            key: const Key('replace-discard'),
++            onPressed: () => choose(SaveChoice.discard),
++            child: Text(AppStrings.of(context).dontSave),
++          ),
++          TextButton(
++            key: const Key('replace-cancel'),
++            onPressed: () => choose(SaveChoice.cancel),
++            child: Text(PlanStrings.of(context).cancel),
++          ),
++          FilledButton(
++            key: const Key('replace-save'),
++            autofocus: true,
++            onPressed: () => choose(SaveChoice.save),
++            child: Text(AppStrings.of(context).save),
++          ),
++        ],
++      ),
++    );
++  }
++}
++
++/// Asks for a file name, starting from [suggested]: the web's save prompt.
++/// Null when cancelled; the files object treats a blank name as a cancel
++/// and appends `.jetplan`.
++Future<String?> showDocumentNamePrompt(
++        BuildContext context, String suggested) =>
++    showDialog<String>(
++      context: context,
++      builder: (_) => _NamePrompt(suggested: suggested),
++    );
++
++class _NamePrompt extends StatefulWidget {
++  const _NamePrompt({required this.suggested});
++
++  final String suggested;
++
++  @override
++  State<_NamePrompt> createState() => _NamePromptState();
++}
++
++class _NamePromptState extends State<_NamePrompt> {
++  late final TextEditingController _name =
++      TextEditingController(text: widget.suggested);
++
++  @override
++  void dispose() {
++    _name.dispose();
++    super.dispose();
++  }
++
++  void _save() => Navigator.of(context).pop(_name.text);
++
++  @override
++  Widget build(BuildContext context) => AlertDialog(
++        key: const Key('name-prompt'),
++        title: Text(AppStrings.of(context).saveAsTitle),
++        content: TextField(
++          key: const Key('name-prompt-field'),
++          controller: _name,
++          autofocus: true,
++          decoration:
++              InputDecoration(labelText: AppStrings.of(context).fileName),
++          onSubmitted: (_) => _save(),
++        ),
++        actions: [
++          TextButton(
++            key: const Key('name-prompt-cancel'),
++            onPressed: () => Navigator.of(context).pop(),
++            child: Text(PlanStrings.of(context).cancel),
++          ),
++          TextButton(
++            key: const Key('name-prompt-save'),
++            onPressed: _save,
++            child: Text(AppStrings.of(context).save),
++          ),
++        ],
++      );
++}
+diff --git a/apps/architecture_demo/lib/document_session.dart b/apps/architecture_demo/lib/document_session.dart
+new file mode 100644
+index 00000000..2e75e992
+--- /dev/null
++++ b/apps/architecture_demo/lib/document_session.dart
+@@ -0,0 +1,76 @@
++// The document session: what the app knows about the plan's file, beside the
++// controller (spec B2). Ported from apps/floor_planner/lib/document_host.dart
++// (DocumentSession), without the document, the measurer or the save point:
++// those are the PlanController's.
++import 'package:flutter/foundation.dart';
++
++import 'document_files.dart' show kJetplanExtension;
++
++/// The name of a plan that has no file yet.
++const String kUntitledName = 'Untitled';
++
++/// The web tab's title: `name — jet-cad`, with `• ` in front while [dirty].
++String documentTitle(String name, {required bool dirty}) =>
++    '${dirty ? '• ' : ''}$name — jet-cad';
++
++/// The name a file shows as: its base name without `.jetplan`. Another
++/// extension is kept.
++String documentNameOf(String fileName) {
++  const suffix = '.$kJetplanExtension';
++  return fileName.endsWith(suffix) && fileName.length > suffix.length
++      ? fileName.substring(0, fileName.length - suffix.length)
++      : fileName;
++}
++
++/// What the app knows about the plan's file, beside the controller: its
++/// name and location, the untitled name in the app's language, and whether
++/// a flow runs. Dirty is the controller's (`PlanController.dirty`).
++///
++/// Notifies when the name or the location changes; [busy] notifies for
++/// itself.
++class DocumentSession extends ChangeNotifier {
++  String? _fileName;
++  Object? _location;
++  String _untitledName = kUntitledName;
++
++  /// Whether a flow is running. Set by the outermost flow only.
++  final ValueNotifier<bool> busy = ValueNotifier<bool>(false);
++
++  /// The file's name, with its extension; null while untitled.
++  String? get fileName => _fileName;
++
++  /// Where a Save writes, as the files object returned it; opaque here.
++  Object? get location => _location;
++
++  /// [untitledName], or [fileName] without `.jetplan`.
++  String get name =>
++      _fileName == null ? _untitledName : documentNameOf(_fileName!);
++
++  String get untitledName => _untitledName;
++
++  /// Sets [untitledName] without notifying (the host sets it during a
++  /// build); true when the shown [name] changed, and the host then calls
++  /// [nameChanged] after the frame.
++  bool setUntitledName(String next) {
++    if (next == _untitledName) return false;
++    _untitledName = next;
++    return _fileName == null;
++  }
++
++  /// Tells the listeners that [name] changed with the language.
++  void nameChanged() => notifyListeners();
++
++  /// The plan is now the file [fileName] at [location] (untitled when
++  /// null). One notification.
++  void named(String? fileName, Object? location) {
++    _fileName = fileName;
++    _location = location;
++    notifyListeners();
++  }
++
++  @override
++  void dispose() {
++    busy.dispose();
++    super.dispose();
++  }
++}
+diff --git a/apps/architecture_demo/lib/main.dart b/apps/architecture_demo/lib/main.dart
+index 200845d2..35b836c4 100644
+--- a/apps/architecture_demo/lib/main.dart
++++ b/apps/architecture_demo/lib/main.dart
+@@ -1,12 +1,18 @@
+ import 'package:flutter/material.dart';
+ import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
+ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+ 
++import 'app_strings.dart';
++import 'document_files.dart';
++import 'document_host.dart';
++import 'document_session.dart';
++import 'exit_guard.dart';
++
+ /// The app's theme seed, light and dark alike (the old app's).
+ const Color kAppSeed = Color(0xFF2266CC);
+ 
+ Future<void> main() async {
+   WidgetsFlutterBinding.ensureInitialized();
+   try {
+     await ensurePlanFonts();
+   } catch (error, stack) {
+@@ -16,19 +22,42 @@ Future<void> main() async {
+         stack: stack,
+         library: 'architecture_demo',
+         context: ErrorDescription('while registering the plan font')));
+   }
+   registerFontLicences();
+   runApp(const ArchitectureDemoApp());
+ }
+ 
++/// The app: it owns the one [PlanController], the [DocumentSession] and the
++/// [DocumentFiles], and rebuilds [MaterialApp] from the session and the
++/// controller's dirty flag, so `onGenerateTitle` -- which runs above `home`
++/// and re-runs only when the app rebuilds -- follows the plan's name and
++/// dirty state (the web tab's title). The [DocumentHost] in `home` runs the
++/// flows and builds the editor.
+ class ArchitectureDemoApp extends StatefulWidget {
+   const ArchitectureDemoApp(
+-      {super.key, this.printer = const PrintingPagePrinter()});
++      {super.key,
++      this.files,
++      this.createFiles = createDocumentFiles,
++      this.exitGuard,
++      this.printer = const PrintingPagePrinter()});
++
++  /// The files, a test seam: when null the app makes the platform's through
++  /// [createFiles].
++  final DocumentFiles? files;
++
++  /// Makes the files when [files] is null: the platform's, a test seam that
++  /// sees the prompt and the type names the app hands over.
++  final DocumentFiles Function(
++      {required DocumentNamePrompt askName,
++      required FileTypeLabel typeLabel}) createFiles;
++
++  /// Handed to the [DocumentHost] (armed while the plan is dirty, Task 5).
++  final ExitGuard? exitGuard;
+ 
+   /// Where Print hands the page's PDF: the platform's dialog unless a test
+   /// gives a fake.
+   final PagePrinter printer;
+ 
+   @override
+   State<ArchitectureDemoApp> createState() => ArchitectureDemoAppState();
+ }
+@@ -43,30 +72,62 @@ class ArchitectureDemoAppState extends State<ArchitectureDemoApp> {
+   /// The app's one controller: New, Open sample and Open replace the plan
+   /// inside it, so the editor, its panels and its caches stay.
+   late final PlanController _controller =
+       PlanController(kits: [architectureKit], symbols: _symbols);
+ 
+   @visibleForTesting
+   PlanController get controller => _controller;
+ 
++  final DocumentSession _session = DocumentSession();
++  late final DocumentFiles _files = widget.files ??
++      widget.createFiles(askName: _askName, typeLabel: _typeLabel);
++
++  @visibleForTesting
++  DocumentSession get session => _session;
++
++  /// The web's save-name prompt, shown over the navigator: the files object
++  /// is made above the `MaterialApp`, so it has no `BuildContext` of its
++  /// own.
++  Future<String?> _askName(String suggested) async {
++    final context = _navigator.currentContext;
++    if (context == null) return null;
++    return showDocumentNamePrompt(context, suggested);
++  }
++
++  /// A file type's name in the panels, in the app's language, read at each
++  /// panel: English before the navigator exists.
++  String _typeLabel(FileKind kind) {
++    final context = _navigator.currentContext;
++    return context == null
++        ? englishFileTypeLabel(kind)
++        : AppStrings.of(context).fileTypeLabel(kind);
++  }
++
+   /// Marks a file chord handled, and does nothing.
+   static void _consume() {}
+ 
+   @override
+   void dispose() {
+     _controller.dispose();
+     _symbols.dispose();
++    _session.dispose();
+     super.dispose();
+   }
+ 
+   @override
+-  Widget build(BuildContext context) => MaterialApp(
++  Widget build(BuildContext context) => ListenableBuilder(
++        listenable: Listenable.merge([_session, _controller.dirty]),
++        builder: (context, _) => _app(),
++      );
++
++  Widget _app() => MaterialApp(
+         navigatorKey: _navigator,
+-        title: 'jet-cad',
++        onGenerateTitle: (_) =>
++            documentTitle(_session.name, dirty: _controller.dirty.value),
+         debugShowCheckedModeBanner: false,
+         supportedLocales: planSupportedLocales,
+         localizationsDelegates: planLocalizationsDelegates,
+         theme: ThemeData(colorSchemeSeed: kAppSeed),
+         darkTheme:
+             ThemeData(colorSchemeSeed: kAppSeed, brightness: Brightness.dark),
+         themeMode: ThemeMode.system,
+         // The file chords once more above the Navigator, consume-only: a
+@@ -75,12 +136,16 @@ class ArchitectureDemoAppState extends State<ArchitectureDemoApp> {
+         // editor's own bindings run the commands when the home route has
+         // the focus.
+         builder: (context, child) => CallbackShortcuts(
+           bindings: <ShortcutActivator, VoidCallback>{
+             for (final chord in kFileChords) chord: _consume,
+           },
+           child: child!,
+         ),
+-        home: Scaffold(
+-            body: PlanEditor(controller: _controller, printer: widget.printer)),
++        home: DocumentHost(
++            controller: _controller,
++            session: _session,
++            files: _files,
++            exitGuard: widget.exitGuard,
++            printer: widget.printer),
+       );
+ }
+diff --git a/apps/architecture_demo/pubspec.yaml b/apps/architecture_demo/pubspec.yaml
+index 2019b3ed..6040e413 100644
+--- a/apps/architecture_demo/pubspec.yaml
++++ b/apps/architecture_demo/pubspec.yaml
+@@ -24,11 +24,18 @@ dependencies:
+   # The print wrapper names PdfPageFormat (PagePrinter's signature).
+   pdf: ^3.13.1
+   web: ^1.1.0
+ 
+ dev_dependencies:
+   flutter_test:
+     sdk: flutter
+   flutter_lints: ^6.0.0
++  # The tests drive the editor through the engine's types (Handle, Tool,
++  # InteractionLayer, Transform2), the kit's diagnostics and world points
++  # (Vector2).
++  jet_cad_2d: ^0.7.2
++  jet_cad_2d_flutter: ^0.7.2
++  jet_cad_2d_kit: ^0.1.0
++  vector_math: ^2.2.0
+ 
+ flutter:
+   uses-material-design: true
+diff --git a/apps/architecture_demo/test/support/app_rig.dart b/apps/architecture_demo/test/support/app_rig.dart
+new file mode 100644
+index 00000000..aadc1c15
+--- /dev/null
++++ b/apps/architecture_demo/test/support/app_rig.dart
+@@ -0,0 +1,254 @@
++// The app pumped with scripted files (spec 12a Testing, ported), and the
++// moves the document tests share: reading the host, the controller and the
++// session, and editing through the real tools. The one helper set for every
++// app test (R-P14): no copies elsewhere.
++import 'dart:convert';
++
++import 'package:architecture_demo/document_host.dart';
++import 'package:architecture_demo/document_session.dart';
++import 'package:architecture_demo/main.dart';
++import 'package:flutter/material.dart';
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
++    show InteractionLayer, Tool, ViewportTransform;
++import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import 'app_fakes.dart';
++
++/// Far from the origin and from the page, where the rig's edit lands: a
++/// default of the plan's origin would hide a transform that is dropped.
++final Vector2 kFar = Vector2(-43210.5, 31234.75);
++
++/// The app, its host, controller, session and scripted files.
++class AppRig {
++  AppRig._(this.tester, this.files, this.guard);
++
++  final WidgetTester tester;
++  final FakeDocumentFiles files;
++  final FakeExitGuard? guard;
++
++  ArchitectureDemoAppState get app =>
++      tester.state<ArchitectureDemoAppState>(find.byType(ArchitectureDemoApp));
++
++  DocumentHostState get host =>
++      tester.state<DocumentHostState>(find.byType(DocumentHost));
++
++  PlanController get controller => app.controller;
++
++  DocumentSession get session => app.session;
++
++  /// One undoable edit through the controller's command path: a wall drawn
++  /// by the Wall tool with pointer events and keys (W, two clicks, Enter,
++  /// Escape) under a turned camera centred on [at], then Select again.
++  /// `dirty` is true after it and the history has one more step.
++  Future<void> editOnce({Vector2? at}) async {
++    final c = at ?? kFar;
++    await aimCamera(tester, controller, c);
++    await drawWall(
++        tester, controller, c + Vector2(-1500, 200), c + Vector2(1500, -300));
++  }
++
++  /// Taps the widget keyed [key], then one frame.
++  Future<void> tapKey(String key) async {
++    await tester.tap(find.byKey(Key(key)));
++    await tester.pump();
++  }
++}
++
++/// The app over [files] (and [guard], the platform's no-op when null) at a
++/// 1440 x 900 surface; the rig.
++Future<AppRig> pumpApp(WidgetTester tester,
++    {FakeDocumentFiles? files,
++    FakeExitGuard? guard,
++    PagePrinter? printer,
++    Size size = const Size(1440, 900)}) async {
++  await tester.binding.setSurfaceSize(size);
++  addTearDown(() => tester.binding.setSurfaceSize(null));
++  final fakeFiles = files ?? FakeDocumentFiles();
++  await tester.pumpWidget(ArchitectureDemoApp(
++      files: fakeFiles,
++      exitGuard: guard,
++      printer: printer ?? const PrintingPagePrinter()));
++  await tester.pump();
++  return AppRig._(tester, fakeFiles, guard);
++}
++
++/// The app's title, as `MaterialApp.onGenerateTitle` made it: the app's own
++/// `Title`, the first under the `WidgetsApp`.
++String titleOf(WidgetTester tester) => tester
++    .widget<Title>(find
++        .descendant(of: find.byType(WidgetsApp), matching: find.byType(Title))
++        .first)
++    .title;
++
++/// The name widget's text.
++String shownName(WidgetTester tester) =>
++    tester.widget<Text>(find.byKey(const Key('document-name'))).data!;
++
++/// [c]'s live objects of [typeId] carrying a `T`, ascending by handle.
++List<Handle> liveOf<T extends Component>(PlanController c, String typeId) => [
++      for (final h in c.document.components.withComponent<T>())
++        if (c.typeOf(h)?.id == typeId) h,
++    ]..sort((a, b) => a.value.compareTo(b.value));
++
++/// [c]'s walls, ascending.
++List<Handle> wallsOf(PlanController c) =>
++    liveOf<WallParams>(c, ArchitectureTypes.wall);
++
++Future<void> press(WidgetTester tester, LogicalKeyboardKey key) async {
++  await tester.sendKeyEvent(key);
++  await tester.pump();
++}
++
++Future<void> chord(WidgetTester tester, LogicalKeyboardKey modifier,
++    LogicalKeyboardKey key) async {
++  await tester.sendKeyDownEvent(modifier);
++  await press(tester, key);
++  await tester.sendKeyUpEvent(modifier);
++  await tester.pump();
++}
++
++/// Cmd+Z: the editor's undo binding.
++Future<void> undoKey(WidgetTester tester) =>
++    chord(tester, LogicalKeyboardKey.meta, LogicalKeyboardKey.keyZ);
++
++/// The global position of world [p] under [c]'s camera.
++Offset globalOf(WidgetTester tester, PlanController c, Vector2 p) {
++  final s = c.camera.value.worldToScreen(p);
++  return tester.getTopLeft(find.byType(InteractionLayer)) + Offset(s.x, s.y);
++}
++
++Future<void> clickAt(WidgetTester tester, PlanController c, Vector2 p) async {
++  await tester.tapAt(globalOf(tester, c, p));
++  await tester.pump();
++}
++
++/// A rotated, non-reflecting camera at 0.1 px/mm centred on world [centre]:
++/// the drawing can sit far from the origin and off the page.
++Future<void> aimCamera(
++    WidgetTester tester, PlanController c, Vector2 centre) async {
++  final size = tester.getSize(find.byType(InteractionLayer));
++  final linear = Transform2.rotation(0.3).multiply(Transform2.scale(0.1, 0.1));
++  final mid = linear.transformPoint(centre);
++  c.camera.value = ViewportTransform(
++      worldToScreenMatrix: Transform2.translation(
++              size.width / 2 - mid.x, size.height / 2 - mid.y)
++          .multiply(linear));
++  await tester.pump();
++}
++
++/// The canvas's active tool, as its interaction layer holds it
++/// (`PlanController.toolController` is internal to the library).
++Tool activeTool(WidgetTester tester) =>
++    tester.widget<InteractionLayer>(find.byType(InteractionLayer)).tools.active;
++
++/// One wall from [a] to [b] through the Wall tool (W, two clicks, Enter),
++/// then Escape to Select: an edit through a real tool, the shape ended.
++Future<void> drawWall(
++    WidgetTester tester, PlanController c, Vector2 a, Vector2 b) async {
++  await press(tester, LogicalKeyboardKey.keyW);
++  await clickAt(tester, c, a);
++  await clickAt(tester, c, b);
++  await press(tester, LogicalKeyboardKey.enter);
++  await press(tester, LogicalKeyboardKey.escape);
++  expect(activeTool(tester).isMidShape, isFalse,
++      reason: 'premise: the shape is ended');
++}
++
++/// Answers the Save / Don't Save / Cancel dialog with the button keyed
++/// [key]: `replace-save`, `replace-discard` or `replace-cancel`. The dialog
++/// must be up.
++Future<void> answerReplace(WidgetTester tester, String key) async {
++  expect(find.byKey(const Key('replace-dialog')), findsOneWidget,
++      reason: 'premise: the dialog is up');
++  await tester.tap(find.byKey(Key(key)));
++  await tester.pump();
++  await tester.pump();
++}
++
++/// Fails, rather than waits forever, while a flow's dialog is still up:
++/// called before awaiting a flow that should have finished.
++void noDialog(WidgetTester tester) {
++  expect(find.byKey(const Key('replace-dialog')), findsNothing,
++      reason: 'no Save / Don\'t Save / Cancel dialog left');
++  expect(find.byKey(const Key('document-error')), findsNothing,
++      reason: 'no error dialog left');
++}
++
++/// Runs [flow] (New, Open or Open sample) from a dirty plan and answers its
++/// dialog with Don't Save.
++Future<void> discardAndRun(WidgetTester tester, Future<void> flow) async {
++  await tester.pump();
++  await answerReplace(tester, 'replace-discard');
++  noDialog(tester);
++  await flow;
++  await tester.pump();
++}
++
++/// Taps the error dialog's OK.
++Future<void> dismissError(WidgetTester tester) async {
++  await tester.tap(find.byKey(const Key('document-error-ok')));
++  await tester.pump();
++  await tester.pump();
++}
++
++/// The sample flat's text, saved by a controller of its own (disposed at
++/// tear-down): what Open sample must produce, computed apart from the app.
++String sampleText() {
++  final c = PlanController(kits: [architectureKit]);
++  addTearDown(c.dispose);
++  c.newPlan(build: buildSampleFlat);
++  return c.save();
++}
++
++/// The sample's bytes.
++List<int> sampleBytes() => utf8.encode(sampleText());
++
++/// [c]'s plan as the bytes a Save writes.
++List<int> bytesOf(PlanController c) => utf8.encode(c.save());
++
++/// Whether the focused node is a panel field (the type is the library's
++/// own and not exported).
++bool panelFieldFocused() =>
++    FocusManager.instance.primaryFocus.runtimeType.toString() ==
++    'PanelFieldFocusNode';
++
++/// [group]'s children, ascending.
++List<Handle> kidsOf(DraftDocument doc, Handle group) => [
++      for (final slot in doc.entities.liveSlots)
++        if (doc.entities.ownerAt(slot) == group) doc.entities.handleAt(slot),
++    ]..sort((a, b) => a.value.compareTo(b.value));
++
++/// [room]'s TEXT children's strings, ascending: its name label, then its
++/// area label.
++List<String> roomLabels(DraftDocument doc, Handle room) => [
++      for (final k in kidsOf(doc, room))
++        if (doc.entities.kindAt(doc.entities.slotOf(k)!) == EntityKind.text)
++          doc.entities.textAt(doc.entities.slotOf(k)!),
++    ];
++
++/// Dimension [d]'s value string: its one TEXT child's.
++String dimensionText(DraftDocument doc, Handle d) => [
++      for (final k in kidsOf(doc, d))
++        if (doc.entities.kindAt(doc.entities.slotOf(k)!) == EntityKind.text)
++          doc.entities.textAt(doc.entities.slotOf(k)!),
++    ].single;
++
++/// The middle of wall [h], in the world (through its group's transform).
++Vector2 wallMid(PlanController c, Handle h) {
++  final w = c.document.components.get<WallParams>(h)!;
++  return c.document.tree
++      .accumulatedTransform(h)
++      .transformPoint(Vector2((w.sx + w.ex) / 2, (w.sy + w.ey) / 2));
++}
++
++/// How many live objects of [typeId] the plan holds, whatever their
++/// component class.
++int liveOfAny(PlanController c, String typeId) => [
++      for (final h in c.document.tree.nodes)
++        if (c.typeOf(h.handle)?.id == typeId) h,
++    ].length;
+diff --git a/packages/jet_cad_2d_plan/lib/src/canvas/text_entry_overlay.dart b/packages/jet_cad_2d_plan/lib/src/canvas/text_entry_overlay.dart
+index 427aa21c..65f08ae0 100644
+--- a/packages/jet_cad_2d_plan/lib/src/canvas/text_entry_overlay.dart
++++ b/packages/jet_cad_2d_plan/lib/src/canvas/text_entry_overlay.dart
+@@ -48,23 +48,44 @@ class TextEntryOverlay extends StatefulWidget {
+ 
+   @override
+   State<TextEntryOverlay> createState() => _TextEntryOverlayState();
+ }
+ 
+ class _TextEntryOverlayState extends State<TextEntryOverlay> {
+   final FocusNode _focus = FocusNode(debugLabel: 'text-entry');
+ 
++  /// Withdraws [_settle]'s registration with the controller.
++  VoidCallback? _releaseSettle;
++
+   @override
+   void initState() {
+     super.initState();
++    _releaseSettle = widget.controller.registerSettle(_settle);
+     widget.tool.pending.addListener(_onPending);
+     _focus.addListener(_onFocus);
+   }
+ 
++  /// The controller's settle (planner_shell.dart:845-865): an open entry is
++  /// committed through the tool's `finish`, as Enter would (one step, empty
++  /// text commits nothing), and closed; [_onPending] then hands the focus
++  /// back to the canvas, so the focus loss finds nothing to cancel.
++  void _settle() {
++    if (widget.tool.isPending) widget.tool.finish(widget.tools.context);
++  }
++
++  @override
++  void didUpdateWidget(TextEntryOverlay oldWidget) {
++    super.didUpdateWidget(oldWidget);
++    if (!identical(oldWidget.controller, widget.controller)) {
++      _releaseSettle?.call();
++      _releaseSettle = widget.controller.registerSettle(_settle);
++    }
++  }
++
+   /// A placement takes focus for the field; Ruling 05-7 hands it back to
+   /// the canvas, the scope's previous child, as soon as the placement ends.
+   ///
+   /// `autofocus` alone never fires here: the canvas already holds focus (the
+   /// layer requests it on the very click that placed the point), and
+   /// autofocus only acts on a scope with nothing focused. The field is not
+   /// built yet, so the request is deferred until its `Focus` attaches.
+   void _onPending() {
+@@ -117,16 +138,17 @@ class _TextEntryOverlayState extends State<TextEntryOverlay> {
+   }
+ 
+   void _submit(String s) => widget.tool.commitText(s, widget.tools.context);
+ 
+   void _cancel() => widget.tool.cancelText(widget.tools.context);
+ 
+   @override
+   void dispose() {
++    _releaseSettle?.call();
+     widget.tool.pending.removeListener(_onPending);
+     _focus.removeListener(_onFocus);
+     _focus.dispose();
+     super.dispose();
+   }
+ 
+   @override
+   Widget build(BuildContext context) => ValueListenableBuilder<TextPlacement?>(
+diff --git a/packages/jet_cad_2d_plan/lib/src/panels/plan_page_panel.dart b/packages/jet_cad_2d_plan/lib/src/panels/plan_page_panel.dart
+index dfd8a1c6..cb94db2d 100644
+--- a/packages/jet_cad_2d_plan/lib/src/panels/plan_page_panel.dart
++++ b/packages/jet_cad_2d_plan/lib/src/panels/plan_page_panel.dart
+@@ -113,17 +113,22 @@ class PlanPagePanelState extends State<PlanPagePanel> {
+     if (page == null) return;
+     final text = formatPanelNumber(page.scaleDenominator, _strings);
+     if (_scale.text != text) _scale.text = text;
+   }
+ 
+   /// Shows the stored scale in the scale field, dropping any text typed and
+   /// not submitted, and commits nothing: the controller's settle calls it
+   /// before a flow reads the document (D14: unsubmitted text is not saved).
+-  void resyncScale() => _syncScale();
++  /// A scale field that has the focus hands it back to the canvas, as the
++  /// old shell's settle did.
++  void resyncScale() {
++    _scaleFocus.handBack();
++    _syncScale();
++  }
+ 
+   bool get _editable => widget.controller.permissions.editPage;
+ 
+   /// The scale is committed on submit (spec 04), so a field left without
+   /// Enter would go on showing a scale the page does not have. A tap outside
+   /// the field -- the user clicking elsewhere in the app -- hands the focus
+   /// back to the canvas and then re-syncs the field to the page's scale
+   /// (fix/post-07 F2F3d). Nothing is committed.
+diff --git a/packages/jet_cad_2d_plan/test/panels/page_scale_field_test.dart b/packages/jet_cad_2d_plan/test/panels/page_scale_field_test.dart
+index 51eb7798..8a458347 100644
+--- a/packages/jet_cad_2d_plan/test/panels/page_scale_field_test.dart
++++ b/packages/jet_cad_2d_plan/test/panels/page_scale_field_test.dart
+@@ -47,16 +47,57 @@ void main() {
+     expect(status(tester), 'Rectangle');
+     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+     await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
+     await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+     await tester.pump();
+     expect(c.document.commands.undoDepth, 1, reason: 'not undone');
+   });
+ 
++  testWidgets(
++      'SET-1 saving with a text entry open commits the typed text as one '
++      'step and closes the entry (planner_shell.dart:845-865)', (tester) async {
++    final c = await pumpScale(tester);
++    await press(tester, LogicalKeyboardKey.keyT);
++    await tester.tapAt(globalOf(tester, c, 7100, 3050));
++    await tester.pump();
++    await tester.enterText(find.byKey(const Key('text-entry')), 'Kitchen');
++    final depth = c.document.commands.undoDepth;
++    expect(bytes(c), isNot(contains('Kitchen')), reason: 'premise: typed only');
++
++    final saved = c.save();
++    await tester.pump();
++    // M-SET-1: drop the text entry's registerSettle.
++    expect(saved, contains('Kitchen'));
++    expect(c.document.commands.undoDepth, depth + 1, reason: 'one step');
++    expect(find.byKey(const Key('text-entry')), findsNothing);
++    expect((activeTool(c) as TextTool).pending.value, isNull);
++    expect(FocusManager.instance.primaryFocus, same(canvasFocus(tester)),
++        reason: 'the focus is back on the canvas');
++  });
++
++  testWidgets(
++      'SET-2 settling with the focus in the page scale field hands it back '
++      'to the canvas and shows the stored scale', (tester) async {
++    final c = await pumpScale(tester);
++    final shown = scaleText(tester);
++    await tester.tap(scale());
++    await tester.pump();
++    await tester.enterText(scale(), '77');
++    expect(FocusManager.instance.primaryFocus, isNot(same(canvasFocus(tester))),
++        reason: 'premise: the focus is in the field');
++
++    c.settlePendingInput();
++    await tester.pump();
++    // M-SET-2: drop `_scaleFocus.handBack()` from `resyncScale`.
++    expect(FocusManager.instance.primaryFocus, same(canvasFocus(tester)));
++    expect(scaleText(tester), shown);
++    expect(c.document.commands.undoDepth, 0);
++  });
++
+   testWidgets(
+       'A14 Escape in the page panel\'s scale field keeps a pending '
+       'polyline (spec 05 D9: the guard covers the shell\'s Escape)',
+       (tester) async {
+     final c = await pumpScale(tester);
+     await press(tester, LogicalKeyboardKey.keyP);
+     await tester.tapAt(globalOf(tester, c, 7010, 3020));
+     await tester.tapAt(globalOf(tester, c, 7060, 3090));

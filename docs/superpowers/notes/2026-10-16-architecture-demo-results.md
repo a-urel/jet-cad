@@ -160,3 +160,19 @@ changed; `jet_cad_2d_plan` (`--enable-vmservice`) 1558 passed; `jet_cad_2d_integ
 test passed; `flutter build macos` and `flutter build web` built. Commits:
 `4fa37742`, `8295cc76`, `cafa8ff3`, `518e2757`, `492c3719`, `fac57b29`,
 `0ce785fb`, `b6831537`, `17a472b8`, `90f1576b`, `6b695558`, `7277dd24`.
+
+## For the human
+
+1. **A look finding in the plan library:** the Page panel's "Landscape"
+   button wraps to "Landscap/e" at 1440 px (visible in the smoke PNG). Not
+   3b's code; a `fix/<slug>` branch on the human's word.
+2. **The export gap** (Follow-ups): closing it needs a public library
+   signal; a decision for sub-project 4 or a follow-up.
+3. **Open asks before the picker** (ruling on Task 4's I2): an edit made on
+   the web while the picker is open is lost on `load`; the old app did the
+   same (spec 12a D10).
+4. **A5's damaged-plan guard** on the exit's settle has no red test: the
+   architecture kit offers no public way to damage a plan.
+5. **The interactive smoke run** was replaced by the automated macOS
+   integration test on the human's choice; the human's own run is the real
+   test, after sub-project 4.
