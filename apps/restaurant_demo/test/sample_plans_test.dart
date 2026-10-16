@@ -12,6 +12,7 @@ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
 import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
 import 'package:jet_cad_2d_kit_restaurant/jet_cad_2d_kit_restaurant.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+import 'package:vector_math/vector_math_64.dart' show Vector2;
 import 'package:restaurant_demo/samples/salon.dart';
 import 'package:restaurant_demo/samples/teras.dart';
 
@@ -146,4 +147,88 @@ void main() {
       });
     });
   }
+
+  group('Salon room', () {
+    List<WallParams> walls(PlanController c) => [
+          for (final h in c.document.components.withComponent<WallParams>())
+            c.document.components.get<WallParams>(h)!,
+        ];
+    List<OpeningParams> openings(PlanController c) => [
+          for (final h in c.document.components.withComponent<OpeningParams>())
+            c.document.components.get<OpeningParams>(h)!,
+        ];
+
+    test('SW1 four walls, one door, two windows; the Teras has none', () {
+      final c = open(buildSalon);
+      expect(walls(c), hasLength(4));
+      expect(
+          [for (final o in openings(c)) o.kind],
+          unorderedEquals(
+              [OpeningKind.door, OpeningKind.window, OpeningKind.window]));
+      // The door in a long wall, the windows in the opposite one.
+      final hosts = {
+        for (final h in c.document.components.withComponent<OpeningParams>())
+          c.document.components.get<OpeningParams>(h)!.kind: [
+            for (final h2
+                in c.document.components.withComponent<OpeningParams>())
+              if (c.document.components.get<OpeningParams>(h2)!.kind ==
+                  c.document.components.get<OpeningParams>(h)!.kind)
+                c.document.components.get<OpeningParams>(h2)!.host
+          ],
+      };
+      final door = hosts[OpeningKind.door]!.single;
+      final win = hosts[OpeningKind.window]!;
+      expect(win.toSet(), hasLength(1), reason: 'both windows on one wall');
+      final dw = c.document.components.get<WallParams>(door)!;
+      final ww = c.document.components.get<WallParams>(win.first)!;
+      expect(dw.sy, dw.ey, reason: 'the door wall runs west-east');
+      expect(ww.sy, ww.ey);
+      expect(dw.sy, lessThan(ww.sy), reason: 'opposite walls');
+      expect((dw.ex - dw.sx).abs(), greaterThan(10000), reason: 'a long wall');
+      final t = open(buildTeras);
+      expect(walls(t), isEmpty);
+      expect(openings(t), isEmpty);
+    });
+
+    test(
+        'SW2 every table lies inside the room, 1200 mm clear of its inner '
+        'faces; the numbers are 1-11 and the walls come first', () {
+      final c = open(buildSalon);
+      final w = walls(c);
+      final half = w.first.thickness / 2;
+      final left = w
+              .map((e) => e.sx < e.ex ? e.sx : e.ex)
+              .reduce((a, b) => a < b ? a : b) +
+          half;
+      final right = w
+              .map((e) => e.sx > e.ex ? e.sx : e.ex)
+              .reduce((a, b) => a > b ? a : b) -
+          half;
+      final bottom = w
+              .map((e) => e.sy < e.ey ? e.sy : e.ey)
+              .reduce((a, b) => a < b ? a : b) +
+          half;
+      final top = w
+              .map((e) => e.sy > e.ey ? e.sy : e.ey)
+              .reduce((a, b) => a > b ? a : b) -
+          half;
+      var minMargin = double.infinity;
+      for (final i in instances(c)) {
+        final b = boxOfDefinition(c.document, i.definition)!;
+        for (final (x, y) in [(b.left, b.front), (b.right, b.back)]) {
+          final p = i.transform.transformPoint(Vector2(x, y));
+          for (final m in [p.x - left, right - p.x, p.y - bottom, top - p.y]) {
+            if (m < minMargin) minMargin = m;
+            expect(m, greaterThan(0),
+                reason: '${definitionName(c, i.handle)} at ${p.x},${p.y}');
+          }
+        }
+      }
+      expect(minMargin, greaterThanOrEqualTo(1200));
+      expect([for (final u in c.units) u.label],
+          [for (var n = 1; n <= 11; n++) '$n']);
+      final firstWall = c.document.components.withComponent<WallParams>().first;
+      expect(firstWall.value, lessThan(instances(c).first.handle.value));
+    });
+  });
 }

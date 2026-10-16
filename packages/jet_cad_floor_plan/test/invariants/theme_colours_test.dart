@@ -18,7 +18,6 @@ const List<String> kRoots = [
   'lib',
   '../jet_cad_2d_flutter/lib',
   '../../apps/floor_planner/lib',
-  '../../apps/restaurant_demo/lib',
 ];
 
 /// The three patterns (R-4; the spec's amendment S-1). The word boundary keeps
@@ -36,9 +35,6 @@ final List<RegExp> kPatterns = [
 /// `/`-separated): the palettes and the two status caption inks.
 const List<String> kAllowedFiles = [
   '../jet_cad_2d_flutter/lib/src/canvas_palette.dart',
-  // The demo's POS look: a hand-built ColorScheme of another design
-  // system's tokens (host embedding API spec F-4), literal by nature.
-  '../../apps/restaurant_demo/lib/demo_theme.dart',
 ];
 
 /// Allowed (file, exact literal) pairs (spec D9a): a match is allowed when
@@ -62,11 +58,6 @@ const List<(String, String)> kAllowedLiterals = [
   ),
   // The theme seed.
   ('../../apps/floor_planner/lib/main.dart', 'Color(0xFF2266CC)'),
-  // The demo's theme seed and its three statuses (data).
-  ('../../apps/restaurant_demo/lib/main.dart', 'Colors.teal'),
-  ('../../apps/restaurant_demo/lib/main.dart', 'Color(0x99FFB300)'),
-  ('../../apps/restaurant_demo/lib/main.dart', 'Color(0x9943A047)'),
-  ('../../apps/restaurant_demo/lib/main.dart', 'Color(0x99E53935)'),
 ];
 
 final RegExp _word = RegExp(r'\w');
@@ -211,18 +202,15 @@ void main() {
     expect(withPanel('final c = Colors.transparent;').offenders, isEmpty);
     expect(withPanel('const c = TrueColor(0x8A6D3B);').offenders, isEmpty);
 
-    // A second, different literal in an allow-listed file.
-    const demo = '../../apps/restaurant_demo/lib/main.dart';
-    final demoSource = File(demo).readAsStringSync();
-    expect(
-        scan(override: {demo: '$demoSource\nconst x = Color(0x99123456);\n'})
-            .offenders
-            .map((h) => h.file),
-        [demo]);
-
     // A stale entry: the literal it names is gone from its file.
     const seedFile = '../../apps/floor_planner/lib/main.dart';
     final seedSource = File(seedFile).readAsStringSync();
+    // A second, different literal in an allow-listed file.
+    expect(
+        scan(override: {
+          seedFile: '$seedSource\nconst x = Color(0x99123456);\n'
+        }).offenders.map((h) => h.file),
+        [seedFile]);
     expect(seedSource.contains('Color(0xFF2266CC)'), isTrue);
     final stale = scan(override: {
       seedFile: seedSource.replaceAll('Color(0xFF2266CC)', 'Color(0xFF2266CD)')
