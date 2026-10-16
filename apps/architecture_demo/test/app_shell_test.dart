@@ -54,10 +54,27 @@ void main() {
     });
   }
 
-  testWidgets('AS-dispose unmounting disposes cleanly', (tester) async {
-    await pumpApp(tester);
+  testWidgets(
+      'AS-dispose the controller lives across a reparent, and dies '
+      'with the unmount', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1400, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final key = GlobalKey<ArchitectureDemoAppState>();
+    final app = ArchitectureDemoApp(key: key);
+    await tester.pumpWidget(Align(child: app));
+    final controller = key.currentState!.controller;
+
+    // A reparent deactivates and reactivates the state without disposing.
+    await tester.pumpWidget(Padding(padding: EdgeInsets.zero, child: app));
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    expect(() => controller.dirty.addListener(() {}), returnsNormally,
+        reason: 'not disposed by a reparent');
+
     await tester.pumpWidget(const SizedBox());
     await tester.pump();
     expect(tester.takeException(), isNull);
+    expect(() => controller.dirty.addListener(() {}), throwsFlutterError,
+        reason: 'disposed by the unmount');
   });
 }
