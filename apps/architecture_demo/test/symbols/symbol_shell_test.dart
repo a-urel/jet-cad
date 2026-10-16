@@ -46,7 +46,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
-    show SelectionKey, SymbolGallery;
+    show InteractionLayer, SelectionKey, SymbolGallery;
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
@@ -175,6 +175,18 @@ void main() {
       await armBySymbolsTab(tester, c, bed);
       expect(galleryOf(tester).selectedId, bed.id, reason: 'premise: armed');
       final armedTool = activeTool(tester);
+      // A hover over the canvas shows the placement ghost (T7-M3): the
+      // armed tool's overlays paint.
+      await aimCamera(tester, c, kFar);
+      final size = tester.getSize(find.byType(InteractionLayer));
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer(
+          location: globalOf(tester, c, kFar) + const Offset(9, 7));
+      await tester.pump();
+      await mouse.moveTo(globalOf(tester, c, kFar));
+      await tester.pump();
+      expect(overlayCalls(armedTool, c, size), greaterThan(0),
+          reason: 'premise: the ghost is shown while hovering');
       expect(rig.controller.dirty.value, isFalse, reason: 'premise: clean');
       final document = c.document;
 
@@ -185,6 +197,15 @@ void main() {
       expect(activeTool(tester), isNot(same(armedTool)),
           reason: 'the armed placement tool is not the active one');
       expect(c.activeTool.value, 'plan.select');
+      // No ghost is left on the canvas: neither the armed tool nor the
+      // active one paints an overlay (the old `ghostVisible` isFalse).
+      await mouse.moveTo(globalOf(tester, c, kFar) + const Offset(20, 10));
+      await tester.pump();
+      expect(overlayCalls(armedTool, c, size), 0,
+          reason: 'the armed tool\'s ghost is gone after the swap');
+      expect(overlayCalls(activeTool(tester), c, size), 0,
+          reason: 'the active tool paints no ghost');
+      await mouse.removePointer();
       // The tab stays where the user left it (the editor is the same one):
       // the Symbols gallery is still shown, and highlights no cell.
       expect(find.byType(SymbolGallery), findsOneWidget);

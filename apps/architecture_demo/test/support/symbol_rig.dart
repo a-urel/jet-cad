@@ -9,7 +9,7 @@ import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
-    show InteractionLayer, SymbolGallery, ViewportTransform;
+    show InteractionLayer, PaperPalette, SymbolGallery, Tool, ViewportTransform;
 import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
@@ -309,4 +309,27 @@ Future<void> hoverPressRelease(WidgetTester tester, PlanController c,
   await tester.pump();
   await mouse.removePointer();
   await tester.pump();
+}
+
+/// A canvas that only counts the calls made on it.
+class _CountingCanvas implements Canvas {
+  int calls = 0;
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) {
+    calls++;
+    return null;
+  }
+}
+
+/// How many canvas calls [tool]'s overlays make under [c]'s camera, the
+/// screen one and the world one: 0 when the tool shows nothing (a placement
+/// ghost, its base-point cross and its snap marker are all overlay paints).
+int overlayCalls(Tool tool, PlanController c, Size viewport) {
+  final canvas = _CountingCanvas();
+  final camera = c.camera.value;
+  tool.paintWorldOverlay(
+      canvas, Vector2.zero(), camera.scale, PaperPalette.light);
+  tool.paintOverlay(canvas, camera, viewport, PaperPalette.light);
+  return canvas.calls;
 }
