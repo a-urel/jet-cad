@@ -53,10 +53,26 @@ void main() {
 
     // -- C's free start, left face (0, 100): a point of C's own children.
     final c0 = plan.at(0, 100);
-    List<AttachedEnd> at(Vector2 q, LiveTypeOf live) =>
+    List<AttachedEnd> at(Vector2 q, LiveTypeOf live,
+            [Map<Handle, WallPoints>? points]) =>
         attachCandidates(doc, index, q,
-            live: live, objectSnap: true, thickest: thickestWall(doc, live));
+            live: live,
+            objectSnap: true,
+            thickest: thickestWall(doc, live),
+            points: points);
     expect(at(c0, all), contains(AttachedEnd(cw, 0, l)), reason: 'control');
+    // The candidate set itself, before any wall is laid out: a memo that
+    // still holds every wall's live points answers a candidate without
+    // laying it out, so a frozen wall in the set would come back from the
+    // memo (M-DG2 red here, not at a null check).
+    final held = <Handle, WallPoints>{};
+    at(c0, all, held);
+    at(plan.at(2500, 0), all, held);
+    expect(held.keys, containsAll([cw, s]), reason: 'premise: memo filled');
+    expect([
+      for (final e in at(c0, frozen(cw), {...held})) e.wall
+    ], isNot(contains(cw)),
+        reason: 'C frozen: no candidate, its points memoised');
     expect([for (final e in at(c0, frozen(cw))) e.wall], isNot(contains(cw)),
         reason: 'C frozen: none of its points');
 
@@ -66,6 +82,12 @@ void main() {
     expect(at(s0, all), contains(AttachedEnd(s, 0, c)), reason: 'control');
     expect(bruteCandidates(doc, s0), contains(AttachedEnd(s, 0, c)),
         reason: 'premise: a point of S');
+    // The candidate set first, as above (M-DG3 red here).
+    expect([
+      for (final e in at(s0, frozen(s), {...held})) e.wall
+    ], isNot(contains(s)),
+        reason: 'S frozen: no candidate through its door, its points '
+            'memoised');
     expect([for (final e in at(s0, frozen(s))) e.wall], isNot(contains(s)),
         reason: 'S frozen: its door does not bring it in');
     expect([for (final e in at(s0, frozen(door))) e.wall], isNot(contains(s)),
