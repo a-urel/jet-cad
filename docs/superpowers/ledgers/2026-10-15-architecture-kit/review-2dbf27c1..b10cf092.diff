@@ -1,0 +1,1733 @@
+b10cf092 feat(architecture): the furniture library (3a C4)
+ .../assets/library/furniture.jetlib                |   1 +
+ .../assets/library/furniture.snapshot.json         |  43 ++
+ .../lib/src/furniture/furniture_catalog.dart       | 557 +++++++++++++++++
+ .../lib/src/furniture/furniture_names.dart         | 115 ++++
+ .../lib/src/furniture/furniture_source.dart        |  22 +
+ .../lib/src/words/words.dart                       |  13 +-
+ packages/jet_cad_2d_kit_architecture/pubspec.yaml  |   4 +
+ .../test/furniture/furniture_library_test.dart     | 682 +++++++++++++++++++++
+ .../test/furniture/package_assets_test.dart        |  61 ++
+ .../test/scaffold/words_test.dart                  |  23 +-
+ .../test/support/place_entry.dart                  |  84 +++
+ .../tool/generate_furniture_library.dart           |  25 +
+ 12 files changed, 1616 insertions(+), 14 deletions(-)
+diff --git a/packages/jet_cad_2d_kit_architecture/lib/src/furniture/furniture_catalog.dart b/packages/jet_cad_2d_kit_architecture/lib/src/furniture/furniture_catalog.dart
+new file mode 100644
+index 00000000..8cd200eb
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/lib/src/furniture/furniture_catalog.dart
+@@ -0,0 +1,557 @@
++// The architecture kit's furniture (spec 3a C4): today's 41 symbols
++// (jet_cad_floor_plan/lib/src/symbols/furniture_catalog.dart), rewritten in
++// the authoring language, each in millimetres in a corner-origin local frame
++// (x to the right, y up the plan, the front of the piece on y = 0), its base
++// point off the origin.
++//
++// - Keys: `architecture.` and today's key, at version 1 (umbrella decision
++//   9: no plan of jet_cad_floor_plan is read, so versions restart);
++//   `armchair`, one segment, is `architecture.armchair.single`.
++// - Behaviour is fields (umbrella A5): the 30 symbols of 09c D9's
++//   against-the-wall set attach to `wall-face`; the six size families are
++//   `family` fields; tags are search words only.
++// - The dining tables are plain symbols (decision 3): no unit.
++// - Every symbol's leaves are today's, in today's order and vertex order: a
++//   chair is today's `_chair` (a `rect` and its back line), not `chairAt`.
++//
++// Pure Dart: no Flutter, no dart:io (the generator runs it under `dart run`).
++import 'dart:math' as math;
++
++import 'package:jet_cad_2d_kit/authoring.dart';
++
++const double _pi = math.pi;
++
++const String _dining = 'Dining Room';
++const String _kitchen = 'Kitchen';
++const String _bedRoom = 'Bed Room';
++const String _livingRoom = 'Living Room';
++const String _bathroom = 'Bathroom';
++const String _office = 'Office';
++
++/// The one attachment kind the kit's symbols name (spec C5).
++const List<String> _wallFace = ['wall-face'];
++
++/// Which side of the table a chair sits on; the chair's back is on the far
++/// side from the table.
++enum _Side { bottom, top, left, right }
++
++/// Today's seat depth beyond the table edge: 450 − 100 = 350.
++const double _chairReach = chairSize - chairTuck;
++
++CatalogLine _line(double x1, double y1, double x2, double y2) =>
++    CatalogLine((x1, y1), (x2, y2));
++
++/// One chair: a closed 450 x 450 seat outline from (x, y) and a thin back
++/// line 60 mm in from the outer edge, on the side away from the table.
++List<CatalogShape> _chair(double x, double y, _Side back) => [
++      rect(x, y, chairSize, chairSize),
++      switch (back) {
++        _Side.bottom => _line(x, y + 60, x + chairSize, y + 60),
++        _Side.top =>
++          _line(x, y + chairSize - 60, x + chairSize, y + chairSize - 60),
++        _Side.left => _line(x + 60, y, x + 60, y + chairSize),
++        _Side.right =>
++          _line(x + chairSize - 60, y, x + chairSize - 60, y + chairSize),
++      },
++    ];
++
++/// A [tw] x [th] table with its chairs, its lower-left corner at ([ox],
++/// [oy]); [chairs] are (side, centre along that side) pairs. The base point
++/// is the table centre. Leaves: table outline, table inset, then each chair
++/// (outline, back line). A plain symbol (decision 3).
++CatalogSymbol _diningSet(String key, String name, double tw, double th,
++    double ox, double oy, List<String> tags, List<(_Side, double)> chairs) {
++  final shapes = <CatalogShape>[
++    rect(ox, oy, tw, th),
++    rect(ox + 50, oy + 50, tw - 100, th - 100),
++  ];
++  for (final (side, c) in chairs) {
++    const h = chairSize / 2;
++    switch (side) {
++      case _Side.bottom:
++        shapes.addAll(_chair(ox + c - h, oy - _chairReach, side));
++      case _Side.top:
++        shapes.addAll(_chair(ox + c - h, oy + th - chairTuck, side));
++      case _Side.left:
++        shapes.addAll(_chair(ox - _chairReach, oy + c - h, side));
++      case _Side.right:
++        shapes.addAll(_chair(ox + tw - chairTuck, oy + c - h, side));
++    }
++  }
++  return CatalogSymbol(
++    key: key,
++    name: name,
++    category: _dining,
++    tags: tags,
++    base: (ox + tw / 2, oy + th / 2),
++    shapes: shapes,
++  );
++}
++
++// The size families (spec 09c D9): each member is its family's drawing at
++// another width, the depth, the front (y = 0) and the back the same, the
++// base point on the box's centre x.
++
++/// A double bed [w] x 2000: outline, two pillows 240 deep with 100 mm
++/// margins and gap, the fold line at 1300. Base point: the centre.
++CatalogSymbol _doubleBed(String key, String name, double w) {
++  final pillow = (w - 300) / 2;
++  return CatalogSymbol(
++    key: key,
++    name: name,
++    category: _bedRoom,
++    tags: const ['bed', 'double', 'sleeping'],
++    attachTo: _wallFace,
++    family: 'bed-double',
++    base: (w / 2, 1000),
++    shapes: [
++      rect(0, 0, w, 2000),
++      rect(100, 1680, pillow, 240),
++      rect(200 + pillow, 1680, pillow, 240),
++      _line(0, 1300, w, 1300),
++    ],
++  );
++}
++
++/// A single bed [w] x 2000: outline, one pillow 240 deep with 120 mm
++/// margins, the fold line at 1300. Base point: the centre.
++CatalogSymbol _singleBed(String key, String name, double w) => CatalogSymbol(
++      key: key,
++      name: name,
++      category: _bedRoom,
++      tags: const ['bed', 'single', 'sleeping'],
++      attachTo: _wallFace,
++      family: 'bed-single',
++      base: (w / 2, 1000),
++      shapes: [
++        rect(0, 0, w, 2000),
++        rect(120, 1680, w - 240, 240),
++        _line(0, 1300, w, 1300),
++      ],
++    );
++
++/// A wardrobe [w] x 600 of 600 mm doors: outline, the door line at y = 40,
++/// a line between each pair of doors, the handles either side of the first.
++/// Base point: the front centre.
++CatalogSymbol _wardrobe(String key, String name, double w) => CatalogSymbol(
++      key: key,
++      name: name,
++      category: _bedRoom,
++      tags: const ['wardrobe', 'storage', 'closet'],
++      attachTo: _wallFace,
++      family: 'wardrobe',
++      base: (w / 2, 0),
++      shapes: [
++        rect(0, 0, w, 600),
++        _line(0, 40, w, 40),
++        for (var x = 600.0; x < w; x += 600) _line(x, 40, x, 600),
++        _line(560, 40, 560, 160),
++        _line(640, 40, 640, 160),
++      ],
++    );
++
++/// A kitchen base unit [w] x 600: outline, the front line at y = 40, the
++/// knob at the front centre. Base point: the front centre.
++CatalogSymbol _baseUnit(String key, String name, double w) => CatalogSymbol(
++      key: key,
++      name: name,
++      category: _kitchen,
++      tags: const ['base unit', 'cabinet', 'cupboard'],
++      attachTo: _wallFace,
++      family: 'kitchen-base',
++      base: (w / 2, 0),
++      shapes: [
++        rect(0, 0, w, 600),
++        _line(0, 40, w, 40),
++        CatalogCircle((w / 2, 20), 10),
++      ],
++    );
++
++/// A desk [w] x 700: outline, a 400 mm drawer block at the right with two
++/// drawer lines. Base point: the front centre.
++CatalogSymbol _desk(String key, String name, double w) => CatalogSymbol(
++      key: key,
++      name: name,
++      category: _office,
++      tags: const ['desk', 'office', 'table'],
++      attachTo: _wallFace,
++      family: 'desk',
++      base: (w / 2, 0),
++      shapes: [
++        rect(0, 0, w, 700),
++        _line(w - 400, 0, w - 400, 700),
++        _line(w - 400, 230, w, 230),
++        _line(w - 400, 460, w, 460),
++      ],
++    );
++
++/// The catalog, in the order the library stores it: definition handles and
++/// leaf handles ascend in this order (today's order).
++final Catalog furnitureCatalog = Catalog(kit: 'architecture', symbols: [
++  // Dining Room
++  _diningSet(
++      'architecture.dining.table.square.two',
++      'Square dining table, 2 seats',
++      800,
++      800,
++      0,
++      350,
++      const ['table', 'dining', 'square', 'two'],
++      const [(_Side.bottom, 400), (_Side.top, 400)]),
++  _diningSet('architecture.dining.table.square.four',
++      'Square dining table, 4 seats', 900, 900, 350, 350, const [
++    'table',
++    'dining',
++    'square',
++    'four'
++  ], const [
++    (_Side.bottom, 450),
++    (_Side.top, 450),
++    (_Side.left, 450),
++    (_Side.right, 450),
++  ]),
++  _diningSet('architecture.dining.table.rect.four',
++      'Rectangular dining table, 4 seats', 1400, 800, 0, 350, const [
++    'table',
++    'dining',
++    'rectangular',
++    'four'
++  ], const [
++    (_Side.bottom, 350),
++    (_Side.bottom, 1050),
++    (_Side.top, 350),
++    (_Side.top, 1050),
++  ]),
++  _diningSet('architecture.dining.table.rect.six',
++      'Rectangular dining table, 6 seats', 1800, 900, 350, 350, const [
++    'table',
++    'dining',
++    'rectangular',
++    'six'
++  ], const [
++    (_Side.bottom, 450),
++    (_Side.bottom, 1350),
++    (_Side.top, 450),
++    (_Side.top, 1350),
++    (_Side.left, 450),
++    (_Side.right, 450),
++  ]),
++  // A Ø 1100 top with four chairs, centred far enough from the origin that
++  // every chair has non-negative coordinates.
++  CatalogSymbol(
++    key: 'architecture.dining.table.round',
++    name: 'Round dining table, 4 seats',
++    category: _dining,
++    tags: const ['table', 'dining', 'round', 'four'],
++    base: (900, 900),
++    shapes: [
++      const CatalogCircle((900, 900), 550),
++      const CatalogCircle((900, 900), 500),
++      ..._chair(900 - chairSize / 2, 900 - 550 - _chairReach, _Side.bottom),
++      ..._chair(900 - chairSize / 2, 900 + 550 - chairTuck, _Side.top),
++      ..._chair(900 - 550 - _chairReach, 900 - chairSize / 2, _Side.left),
++      ..._chair(900 + 550 - chairTuck, 900 - chairSize / 2, _Side.right),
++    ],
++  ),
++  CatalogSymbol(
++    key: 'architecture.dining.chair',
++    name: 'Dining chair',
++    category: _dining,
++    tags: const ['chair', 'seating', 'dining'],
++    base: (225, 225),
++    shapes: [
++      rect(0, 0, 450, 450),
++      _line(0, 380, 450, 380),
++      rect(40, 40, 370, 300),
++    ],
++  ),
++  CatalogSymbol(
++    key: 'architecture.dining.bench',
++    name: 'Bench',
++    category: _dining,
++    tags: const ['bench', 'seating', 'dining'],
++    base: (600, 175),
++    shapes: [rect(0, 0, 1200, 350), inset(0, 0, 1200, 350, 30)],
++  ),
++
++  // Kitchen
++  _baseUnit('architecture.kitchen.base.300', 'Base unit 300', 300),
++  _baseUnit('architecture.kitchen.base.400', 'Base unit 400', 400),
++  _baseUnit('architecture.kitchen.base.600', 'Base unit 600', 600),
++  _baseUnit('architecture.kitchen.base.800', 'Base unit 800', 800),
++  CatalogSymbol(
++    key: 'architecture.kitchen.sink',
++    name: 'Sink unit',
++    category: _kitchen,
++    tags: const ['sink', 'basin', 'cabinet'],
++    attachTo: _wallFace,
++    base: (600, 0),
++    shapes: [
++      rect(0, 0, 1200, 600),
++      rect(60, 60, 500, 480),
++      const CatalogCircle((310, 300), 35),
++      _line(640, 100, 1140, 100),
++      _line(640, 200, 1140, 200),
++      _line(640, 300, 1140, 300),
++      _line(640, 400, 1140, 400),
++      const CatalogCircle((600, 570), 25),
++    ],
++  ),
++  CatalogSymbol(
++    key: 'architecture.kitchen.hob',
++    name: 'Hob',
++    category: _kitchen,
++    tags: const ['hob', 'cooker', 'stove'],
++    attachTo: _wallFace,
++    base: (300, 0),
++    shapes: [
++      poly(const [(0, 0), (600, 0), (600, 520), (0, 520)]),
++      const CatalogCircle((150, 140), 90),
++      const CatalogCircle((150, 140), 40),
++      const CatalogCircle((450, 140), 70),
++      const CatalogCircle((450, 140), 30),
++      const CatalogCircle((150, 390), 70),
++      const CatalogCircle((150, 390), 30),
++      const CatalogCircle((450, 390), 90),
++      const CatalogCircle((450, 390), 40),
++    ],
++  ),
++  CatalogSymbol(
++    key: 'architecture.kitchen.fridge',
++    name: 'Fridge',
++    category: _kitchen,
++    tags: const ['fridge', 'refrigerator', 'appliance'],
++    attachTo: _wallFace,
++    base: (300, 0),
++    shapes: [
++      rect(0, 0, 600, 650),
++      _line(0, 40, 600, 40),
++      _line(60, 40, 60, 160),
++      _line(540, 40, 540, 160),
++    ],
++  ),
++  CatalogSymbol(
++    key: 'architecture.kitchen.dishwasher',
++    name: 'Dishwasher',
++    category: _kitchen,
++    tags: const ['dishwasher', 'dishes', 'appliance'],
++    attachTo: _wallFace,
++    base: (300, 0),
++    shapes: [
++      rect(0, 0, 600, 600),
++      _line(0, 40, 600, 40),
++      _line(200, 20, 400, 20),
++    ],
++  ),
++  CatalogSymbol(
++    key: 'architecture.kitchen.washer',
++    name: 'Washing machine',
++    category: _kitchen,
++    tags: const ['washer', 'laundry', 'appliance'],
++    attachTo: _wallFace,
++    base: (300, 0),
++    shapes: [
++      rect(0, 0, 600, 600),
++      _line(0, 40, 600, 40),
++      const CatalogCircle((300, 330), 220),
++    ],
++  ),
++  CatalogSymbol(
++    key: 'architecture.kitchen.island',
++    name: 'Kitchen island',
++    category: _kitchen,
++    tags: const ['island', 'counter', 'worktop'],
++    base: (900, 450),
++    shapes: [
++      rect(0, 0, 1800, 900),
++      inset(0, 0, 1800, 900, 60),
++      _line(600, 60, 600, 840),
++      _line(1200, 60, 1200, 840),
++    ],
++  ),
++
++  // Bed Room
++  _doubleBed('architecture.bed.double.1400', 'Double bed 1400', 1400),
++  _doubleBed('architecture.bed.double', 'Double bed', 1600),
++  _doubleBed('architecture.bed.double.1800', 'Double bed 1800', 1800),
++  _singleBed('architecture.bed.single.800', 'Single bed 800', 800),
++  _singleBed('architecture.bed.single', 'Single bed', 900),
++  _singleBed('architecture.bed.single.1000', 'Single bed 1000', 1000),
++  CatalogSymbol(
++    key: 'architecture.bed.nightstand',
++    name: 'Nightstand',
++    category: _bedRoom,
++    tags: const ['nightstand', 'bedside', 'table'],
++    attachTo: _wallFace,
++    base: (225, 0),
++    shapes: [
++      rect(0, 0, 450, 400),
++      inset(0, 0, 450, 400, 40),
++      const CatalogCircle((225, 60), 12),
++    ],
++  ),
++  _wardrobe('architecture.bed.wardrobe.1200', 'Wardrobe 1200', 1200),
++  _wardrobe('architecture.bed.wardrobe', 'Wardrobe', 1800),
++  _wardrobe('architecture.bed.wardrobe.2400', 'Wardrobe 2400', 2400),
++
++  // Living Room
++  CatalogSymbol(
++    key: 'architecture.sofa.two',
++    name: 'Two-seat sofa',
++    category: _livingRoom,
++    tags: const ['sofa', 'seating', 'couch'],
++    attachTo: _wallFace,
++    family: 'sofa',
++    base: (750, 0),
++    shapes: [
++      rect(0, 0, 1500, 900),
++      _line(0, 700, 1500, 700),
++      _line(200, 0, 200, 700),
++      _line(1300, 0, 1300, 700),
++      _line(750, 0, 750, 700),
++    ],
++  ),
++  CatalogSymbol(
++    key: 'architecture.sofa.three',
++    name: 'Three-seat sofa',
++    category: _livingRoom,
++    tags: const ['sofa', 'seating', 'couch'],
++    attachTo: _wallFace,
++    family: 'sofa',
++    base: (1000, 0),
++    shapes: [
++      rect(0, 0, 2000, 900),
++      _line(0, 700, 2000, 700),
++      _line(200, 0, 200, 700),
++      _line(1800, 0, 1800, 700),
++      _line(733, 0, 733, 700),
++      _line(1267, 0, 1267, 700),
++    ],
++  ),
++  CatalogSymbol(
++    key: 'architecture.armchair.single',
++    name: 'Armchair',
++    category: _livingRoom,
++    tags: const ['armchair', 'seating', 'chair'],
++    base: (425, 0),
++    shapes: [
++      rect(0, 0, 850, 850),
++      _line(0, 650, 850, 650),
++      _line(150, 0, 150, 650),
++      _line(700, 0, 700, 650),
++    ],
++  ),
++  CatalogSymbol(
++    key: 'architecture.table.coffee',
++    name: 'Coffee table',
++    category: _livingRoom,
++    tags: const ['table', 'coffee', 'low'],
++    base: (550, 300),
++    shapes: [rect(0, 0, 1100, 600), inset(0, 0, 1100, 600, 40)],
++  ),
++  CatalogSymbol(
++    key: 'architecture.tv.unit',
++    name: 'TV unit',
++    category: _livingRoom,
++    tags: const ['tv', 'media', 'unit', 'storage'],
++    attachTo: _wallFace,
++    base: (800, 0),
++    shapes: [
++      rect(0, 0, 1600, 450),
++      _line(533, 0, 533, 450),
++      _line(1066, 0, 1066, 450),
++      _line(0, 40, 1600, 40),
++    ],
++  ),
++
++  // Bathroom
++  CatalogSymbol(
++    key: 'architecture.bath.toilet',
++    name: 'Toilet',
++    category: _bathroom,
++    tags: const ['toilet', 'wc', 'sanitary'],
++    attachTo: _wallFace,
++    base: (200, 0),
++    shapes: [
++      poly(const [(0, 500), (400, 500), (400, 700), (0, 700)]),
++      _line(0, 500, 0, 200),
++      _line(400, 500, 400, 200),
++      const CatalogArc((200, 200), 200, _pi, _pi),
++      _line(50, 500, 50, 200),
++      _line(350, 500, 350, 200),
++      const CatalogArc((200, 200), 150, _pi, _pi),
++    ],
++  ),
++  CatalogSymbol(
++    key: 'architecture.bath.washbasin',
++    name: 'Washbasin',
++    category: _bathroom,
++    tags: const ['washbasin', 'sink', 'sanitary'],
++    attachTo: _wallFace,
++    base: (300, 0),
++    shapes: [
++      poly(const [(0, 0), (600, 0), (600, 450), (0, 450)]),
++      const CatalogCircle((300, 210), 170),
++      const CatalogCircle((300, 210), 20),
++      const CatalogCircle((300, 410), 18),
++    ],
++  ),
++  CatalogSymbol(
++    key: 'architecture.bath.tub',
++    name: 'Bathtub',
++    category: _bathroom,
++    tags: const ['bathtub', 'bath', 'sanitary'],
++    attachTo: _wallFace,
++    base: (850, 375),
++    shapes: [
++      rect(0, 0, 1700, 750),
++      inset(0, 0, 1700, 750, 70),
++      const CatalogCircle((170, 375), 25),
++      const CatalogCircle((1620, 375), 15),
++    ],
++  ),
++  CatalogSymbol(
++    key: 'architecture.bath.shower',
++    name: 'Shower tray',
++    category: _bathroom,
++    tags: const ['shower', 'tray', 'sanitary'],
++    attachTo: _wallFace,
++    base: (450, 450),
++    shapes: [
++      rect(0, 0, 900, 900),
++      inset(0, 0, 900, 900, 50),
++      const CatalogCircle((450, 450), 40),
++    ],
++  ),
++
++  // Office
++  _desk('architecture.office.desk.1200', 'Desk 1200', 1200),
++  _desk('architecture.office.desk', 'Desk', 1400),
++  _desk('architecture.office.desk.1600', 'Desk 1600', 1600),
++  CatalogSymbol(
++    key: 'architecture.office.chair',
++    name: 'Office chair',
++    category: _office,
++    tags: const ['chair', 'office', 'seating'],
++    base: (300, 300),
++    shapes: [
++      const CatalogCircle((300, 300), 300),
++      const CatalogCircle((300, 300), 230),
++      const CatalogArc((300, 300), 280, _pi / 4, _pi / 2),
++    ],
++  ),
++  CatalogSymbol(
++    key: 'architecture.office.bookshelf',
++    name: 'Bookshelf',
++    category: _office,
++    tags: const ['bookshelf', 'shelf', 'storage'],
++    attachTo: _wallFace,
++    base: (450, 0),
++    shapes: [
++      rect(0, 0, 900, 300),
++      _line(0, 30, 900, 30),
++      _line(300, 30, 300, 300),
++      _line(600, 30, 600, 300),
++    ],
++  ),
++]);
+diff --git a/packages/jet_cad_2d_kit_architecture/lib/src/furniture/furniture_names.dart b/packages/jet_cad_2d_kit_architecture/lib/src/furniture/furniture_names.dart
+new file mode 100644
+index 00000000..843460b2
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/lib/src/furniture/furniture_names.dart
+@@ -0,0 +1,115 @@
++// The furniture library's names in German and Turkish (spec 3a C4; today's
++// jet_cad_floor_plan/lib/src/symbols/furniture_names.dart), under the kit's
++// word ids: `symbol:<key>` and `category:architecture/<English category>`.
++// English is the library's own stored text.
++//
++// Pure Dart: no Flutter, no dart:io.
++
++/// The German words (`words.dart` spreads them into `architectureNames`).
++const Map<String, String> furnitureGerman = {
++  'symbol:architecture.dining.table.square.two':
++      'Quadratischer Esstisch, 2 Plätze',
++  'symbol:architecture.dining.table.square.four':
++      'Quadratischer Esstisch, 4 Plätze',
++  'symbol:architecture.dining.table.rect.four':
++      'Rechteckiger Esstisch, 4 Plätze',
++  'symbol:architecture.dining.table.rect.six':
++      'Rechteckiger Esstisch, 6 Plätze',
++  'symbol:architecture.dining.table.round': 'Runder Esstisch, 4 Plätze',
++  'symbol:architecture.dining.chair': 'Esszimmerstuhl',
++  'symbol:architecture.dining.bench': 'Sitzbank',
++  'symbol:architecture.kitchen.base.300': 'Unterschrank 300',
++  'symbol:architecture.kitchen.base.400': 'Unterschrank 400',
++  'symbol:architecture.kitchen.base.600': 'Unterschrank 600',
++  'symbol:architecture.kitchen.base.800': 'Unterschrank 800',
++  'symbol:architecture.kitchen.sink': 'Spülenschrank',
++  'symbol:architecture.kitchen.hob': 'Kochfeld',
++  'symbol:architecture.kitchen.fridge': 'Kühlschrank',
++  'symbol:architecture.kitchen.dishwasher': 'Geschirrspüler',
++  'symbol:architecture.kitchen.washer': 'Waschmaschine',
++  'symbol:architecture.kitchen.island': 'Kücheninsel',
++  'symbol:architecture.bed.double.1400': 'Doppelbett 1400',
++  'symbol:architecture.bed.double': 'Doppelbett',
++  'symbol:architecture.bed.double.1800': 'Doppelbett 1800',
++  'symbol:architecture.bed.single.800': 'Einzelbett 800',
++  'symbol:architecture.bed.single': 'Einzelbett',
++  'symbol:architecture.bed.single.1000': 'Einzelbett 1000',
++  'symbol:architecture.bed.nightstand': 'Nachttisch',
++  'symbol:architecture.bed.wardrobe.1200': 'Kleiderschrank 1200',
++  'symbol:architecture.bed.wardrobe': 'Kleiderschrank',
++  'symbol:architecture.bed.wardrobe.2400': 'Kleiderschrank 2400',
++  'symbol:architecture.sofa.two': 'Zweisitzer-Sofa',
++  'symbol:architecture.sofa.three': 'Dreisitzer-Sofa',
++  'symbol:architecture.armchair.single': 'Sessel',
++  'symbol:architecture.table.coffee': 'Couchtisch',
++  'symbol:architecture.tv.unit': 'TV-Möbel',
++  'symbol:architecture.bath.toilet': 'WC',
++  'symbol:architecture.bath.washbasin': 'Waschbecken',
++  'symbol:architecture.bath.tub': 'Badewanne',
++  'symbol:architecture.bath.shower': 'Duschtasse',
++  'symbol:architecture.office.desk.1200': 'Schreibtisch 1200',
++  'symbol:architecture.office.desk': 'Schreibtisch',
++  'symbol:architecture.office.desk.1600': 'Schreibtisch 1600',
++  'symbol:architecture.office.chair': 'Bürostuhl',
++  'symbol:architecture.office.bookshelf': 'Bücherregal',
++  'category:architecture/Dining Room': 'Esszimmer',
++  'category:architecture/Kitchen': 'Küche',
++  'category:architecture/Bed Room': 'Schlafzimmer',
++  'category:architecture/Living Room': 'Wohnzimmer',
++  'category:architecture/Bathroom': 'Badezimmer',
++  'category:architecture/Office': 'Büro',
++};
++
++/// The Turkish words.
++const Map<String, String> furnitureTurkish = {
++  'symbol:architecture.dining.table.square.two': 'Kare yemek masası, 2 kişilik',
++  'symbol:architecture.dining.table.square.four':
++      'Kare yemek masası, 4 kişilik',
++  'symbol:architecture.dining.table.rect.four':
++      'Dikdörtgen yemek masası, 4 kişilik',
++  'symbol:architecture.dining.table.rect.six':
++      'Dikdörtgen yemek masası, 6 kişilik',
++  'symbol:architecture.dining.table.round': 'Yuvarlak yemek masası, 4 kişilik',
++  'symbol:architecture.dining.chair': 'Yemek sandalyesi',
++  'symbol:architecture.dining.bench': 'Bank',
++  'symbol:architecture.kitchen.base.300': 'Alt dolap 300',
++  'symbol:architecture.kitchen.base.400': 'Alt dolap 400',
++  'symbol:architecture.kitchen.base.600': 'Alt dolap 600',
++  'symbol:architecture.kitchen.base.800': 'Alt dolap 800',
++  'symbol:architecture.kitchen.sink': 'Eviye dolabı',
++  'symbol:architecture.kitchen.hob': 'Ocak',
++  'symbol:architecture.kitchen.fridge': 'Buzdolabı',
++  'symbol:architecture.kitchen.dishwasher': 'Bulaşık makinesi',
++  'symbol:architecture.kitchen.washer': 'Çamaşır makinesi',
++  'symbol:architecture.kitchen.island': 'Mutfak adası',
++  'symbol:architecture.bed.double.1400': 'Çift kişilik yatak 1400',
++  'symbol:architecture.bed.double': 'Çift kişilik yatak',
++  'symbol:architecture.bed.double.1800': 'Çift kişilik yatak 1800',
++  'symbol:architecture.bed.single.800': 'Tek kişilik yatak 800',
++  'symbol:architecture.bed.single': 'Tek kişilik yatak',
++  'symbol:architecture.bed.single.1000': 'Tek kişilik yatak 1000',
++  'symbol:architecture.bed.nightstand': 'Komodin',
++  'symbol:architecture.bed.wardrobe.1200': 'Gardırop 1200',
++  'symbol:architecture.bed.wardrobe': 'Gardırop',
++  'symbol:architecture.bed.wardrobe.2400': 'Gardırop 2400',
++  'symbol:architecture.sofa.two': 'İkili kanepe',
++  'symbol:architecture.sofa.three': 'Üçlü kanepe',
++  'symbol:architecture.armchair.single': 'Koltuk',
++  'symbol:architecture.table.coffee': 'Sehpa',
++  'symbol:architecture.tv.unit': 'TV ünitesi',
++  'symbol:architecture.bath.toilet': 'Klozet',
++  'symbol:architecture.bath.washbasin': 'Lavabo',
++  'symbol:architecture.bath.tub': 'Küvet',
++  'symbol:architecture.bath.shower': 'Duş teknesi',
++  'symbol:architecture.office.desk.1200': 'Çalışma masası 1200',
++  'symbol:architecture.office.desk': 'Çalışma masası',
++  'symbol:architecture.office.desk.1600': 'Çalışma masası 1600',
++  'symbol:architecture.office.chair': 'Ofis sandalyesi',
++  'symbol:architecture.office.bookshelf': 'Kitaplık',
++  'category:architecture/Dining Room': 'Yemek odası',
++  'category:architecture/Kitchen': 'Mutfak',
++  'category:architecture/Bed Room': 'Yatak odası',
++  'category:architecture/Living Room': 'Oturma odası',
++  'category:architecture/Bathroom': 'Banyo',
++  'category:architecture/Office': 'Ofis',
++};
+diff --git a/packages/jet_cad_2d_kit_architecture/lib/src/furniture/furniture_source.dart b/packages/jet_cad_2d_kit_architecture/lib/src/furniture/furniture_source.dart
+new file mode 100644
+index 00000000..e2d6d545
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/lib/src/furniture/furniture_source.dart
+@@ -0,0 +1,22 @@
++// The furniture library as the kit's symbol source (spec 3a C4, contract
++// K5): the package's asset, read under its `packages/` key so a host app
++// finds it (today's kFurnitureLibraryAsset and readBundledLibrary,
++// jet_cad_floor_plan/lib/src/symbols/symbol_library_loader.dart:17-26).
++import 'dart:typed_data';
++
++import 'package:flutter/services.dart' show AssetBundle;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart'
++    show SymbolLibrarySource, bundledLibrary;
++
++/// The library's asset key: the package's, never an app's.
++const String kFurnitureAsset =
++    'packages/jet_cad_2d_kit_architecture/assets/library/furniture.jetlib';
++
++/// The reader of [kFurnitureAsset] in [bundle] (`rootBundle` when null),
++/// resolved each time it runs.
++Future<Uint8List> Function() furnitureReader({AssetBundle? bundle}) =>
++    bundledLibrary(kFurnitureAsset, bundle: bundle);
++
++/// The kit's one symbol source: [furnitureReader] over `rootBundle`.
++final SymbolLibrarySource furnitureSource =
++    SymbolLibrarySource(label: 'furniture', read: furnitureReader());
+diff --git a/packages/jet_cad_2d_kit_architecture/lib/src/words/words.dart b/packages/jet_cad_2d_kit_architecture/lib/src/words/words.dart
+index ebc015c8..a3272620 100644
+--- a/packages/jet_cad_2d_kit_architecture/lib/src/words/words.dart
++++ b/packages/jet_cad_2d_kit_architecture/lib/src/words/words.dart
+@@ -1,22 +1,27 @@
+ // The architecture kit's words (spec 3a C2 "Words", C1.6): tool:, type:,
+-// property: and text: ids in English, German and Turkish. Task 23 adds the
+-// furniture library's symbol: and category: words.
++// property: and text: ids in English, German and Turkish, and the furniture
++// library's symbol: and category: words in German and Turkish (Task 23;
++// English is the library's stored text).
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show KitNames;
+ 
++import '../furniture/furniture_names.dart';
+ import 'de.dart';
+ import 'en.dart';
+ import 'tr.dart';
+ 
+ /// The kit's words by locale.
+-const KitNames architectureNames =
+-    KitNames({'en': englishWords, 'de': germanWords, 'tr': turkishWords});
++const KitNames architectureNames = KitNames({
++  'en': englishWords,
++  'de': {...germanWords, ...furnitureGerman},
++  'tr': {...turkishWords, ...furnitureTurkish},
++});
+ 
+ /// The words whose right word is the English one, per locale: conformance's
+ /// `sameAsEnglish` (contract K7). The dimension's notice is the value alone
+ /// in every language.
+ const Map<String, Set<String>> architectureSameAsEnglish = {
+   'de': {
+     'property:architecture.opening.position',
+     'property:architecture.room.name',
+     'property:architecture.dimension.kind.horizontal',
+     'text:architecture.dimension-value',
+diff --git a/packages/jet_cad_2d_kit_architecture/pubspec.yaml b/packages/jet_cad_2d_kit_architecture/pubspec.yaml
+index 9cef35b4..1837421f 100644
+--- a/packages/jet_cad_2d_kit_architecture/pubspec.yaml
++++ b/packages/jet_cad_2d_kit_architecture/pubspec.yaml
+@@ -25,10 +25,14 @@ dependencies:
+   jet_cad_2d: ^0.7.2
+   jet_cad_2d_flutter: ^0.7.2
+   jet_cad_2d_kit: ^0.1.0
+   meta: ^1.18.0
+   vector_math: ^2.2.0
+ 
+ dev_dependencies:
+   flutter_test:
+     sdk: flutter
+   lints: ^6.1.0
++
++flutter:
++  assets:
++    - assets/library/furniture.jetlib
+diff --git a/packages/jet_cad_2d_kit_architecture/test/furniture/furniture_library_test.dart b/packages/jet_cad_2d_kit_architecture/test/furniture/furniture_library_test.dart
+new file mode 100644
+index 00000000..a08a0205
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/test/furniture/furniture_library_test.dart
+@@ -0,0 +1,682 @@
++// 3a Task 23 (spec C4, C7), ported from jet_cad_floor_plan/test/symbols/
++// furniture_library_test.dart (spec 09 D2, D7, plan 09a Task 5): the
++// committed asset must equal what the catalog builds, every symbol must
++// load, sit off the origin, place cleanly at an off-origin point and quarter
++// turn, and be a plausible size in millimetres. C7's rulings: keys and
++// versions are C4's (class 1); the against-wall and family tags are the
++// `attachTo` and `family` fields (class 2); "the behaviour tags come last"
++// is retired (class 2); the pre-09c group and "the 14 new symbols … == 27"
++// are not ported (umbrella decision 9); the seating group's two seat-count
++// tests are dropped (decision 7). Placement goes through the test support's
++// `placeEntry` (the plan's placer is not exported).
++import 'dart:io';
++import 'dart:typed_data';
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/authoring.dart' show encodeLibrary;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:jet_cad_2d_kit_architecture/src/furniture/furniture_catalog.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/place_entry.dart';
++
++Uint8List builtBytes() => encodeLibrary(furnitureCatalog);
++
++Uint8List assetBytes() =>
++    File('assets/library/furniture.jetlib').readAsBytesSync();
++
++SymbolLibrary assetLibrary() => SymbolLibrary.decode(assetBytes());
++
++/// A document a symbol is placed in: the contract's components and
++/// millimetres (today's `prepareDocument` less the planner's own types and
++/// its DASHED record, which no furniture leaf uses).
++DraftDocument placementDocument() {
++  final doc = DraftDocument.empty();
++  registerKitComponents(doc.components);
++  doc.header.units = DrawingUnits.millimeters;
++  return doc;
++}
++
++void main() {
++  group('the asset', () {
++    test('the committed bytes equal the built library', () {
++      expect(builtBytes(), orderedEquals(assetBytes()),
++          reason: 'run `dart run tool/generate_furniture_library.dart`');
++    });
++
++    test('the built library decodes through the loader', () {
++      expect(SymbolLibrary.decode(builtBytes()).entries.length,
++          furnitureCatalog.symbols.length);
++    });
++
++    test('building twice gives identical bytes', () {
++      expect(builtBytes(), orderedEquals(builtBytes()));
++    });
++
++    test('is declared in the pubspec', () {
++      final pubspec = File('pubspec.yaml').readAsStringSync();
++      expect(
++          RegExp(
++                  r'^\s*assets:\s*\n(\s*-\s+.*\n)*?\s*-\s+assets/library/'
++                  r'furniture\.jetlib\s*$',
++                  multiLine: true)
++              .hasMatch(pubspec),
++          isTrue);
++    });
++
++    test('ships 41 symbols in six categories', () {
++      final lib = assetLibrary();
++      expect(lib.entries.length, 41);
++      expect(lib.categories, [
++        'Dining Room',
++        'Kitchen',
++        'Bed Room',
++        'Living Room',
++        'Bathroom',
++        'Office',
++      ]);
++    });
++  });
++
++  group('the decoded library', () {
++    test('lists every catalog key once, in catalog order', () {
++      final keys = assetLibrary().entries.map((e) => e.symbol.key).toList();
++      expect(keys, [for (final s in furnitureCatalog.symbols) s.key]);
++      expect(keys.toSet().length, keys.length);
++    });
++
++    test('every key is lower-case dotted', () {
++      for (final e in assetLibrary().entries) {
++        expect(RegExp(r'^[a-z]+(\.[a-z0-9]+)*$').hasMatch(e.symbol.key), isTrue,
++            reason: e.symbol.key);
++      }
++    });
++
++    test('every base point is off the origin', () {
++      for (final e in assetLibrary().entries) {
++        expect(e.definition.basePoint.x != 0 || e.definition.basePoint.y != 0,
++            isTrue,
++            reason: e.symbol.key);
++        // The catalog says the same thing the file does.
++        final s =
++            furnitureCatalog.symbols.firstWhere((s) => s.key == e.symbol.key);
++        expect(e.definition.basePoint, Vector2(s.base.$1, s.base.$2));
++      }
++    });
++
++    test('every entry has a category, two tags, its version and leaves', () {
++      for (final e in assetLibrary().entries) {
++        expect(e.symbol.category, isNotEmpty, reason: e.symbol.key);
++        expect(e.symbol.tags.length, greaterThanOrEqualTo(2),
++            reason: e.symbol.key);
++        for (final t in e.symbol.tags) {
++          expect(t, t.toLowerCase(), reason: e.symbol.key);
++        }
++        // C4: versions restart at 1 (umbrella decision 9), the dining tables' 2 included.
++        expect(e.symbol.version, 1, reason: e.symbol.key);
++        expect(e.leaves, isNotEmpty, reason: e.symbol.key);
++      }
++    });
++
++    test('leaf handles ascend across the whole library', () {
++      final handles = [
++        for (final e in assetLibrary().entries)
++          for (final l in e.leaves) l.record.handle.value,
++      ];
++      expect([...handles]..sort(), handles);
++    });
++  });
++
++  group('the outline and the category of each symbol', () {
++    // Written out by hand from the drawn catalog, not derived from it: the
++    // number of closed polylines each symbol draws. Every polyline in the
++    // library is closed, so an open one is a defect.
++    const closedPolylines = {
++      'architecture.dining.table.square.two': 4,
++      'architecture.dining.table.square.four': 6,
++      'architecture.dining.table.rect.four': 6,
++      'architecture.dining.table.rect.six': 8,
++      'architecture.dining.table.round': 4,
++      'architecture.dining.chair': 2,
++      'architecture.dining.bench': 2,
++      'architecture.kitchen.base.300': 1,
++      'architecture.kitchen.base.400': 1,
++      'architecture.kitchen.base.600': 1,
++      'architecture.kitchen.base.800': 1,
++      'architecture.kitchen.sink': 2,
++      'architecture.kitchen.hob': 1,
++      'architecture.kitchen.fridge': 1,
++      'architecture.kitchen.dishwasher': 1,
++      'architecture.kitchen.washer': 1,
++      'architecture.kitchen.island': 2,
++      'architecture.bed.double.1400': 3,
++      'architecture.bed.double': 3,
++      'architecture.bed.double.1800': 3,
++      'architecture.bed.single.800': 2,
++      'architecture.bed.single': 2,
++      'architecture.bed.single.1000': 2,
++      'architecture.bed.nightstand': 2,
++      'architecture.bed.wardrobe.1200': 1,
++      'architecture.bed.wardrobe': 1,
++      'architecture.bed.wardrobe.2400': 1,
++      'architecture.sofa.two': 1,
++      'architecture.sofa.three': 1,
++      'architecture.armchair.single': 1,
++      'architecture.table.coffee': 2,
++      'architecture.tv.unit': 1,
++      'architecture.bath.toilet': 1,
++      'architecture.bath.washbasin': 1,
++      'architecture.bath.tub': 2,
++      'architecture.bath.shower': 2,
++      'architecture.office.desk.1200': 1,
++      'architecture.office.desk': 1,
++      'architecture.office.desk.1600': 1,
++      'architecture.office.chair': 0,
++      'architecture.office.bookshelf': 1,
++    };
++
++    const categories = {
++      'architecture.dining.table.square.two': 'Dining Room',
++      'architecture.dining.table.square.four': 'Dining Room',
++      'architecture.dining.table.rect.four': 'Dining Room',
++      'architecture.dining.table.rect.six': 'Dining Room',
++      'architecture.dining.table.round': 'Dining Room',
++      'architecture.dining.chair': 'Dining Room',
++      'architecture.dining.bench': 'Dining Room',
++      'architecture.kitchen.base.300': 'Kitchen',
++      'architecture.kitchen.base.400': 'Kitchen',
++      'architecture.kitchen.base.600': 'Kitchen',
++      'architecture.kitchen.base.800': 'Kitchen',
++      'architecture.kitchen.sink': 'Kitchen',
++      'architecture.kitchen.hob': 'Kitchen',
++      'architecture.kitchen.fridge': 'Kitchen',
++      'architecture.kitchen.dishwasher': 'Kitchen',
++      'architecture.kitchen.washer': 'Kitchen',
++      'architecture.kitchen.island': 'Kitchen',
++      'architecture.bed.double.1400': 'Bed Room',
++      'architecture.bed.double': 'Bed Room',
++      'architecture.bed.double.1800': 'Bed Room',
++      'architecture.bed.single.800': 'Bed Room',
++      'architecture.bed.single': 'Bed Room',
++      'architecture.bed.single.1000': 'Bed Room',
++      'architecture.bed.nightstand': 'Bed Room',
++      'architecture.bed.wardrobe.1200': 'Bed Room',
++      'architecture.bed.wardrobe': 'Bed Room',
++      'architecture.bed.wardrobe.2400': 'Bed Room',
++      'architecture.sofa.two': 'Living Room',
++      'architecture.sofa.three': 'Living Room',
++      'architecture.armchair.single': 'Living Room',
++      'architecture.table.coffee': 'Living Room',
++      'architecture.tv.unit': 'Living Room',
++      'architecture.bath.toilet': 'Bathroom',
++      'architecture.bath.washbasin': 'Bathroom',
++      'architecture.bath.tub': 'Bathroom',
++      'architecture.bath.shower': 'Bathroom',
++      'architecture.office.desk.1200': 'Office',
++      'architecture.office.desk': 'Office',
++      'architecture.office.desk.1600': 'Office',
++      'architecture.office.chair': 'Office',
++      'architecture.office.bookshelf': 'Office',
++    };
++
++    test('the tables cover exactly the 41 shipped keys', () {
++      final keys = assetLibrary().entries.map((e) => e.symbol.key).toSet();
++      expect(keys.length, 41);
++      expect(closedPolylines.keys.toSet(), keys);
++      expect(categories.keys.toSet(), keys);
++    });
++
++    test('every polyline is closed and each symbol has its closed count', () {
++      for (final e in assetLibrary().entries) {
++        final polylines =
++            e.leaves.where((l) => l.record.kind == EntityKind.polyline);
++        for (final l in polylines) {
++          expect(isClosedPolyline(l.payload), isTrue,
++              reason: '${e.symbol.key}: an open polyline');
++        }
++        expect(polylines.length, closedPolylines[e.symbol.key],
++            reason: e.symbol.key);
++      }
++    });
++
++    test('the outline (first leaf) is a closed polyline or a circle', () {
++      for (final e in assetLibrary().entries) {
++        final first = e.leaves.first;
++        if (first.record.kind == EntityKind.polyline) {
++          expect(isClosedPolyline(first.payload), isTrue, reason: e.symbol.key);
++        } else {
++          expect(first.record.kind, EntityKind.circle, reason: e.symbol.key);
++          // Written out by hand: the two symbols whose outline is a circle.
++          expect(
++              e.symbol.key,
++              isIn(const [
++                'architecture.dining.table.round',
++                'architecture.office.chair'
++              ]));
++        }
++      }
++    });
++
++    test('each key is in its own category', () {
++      for (final e in assetLibrary().entries) {
++        expect(e.symbol.category, categories[e.symbol.key],
++            reason: e.symbol.key);
++      }
++    });
++  });
++
++  group('families and the wall tag (spec 09c D9)', () {
++    // Written out by hand from D9, not derived from the catalog.
++    const againstWall = {
++      'architecture.bed.double.1400',
++      'architecture.bed.double',
++      'architecture.bed.double.1800',
++      'architecture.bed.single.800',
++      'architecture.bed.single',
++      'architecture.bed.single.1000',
++      'architecture.bed.nightstand',
++      'architecture.bed.wardrobe.1200',
++      'architecture.bed.wardrobe',
++      'architecture.bed.wardrobe.2400',
++      'architecture.kitchen.base.300',
++      'architecture.kitchen.base.400',
++      'architecture.kitchen.base.600',
++      'architecture.kitchen.base.800',
++      'architecture.kitchen.sink',
++      'architecture.kitchen.hob',
++      'architecture.kitchen.fridge',
++      'architecture.kitchen.dishwasher',
++      'architecture.kitchen.washer',
++      'architecture.sofa.two',
++      'architecture.sofa.three',
++      'architecture.tv.unit',
++      'architecture.bath.toilet',
++      'architecture.bath.washbasin',
++      'architecture.bath.tub',
++      'architecture.bath.shower',
++      'architecture.office.desk.1200',
++      'architecture.office.desk',
++      'architecture.office.desk.1600',
++      'architecture.office.bookshelf',
++    };
++
++    // D9's table: each family's members (in library order) and each
++    // member's W x D in mm, then the two appliances.
++    const families = {
++      'bed-double': [
++        'architecture.bed.double.1400',
++        'architecture.bed.double',
++        'architecture.bed.double.1800'
++      ],
++      'bed-single': [
++        'architecture.bed.single.800',
++        'architecture.bed.single',
++        'architecture.bed.single.1000'
++      ],
++      'wardrobe': [
++        'architecture.bed.wardrobe.1200',
++        'architecture.bed.wardrobe',
++        'architecture.bed.wardrobe.2400'
++      ],
++      'kitchen-base': [
++        'architecture.kitchen.base.300',
++        'architecture.kitchen.base.400',
++        'architecture.kitchen.base.600',
++        'architecture.kitchen.base.800',
++      ],
++      'desk': [
++        'architecture.office.desk.1200',
++        'architecture.office.desk',
++        'architecture.office.desk.1600'
++      ],
++      'sofa': ['architecture.sofa.two', 'architecture.sofa.three'],
++    };
++    const sizes = {
++      'architecture.bed.double.1400': (1400.0, 2000.0),
++      'architecture.bed.double': (1600.0, 2000.0),
++      'architecture.bed.double.1800': (1800.0, 2000.0),
++      'architecture.bed.single.800': (800.0, 2000.0),
++      'architecture.bed.single': (900.0, 2000.0),
++      'architecture.bed.single.1000': (1000.0, 2000.0),
++      'architecture.bed.wardrobe.1200': (1200.0, 600.0),
++      'architecture.bed.wardrobe': (1800.0, 600.0),
++      'architecture.bed.wardrobe.2400': (2400.0, 600.0),
++      'architecture.kitchen.base.300': (300.0, 600.0),
++      'architecture.kitchen.base.400': (400.0, 600.0),
++      'architecture.kitchen.base.600': (600.0, 600.0),
++      'architecture.kitchen.base.800': (800.0, 600.0),
++      'architecture.office.desk.1200': (1200.0, 700.0),
++      'architecture.office.desk': (1400.0, 700.0),
++      'architecture.office.desk.1600': (1600.0, 700.0),
++      'architecture.sofa.two': (1500.0, 900.0),
++      'architecture.sofa.three': (2000.0, 900.0),
++      'architecture.kitchen.dishwasher': (600.0, 600.0),
++      'architecture.kitchen.washer': (600.0, 600.0),
++    };
++
++    SymbolEntry entry(String key) =>
++        assetLibrary().entries.firstWhere((e) => e.symbol.key == key);
++
++    test('the against-wall set is D9\'s list exactly', () {
++      expect(againstWall, hasLength(30));
++      expect({
++        for (final e in assetLibrary().entries)
++          if (e.symbol.attachTo.contains('wall-face')) e.symbol.key,
++      }, againstWall);
++    });
++
++    test('the families are D9\'s table exactly, one family at most each', () {
++      final found = <String, List<String>>{};
++      for (final e in assetLibrary().entries) {
++        final family = e.symbol.family;
++        if (family != null) (found[family] ??= []).add(e.symbol.key);
++      }
++      expect(found, families);
++    });
++
++    test('every family\'s members share depth, front and back (W-16)', () {
++      for (final MapEntry(:key, :value) in families.entries) {
++        final first = boxOfEntry(entry(value.first))!;
++        for (final k in value.skip(1)) {
++          final b = boxOfEntry(entry(k))!;
++          expect(b.depth, first.depth, reason: '$key: $k');
++          expect(b.front, first.front, reason: '$key: $k');
++          expect(b.back, first.back, reason: '$key: $k');
++        }
++      }
++    });
++
++    test('each family member\'s and appliance\'s box is its D9 W x D', () {
++      for (final MapEntry(:key, :value) in sizes.entries) {
++        final b = boxOfEntry(entry(key))!;
++        expect((b.width, b.depth), value, reason: key);
++      }
++      expect(
++          {for (final v in families.values) ...v}
++              .difference(sizes.keys.toSet()),
++          isEmpty);
++    });
++
++    test('every base point lies on its box\'s centre x, exactly (D4 step 5)',
++        () {
++      for (final e in assetLibrary().entries) {
++        final b = boxOfEntry(e)!;
++        expect(e.definition.basePoint.x, (b.left + b.right) / 2,
++            reason: e.symbol.key);
++      }
++    });
++  });
++
++  group('the dining tables draw their chairs', () {
++    // Written out by hand: the seats of each table. A table's leaves are its
++    // outline and inset (two closed polylines), then one closed outline and
++    // one back line per chair.
++    const seats = {
++      'architecture.dining.table.square.two': 2,
++      'architecture.dining.table.square.four': 4,
++      'architecture.dining.table.rect.four': 4,
++      'architecture.dining.table.rect.six': 6,
++    };
++
++    // Axis-aligned box (minX, minY, maxX, maxY) of a closed polyline leaf.
++    (double, double, double, double) box(GeometryPayload p) {
++      final c = p.coords;
++      var minX = c[0], minY = c[1], maxX = c[0], maxY = c[1];
++      for (var i = 0; i < p.pointCount; i++) {
++        minX = c[2 * i] < minX ? c[2 * i] : minX;
++        maxX = c[2 * i] > maxX ? c[2 * i] : maxX;
++        minY = c[2 * i + 1] < minY ? c[2 * i + 1] : minY;
++        maxY = c[2 * i + 1] > maxY ? c[2 * i + 1] : maxY;
++      }
++      return (minX, minY, maxX, maxY);
++    }
++
++    List<(double, double, double, double)> chairBoxes(String key) {
++      final e = assetLibrary().entries.firstWhere((e) => e.symbol.key == key);
++      final polylines = [
++        for (final l in e.leaves)
++          if (l.record.kind == EntityKind.polyline) l,
++      ];
++      return [for (final l in polylines.skip(2)) box(l.payload)];
++    }
++
++    test('each table\'s base point is its table centre', () {
++      // Written out by hand, in the symbol's own frame (the chairs shift the
++      // table off the corner on the sides that carry them).
++      const centres = {
++        'architecture.dining.table.square.two': (400.0, 750.0),
++        'architecture.dining.table.square.four': (800.0, 800.0),
++        'architecture.dining.table.rect.four': (700.0, 750.0),
++        'architecture.dining.table.rect.six': (1250.0, 800.0),
++      };
++      for (final MapEntry(:key, :value) in centres.entries) {
++        final e = assetLibrary().entries.firstWhere((e) => e.symbol.key == key);
++        expect(e.definition.basePoint, Vector2(value.$1, value.$2),
++            reason: key);
++        final t = box(e.leaves.first.payload);
++        expect(e.definition.basePoint,
++            Vector2((t.$1 + t.$3) / 2, (t.$2 + t.$4) / 2),
++            reason: '$key: the table outline\'s centre');
++      }
++    });
++
++    test('each table draws one chair outline and back line per seat', () {
++      for (final MapEntry(:key, :value) in seats.entries) {
++        expect(chairBoxes(key).length, value, reason: key);
++        final e = assetLibrary().entries.firstWhere((e) => e.symbol.key == key);
++        final lines = e.leaves.where((l) => l.record.kind == EntityKind.line);
++        expect(lines.length, value, reason: '$key: a back line per chair');
++      }
++    });
++
++    test('every chair is 450 x 450 and tucked 100 mm under the table', () {
++      for (final key in seats.keys) {
++        final e = assetLibrary().entries.firstWhere((e) => e.symbol.key == key);
++        final table = box(e.leaves.first.payload);
++        for (final (x0, y0, x1, y1) in chairBoxes(key)) {
++          expect(x1 - x0, 450, reason: key);
++          expect(y1 - y0, 450, reason: key);
++          final ox =
++              (x1 < table.$3 ? x1 : table.$3) - (x0 > table.$1 ? x0 : table.$1);
++          final oy =
++              (y1 < table.$4 ? y1 : table.$4) - (y0 > table.$2 ? y0 : table.$2);
++          // The chair overlaps the table by 100 mm in depth and by its full
++          // 450 mm along the side.
++          expect([ox, oy]..sort(), [100, 450], reason: key);
++        }
++      }
++    });
++
++    test('the chairs of one table do not overlap each other', () {
++      for (final key in seats.keys) {
++        final boxes = chairBoxes(key);
++        for (var i = 0; i < boxes.length; i++) {
++          for (var j = i + 1; j < boxes.length; j++) {
++            final a = boxes[i], b = boxes[j];
++            final overlap =
++                a.$3 > b.$1 && b.$3 > a.$1 && a.$4 > b.$2 && b.$4 > a.$2;
++            expect(overlap, isFalse, reason: '$key: chairs $i and $j');
++          }
++        }
++      }
++    });
++
++    test('the round table draws its four chairs around its top', () {
++      final e = assetLibrary()
++          .entries
++          .firstWhere((e) => e.symbol.key == 'architecture.dining.table.round');
++      final top = e.leaves.first;
++      expect(top.record.kind, EntityKind.circle);
++      final c = top.payload.pointAt(0);
++      final r = top.payload.scalars[0];
++      expect(e.definition.basePoint, c, reason: 'the base point is the top');
++      expect((c.x, c.y, r), (900.0, 900.0, 550.0));
++      final chairs = [
++        for (final l in e.leaves)
++          if (l.record.kind == EntityKind.polyline) l.payload,
++      ];
++      expect(chairs, hasLength(4));
++      for (final p in chairs) {
++        // A 450 x 450 seat whose nearest edge is 100 under the top's edge:
++        // its nearest point to the centre is at r - 100.
++        var minD = double.infinity;
++        var minX = double.infinity, maxX = -double.infinity;
++        var minY = double.infinity, maxY = -double.infinity;
++        for (var i = 0; i < p.pointCount; i++) {
++          final q = p.pointAt(i);
++          minX = q.x < minX ? q.x : minX;
++          maxX = q.x > maxX ? q.x : maxX;
++          minY = q.y < minY ? q.y : minY;
++          maxY = q.y > maxY ? q.y : maxY;
++        }
++        expect((maxX - minX, maxY - minY), (450.0, 450.0));
++        // The nearest point of an axis-aligned box to the centre.
++        final nx = c.x.clamp(minX, maxX), ny = c.y.clamp(minY, maxY);
++        minD = (Vector2(nx, ny) - c).length;
++        expect(minD, closeTo(r - 100, 1e-9));
++        expect(minX, greaterThanOrEqualTo(0));
++        expect(minY, greaterThanOrEqualTo(0));
++      }
++    });
++  });
++
++  group('every symbol placed', () {
++    final at = Vector2(12345, -6789);
++
++    for (final s in furnitureCatalog.symbols) {
++      for (final q in [1, 3]) {
++        test('${s.key} at quarter turn $q lands its base point on at', () {
++          final entry =
++              assetLibrary().entries.firstWhere((e) => e.symbol.key == s.key);
++          final doc = placementDocument();
++          doc.commands.execute(placeEntry(doc, entry,
++              at: at, quarterTurns: q, mirrored: q == 3));
++          expect(doc.validate(), isEmpty, reason: s.key);
++          final box = doc.extents;
++          expect(box.isEmpty, isFalse);
++          expect(at.x, inInclusiveRange(box.minX, box.maxX), reason: s.key);
++          expect(at.y, inInclusiveRange(box.minY, box.maxY), reason: s.key);
++        });
++      }
++    }
++  });
++
++  group('plausible size (a unit slip guard)', () {
++    for (final s in furnitureCatalog.symbols) {
++      test('${s.key} is between 100 and 4000 mm on each axis', () {
++        final entry =
++            assetLibrary().entries.firstWhere((e) => e.symbol.key == s.key);
++        final doc = DraftDocument.empty();
++        registerKitComponents(doc.components);
++        doc.commands.execute(placeEntry(doc, entry, at: Vector2(0, 0)));
++        // Placed unrotated, at the origin, in a fresh document: the extents
++        // are the symbol's own.
++        final size = doc.extents.size;
++        expect(size.x, inInclusiveRange(100, 4000), reason: s.key);
++        expect(size.y, inInclusiveRange(100, 4000), reason: s.key);
++      });
++    }
++  });
++
++  group('C4: keys, fields and plain tables (3a Task 23)', () {
++    // Written out by hand: today's 41 keys in today's catalog order
++    // (jet_cad_floor_plan/lib/src/symbols/furniture_catalog.dart:300-675).
++    const today = [
++      'dining.table.square.two',
++      'dining.table.square.four',
++      'dining.table.rect.four',
++      'dining.table.rect.six',
++      'dining.table.round',
++      'dining.chair',
++      'dining.bench',
++      'kitchen.base.300',
++      'kitchen.base.400',
++      'kitchen.base.600',
++      'kitchen.base.800',
++      'kitchen.sink',
++      'kitchen.hob',
++      'kitchen.fridge',
++      'kitchen.dishwasher',
++      'kitchen.washer',
++      'kitchen.island',
++      'bed.double.1400',
++      'bed.double',
++      'bed.double.1800',
++      'bed.single.800',
++      'bed.single',
++      'bed.single.1000',
++      'bed.nightstand',
++      'bed.wardrobe.1200',
++      'bed.wardrobe',
++      'bed.wardrobe.2400',
++      'sofa.two',
++      'sofa.three',
++      'armchair',
++      'table.coffee',
++      'tv.unit',
++      'bath.toilet',
++      'bath.washbasin',
++      'bath.tub',
++      'bath.shower',
++      'office.desk.1200',
++      'office.desk',
++      'office.desk.1600',
++      'office.chair',
++      'office.bookshelf',
++    ];
++
++    test(
++        'FU-keys every id is `architecture.` and today\'s key at version 1, '
++        'in today\'s order; armchair, one segment today, is '
++        'architecture.armchair.single', () {
++      expect(today, hasLength(41));
++      expect([
++        for (final e in assetLibrary().entries) e.symbol.id
++      ], [
++        for (final k in today)
++          k == 'armchair'
++              ? 'architecture.armchair.single@1'
++              : 'architecture.$k@1',
++      ]);
++    });
++
++    test(
++        'FU-tags tags are search words only: no against-wall tag, no family: '
++        'tag; every attachTo is empty or exactly [wall-face]', () {
++      for (final e in assetLibrary().entries) {
++        final why = e.symbol.key;
++        expect(e.symbol.tags, isNot(contains('against-wall')), reason: why);
++        expect(e.symbol.tags.where((t) => t.startsWith('family:')), isEmpty,
++            reason: why);
++        expect(e.symbol.attachTo, anyOf(isEmpty, equals(const ['wall-face'])),
++            reason: why);
++      }
++    });
++
++    test(
++        'FU-plain-tables no symbol carries a unit, in the catalog or the '
++        'file; the five dining tables are plain symbols at version 1 '
++        '(decision 3)', () {
++      final lib = assetLibrary();
++      expect([
++        for (final e in lib.entries)
++          if (e.unit != null) e.symbol.key,
++      ], isEmpty);
++      expect([
++        for (final s in furnitureCatalog.symbols)
++          if (s.unit != null) s.key,
++      ], isEmpty);
++      for (final key in const [
++        'architecture.dining.table.square.two',
++        'architecture.dining.table.square.four',
++        'architecture.dining.table.rect.four',
++        'architecture.dining.table.rect.six',
++        'architecture.dining.table.round',
++      ]) {
++        final e = lib.entries.firstWhere((e) => e.symbol.key == key);
++        expect((e.symbol.version, e.unit), (1, null), reason: key);
++      }
++    });
++  });
++}
+diff --git a/packages/jet_cad_2d_kit_architecture/test/furniture/package_assets_test.dart b/packages/jet_cad_2d_kit_architecture/test/furniture/package_assets_test.dart
+new file mode 100644
+index 00000000..c221a5e1
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/test/furniture/package_assets_test.dart
+@@ -0,0 +1,61 @@
++// 3a Task 23 (spec C4; D-15), ported from jet_cad_floor_plan/test/
++// package_assets_test.dart PA2, PA3 (spec 14 V-10): the kit's library is read
++// under its package key, so a host app finds it; an app key fails. PA1's
++// counterpart for the kit's key is FU-asset-key. PA4 (the export font) is
++// sub-project 4's.
++import 'dart:io';
++
++import 'package:flutter/foundation.dart' show FlutterError;
++import 'package:flutter/services.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show SymbolLibrary;
++import 'package:jet_cad_2d_kit_architecture/src/furniture/furniture_source.dart';
++
++/// A bundle that serves fixed bytes under the keys it holds, and nothing
++/// else.
++class _MapBundle extends CachingAssetBundle {
++  _MapBundle(this.assets);
++
++  final Map<String, Uint8List> assets;
++
++  @override
++  Future<ByteData> load(String key) async {
++    final bytes = assets[key];
++    if (bytes == null) throw FlutterError('no asset $key');
++    return ByteData.sublistView(bytes);
++  }
++}
++
++Uint8List _file(String path) => File(path).readAsBytesSync();
++
++void main() {
++  group('V-10 the asset key is the package\'s', () {
++    // Written out, not read from the constant: a key that drifted to an
++    // app's `assets/...` must turn these red.
++    const libraryKey =
++        'packages/jet_cad_2d_kit_architecture/assets/library/furniture.jetlib';
++
++    test('FU-asset-key the constant names the package key', () {
++      expect(kFurnitureAsset, libraryKey);
++    });
++
++    test(
++        'PA2 the furniture library loads from a bundle holding only the '
++        'package key', () async {
++      final bytes = _file('assets/library/furniture.jetlib');
++      final read =
++          await furnitureReader(bundle: _MapBundle({libraryKey: bytes}))();
++      expect(read, orderedEquals(bytes));
++      expect(SymbolLibrary.decode(read).entries, isNotEmpty);
++    });
++
++    test('PA3 a bundle holding only the app\'s old key fails the read',
++        () async {
++      final bytes = _file('assets/library/furniture.jetlib');
++      await expectLater(
++          furnitureReader(
++              bundle: _MapBundle({'assets/library/furniture.jetlib': bytes}))(),
++          throwsA(isA<FlutterError>()));
++    });
++  });
++}
+diff --git a/packages/jet_cad_2d_kit_architecture/test/scaffold/words_test.dart b/packages/jet_cad_2d_kit_architecture/test/scaffold/words_test.dart
+index f2360aaa..82acddf6 100644
+--- a/packages/jet_cad_2d_kit_architecture/test/scaffold/words_test.dart
++++ b/packages/jet_cad_2d_kit_architecture/test/scaffold/words_test.dart
+@@ -1,22 +1,23 @@
+ // Spec 3a C2 "Words", C1.6: the kit's words. Every locale holds exactly the
+ // plan's word table (symbol and category words, Task 23's, aside); each
+ // text: word keeps English's placeholders and fills them; the kit validates,
+ // and conformance (A16) holds German and Turkish complete over every
+ // code-side word, the descriptor's and the table's.
++import 'dart:io';
+ import 'dart:ui' show Locale;
+ 
+ import 'package:flutter_test/flutter_test.dart';
+-import 'package:jet_cad_2d_kit/authoring.dart'
+-    show Catalog, conformance, encodeLibrary, encodeSnapshot, geometrySnapshot;
++import 'package:jet_cad_2d_kit/authoring.dart' show conformance;
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+ import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
++import 'package:jet_cad_2d_kit_architecture/src/furniture/furniture_catalog.dart';
+ import 'package:jet_cad_2d_kit_architecture/src/words/words.dart';
+ 
+ /// The 3a plan's "Word ids" table, written out (55 ids).
+ const Set<String> wordTable = {
+   'tool:architecture.box',
+   'tool:architecture.wall',
+   'tool:architecture.door',
+   'tool:architecture.window',
+   'tool:architecture.gap',
+   'tool:architecture.room',
+@@ -115,35 +116,37 @@ void main() {
+           'side': tr.text('text:architecture.face-left'),
+         }),
+         'Duvar 1F, başlangıç, sol yüzey');
+     final de = KitNamesWords(architectureNames, () => const Locale('de'));
+     // Today's strings_de.dart:304.
+     expect(de.text('text:architecture.axes-turned', {'degrees': '12,5'}),
+         'Achsen um 12,5° gedreht');
+   });
+ 
+   test(
+-      'SC-conformance the kit validates, and conformance over the empty '
+-      'catalog holds German and Turkish complete for every code-side word', () {
++      'SC-conformance the kit validates, and conformance holds German and '
++      'Turkish complete for every code-side word, over the furniture '
++      'catalog, its committed library and snapshot (D-47)', () {
+     expect(architectureKit.validate(), isEmpty);
+-    const catalog = Catalog(kit: 'architecture', symbols: []);
+     final english = architectureNames.words['en']!.keys;
+     Set<String> ids(String namespace) => {
+           for (final id in english)
+             if (id.startsWith('$namespace:'))
+               id.substring(namespace.length + 1),
+         };
+     final problems = conformance(
+-      catalog: catalog,
+-      committedLibrary: encodeLibrary(catalog),
+-      committedSnapshot: encodeSnapshot(geometrySnapshot(catalog)),
+-      names: architectureNames,
++      catalog: furnitureCatalog,
++      committedLibrary:
++          File('assets/library/furniture.jetlib').readAsBytesSync(),
++      committedSnapshot:
++          File('assets/library/furniture.snapshot.json').readAsStringSync(),
++      names: architectureKit.names,
+       locales: const ['de', 'tr'],
+       sameAsEnglish: architectureSameAsEnglish,
+       typeIds: {...ids('type'), for (final t in architectureKit.types) t.id},
+       toolIds: {...ids('tool'), for (final t in architectureKit.tools) t.id},
+       propertyIds: {...ids('property'), ...architectureKit.propertyIds},
+     );
+     // M-SC-3 and M-SC-4 are red here too (wordMissing, placeholderMismatch).
+-    expect(problems, isEmpty);
++    expect(problems, isEmpty, reason: problems.join('\n'));
+   });
+ }
+diff --git a/packages/jet_cad_2d_kit_architecture/test/support/place_entry.dart b/packages/jet_cad_2d_kit_architecture/test/support/place_entry.dart
+new file mode 100644
+index 00000000..3c9094bf
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/test/support/place_entry.dart
+@@ -0,0 +1,84 @@
++// A library entry placed by the engine's commands (3a Task 23). The plan
++// library's placer (jet_cad_2d_plan/lib/src/symbols/symbol_placer.dart:
++// 52-102 `definitionForEntry`, 126-177 `placeSymbol`) is not exported, and a
++// kit's tests may not import the plan library (tool/ci/check_kit_deps.dart),
++// so the kit's tests place through this copy of its path for a placement
++// without a unit label: the definition copied on first use (reused by key and
++// version afterwards), then a root-level instance on the drawing layer under
++// the contract's `placementTransform`, or under [transform] when given (an
++// attachment's). Not copied: the leaf-equality and unit checks of the plan's
++// reuse and its `#n` definition-name suffix (a test document holds only
++// copies this helper made), the instance style (the placer's default is
++// InstanceNode's own) and the unit label (no `units` index here).
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++/// The definition of [doc] that copies [entry] (same key and version), or
++/// null.
++Handle? copyOfEntry(DraftDocument doc, SymbolEntry entry) {
++  for (final h in doc.components.withComponent<SymbolComponent>()) {
++    final c = doc.components.get<SymbolComponent>(h);
++    if (c != null &&
++        c.key == entry.symbol.key &&
++        c.version == entry.symbol.version &&
++        doc.tree.definition(h) != null) {
++      return h;
++    }
++  }
++  return null;
++}
++
++/// The command that places [entry] in [doc] at [at] ([quarterTurns]
++/// counter-clockwise, [mirrored]), or under [transform] when given; one
++/// compound labelled `Place <name>`, every handle allocated here, in the
++/// placer's order (the definition, its leaves, the instance). [doc] must
++/// have the contract's components registered.
++CompoundCommand placeEntry(
++  DraftDocument doc,
++  SymbolEntry entry, {
++  required Vector2 at,
++  int quarterTurns = 0,
++  bool mirrored = false,
++  Transform2? transform,
++}) {
++  final commands = <DraftCommand>[];
++  var definition = copyOfEntry(doc, entry);
++  if (definition == null) {
++    final copy = doc.handleSeed.next();
++    commands
++      ..add(AddDefinitionCommand(Definition(
++        handle: copy,
++        name: entry.id,
++        basePoint: entry.definition.basePoint,
++        children: const [],
++      )))
++      ..add(SetComponentCommand<SymbolComponent>(copy, entry.symbol));
++    final unit = entry.unit;
++    if (unit != null) {
++      commands.add(SetComponentCommand<UnitComponent>(copy, unit));
++    }
++    for (final leaf in entry.leaves) {
++      commands.add(AddEntityCommand(
++        record:
++            leaf.record.copyWith(handle: doc.handleSeed.next(), owner: copy),
++        payload: leaf.payload,
++      ));
++    }
++    definition = copy;
++  }
++  commands.add(AddNodeCommand(InstanceNode(
++    handle: doc.handleSeed.next(),
++    parent: doc.rootHandle,
++    definition: definition,
++    layer: drawingLayer(doc),
++    transform: transform ??
++        placementTransform(
++          at: at,
++          basePoint: entry.definition.basePoint,
++          quarterTurns: quarterTurns,
++          mirrored: mirrored,
++        ),
++  )));
++  return CompoundCommand(commands, label: 'Place ${entry.symbol.name}');
++}
+diff --git a/packages/jet_cad_2d_kit_architecture/tool/generate_furniture_library.dart b/packages/jet_cad_2d_kit_architecture/tool/generate_furniture_library.dart
+new file mode 100644
+index 00000000..85733ac0
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/tool/generate_furniture_library.dart
+@@ -0,0 +1,25 @@
++// Writes the architecture kit's furniture library from its catalog and adds
++// the geometry snapshot's entries of new key@Ns, never rewriting one (spec
++// 3a C4, contract K7).
++//
++// Run from the package directory, under plain Dart (no Flutter):
++//   dart run tool/generate_furniture_library.dart
++import 'dart:io';
++
++import 'package:jet_cad_2d_kit/authoring.dart';
++import 'package:jet_cad_2d_kit_architecture/src/furniture/furniture_catalog.dart';
++
++void main() {
++  final library = File('assets/library/furniture.jetlib');
++  final bytes = encodeLibrary(furnitureCatalog);
++  library.parent.createSync(recursive: true);
++  library.writeAsBytesSync(bytes);
++  final snapshot = File('assets/library/furniture.snapshot.json');
++  final committed = snapshot.existsSync()
++      ? parseSnapshot(snapshot.readAsStringSync())
++      : <String, String>{};
++  snapshot.writeAsStringSync(encodeSnapshot(
++      updateSnapshot(committed, geometrySnapshot(furnitureCatalog))));
++  stdout.writeln('wrote ${library.path}: ${bytes.length} bytes, '
++      '${furnitureCatalog.symbols.length} symbols');
++}

@@ -1,0 +1,2271 @@
+# Review package: b72c2ad8..HEAD
+
+## Commits
+d742f063 refactor(kit): the symbol box family moves into the contract (spec 3a C1.4)
+
+## Files changed
+ .../specs/2026-10-13-kit-contract-design.md        |  13 +
+ packages/jet_cad_2d_kit/lib/src/model/model.dart   |   1 +
+ .../lib/src/model}/symbol_box.dart                 |  74 ++++-
+ .../test/model/placement_transform_test.dart       | 259 ++++++++++++++++
+ .../jet_cad_2d_kit/test/model/symbol_box_test.dart | 344 +++++++++++++++++++++
+ .../jet_cad_2d_kit/test/support/box_fixtures.dart  | 129 ++++++++
+ .../jet_cad_2d_kit/test/support/placements.dart    |  33 +-
+ .../lib/src/controller/services.dart               |   1 -
+ .../lib/src/panels/plan_property_panel.dart        |   1 -
+ .../lib/src/panels/symbol_section.dart             |  24 +-
+ .../lib/src/symbols/symbol_placer.dart             |  45 +--
+ .../lib/src/tools/move_resolver.dart               |  20 +-
+ .../lib/src/tools/plan_symbol_tool.dart            |   9 +-
+ .../jet_cad_2d_plan/lib/src/units/unit_index.dart  |   8 +-
+ .../jet_cad_2d_plan/lib/src/units/unit_label.dart  |   9 +-
+ .../jet_cad_2d_plan/test/controller/mode_test.dart |   3 +-
+ .../test/invariants/contract_names_test.dart       |  51 +++
+ .../test/panels/symbol_section_test.dart           |   1 -
+ .../test/service/service_record_test.dart          |   2 -
+ .../test/support/service_plans.dart                |   2 -
+ .../test/support/unit_fixtures.dart                |   2 +-
+ .../test/symbols/symbol_box_test.dart              | 293 +-----------------
+ .../test/symbols/symbol_ghost_test.dart            |   1 -
+ .../test/symbols/symbol_placer_test.dart           | 205 +-----------
+ .../test/tools/move_resolver_test.dart             |   1 -
+ .../test/tools/plan_symbol_tool_test.dart          |   2 -
+ 26 files changed, 915 insertions(+), 618 deletions(-)
+
+## Diff
+diff --git a/docs/superpowers/specs/2026-10-13-kit-contract-design.md b/docs/superpowers/specs/2026-10-13-kit-contract-design.md
+index c7650120..682d7de2 100644
+--- a/docs/superpowers/specs/2026-10-13-kit-contract-design.md
++++ b/docs/superpowers/specs/2026-10-13-kit-contract-design.md
+@@ -402,20 +402,33 @@ version's English. The umbrella's A2 now matches K5 (words on the kit, a
+   differs only up to the box's diagonal); PR2 K9's check reports an
+   unreadable pubspec as a problem instead of throwing; PR3 `CatalogArc`'s
+   sweep is signed (positive counter-clockwise, negative clockwise); PR4 the
+   purity test and K9 read directives with `package:analyzer`, a
+   dev_dependency of the contract and a dependency of `tool/ci`.
+ - PR #12: PR5 `analyzer` ^13.3.0 needs Dart 3.11, so `tool/ci`'s SDK floor
+   is `^3.11.0`; the contract keeps `^3.6.0`, since a dev_dependency binds
+   only whoever runs its tests, never a host; PR6 K6's `CatalogArc` bullet
+   states the signed sweep that PR3 introduced.
+ 
++## Amendments from sub-project 3a (2026-10-15)
++
++Each line is written by the 3a task that lands it (the 3a spec,
++[2026-10-15-architecture-kit-design.md](2026-10-15-architecture-kit-design.md),
++"Amendments to other specs").
++
++- **The symbol box family** (3a C1.4): `SymbolBox`, `isOrthonormal`,
++  `boxOfLeaves`, `boxOfEntry`, `servedTopOfEntry`, `boxOfDefinition`,
++  `footprintOf` and `placementTransform` are the contract's, pure Dart in
++  the model (`lib/src/model/symbol_box.dart`), exported by both libraries;
++  moved unchanged from the plan library, which imports them from here and
++  keeps no copy.
++
+ ## Inputs for sub-project 2
+ 
+ The final review's API risks, none needing a breaking change if settled in
+ sub-project 2's spec before the wave publishes 0.1.0:
+ 
+ - **R1 Per-unit data has no home.** `UnitComponent` sits on a definition;
+   umbrella A6's per-unit label (`assigned`, set by a kit's type) and number
+   (`numbered`) need an instance-level contract component, so
+   `registerKitComponents`' "the four and nothing else" changes. A parametric
+   unit (a booth with N seats) cannot carry a capacity on a definition's
+diff --git a/packages/jet_cad_2d_kit/lib/src/model/model.dart b/packages/jet_cad_2d_kit/lib/src/model/model.dart
+index 6ae08784..1cb0babd 100644
+--- a/packages/jet_cad_2d_kit/lib/src/model/model.dart
++++ b/packages/jet_cad_2d_kit/lib/src/model/model.dart
+@@ -1,11 +1,12 @@
+ // The model's single export list: both public libraries export this file,
+ // so the contract and the authoring toolkit carry the same model.
+ export 'kit_ids.dart';
+ export 'kit_names.dart';
+ export 'kit_problem.dart';
+ export 'library_component.dart';
+ export 'manifest_component.dart';
+ export 'register.dart' show registerKitComponents;
++export 'symbol_box.dart';
+ export 'symbol_library.dart';
+ export 'symbol_component.dart';
+ export 'unit_component.dart';
+diff --git a/packages/jet_cad_2d_plan/lib/src/symbols/symbol_box.dart b/packages/jet_cad_2d_kit/lib/src/model/symbol_box.dart
+similarity index 67%
+rename from packages/jet_cad_2d_plan/lib/src/symbols/symbol_box.dart
+rename to packages/jet_cad_2d_kit/lib/src/model/symbol_box.dart
+index f72fea79..07edc10e 100644
+--- a/packages/jet_cad_2d_plan/lib/src/symbols/symbol_box.dart
++++ b/packages/jet_cad_2d_kit/lib/src/model/symbol_box.dart
+@@ -1,25 +1,30 @@
+ // The symbol's local box (spec 09c D2): the axis-aligned bounds of a
+ // symbol's leaves in its definition's coordinates (the base point not
+ // subtracted). The catalog's frame (F-1) puts the front of a piece on its
+ // smallest y and its back on its largest, so `front = minY` and
+-// `back = maxY`.
++// `back = maxY`. And the placement transform (spec 09 D6, 09c D5) and the
++// orthonormal test (09c W-8, S-10) a placement and an attachment use.
+ //
+-// No Flutter import and no `dart:ui`: this file is Dart over
+-// `package:jet_cad_2d` and the kit's `SymbolEntry` only (spec D1, T-4;
+-// ported to the plan library by Task 14).
++// Moved into the contract from jet_cad_2d_plan's symbols/symbol_box.dart
++// and symbol_placer.dart, unchanged (3a Task 1, spec C1.4): a kit's
++// attachment provider needs the neighbours' boxes and the exact placement
++// (the wall-face provider, spec 3a C5).
++//
++// Pure Dart: no Flutter, no dart:io.
+ import 'dart:math' as math;
+ 
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+-import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show SymbolEntry;
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
++import 'symbol_library.dart' show SymbolEntry;
++
+ /// The local box of a symbol: `left = minX`, `right = maxX`,
+ /// `front = minY`, `back = maxY` in the definition's coordinates.
+ final class SymbolBox {
+   final double left, right, front, back;
+ 
+   const SymbolBox({
+     required this.left,
+     required this.right,
+     required this.front,
+     required this.back,
+@@ -142,30 +147,85 @@ Aabb2 servedTopOfEntry(SymbolEntry entry) {
+       (kind == EntityKind.polyline && isClosedPolyline(first.payload));
+   if (!served) return whole;
+   final top = boxOfLeaves([(kind, first.payload)]);
+   return top == null ? whole : footprintOf(top);
+ }
+ 
+ /// The local box of the definition [definition] in [doc], from its **live**
+ /// leaves (the entities it owns); null when [definition] names no definition
+ /// or none of its leaves draws.
+ ///
+-/// Not memoised: O(entities) per call. The per-document memo cleared on a
+-/// document change belongs to the caller (`WallFaces`, spec D3, D4).
++/// Not memoised: O(entities) per call. A caller that asks often keeps its
++/// own memo and drops it when the document changes (its
++/// `commands.stateId`).
+ SymbolBox? boxOfDefinition(DraftDocument doc, Handle definition) {
+   if (doc.tree.definition(definition) == null) return null;
+   final entities = doc.entities;
+   return boxOfLeaves([
+     for (final slot in entities.liveSlots)
+       if (entities.ownerAt(slot) == definition)
+         (
+           entities.kindAt(slot),
+           doc.geometry.read(entities.geomIndexAt(slot)),
+         ),
+   ]);
+ }
+ 
+ /// [box] as the engine's box, the shape `AttachmentQuery.footprint` takes:
+ /// x from left to right, y from front to back, in the definition's
+ /// coordinates.
+ Aabb2 footprintOf(SymbolBox box) =>
+     Aabb2.raw(box.left, box.front, box.right, box.back);
++
++/// Whether [g]'s linear part is orthonormal (spec 09c W-8, S-10):
++/// `|a² + b² − 1|`, `|c² + d² − 1|` and `|ac + bd|` each at most
++/// `Tolerance.standard.linear`. A mirror is orthonormal; a scale is not.
++bool isOrthonormal(Transform2 g) {
++  final tol = Tolerance.standard.linear;
++  return (g.a * g.a + g.b * g.b - 1).abs() <= tol &&
++      (g.c * g.c + g.d * g.d - 1).abs() <= tol &&
++      (g.a * g.c + g.b * g.d).abs() <= tol;
++}
++
++/// `translation(at) · rotation · scale(mirrored ? -1 : 1, 1) ·
++/// translation(-basePoint)`: the definition's base point lands on [at]
++/// (spec F-2), and a mirror flips the **local** x axis whatever the
++/// rotation.
++///
++/// The rotation is given one of two ways, never both (an [ArgumentError],
++/// in release builds too):
++/// - [quarterTurns] counter-clockwise, taken modulo 4 (negative allowed),
++///   with exact cosine and sine from a table (0 and ±1, never `6e-17`);
++/// - [rotation], a unit vector `(cos, sin)` used exactly as given (spec 09c
++///   D5: a wall face's `t`).
++///
++/// Neither is no turn. The quarter-turn form is the [rotation] form at its
++/// table entry, so the two give the same bytes. No stored component is
++/// `-0.0` in either form, so a placement stores clean numbers in a file.
++Transform2 placementTransform({
++  required Vector2 at,
++  required Vector2 basePoint,
++  int? quarterTurns,
++  (double, double)? rotation,
++  bool mirrored = false,
++}) {
++  if (quarterTurns != null && rotation != null) {
++    throw ArgumentError(
++        'placementTransform takes quarterTurns or rotation, not both');
++  }
++  final (cos, sin) = rotation ?? _quarterTurn(quarterTurns ?? 0);
++  final m = Transform2.translation(at.x, at.y)
++      .multiply(Transform2(cos, sin, -sin, cos, 0, 0))
++      .multiply(Transform2.scale(mirrored ? -1 : 1, 1))
++      .multiply(Transform2.translation(-basePoint.x, -basePoint.y));
++  double clean(double v) => v == 0 ? 0.0 : v;
++  return Transform2(
++      clean(m.a), clean(m.b), clean(m.c), clean(m.d), clean(m.e), clean(m.f));
++}
++
++/// The exact `(cos, sin)` of [quarterTurns] counter-clockwise quarter turns.
++(double, double) _quarterTurn(int quarterTurns) => const [
++      (1.0, 0.0),
++      (0.0, 1.0),
++      (-1.0, 0.0),
++      (0.0, -1.0)
++    ][((quarterTurns % 4) + 4) % 4];
+diff --git a/packages/jet_cad_2d_kit/test/model/placement_transform_test.dart b/packages/jet_cad_2d_kit/test/model/placement_transform_test.dart
+new file mode 100644
+index 00000000..e3d39de8
+--- /dev/null
++++ b/packages/jet_cad_2d_kit/test/model/placement_transform_test.dart
+@@ -0,0 +1,259 @@
++// Spec 09 D6 and 09c D5, moved into the contract by 3a Task 1 (spec
++// C1.4): placementTransform. The group is jet_cad_2d_plan's
++// test/symbols/symbol_placer_test.dart group 'placementTransform' (P1-P4,
++// P20-P23), assertions unchanged; the placer's own groups stay there.
++// Fixtures: every base point and `at` off the origin, rotations of 30° and
++// −112.5° (no 0 or ±1), mirrored or not.
++import 'dart:math' as math;
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/box_fixtures.dart';
++
++SymbolLibrary library() => SymbolLibrary.decode(bytesOf(buildValidLibrary()));
++
++SymbolEntry entryOf(String key) =>
++    library().entries.firstWhere((e) => e.symbol.key == key);
++
++SymbolEntry sofa() => entryOf('fixture.sofa.three');
++
++/// World position of a local point under placement (q, mirrored), written
++/// without [Transform2]: mirror the local x, rotate by q quarter turns, move
++/// the base point to [at].
++Vector2 expectedWorld(
++    Vector2 local, Vector2 base, Vector2 at, int q, bool mirrored) {
++  var x = local.x - base.x;
++  final y = local.y - base.y;
++  if (mirrored) x = -x;
++  final (rx, ry) = switch (((q % 4) + 4) % 4) {
++    0 => (x, y),
++    1 => (-y, x),
++    2 => (-x, -y),
++    _ => (y, -x),
++  };
++  return Vector2(at.x + rx, at.y + ry);
++}
++
++final Vector2 at = Vector2(3333.5, -2222.25);
++
++/// Far from the origin, as the wall fixtures are (plan P-2).
++final Vector2 far = Vector2(100000.25, -70000.75);
++
++/// A 30° and a −112.5° rotation vector: (name, cos, sin).
++final List<(String, double, double)> rotations = [
++  ('30°', math.sqrt(3) / 2, 0.5),
++  (
++    '−112.5°',
++    math.cos(-112.5 * math.pi / 180),
++    math.sin(-112.5 * math.pi / 180)
++  ),
++];
++const Tolerance tol = Tolerance.standard;
++
++void main() {
++  group('placementTransform', () {
++    test(
++        'P1 the base point lands on at, and a leaf endpoint where the '
++        'independent formula says, for every quarter turn, mirrored or not',
++        () {
++      final e = sofa();
++      final base = e.definition.basePoint;
++      expect(base.x, isNot(0));
++      expect(base.y, isNot(0));
++      final line =
++          e.leaves.firstWhere((l) => l.record.handle.value == sofaLine);
++      final p0 = line.payload.pointAt(0);
++      final p1 = line.payload.pointAt(1);
++      for (final mirrored in [false, true]) {
++        for (var q = 0; q < 4; q++) {
++          final t = placementTransform(
++              at: at, basePoint: base, quarterTurns: q, mirrored: mirrored);
++          expect(tol.eqPoint(t.transformPoint(base), at), isTrue,
++              reason: 'q=$q mirrored=$mirrored base point');
++          for (final p in [p0, p1]) {
++            final want = expectedWorld(p, base, at, q, mirrored);
++            expect(tol.eqPoint(t.transformPoint(p), want), isTrue,
++                reason: 'q=$q mirrored=$mirrored $p -> '
++                    '${t.transformPoint(p)}, want $want');
++          }
++        }
++      }
++    });
++
++    test('P2 quarter turns are taken modulo 4, negative allowed', () {
++      final base = Vector2(900, 400);
++      List<double> t(int q) => placementTransform(
++              at: at, basePoint: base, quarterTurns: q, mirrored: true)
++          .toJson()
++          .cast<double>();
++      expect(t(-1), t(3));
++      expect(t(4), t(0));
++      expect(t(5), t(1));
++      expect(t(-6), t(2));
++      expect(t(1), isNot(t(3)));
++    });
++
++    test(
++        'P3 the matrix is exactly 0 and ±1 in its linear part and never '
++        '-0.0, for every quarter turn, mirrored or not', () {
++      final base = Vector2(900, 400);
++      for (final mirrored in [false, true]) {
++        for (var q = -2; q < 6; q++) {
++          final t = placementTransform(
++              at: at, basePoint: base, quarterTurns: q, mirrored: mirrored);
++          for (final v in [t.a, t.b, t.c, t.d]) {
++            expect([0.0, 1.0, -1.0], contains(v),
++                reason: 'q=$q mirrored=$mirrored ${t.toJson()}');
++          }
++          for (final v in [t.a, t.b, t.c, t.d, t.e, t.f]) {
++            expect(v == 0 && v.isNegative, isFalse,
++                reason: 'q=$q mirrored=$mirrored has -0.0: ${t.toJson()}');
++          }
++        }
++      }
++    });
++
++    test(
++        'P4 a mirror flips the local x axis whatever the turns (det < 0), '
++        'and the turn order is rotate after mirror', () {
++      final base = Vector2(900, 400);
++      for (var q = 0; q < 4; q++) {
++        expect(
++            placementTransform(
++                    at: at, basePoint: base, quarterTurns: q, mirrored: true)
++                .determinant,
++            -1.0);
++        expect(
++            placementTransform(at: at, basePoint: base, quarterTurns: q)
++                .determinant,
++            1.0);
++      }
++      // Local +x under q=1 mirrored: mirrored to -x, rotated to -y.
++      final t = placementTransform(
++          at: at, basePoint: base, quarterTurns: 1, mirrored: true);
++      final d = t.transformDirection(Vector2(1, 0));
++      expect(d.x, 0.0);
++      expect(d.y, -1.0);
++    });
++
++    // Plan 09c-1 Task 5 (spec D5): the rotation as a unit vector. The
++    // fixtures: a 30° and a −112.5° vector (no 0 or ±1 in either), `far` and
++    // the sofa's base point off the origin and off each other.
++
++    test(
++        'P20 a rotation vector gives translate(at) · R · S · '
++        'translate(−base), written out by hand, mirrored or not', () {
++      final e = sofa();
++      final base = e.definition.basePoint;
++      final line =
++          e.leaves.firstWhere((l) => l.record.handle.value == sofaLine);
++      for (final (name, cos, sin) in rotations) {
++        for (final mirrored in [false, true]) {
++          final why = '$name mirrored=$mirrored';
++          final s = mirrored ? -1.0 : 1.0;
++          final t = placementTransform(
++              at: far,
++              basePoint: base,
++              rotation: (cos, sin),
++              mirrored: mirrored);
++          // The local x is mirrored first, then turned: (s·cos, s·sin);
++          // the local y turns alone: (−sin, cos). Exact doubles.
++          expect(
++              t.toJson(),
++              [
++                s * cos,
++                s * sin,
++                -sin,
++                cos,
++                far.x - (s * cos * base.x - sin * base.y),
++                far.y - (s * sin * base.x + cos * base.y),
++              ],
++              reason: why);
++          expect(tol.eqPoint(t.transformPoint(base), far), isTrue,
++              reason: '$why base point');
++          for (final p in [line.payload.pointAt(0), line.payload.pointAt(1)]) {
++            final u = (p.x - base.x) * s, v = p.y - base.y;
++            final want =
++                Vector2(far.x + cos * u - sin * v, far.y + sin * u + cos * v);
++            expect(tol.eqPoint(t.transformPoint(p), want), isTrue,
++                reason: '$why $p -> ${t.transformPoint(p)}, want $want');
++          }
++          expect(t.determinant, closeTo(s, 1e-12), reason: why);
++        }
++      }
++    });
++
++    test(
++        'P21 quarterTurns and rotation together are refused (an '
++        'ArgumentError, not only an assert)', () {
++      for (final q in [0, 1]) {
++        expect(
++            () => placementTransform(
++                at: far,
++                basePoint: Vector2(900, 400),
++                quarterTurns: q,
++                rotation: (rotations.first.$2, rotations.first.$3)),
++            throwsArgumentError,
++            reason: 'quarterTurns: $q');
++      }
++      // Neither: no turn.
++      expect(
++          placementTransform(at: far, basePoint: Vector2(900, 400)).toJson(),
++          placementTransform(
++              at: far,
++              basePoint: Vector2(900, 400),
++              rotation: (1.0, 0.0)).toJson());
++    });
++
++    test(
++        'P22 the quarter-turn form is the rotation form at the exact table: '
++        'the same bytes for every turn, mirrored or not', () {
++      const table = [(1.0, 0.0), (0.0, 1.0), (-1.0, 0.0), (0.0, -1.0)];
++      final base = Vector2(900, 400);
++      for (final mirrored in [false, true]) {
++        for (var q = -2; q < 6; q++) {
++          expect(
++              placementTransform(
++                      at: far,
++                      basePoint: base,
++                      quarterTurns: q,
++                      mirrored: mirrored)
++                  .toJson(),
++              placementTransform(
++                      at: far,
++                      basePoint: base,
++                      rotation: table[((q % 4) + 4) % 4],
++                      mirrored: mirrored)
++                  .toJson(),
++              reason: 'q=$q mirrored=$mirrored');
++        }
++      }
++    });
++
++    test(
++        'P23 an axis-aligned rotation vector (cos or sin −0.0, as a face '
++        'normal gives it) stores no −0.0, mirrored or not (M-09c-n: the '
++        'named axis-aligned exception)', () {
++      final base = Vector2(900, 400);
++      for (final r in [
++        (-0.0, 1.0),
++        (0.0, 1.0),
++        (-0.0, -1.0),
++        (1.0, -0.0),
++        (-1.0, -0.0),
++      ]) {
++        for (final mirrored in [false, true]) {
++          final t = placementTransform(
++              at: far, basePoint: base, rotation: r, mirrored: mirrored);
++          for (final v in t.toJson()) {
++            expect(v == 0 && v.isNegative, isFalse,
++                reason: '$r mirrored=$mirrored has -0.0: ${t.toJson()}');
++          }
++        }
++      }
++    });
++  });
++}
+diff --git a/packages/jet_cad_2d_kit/test/model/symbol_box_test.dart b/packages/jet_cad_2d_kit/test/model/symbol_box_test.dart
+new file mode 100644
+index 00000000..20f541e5
+--- /dev/null
++++ b/packages/jet_cad_2d_kit/test/model/symbol_box_test.dart
+@@ -0,0 +1,344 @@
++// Spec 09c D2, moved into the contract by 3a Task 1 (spec C1.4): the
++// symbol's local box. The groups SymbolBox, boxOfLeaves, the arc's true
++// extents, the library entries and boxOfDefinition's refusals are
++// jet_cad_2d_plan's test/symbols/symbol_box_test.dart (itself ported from
++// jet_cad_floor_plan's), assertions unchanged; boxOfDefinition's placed
++// case calls the plan's placeSymbol and stays there. New: SB-ortho,
++// SB-barrels. Fixtures avoid the degenerate cases (P-2): leaves far from
++// the origin, every side of a box set by a different kind of leaf.
++import 'dart:math' as math;
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/authoring.dart' as authoring
++    show boxOfLeaves, footprintOf, isOrthonormal, placementTransform;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/box_fixtures.dart';
++
++SymbolEntry entryIn(SymbolLibrary lib, String key) =>
++    lib.entries.firstWhere((e) => e.symbol.key == key);
++
++/// Far from the origin, as the plan's P-2 asks.
++const double cx = 1e5 + 37.5, cy = -7e4 + 12.25, r = 410.0;
++
++(EntityKind, GeometryPayload) arc(double start, double sweep) =>
++    (EntityKind.arc, arcPayload(Vector2(cx, cy), r, start, sweep));
++
++SymbolBox boxOfArc(double start, double sweep) =>
++    boxOfLeaves([arc(start, sweep)])!;
++
++/// The box of an arc from [start] through [sweep] by its end points only.
++({double minX, double maxX, double minY, double maxY}) ends(
++    double start, double sweep) {
++  final xs = [cx + r * math.cos(start), cx + r * math.cos(start + sweep)];
++  final ys = [cy + r * math.sin(start), cy + r * math.sin(start + sweep)];
++  return (
++    minX: math.min(xs[0], xs[1]),
++    maxX: math.max(xs[0], xs[1]),
++    minY: math.min(ys[0], ys[1]),
++    maxY: math.max(ys[0], ys[1]),
++  );
++}
++
++Matcher near(double v) => closeTo(v, 1e-9);
++
++DraftDocument target() {
++  final doc = DraftDocument.empty();
++  registerKitComponents(doc.components);
++  doc.header.units = DrawingUnits.millimeters;
++  return doc;
++}
++
++void main() {
++  group('SymbolBox', () {
++    test('width, depth and the back-centre of an off-origin box', () {
++      const b =
++          SymbolBox(left: -310.5, right: 1240.25, front: -75, back: 905.5);
++      expect(b.width, 1550.75);
++      expect(b.depth, 980.5);
++      expect(b.backCentre, Vector2(464.875, 905.5));
++    });
++
++    test('equality is exact on all four sides', () {
++      const b =
++          SymbolBox(left: -310.5, right: 1240.25, front: -75, back: 905.5);
++      // A box computed from a leaf: equal values, a distinct object (two
++      // equal `const` boxes would be one canonical object).
++      final computed = boxOfLeaves([
++        (
++          EntityKind.line,
++          linePayload(Vector2(1240.25, 905.5), Vector2(-310.5, -75))
++        )
++      ])!;
++      expect(identical(computed, b), isFalse);
++      expect(computed, b);
++      expect(computed.hashCode, b.hashCode);
++      for (final other in const [
++        SymbolBox(left: -310.4, right: 1240.25, front: -75, back: 905.5),
++        SymbolBox(left: -310.5, right: 1240.3, front: -75, back: 905.5),
++        SymbolBox(left: -310.5, right: 1240.25, front: -75.1, back: 905.5),
++        SymbolBox(left: -310.5, right: 1240.25, front: -75, back: 905.6),
++      ]) {
++        expect(b == other, isFalse, reason: '$other');
++      }
++    });
++  });
++
++  group('boxOfLeaves', () {
++    test('each side set by a different kind of leaf, far from the origin', () {
++      // left: a circle's centre − r; right: a polyline's interior vertex;
++      // front: an arc's axis extreme (3π/2); back: a line's second end.
++      final box = boxOfLeaves([
++        (
++          EntityKind.line,
++          linePayload(
++              Vector2(1e5 + 100, -7e4 + 200), Vector2(1e5 + 300, -7e4 + 950))
++        ),
++        (
++          EntityKind.polyline,
++          polylinePayload([
++            Vector2(1e5 + 50, -7e4 + 100),
++            Vector2(1e5 + 1200, -7e4 + 400),
++            Vector2(1e5 + 60, -7e4 + 700),
++          ])
++        ),
++        (EntityKind.circle, circlePayload(Vector2(1e5 - 20, -7e4 + 300), 180)),
++        (
++          EntityKind.arc,
++          arcPayload(Vector2(1e5 + 500, -7e4 + 100), 250, math.pi + 0.3, 2.5)
++        ),
++      ])!;
++      expect(
++          box,
++          const SymbolBox(
++              left: 1e5 - 200,
++              right: 1e5 + 1200,
++              front: -7e4 - 150,
++              back: -7e4 + 950));
++    });
++
++    test('a circle is its centre ± r on every side', () {
++      final box = boxOfLeaves([
++        (EntityKind.circle, circlePayload(Vector2(-2400.5, 3100.25), 72.5))
++      ])!;
++      expect(
++          box,
++          const SymbolBox(
++              left: -2473, right: -2328, front: 3027.75, back: 3172.75));
++    });
++
++    test('a closed polyline counts every vertex once, a line both ends', () {
++      final box = boxOfLeaves([
++        (
++          EntityKind.polyline,
++          polylinePayload([
++            Vector2(-50, 20),
++            Vector2(10, -40),
++            Vector2(70, 15),
++            Vector2(5, 90),
++          ], closed: true)
++        ),
++        (EntityKind.line, linePayload(Vector2(-10, 30), Vector2(95, 10))),
++      ])!;
++      expect(box, const SymbolBox(left: -50, right: 95, front: -40, back: 90));
++    });
++
++    test('no leaf has no box; a leaf of another kind draws nothing', () {
++      expect(boxOfLeaves(const []), isNull);
++      expect(
++          boxOfLeaves([
++            (
++              EntityKind.point,
++              linePayload(Vector2(9e4, 9e4), Vector2(9e4, 9e4))
++            )
++          ]),
++          isNull);
++      final box = boxOfLeaves([
++        (EntityKind.circle, circlePayload(Vector2(-2400.5, 3100.25), 72.5)),
++        (EntityKind.point, polylinePayload([Vector2(9e4, -9e4)])),
++        (EntityKind.text, textPayload(Vector2(-9e4, 9e4), 250)),
++      ])!;
++      expect(
++          box,
++          const SymbolBox(
++              left: -2473, right: -2328, front: 3027.75, back: 3172.75));
++    });
++  });
++
++  group('an arc by its true extents', () {
++    test('a sweep that crosses 0 rad only', () {
++      const s = -math.pi / 6, w = math.pi / 3;
++      final b = boxOfArc(s, w), e = ends(s, w);
++      expect(b.right, cx + r);
++      expect(b.left, near(e.minX));
++      expect(b.front, near(e.minY));
++      expect(b.back, near(e.maxY));
++    });
++
++    test('a sweep that crosses π/2 only', () {
++      const s = math.pi / 3, w = math.pi / 3;
++      final b = boxOfArc(s, w), e = ends(s, w);
++      expect(b.back, cy + r);
++      expect(b.left, near(e.minX));
++      expect(b.right, near(e.maxX));
++      expect(b.front, near(e.minY));
++    });
++
++    test('a sweep that crosses π only', () {
++      const s = 5 * math.pi / 6, w = math.pi / 3;
++      final b = boxOfArc(s, w), e = ends(s, w);
++      expect(b.left, cx - r);
++      expect(b.right, near(e.maxX));
++      expect(b.front, near(e.minY));
++      expect(b.back, near(e.maxY));
++    });
++
++    test('a sweep that crosses 3π/2 only', () {
++      const s = 4 * math.pi / 3, w = math.pi / 3;
++      final b = boxOfArc(s, w), e = ends(s, w);
++      expect(b.front, cy - r);
++      expect(b.left, near(e.minX));
++      expect(b.right, near(e.maxX));
++      expect(b.back, near(e.maxY));
++    });
++
++    test('a sweep that crosses no axis is its end points', () {
++      const s = math.pi / 12, w = math.pi / 3;
++      final b = boxOfArc(s, w), e = ends(s, w);
++      expect(b.left, near(e.minX));
++      expect(b.right, near(e.maxX));
++      expect(b.front, near(e.minY));
++      expect(b.back, near(e.maxY));
++      expect(b.right, lessThan(cx + r - 1));
++      expect(b.back, lessThan(cy + r - 1));
++    });
++
++    test('a negative start (−120° through 90°) crosses −π/2', () {
++      const s = -2 * math.pi / 3, w = math.pi / 2;
++      final b = boxOfArc(s, w), e = ends(s, w);
++      expect(b.front, cy - r);
++      expect(b.left, near(cx - r / 2));
++      expect(b.right, near(cx + r * math.cos(math.pi / 6)));
++      expect(b.back, near(cy - r / 2));
++      expect(b.left, near(e.minX));
++    });
++
++    test('a start past 2π crosses π', () {
++      const s = 2 * math.pi + 5 * math.pi / 6, w = math.pi / 3;
++      final b = boxOfArc(s, w);
++      expect(b.left, cx - r);
++      expect(b.back, near(cy + r / 2));
++      expect(b.front, near(cy - r / 2));
++    });
++
++    test('a clockwise sweep from π/3 back through 0 to −π/6', () {
++      const s = math.pi / 3, w = -math.pi / 2;
++      final b = boxOfArc(s, w), e = ends(s, w);
++      expect(b.right, cx + r);
++      expect(b.back, near(e.maxY));
++      expect(b.front, near(e.minY));
++      expect(b.left, near(e.minX));
++      expect(b.back, lessThan(cy + r - 1));
++    });
++
++    test('a full turn is the whole circle', () {
++      final b = boxOfArc(0.7, 2 * math.pi);
++      expect(b,
++          SymbolBox(left: cx - r, right: cx + r, front: cy - r, back: cy + r));
++    });
++  });
++
++  group('library entries', () {
++    test('the off-centre fixtures: back and left from an arc', () {
++      final lib = SymbolLibrary.decode(bytesOf(buildValidLibrary()));
++      // Sofa: the arc (900, 900) r 250 from 0.5 through 1.75 rad crosses
++      // π/2, so its back is 1150, beyond the polyline's 950.
++      expect(boxOfEntry(entryIn(lib, 'fixture.sofa.three')),
++          const SymbolBox(left: 120, right: 1680, front: 340, back: 1150));
++      // Armchair: the arc (500, 500) r 300 from 0.25 through 2.5 rad sets
++      // the left and right by its end points and the back by π/2; the
++      // circle (510, 480) r 120 sets the front.
++      final a = boxOfEntry(entryIn(lib, 'fixture.armchair.single'))!;
++      expect(a.left, near(500 + 300 * math.cos(2.75)));
++      expect(a.right, near(500 + 300 * math.cos(0.25)));
++      expect(a.front, 360);
++      expect(a.back, 800);
++      expect(a.backCentre.x, near((a.left + a.right) / 2));
++      expect(a.backCentre.y, 800);
++      expect(boxOfEntry(entryIn(lib, 'fixture.nightstand.single')),
++          const SymbolBox(left: 50, right: 450, front: 60, back: 410));
++    });
++
++    test('memoised per entry: the same object on every call', () {
++      final lib = SymbolLibrary.decode(bytesOf(buildValidLibrary()));
++      final toilet = entryIn(lib, 'fixture.sofa.three');
++      final tub = entryIn(lib, 'fixture.armchair.single');
++      expect(identical(boxOfEntry(toilet), boxOfEntry(toilet)), isTrue);
++      expect(boxOfEntry(tub), isNot(boxOfEntry(toilet)));
++    });
++  });
++
++  group('boxOfDefinition', () {
++    test(
++        'not a definition (the root, a leaf, nothing), or a definition '
++        'without leaves: no box', () {
++      final doc = target();
++      doc.commands.execute(AddDefinitionCommand(Definition(
++          handle: const Handle(0x7A1),
++          name: 'empty',
++          basePoint: Vector2(-40, 75),
++          children: const [])));
++      // The root owns a drawn line and a circle: it is not a definition.
++      doc.commands.execute(CompoundCommand([
++        AddEntityCommand(
++            record: leafRecord(0x7B0, doc.rootHandle, EntityKind.line),
++            payload: linePayload(Vector2(1e5, -7e4), Vector2(1e5 + 900, -7e4))),
++        AddEntityCommand(
++            record: leafRecord(0x7B1, doc.rootHandle, EntityKind.circle),
++            payload: circlePayload(Vector2(-310, 925), 60)),
++      ], label: 'Model space'));
++      expect(boxOfDefinition(doc, const Handle(0x7A1)), isNull);
++      expect(boxOfDefinition(doc, const Handle(0x7A2)), isNull);
++      expect(boxOfDefinition(doc, doc.rootHandle), isNull);
++      expect(boxOfDefinition(doc, const Handle(0x7B0)), isNull);
++    });
++  });
++
++  group('isOrthonormal (spec 09c W-8, S-10)', () {
++    test(
++        'SB-ortho a turn, a mirror and a turned mirror far from the origin '
++        'are; a scale, and unit columns that are not perpendicular, are not',
++        () {
++      final turn = Transform2.translation(-41250.5, 17320.25)
++          .multiply(Transform2.rotation(37 * math.pi / 180));
++      final turnedMirror = turn.multiply(Transform2.scale(-1, 1));
++      expect(isOrthonormal(turn), isTrue);
++      expect(isOrthonormal(turnedMirror), isTrue);
++      expect(isOrthonormal(Transform2.scale(-1, 1)), isTrue);
++      // A file's scale: |a² + b² − 1| = 0.002001.
++      expect(isOrthonormal(turn.multiply(Transform2.scale(1.001, 1))), isFalse);
++      // Both columns of length 1, at 89.43° to each other: only the
++      // a·c + b·d term (sin 0.01 ≈ 0.01) refuses it. M-SB-ortho: drop it.
++      final skew =
++          Transform2(1, 0, math.sin(0.01), math.cos(0.01), 1e5 + 3.5, -7e4);
++      expect((skew.c * skew.c + skew.d * skew.d - 1).abs(),
++          lessThanOrEqualTo(Tolerance.standard.linear),
++          reason: 'premise: the second column has unit length');
++      expect(isOrthonormal(skew), isFalse);
++    });
++  });
++
++  test(
++      'SB-barrels the authoring library exports the family too: the same '
++      'functions as the contract barrel', () {
++    // A premise of the export list (pure Dart kits build boxes and
++    // placements under `dart run`), exempt from the mutation rule beyond
++    // M-SB-export: without the export this file does not compile.
++    expect(identical(authoring.boxOfLeaves, boxOfLeaves), isTrue);
++    expect(identical(authoring.footprintOf, footprintOf), isTrue);
++    expect(identical(authoring.isOrthonormal, isOrthonormal), isTrue);
++    expect(identical(authoring.placementTransform, placementTransform), isTrue);
++  });
++}
+diff --git a/packages/jet_cad_2d_kit/test/support/box_fixtures.dart b/packages/jet_cad_2d_kit/test/support/box_fixtures.dart
+new file mode 100644
+index 00000000..04f56070
+--- /dev/null
++++ b/packages/jet_cad_2d_kit/test/support/box_fixtures.dart
+@@ -0,0 +1,129 @@
++// The 09a fixture library (kit "fixture"), copied from jet_cad_2d_plan's
++// test/support/symbol_fixtures.dart part one (lines 25-140, unchanged) for
++// the symbol box and placement tests that moved into the contract (3a
++// Task 1, spec C1.4): their assertions name these keys and boxes. Not
++// degenerate: every base point and leaf off the origin, versions 3, 2 and
++// 1, definition handles far apart, the leaves inserted out of handle order.
++import 'dart:convert';
++import 'dart:typed_data';
++
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++const Handle sofaDef = Handle(4200);
++const Handle nightstandDef = Handle(4300);
++const Handle armchairDef = Handle(4400);
++
++const int sofaLine = 4210,
++    sofaPolyline = 4211,
++    sofaArc = 4212,
++    sofaCircle = 4213;
++const int nightstandRect = 4310, nightstandLine = 4311;
++const int armchairCircle = 4410, armchairArc = 4411;
++
++SymbolComponent sofaSymbol() => SymbolComponent(
++    key: 'fixture.sofa.three',
++    name: 'Three-seat sofa',
++    category: 'Living Room',
++    tags: const ['sofa', 'seating', 'couch'],
++    version: 3);
++
++SymbolComponent nightstandSymbol() => SymbolComponent(
++    key: 'fixture.nightstand.single',
++    name: 'Nightstand',
++    category: 'Bed Room',
++    tags: const ['nightstand', 'bedside', 'table'],
++    version: 2);
++
++SymbolComponent armchairSymbol() => SymbolComponent(
++    key: 'fixture.armchair.single',
++    name: 'Armchair',
++    category: 'Living Room',
++    tags: const ['armchair', 'seating', 'chair'],
++    version: 1);
++
++EntityRecord leafRecord(int handle, Handle owner, EntityKind kind) =>
++    EntityRecord(
++      handle: Handle(handle),
++      owner: owner,
++      kind: kind,
++      layer: ReservedHandles.layerZero,
++      linetype: ReservedHandles.byBlockLinetype,
++      linetypeScale: 1.0,
++      geomIndex: 0,
++      color: const ByBlockColor(),
++      lineweight: kByBlock,
++      transparency: kByBlock,
++      flags: 0,
++    );
++
++/// The leaves in their insertion (file) order: not ascending by handle,
++/// the symbols interleaved.
++List<SymbolLeaf> fixtureLeaves() => [
++      (
++        record: leafRecord(sofaCircle, sofaDef, EntityKind.circle),
++        payload: circlePayload(Vector2(1500, 620), 45),
++      ),
++      (
++        record: leafRecord(nightstandRect, nightstandDef, EntityKind.polyline),
++        payload: polylinePayload([
++          Vector2(50, 60),
++          Vector2(450, 60),
++          Vector2(450, 410),
++          Vector2(50, 410),
++        ], closed: true),
++      ),
++      (
++        record: leafRecord(sofaLine, sofaDef, EntityKind.line),
++        payload: linePayload(Vector2(120, 340), Vector2(1680, 340)),
++      ),
++      (
++        record: leafRecord(armchairArc, armchairDef, EntityKind.arc),
++        payload: arcPayload(Vector2(500, 500), 300, 0.25, 2.5),
++      ),
++      (
++        record: leafRecord(sofaArc, sofaDef, EntityKind.arc),
++        payload: arcPayload(Vector2(900, 900), 250, 0.5, 1.75),
++      ),
++      (
++        record: leafRecord(nightstandLine, nightstandDef, EntityKind.line),
++        payload: linePayload(Vector2(70, 230), Vector2(430, 230)),
++      ),
++      (
++        record: leafRecord(sofaPolyline, sofaDef, EntityKind.polyline),
++        payload: polylinePayload(
++            [Vector2(120, 340), Vector2(120, 900), Vector2(400, 950)]),
++      ),
++      (
++        record: leafRecord(armchairCircle, armchairDef, EntityKind.circle),
++        payload: circlePayload(Vector2(510, 480), 120),
++      ),
++    ];
++
++/// The valid library: kit "fixture", three symbols, two categories.
++DraftDocument buildValidLibrary() {
++  final doc = DraftDocument.empty();
++  registerKitComponents(doc.components);
++  doc.header.units = DrawingUnits.millimeters;
++  Definition def(Handle h, String name, double x, double y) =>
++      Definition(handle: h, name: name, basePoint: Vector2(x, y), children: []);
++  doc.commands.execute(CompoundCommand([
++    SetComponentCommand<LibraryComponent>(
++        doc.rootHandle, LibraryComponent(kit: 'fixture')),
++    AddDefinitionCommand(def(armchairDef, 'fixture.armchair.single@1', 510, 0)),
++    AddDefinitionCommand(def(sofaDef, 'fixture.sofa.three@3', 900, 400)),
++    AddDefinitionCommand(
++        def(nightstandDef, 'fixture.nightstand.single@2', 250, 60)),
++    SetComponentCommand<SymbolComponent>(sofaDef, sofaSymbol()),
++    SetComponentCommand<SymbolComponent>(nightstandDef, nightstandSymbol()),
++    SetComponentCommand<SymbolComponent>(armchairDef, armchairSymbol()),
++    for (final l in fixtureLeaves())
++      AddEntityCommand(record: l.record, payload: l.payload),
++  ], label: 'Fixture library'));
++  doc.commands.clearHistory();
++  return doc;
++}
++
++Uint8List bytesOf(DraftDocument doc) =>
++    Uint8List.fromList(utf8.encode(DraftDocumentCodec.encodeToString(doc)));
+diff --git a/packages/jet_cad_2d_kit/test/support/placements.dart b/packages/jet_cad_2d_kit/test/support/placements.dart
+index 7942e27c..896086cb 100644
+--- a/packages/jet_cad_2d_kit/test/support/placements.dart
++++ b/packages/jet_cad_2d_kit/test/support/placements.dart
+@@ -1,39 +1,12 @@
+-// Two placements, copied for the label tests ported in 2b Task 3: today's
+-// fixture placement (jet_cad_floor_plan/test/tables/table_fixture.dart:
+-// 72-78) and the placer's quarter-turn form (jet_cad_floor_plan/lib/src/
+-// symbols/symbol_placer.dart:51-78, the `rotation` form left out). The kit
+-// depends on neither package.
++// The fixture placement the label tests use (2b Task 3): today's fixture
++// placement (jet_cad_floor_plan/test/tables/table_fixture.dart:72-78). The
++// placer's form is the contract's placementTransform (3a Task 1).
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+-import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ /// `translate(at) · R(theta) · (mirror x) · translate(-base)`.
+ Transform2 placementAt(double x, double y, double theta,
+         {bool mirrored = false, double baseX = 900, double baseY = 700}) =>
+     Transform2.translation(x, y)
+         .multiply(Transform2.rotation(theta))
+         .multiply(Transform2.scale(mirrored ? -1 : 1, 1))
+         .multiply(Transform2.translation(-baseX, -baseY));
+-
+-/// `translation(at) · rotation · scale(mirrored ? -1 : 1, 1) ·
+-/// translation(-basePoint)`, the rotation [quarterTurns] counter-clockwise
+-/// with exact cosine and sine, and no stored `-0.0`.
+-Transform2 placementTransform({
+-  required Vector2 at,
+-  required Vector2 basePoint,
+-  int quarterTurns = 0,
+-  bool mirrored = false,
+-}) {
+-  final (cos, sin) = const [
+-    (1.0, 0.0),
+-    (0.0, 1.0),
+-    (-1.0, 0.0),
+-    (0.0, -1.0)
+-  ][((quarterTurns % 4) + 4) % 4];
+-  final m = Transform2.translation(at.x, at.y)
+-      .multiply(Transform2(cos, sin, -sin, cos, 0, 0))
+-      .multiply(Transform2.scale(mirrored ? -1 : 1, 1))
+-      .multiply(Transform2.translation(-basePoint.x, -basePoint.y));
+-  double clean(double v) => v == 0 ? 0.0 : v;
+-  return Transform2(
+-      clean(m.a), clean(m.b), clean(m.c), clean(m.d), clean(m.e), clean(m.f));
+-}
+diff --git a/packages/jet_cad_2d_plan/lib/src/controller/services.dart b/packages/jet_cad_2d_plan/lib/src/controller/services.dart
+index 7363f394..c6007da1 100644
+--- a/packages/jet_cad_2d_plan/lib/src/controller/services.dart
++++ b/packages/jet_cad_2d_plan/lib/src/controller/services.dart
+@@ -1,21 +1,20 @@
+ // PlanServices (spec 2a P1): a live view, one per kit per controller, of
+ // the current document, its index, the camera, the effective object snap,
+ // the attachment registry, the kit's words at the controller's locale, the
+ // kit's own tools' settings and the per-document shared cache.
+ import 'package:flutter/foundation.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+ 
+ import '../symbols/plan_symbol.dart';
+-import '../symbols/symbol_box.dart' show servedTopOfEntry;
+ import '../symbols/symbol_placer.dart' show definitionForEntry;
+ import 'session.dart';
+ import 'tool_settings_store.dart';
+ 
+ /// What the services read of their controller.
+ abstract interface class ServicesHost {
+   DocumentSession get session;
+   CameraController get camera;
+   SnapSettings get snap;
+   ToolSettingsStore get toolSettings;
+diff --git a/packages/jet_cad_2d_plan/lib/src/panels/plan_property_panel.dart b/packages/jet_cad_2d_plan/lib/src/panels/plan_property_panel.dart
+index 8e41e60e..8800bcad 100644
+--- a/packages/jet_cad_2d_plan/lib/src/panels/plan_property_panel.dart
++++ b/packages/jet_cad_2d_plan/lib/src/panels/plan_property_panel.dart
+@@ -22,21 +22,20 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+ import 'package:meta/meta.dart' show internal;
+ 
+ import '../controller/plan_controller.dart';
+ import '../kits/section_boundary.dart' show KitSectionBoundary;
+ import '../l10n/locale_scope.dart';
+ import '../l10n/number_text.dart';
+ import '../l10n/strings.dart';
+ import '../l10n/strings_en.dart';
+ import '../shortcuts/plan_shortcut_guard.dart';
+-import '../symbols/symbol_box.dart';
+ import '../units/unit_problems.dart' show DuplicateLabel;
+ import '../units/unit_rotate.dart' show rotateUnitCommand;
+ import '../units/unit_words.dart';
+ import '../units/unit_writes.dart' show unitLabelCommand;
+ import 'colour_row.dart';
+ import 'frame_safe_relay.dart';
+ import 'kit_lookup.dart';
+ import 'layer_picker.dart';
+ import 'panel_focus.dart';
+ import 'symbol_section.dart';
+diff --git a/packages/jet_cad_2d_plan/lib/src/panels/symbol_section.dart b/packages/jet_cad_2d_plan/lib/src/panels/symbol_section.dart
+index 05024514..3fd0c54e 100644
+--- a/packages/jet_cad_2d_plan/lib/src/panels/symbol_section.dart
++++ b/packages/jet_cad_2d_plan/lib/src/panels/symbol_section.dart
+@@ -1,24 +1,30 @@
+ // The Symbol section's model (spec 09c D7, revision 5): which instance it
+ // shows, its library entry and size family, its rotation, and the commands
+ // its rows commit -- Rotate, Mirror and Change size. The widgets are the
+ // Selection panel's; everything here is Dart over the document.
+ // Ported to the kit model: a symbol is a jetcad.symbol definition (the kit's SymbolComponent), a servable one carries a UnitComponent, and a size family is SymbolComponent.family (the K2 field) instead of a family: tag.
+ import 'dart:math' as math;
+ 
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart'
+-    show SymbolComponent, SymbolEntry, UnitComponent;
++    show
++        SymbolBox,
++        SymbolComponent,
++        SymbolEntry,
++        UnitComponent,
++        boxOfDefinition,
++        boxOfEntry,
++        isOrthonormal;
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import '../symbols/plan_symbol.dart';
+-import '../symbols/symbol_box.dart';
+ import '../symbols/symbol_placer.dart' show definitionForEntry;
+ 
+ /// [handle] is a root-level instance whose definition carries a
+ /// [SymbolComponent] (D7's rule, F-11's for a symbol).
+ bool isSymbolInstance(DraftDocument doc, Handle handle) {
+   final node = doc.tree[handle];
+   return node is InstanceNode &&
+       node.parent == doc.rootHandle &&
+       doc.tree.definition(node.definition) != null &&
+       doc.components.get<SymbolComponent>(node.definition) != null;
+@@ -122,46 +128,34 @@ double rotationDegreesOf(Transform2 t) {
+ /// The exact `(cos, sin)` of [quarterTurns] quarter turns (F-2).
+ (double, double) _quarter(int quarterTurns) => const [
+       (1.0, 0.0),
+       (0.0, 1.0),
+       (-1.0, 0.0),
+       (0.0, -1.0),
+     ][((quarterTurns % 4) + 4) % 4];
+ 
+ double _clean(double v) => v == 0 ? 0.0 : v;
+ 
+-/// Whether [g]'s linear part is orthonormal (spec 09c W-8, S-10):
+-/// `|a² + b² − 1|`, `|c² + d² − 1|` and `|ac + bd|` each at most
+-/// `Tolerance.standard.linear`. A mirror is orthonormal; a scale is not.
+-/// Copied from jet_cad_floor_plan/lib/src/symbols/wall_attach.dart:402-407
+-/// (the wall attachment is sub-project 3's).
+-bool _isOrthonormal(Transform2 g) {
+-  final tol = Tolerance.standard.linear;
+-  return (g.a * g.a + g.b * g.b - 1).abs() <= tol &&
+-      (g.c * g.c + g.d * g.d - 1).abs() <= tol &&
+-      (g.a * g.c + g.b * g.d).abs() <= tol;
+-}
+-
+ /// [t] turned so its Rotation reads [degrees] (any finite number, taken
+ /// modulo 360), about the insertion point `t · basePoint` (D7): the linear
+ /// part `A` becomes `R(θ' − θ)·A`, so a mirror and a file's scale are
+ /// kept; an orthonormal result at a multiple of 90° is `R(θ')·S` from the
+ /// exact table, `S` the mirror or the identity, `-0.0` normalised.
+ Transform2 rotatedTo(Transform2 t, Vector2 basePoint, double degrees) {
+   var target = degrees % 360;
+   if (target < 0) target += 360;
+   final p = t.transformPoint(basePoint);
+   final delta = (target - rotationDegreesOf(t)) * math.pi / 180;
+   final cs = math.cos(delta), sn = math.sin(delta);
+   var a = cs * t.a - sn * t.b, b = sn * t.a + cs * t.b;
+   var c = cs * t.c - sn * t.d, d = sn * t.c + cs * t.d;
+-  if (target % 90 == 0 && _isOrthonormal(Transform2(a, b, c, d, 0, 0))) {
++  if (target % 90 == 0 && isOrthonormal(Transform2(a, b, c, d, 0, 0))) {
+     final (qc, qs) = _quarter(target ~/ 90);
+     if (t.a * t.d - t.b * t.c < 0) {
+       // R(θ')·scale(−1, 1).
+       a = -qc;
+       b = -qs;
+     } else {
+       a = qc;
+       b = qs;
+     }
+     c = -qs;
+diff --git a/packages/jet_cad_2d_plan/lib/src/symbols/symbol_placer.dart b/packages/jet_cad_2d_plan/lib/src/symbols/symbol_placer.dart
+index a2c5d121..22dc0d07 100644
+--- a/packages/jet_cad_2d_plan/lib/src/symbols/symbol_placer.dart
++++ b/packages/jet_cad_2d_plan/lib/src/symbols/symbol_placer.dart
+@@ -8,20 +8,21 @@
+ // No Flutter import and no `dart:io`. It writes no table record (a symbol
+ // uses only reserved handles) and never touches `DraftDocument.purge`.
+ 
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart'
+     show
+         SymbolComponent,
+         SymbolEntry,
+         UnitComponent,
+         UnitLabelling,
++        placementTransform,
+         unitLabelHeight,
+         unitLabelPayload;
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import '../units/unit_index.dart' show UnitIndex;
+ import '../units/unit_label.dart' show placedLabelTop, unitLabelRecord;
+ import '../units/unit_numbers.dart' show nextUnitNumber;
+ 
+ /// The instance fields a placement imposes on the symbol's BYBLOCK contents.
+ /// The defaults are [InstanceNode]'s own.
+@@ -34,64 +35,20 @@ final class InstanceStyle {
+ 
+   const InstanceStyle({
+     this.color = const ByBlockColor(),
+     this.lineweight = kByBlock,
+     this.transparency = kByBlock,
+     this.linetype = ReservedHandles.byBlockLinetype,
+     this.linetypeScale = 1.0,
+   });
+ }
+ 
+-/// `translation(at) · rotation · scale(mirrored ? -1 : 1, 1) ·
+-/// translation(-basePoint)`: the definition's base point lands on [at]
+-/// (spec F-2), and a mirror flips the **local** x axis whatever the
+-/// rotation.
+-///
+-/// The rotation is given one of two ways, never both (an [ArgumentError],
+-/// in release builds too):
+-/// - [quarterTurns] counter-clockwise, taken modulo 4 (negative allowed),
+-///   with exact cosine and sine from a table (0 and ±1, never `6e-17`);
+-/// - [rotation], a unit vector `(cos, sin)` used exactly as given (spec 09c
+-///   D5: a wall face's `t`).
+-///
+-/// Neither is no turn. The quarter-turn form is the [rotation] form at its
+-/// table entry, so the two give the same bytes. No stored component is
+-/// `-0.0` in either form, so a placement stores clean numbers in a file.
+-Transform2 placementTransform({
+-  required Vector2 at,
+-  required Vector2 basePoint,
+-  int? quarterTurns,
+-  (double, double)? rotation,
+-  bool mirrored = false,
+-}) {
+-  if (quarterTurns != null && rotation != null) {
+-    throw ArgumentError(
+-        'placementTransform takes quarterTurns or rotation, not both');
+-  }
+-  final (cos, sin) = rotation ?? _quarterTurn(quarterTurns ?? 0);
+-  final m = Transform2.translation(at.x, at.y)
+-      .multiply(Transform2(cos, sin, -sin, cos, 0, 0))
+-      .multiply(Transform2.scale(mirrored ? -1 : 1, 1))
+-      .multiply(Transform2.translation(-basePoint.x, -basePoint.y));
+-  double clean(double v) => v == 0 ? 0.0 : v;
+-  return Transform2(
+-      clean(m.a), clean(m.b), clean(m.c), clean(m.d), clean(m.e), clean(m.f));
+-}
+-
+-/// The exact `(cos, sin)` of [quarterTurns] counter-clockwise quarter turns.
+-(double, double) _quarterTurn(int quarterTurns) => const [
+-      (1.0, 0.0),
+-      (0.0, 1.0),
+-      (-1.0, 0.0),
+-      (0.0, -1.0)
+-    ][((quarterTurns % 4) + 4) % 4];
+-
+ /// The definition a placement of [entry] in [doc] uses, and the commands
+ /// that make it when it is a copy (none when one is reused). A definition
+ /// is reused when it carries the entry's key and version, still exists,
+ /// carries an equal unit (or none, as the entry) and is leaf-equal to the
+ /// entry; otherwise it is copied with fresh handles, its `jetcad.symbol`
+ /// the entry's whole component (attachment kinds, family and retired
+ /// included) and its `jetcad.unit` the entry's when it has one.
+ ({Handle definition, List<DraftCommand> commands}) definitionForEntry(
+     DraftDocument doc, SymbolEntry entry) {
+   assert(_ascending(entry.leaves),
+diff --git a/packages/jet_cad_2d_plan/lib/src/tools/move_resolver.dart b/packages/jet_cad_2d_plan/lib/src/tools/move_resolver.dart
+index 3fe23eb6..0fe6b283 100644
+--- a/packages/jet_cad_2d_plan/lib/src/tools/move_resolver.dart
++++ b/packages/jet_cad_2d_plan/lib/src/tools/move_resolver.dart
+@@ -1,34 +1,32 @@
+ // Spec P3 "Attachment" (Task 14): plan.select's move resolver, ported from
+ // jet_cad_floor_plan's symbol_move.dart (spec 09c D8) over the registry.
+ // A root-level symbol instance whose jetcad.symbol names attachment kinds,
+ // dragged by its body with object snap on, attaches as a placement does,
+ // anchored on its plain-moved back-centre.
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
+     show MoveResolver, ToolContext;
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart'
+-    show Attachment, AttachmentQuery, AttachmentRegistry, SymbolComponent;
++    show
++        Attachment,
++        AttachmentQuery,
++        AttachmentRegistry,
++        SymbolBox,
++        SymbolComponent,
++        boxOfDefinition,
++        footprintOf,
++        isOrthonormal;
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+-import '../symbols/symbol_box.dart';
+ import 'plan_symbol_tool.dart' show kAttachPixels;
+ 
+-/// Whether [g]'s linear part is orthonormal (spec 09c W-8, S-10; ported
+-/// from wall_attach.dart:402-407): a mirror is, a scale is not.
+-bool isOrthonormal(Transform2 g) {
+-  final tol = Tolerance.standard.linear;
+-  return (g.a * g.a + g.b * g.b - 1).abs() <= tol &&
+-      (g.c * g.c + g.d * g.d - 1).abs() <= tol &&
+-      (g.a * g.c + g.b * g.d).abs() <= tol;
+-}
+-
+ /// plan.select's [MoveResolver] over the current document's attachment
+ /// registry (spec P3; today's `SymbolMoveResolver`, spec 09c D8).
+ final class PlanMoveResolver implements MoveResolver {
+   PlanMoveResolver({required this.attachments, this.canRotate});
+ 
+   /// The current document's registry, read at each call.
+   final AttachmentRegistry Function() attachments;
+ 
+   /// Whether a move may turn the symbol (the permissions' rotate), read at
+   /// each call; null allows.
+diff --git a/packages/jet_cad_2d_plan/lib/src/tools/plan_symbol_tool.dart b/packages/jet_cad_2d_plan/lib/src/tools/plan_symbol_tool.dart
+index b602b6e2..d65c0b16 100644
+--- a/packages/jet_cad_2d_plan/lib/src/tools/plan_symbol_tool.dart
++++ b/packages/jet_cad_2d_plan/lib/src/tools/plan_symbol_tool.dart
+@@ -17,26 +17,31 @@ import 'package:flutter/services.dart'
+         KeyDownEvent,
+         KeyEvent,
+         KeyUpEvent,
+         LogicalKeyboardKey,
+         MouseCursor,
+         SystemMouseCursors;
+ import 'package:flutter/widgets.dart' show KeyEventResult;
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart'
+-    show Attachment, AttachmentQuery, AttachmentRegistry;
++    show
++        Attachment,
++        AttachmentQuery,
++        AttachmentRegistry,
++        boxOfEntry,
++        footprintOf,
++        placementTransform;
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import '../attach/attachment_painter.dart';
+ import '../symbols/plan_symbol.dart';
+-import '../symbols/symbol_box.dart';
+ import '../symbols/symbol_ghost.dart';
+ import '../symbols/symbol_placer.dart';
+ import '../units/unit_index.dart' show UnitIndex;
+ import 'generic_tools.dart' show PlanToolIds;
+ 
+ /// The half-size of the ghost's base-point cross, in screen pixels.
+ const double kGhostCrossPixels = 6.0;
+ 
+ /// How near, in screen pixels, the raw pointer may be for an attachment
+ /// (today's kWallAttachPixels, spec 09c D4, D6): larger than the snap
+diff --git a/packages/jet_cad_2d_plan/lib/src/units/unit_index.dart b/packages/jet_cad_2d_plan/lib/src/units/unit_index.dart
+index 8ea9c785..51873723 100644
+--- a/packages/jet_cad_2d_plan/lib/src/units/unit_index.dart
++++ b/packages/jet_cad_2d_plan/lib/src/units/unit_index.dart
+@@ -2,24 +2,28 @@
+ // "Unlabelled, duplicate and bad labels"): every live symbol instance whose
+ // definition carries `jetcad.unit`, placed at the root or generated by an
+ // object, in one pass, with its label, its lock, its world transform and
+ // its definition-space top and box. Replaces jet_cad_floor_plan's
+ // TableSurvey (tables/table_index.dart:61-226); the top and box follow
+ // service/table_picker.dart:92-110, :259-299.
+ import 'package:flutter/foundation.dart'
+     show ValueListenable, visibleForTesting;
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart'
+-    show SymbolComponent, UnitComponent, UnitLabelling, kUnitLabelTag;
++    show
++        SymbolComponent,
++        UnitComponent,
++        UnitLabelling,
++        boxOfLeaves,
++        kUnitLabelTag;
+ 
+ import '../kits/locks.dart';
+-import '../symbols/symbol_box.dart' show boxOfLeaves;
+ import 'unit_components.dart';
+ import 'unit_label.dart';
+ import 'unit_locks.dart';
+ import 'unit_problems.dart';
+ 
+ /// One unit.
+ final class UnitInfo {
+   const UnitInfo({
+     required this.instance,
+     required this.definition,
+diff --git a/packages/jet_cad_2d_plan/lib/src/units/unit_label.dart b/packages/jet_cad_2d_plan/lib/src/units/unit_label.dart
+index 0ae282da..c6c8a070 100644
+--- a/packages/jet_cad_2d_plan/lib/src/units/unit_label.dart
++++ b/packages/jet_cad_2d_plan/lib/src/units/unit_label.dart
+@@ -1,24 +1,27 @@
+ // A unit's label (spec 2b S2 "The label"): the text rule (today's table
+ // number rule, jet_cad_floor_plan/lib/src/tables/table_numbers.dart:5-46,
+ // renamed), the label record and command of a placed unit
+ // (table_label.dart:106-179), and how a unit's label and top are read. The
+ // stamp, the height and the payload are the kit's (Task 3).
+ //
+ // No Flutter import: Dart over package:jet_cad_2d and the kit's model.
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart'
+-    show kUnitLabelTag, kUnitLabelTextAttrs, unitLabelHeight, unitLabelPayload;
++    show
++        boxOfLeaves,
++        kUnitLabelTag,
++        kUnitLabelTextAttrs,
++        unitLabelHeight,
++        unitLabelPayload;
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+-import '../symbols/symbol_box.dart' show boxOfLeaves;
+-
+ /// A label's longest length, in UTF-16 code units.
+ const int kUnitLabelMaxLength = 8;
+ 
+ /// Why a text is not a unit label, as a value a UI words.
+ enum UnitLabelProblem {
+   /// Empty, or longer than [kUnitLabelMaxLength] code units, trimmed.
+   length,
+ 
+   /// A control character, a line break among them.
+   control,
+diff --git a/packages/jet_cad_2d_plan/test/controller/mode_test.dart b/packages/jet_cad_2d_plan/test/controller/mode_test.dart
+index 172bfa1c..5cc7ba81 100644
+--- a/packages/jet_cad_2d_plan/test/controller/mode_test.dart
++++ b/packages/jet_cad_2d_plan/test/controller/mode_test.dart
+@@ -1,21 +1,20 @@
+ // jet_cad_floor_plan's test/host/controller_test.dart C3, C4, C5, C8 and
+ // CD1, the service halves, assertions unchanged (spec 2b S3, A12): the
+ // copy, its permissions, a load in service, a refused load in service,
+ // unitDetails following the active document.
+ import 'dart:convert';
+ 
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show placementTransform;
+ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+-import 'package:jet_cad_2d_plan/src/symbols/symbol_placer.dart'
+-    show placementTransform;
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import '../support/harness.dart';
+ import '../support/service_plans.dart';
+ import '../support/test_kit.dart';
+ 
+ PlanController controller(String json) =>
+     controllerFor(kits: [testKit()], json: json);
+ 
+ void main() {
+diff --git a/packages/jet_cad_2d_plan/test/invariants/contract_names_test.dart b/packages/jet_cad_2d_plan/test/invariants/contract_names_test.dart
+new file mode 100644
+index 00000000..4fc96e54
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/invariants/contract_names_test.dart
+@@ -0,0 +1,51 @@
++// 3a Task 1 (spec C1.4, Appendix A D-09): the symbol box family and the
++// placement transform have one owner, the contract. The plan library
++// declares none of them, under its own name or a private one, so a rule
++// changed in the contract cannot drift from a copy here.
++import 'dart:io';
++
++import 'package:flutter_test/flutter_test.dart';
++
++/// A top-level declaration of one of the contract's names, public or
++/// private.
++final RegExp _declaration = RegExp(
++    r'^(?:final\s+)?(?:class\s+_?SymbolBox\b|'
++    r'(?:bool|Transform2|Aabb2|SymbolBox\??)\s+_?'
++    r'(?:isOrthonormal|placementTransform|boxOfLeaves|boxOfEntry|'
++    r'servedTopOfEntry|boxOfDefinition|footprintOf)\s*\()',
++    multiLine: true);
++
++void main() {
++  test(
++      'SB-one-owner no file under lib/ declares the symbol box family or '
++      'the placement transform (M-SB-owner)', () {
++    final files = Directory('lib')
++        .listSync(recursive: true)
++        .whereType<File>()
++        .where((f) => f.path.endsWith('.dart'))
++        .toList();
++    expect(files.length, greaterThan(50), reason: 'premise: lib/ was read');
++    final found = [
++      for (final f in files)
++        for (final m in _declaration.allMatches(f.readAsStringSync()))
++          '${f.path}: ${m[0]}',
++    ];
++    expect(found, isEmpty);
++  });
++
++  test('SB-one-owner-probe the pattern finds each form it names', () {
++    // The detector's own positive control (exempt from the mutation rule).
++    for (final line in [
++      'bool isOrthonormal(Transform2 g) {',
++      'bool _isOrthonormal(Transform2 g) {',
++      'Transform2 placementTransform({',
++      'final class SymbolBox {',
++      'SymbolBox? boxOfLeaves(Iterable<(EntityKind, GeometryPayload)> l) {',
++      'Aabb2 footprintOf(SymbolBox box) =>',
++    ]) {
++      expect(_declaration.hasMatch(line), isTrue, reason: line);
++    }
++    expect(_declaration.hasMatch('  if (!isOrthonormal(t)) return null;'),
++        isFalse);
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/panels/symbol_section_test.dart b/packages/jet_cad_2d_plan/test/panels/symbol_section_test.dart
+index 32fe3e37..4d1169fa 100644
+--- a/packages/jet_cad_2d_plan/test/panels/symbol_section_test.dart
++++ b/packages/jet_cad_2d_plan/test/panels/symbol_section_test.dart
+@@ -27,21 +27,20 @@ import 'package:jet_cad_2d_kit/authoring.dart'
+     show
+         Catalog,
+         CatalogLine,
+         CatalogPolyline,
+         CatalogSymbol,
+         CatalogUnit,
+         encodeLibrary;
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+ import 'package:jet_cad_2d_plan/src/panels/symbol_section.dart';
+-import 'package:jet_cad_2d_plan/src/symbols/symbol_box.dart';
+ import 'package:jet_cad_2d_plan/src/symbols/symbol_placer.dart';
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import '../support/unit_fixtures.dart' show addUnitLabel;
+ 
+ /// A [w] x [d] rectangle, base point at its centre.
+ CatalogSymbol rect(String key, double w, double d,
+         {List<String> tags = const [],
+         int? seats,
+         double? baseX,
+diff --git a/packages/jet_cad_2d_plan/test/service/service_record_test.dart b/packages/jet_cad_2d_plan/test/service/service_record_test.dart
+index 28a52701..f09639fa 100644
+--- a/packages/jet_cad_2d_plan/test/service/service_record_test.dart
++++ b/packages/jet_cad_2d_plan/test/service/service_record_test.dart
+@@ -2,22 +2,20 @@
+ // ported to the service record (spec 2b S3 "The service record"):
+ // assertions unchanged but where the format itself is the premise
+ // (ruling R13-a). Units are turned, mirrored and off the origin; moves are
+ // off-grid; the copy is a decoded copy of the design under runtime
+ // permissions, as the controller makes it.
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+ import 'package:jet_cad_2d_plan/src/kits/locks.dart' show LockSet;
+ import 'package:jet_cad_2d_plan/src/service/service_record.dart';
+-import 'package:jet_cad_2d_plan/src/symbols/symbol_placer.dart'
+-    show placementTransform;
+ import 'package:jet_cad_2d_plan/src/units/unit_index.dart';
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import '../support/harness.dart'
+     show catalogOf, planDocument, registerPlanComponents;
+ import '../support/service_plans.dart';
+ import '../support/test_kit.dart' show testKit;
+ 
+ /// Units 1 (a quarter turn, mirrored), 2, 3 (a stool, half-turned) and 4
+ /// (on layer `L`), and a planter (today's `design()`,
+diff --git a/packages/jet_cad_2d_plan/test/support/service_plans.dart b/packages/jet_cad_2d_plan/test/support/service_plans.dart
+index 7e2e12c0..e5348d71 100644
+--- a/packages/jet_cad_2d_plan/test/support/service_plans.dart
++++ b/packages/jet_cad_2d_plan/test/support/service_plans.dart
+@@ -4,22 +4,20 @@
+ // origin, and an instance carrying its UNIT label (`unitLabelAttrib`, Task
+ // 3). Every placement is off the origin, turned, most mirrored (CLAUDE.md).
+ // The helpers are today's (jet_cad_floor_plan's
+ // test/host/controller_test.dart:26-79): `move`, `drawLine`, `parts`.
+ import 'dart:ui' show Color;
+ 
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+-import 'package:jet_cad_2d_plan/src/symbols/symbol_placer.dart'
+-    show placementTransform;
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import 'harness.dart';
+ import 'service_fixture.dart' show serviceFixture;
+ import 'test_kit.dart';
+ import 'unit_fixtures.dart' show addLayer, kDeg37;
+ 
+ // One owner per helper (controller ruling R-19): `kDeg37` and `addLayer`
+ // are the units' fixture's (Tasks 6 and 8), re-exported for Tasks 11-13.
+ export 'unit_fixtures.dart' show addLayer, kDeg37;
+diff --git a/packages/jet_cad_2d_plan/test/support/unit_fixtures.dart b/packages/jet_cad_2d_plan/test/support/unit_fixtures.dart
+index 1c305070..3d9623ec 100644
+--- a/packages/jet_cad_2d_plan/test/support/unit_fixtures.dart
++++ b/packages/jet_cad_2d_plan/test/support/unit_fixtures.dart
+@@ -21,21 +21,21 @@ import 'package:jet_cad_2d_kit/authoring.dart'
+         CatalogLine,
+         CatalogPolyline,
+         CatalogSymbol,
+         CatalogUnit;
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+ import 'package:jet_cad_2d_plan/src/kits/locks.dart';
+ import 'package:jet_cad_2d_plan/src/service/service_session.dart'
+     show serviceCopyOf;
+ import 'package:jet_cad_2d_plan/src/service/unit_picker.dart';
+ import 'package:jet_cad_2d_plan/src/symbols/symbol_placer.dart'
+-    show definitionForEntry, placementTransform;
++    show definitionForEntry;
+ import 'package:jet_cad_2d_plan/src/units/unit_index.dart';
+ import 'package:jet_cad_2d_plan/src/units/unit_label.dart';
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import 'harness.dart';
+ import 'symbol_fixtures.dart' show leafRecord;
+ 
+ /// The fixtures' kit: no type, no tool, no library. Its symbols are placed
+ /// by hand; a controller loads it so that LockSet leaves them unlocked.
+ const String fxKitId = 'fx';
+diff --git a/packages/jet_cad_2d_plan/test/symbols/symbol_box_test.dart b/packages/jet_cad_2d_plan/test/symbols/symbol_box_test.dart
+index 675cdd42..e66a98c9 100644
+--- a/packages/jet_cad_2d_plan/test/symbols/symbol_box_test.dart
++++ b/packages/jet_cad_2d_plan/test/symbols/symbol_box_test.dart
+@@ -1,303 +1,46 @@
+-// Spec 09c D2 (ported to the plan library, Task 14): the symbol's local
++// Spec 09c D2 (ported to the plan library, Task 14): a placed definition's
+ // box. Ported from jet_cad_floor_plan's symbol_box_test.dart, assertions
+-// unchanged; the furniture asset's literal boxes stay with that asset's kit
+-// (sub-project 3), and the library entries are the plan library's fixture
+-// library (kit "fixture"). Fixtures avoid the degenerate cases (P-2): the
+-// box rules are pinned by leaves far from the origin, with every side of a
+-// box set by a different kind of leaf, by an interior polyline vertex, by
+-// an arc's axis extreme and by an arc's end point; arcs cross each axis
+-// separately, none, from a negative start and clockwise.
+-import 'dart:math' as math;
+-
++// unchanged. The box functions are the contract's since 3a Task 1 (spec
++// C1.4), and so are their other tests (jet_cad_2d_kit's
++// test/model/symbol_box_test.dart); this case stays because it places
++// through the plan's placeSymbol. The furniture asset's literal boxes stay
++// with that asset's kit (3a Task 28).
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+-import 'package:jet_cad_2d_plan/src/symbols/symbol_box.dart';
+ import 'package:jet_cad_2d_plan/src/symbols/symbol_placer.dart';
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import '../support/symbol_fixtures.dart';
+ 
+ SymbolEntry entryIn(SymbolLibrary lib, String key) =>
+     lib.entries.firstWhere((e) => e.symbol.key == key);
+ 
+-/// Far from the origin, as the plan's P-2 asks.
+-const double cx = 1e5 + 37.5, cy = -7e4 + 12.25, r = 410.0;
+-
+-(EntityKind, GeometryPayload) arc(double start, double sweep) =>
+-    (EntityKind.arc, arcPayload(Vector2(cx, cy), r, start, sweep));
+-
+-SymbolBox boxOfArc(double start, double sweep) =>
+-    boxOfLeaves([arc(start, sweep)])!;
+-
+-/// The box of an arc from [start] through [sweep] by its end points only.
+-({double minX, double maxX, double minY, double maxY}) ends(
+-    double start, double sweep) {
+-  final xs = [cx + r * math.cos(start), cx + r * math.cos(start + sweep)];
+-  final ys = [cy + r * math.sin(start), cy + r * math.sin(start + sweep)];
+-  return (
+-    minX: math.min(xs[0], xs[1]),
+-    maxX: math.max(xs[0], xs[1]),
+-    minY: math.min(ys[0], ys[1]),
+-    maxY: math.max(ys[0], ys[1]),
+-  );
+-}
+-
+-Matcher near(double v) => closeTo(v, 1e-9);
+-
+ DraftDocument target() {
+   final doc = DraftDocument.empty();
+   registerKitComponents(doc.components);
+   doc.header.units = DrawingUnits.millimeters;
+   return doc;
+ }
+ 
+ Handle definitionOf(DraftDocument doc, String key) {
+   for (final h in doc.components.withComponent<SymbolComponent>()) {
+     if (doc.components.get<SymbolComponent>(h)!.key == key &&
+         doc.tree.definition(h) != null) {
+       return h;
+     }
+   }
+   throw StateError('no $key');
+ }
+ 
+ void main() {
+-  group('SymbolBox', () {
+-    test('width, depth and the back-centre of an off-origin box', () {
+-      const b =
+-          SymbolBox(left: -310.5, right: 1240.25, front: -75, back: 905.5);
+-      expect(b.width, 1550.75);
+-      expect(b.depth, 980.5);
+-      expect(b.backCentre, Vector2(464.875, 905.5));
+-    });
+-
+-    test('equality is exact on all four sides', () {
+-      const b =
+-          SymbolBox(left: -310.5, right: 1240.25, front: -75, back: 905.5);
+-      // A box computed from a leaf: equal values, a distinct object (two
+-      // equal `const` boxes would be one canonical object).
+-      final computed = boxOfLeaves([
+-        (
+-          EntityKind.line,
+-          linePayload(Vector2(1240.25, 905.5), Vector2(-310.5, -75))
+-        )
+-      ])!;
+-      expect(identical(computed, b), isFalse);
+-      expect(computed, b);
+-      expect(computed.hashCode, b.hashCode);
+-      for (final other in const [
+-        SymbolBox(left: -310.4, right: 1240.25, front: -75, back: 905.5),
+-        SymbolBox(left: -310.5, right: 1240.3, front: -75, back: 905.5),
+-        SymbolBox(left: -310.5, right: 1240.25, front: -75.1, back: 905.5),
+-        SymbolBox(left: -310.5, right: 1240.25, front: -75, back: 905.6),
+-      ]) {
+-        expect(b == other, isFalse, reason: '$other');
+-      }
+-    });
+-  });
+-
+-  group('boxOfLeaves', () {
+-    test('each side set by a different kind of leaf, far from the origin', () {
+-      // left: a circle's centre − r; right: a polyline's interior vertex;
+-      // front: an arc's axis extreme (3π/2); back: a line's second end.
+-      final box = boxOfLeaves([
+-        (
+-          EntityKind.line,
+-          linePayload(
+-              Vector2(1e5 + 100, -7e4 + 200), Vector2(1e5 + 300, -7e4 + 950))
+-        ),
+-        (
+-          EntityKind.polyline,
+-          polylinePayload([
+-            Vector2(1e5 + 50, -7e4 + 100),
+-            Vector2(1e5 + 1200, -7e4 + 400),
+-            Vector2(1e5 + 60, -7e4 + 700),
+-          ])
+-        ),
+-        (EntityKind.circle, circlePayload(Vector2(1e5 - 20, -7e4 + 300), 180)),
+-        (
+-          EntityKind.arc,
+-          arcPayload(Vector2(1e5 + 500, -7e4 + 100), 250, math.pi + 0.3, 2.5)
+-        ),
+-      ])!;
+-      expect(
+-          box,
+-          const SymbolBox(
+-              left: 1e5 - 200,
+-              right: 1e5 + 1200,
+-              front: -7e4 - 150,
+-              back: -7e4 + 950));
+-    });
+-
+-    test('a circle is its centre ± r on every side', () {
+-      final box = boxOfLeaves([
+-        (EntityKind.circle, circlePayload(Vector2(-2400.5, 3100.25), 72.5))
+-      ])!;
+-      expect(
+-          box,
+-          const SymbolBox(
+-              left: -2473, right: -2328, front: 3027.75, back: 3172.75));
+-    });
+-
+-    test('a closed polyline counts every vertex once, a line both ends', () {
+-      final box = boxOfLeaves([
+-        (
+-          EntityKind.polyline,
+-          polylinePayload([
+-            Vector2(-50, 20),
+-            Vector2(10, -40),
+-            Vector2(70, 15),
+-            Vector2(5, 90),
+-          ], closed: true)
+-        ),
+-        (EntityKind.line, linePayload(Vector2(-10, 30), Vector2(95, 10))),
+-      ])!;
+-      expect(box, const SymbolBox(left: -50, right: 95, front: -40, back: 90));
+-    });
+-
+-    test('no leaf has no box; a leaf of another kind draws nothing', () {
+-      expect(boxOfLeaves(const []), isNull);
+-      expect(
+-          boxOfLeaves([
+-            (
+-              EntityKind.point,
+-              linePayload(Vector2(9e4, 9e4), Vector2(9e4, 9e4))
+-            )
+-          ]),
+-          isNull);
+-      final box = boxOfLeaves([
+-        (EntityKind.circle, circlePayload(Vector2(-2400.5, 3100.25), 72.5)),
+-        (EntityKind.point, polylinePayload([Vector2(9e4, -9e4)])),
+-        (EntityKind.text, textPayload(Vector2(-9e4, 9e4), 250)),
+-      ])!;
+-      expect(
+-          box,
+-          const SymbolBox(
+-              left: -2473, right: -2328, front: 3027.75, back: 3172.75));
+-    });
+-  });
+-
+-  group('an arc by its true extents', () {
+-    test('a sweep that crosses 0 rad only', () {
+-      const s = -math.pi / 6, w = math.pi / 3;
+-      final b = boxOfArc(s, w), e = ends(s, w);
+-      expect(b.right, cx + r);
+-      expect(b.left, near(e.minX));
+-      expect(b.front, near(e.minY));
+-      expect(b.back, near(e.maxY));
+-    });
+-
+-    test('a sweep that crosses π/2 only', () {
+-      const s = math.pi / 3, w = math.pi / 3;
+-      final b = boxOfArc(s, w), e = ends(s, w);
+-      expect(b.back, cy + r);
+-      expect(b.left, near(e.minX));
+-      expect(b.right, near(e.maxX));
+-      expect(b.front, near(e.minY));
+-    });
+-
+-    test('a sweep that crosses π only', () {
+-      const s = 5 * math.pi / 6, w = math.pi / 3;
+-      final b = boxOfArc(s, w), e = ends(s, w);
+-      expect(b.left, cx - r);
+-      expect(b.right, near(e.maxX));
+-      expect(b.front, near(e.minY));
+-      expect(b.back, near(e.maxY));
+-    });
+-
+-    test('a sweep that crosses 3π/2 only', () {
+-      const s = 4 * math.pi / 3, w = math.pi / 3;
+-      final b = boxOfArc(s, w), e = ends(s, w);
+-      expect(b.front, cy - r);
+-      expect(b.left, near(e.minX));
+-      expect(b.right, near(e.maxX));
+-      expect(b.back, near(e.maxY));
+-    });
+-
+-    test('a sweep that crosses no axis is its end points', () {
+-      const s = math.pi / 12, w = math.pi / 3;
+-      final b = boxOfArc(s, w), e = ends(s, w);
+-      expect(b.left, near(e.minX));
+-      expect(b.right, near(e.maxX));
+-      expect(b.front, near(e.minY));
+-      expect(b.back, near(e.maxY));
+-      expect(b.right, lessThan(cx + r - 1));
+-      expect(b.back, lessThan(cy + r - 1));
+-    });
+-
+-    test('a negative start (−120° through 90°) crosses −π/2', () {
+-      const s = -2 * math.pi / 3, w = math.pi / 2;
+-      final b = boxOfArc(s, w), e = ends(s, w);
+-      expect(b.front, cy - r);
+-      expect(b.left, near(cx - r / 2));
+-      expect(b.right, near(cx + r * math.cos(math.pi / 6)));
+-      expect(b.back, near(cy - r / 2));
+-      expect(b.left, near(e.minX));
+-    });
+-
+-    test('a start past 2π crosses π', () {
+-      const s = 2 * math.pi + 5 * math.pi / 6, w = math.pi / 3;
+-      final b = boxOfArc(s, w);
+-      expect(b.left, cx - r);
+-      expect(b.back, near(cy + r / 2));
+-      expect(b.front, near(cy - r / 2));
+-    });
+-
+-    test('a clockwise sweep from π/3 back through 0 to −π/6', () {
+-      const s = math.pi / 3, w = -math.pi / 2;
+-      final b = boxOfArc(s, w), e = ends(s, w);
+-      expect(b.right, cx + r);
+-      expect(b.back, near(e.maxY));
+-      expect(b.front, near(e.minY));
+-      expect(b.left, near(e.minX));
+-      expect(b.back, lessThan(cy + r - 1));
+-    });
+-
+-    test('a full turn is the whole circle', () {
+-      final b = boxOfArc(0.7, 2 * math.pi);
+-      expect(b,
+-          SymbolBox(left: cx - r, right: cx + r, front: cy - r, back: cy + r));
+-    });
+-  });
+-
+-  group('library entries', () {
+-    test('the off-centre fixtures: back and left from an arc', () {
+-      final lib = SymbolLibrary.decode(bytesOf(buildValidLibrary()));
+-      // Sofa: the arc (900, 900) r 250 from 0.5 through 1.75 rad crosses
+-      // π/2, so its back is 1150, beyond the polyline's 950.
+-      expect(boxOfEntry(entryIn(lib, 'fixture.sofa.three')),
+-          const SymbolBox(left: 120, right: 1680, front: 340, back: 1150));
+-      // Armchair: the arc (500, 500) r 300 from 0.25 through 2.5 rad sets
+-      // the left and right by its end points and the back by π/2; the
+-      // circle (510, 480) r 120 sets the front.
+-      final a = boxOfEntry(entryIn(lib, 'fixture.armchair.single'))!;
+-      expect(a.left, near(500 + 300 * math.cos(2.75)));
+-      expect(a.right, near(500 + 300 * math.cos(0.25)));
+-      expect(a.front, 360);
+-      expect(a.back, 800);
+-      expect(a.backCentre.x, near((a.left + a.right) / 2));
+-      expect(a.backCentre.y, 800);
+-      expect(boxOfEntry(entryIn(lib, 'fixture.nightstand.single')),
+-          const SymbolBox(left: 50, right: 450, front: 60, back: 410));
+-    });
+-
+-    test('memoised per entry: the same object on every call', () {
+-      final lib = SymbolLibrary.decode(bytesOf(buildValidLibrary()));
+-      final toilet = entryIn(lib, 'fixture.sofa.three');
+-      final tub = entryIn(lib, 'fixture.armchair.single');
+-      expect(identical(boxOfEntry(toilet), boxOfEntry(toilet)), isTrue);
+-      expect(boxOfEntry(tub), isNot(boxOfEntry(toilet)));
+-    });
+-  });
+-
+   group('boxOfDefinition', () {
+     test('a placed definition gives the same box as its entry', () {
+       final lib = SymbolLibrary.decode(bytesOf(buildValidLibrary()));
+       final doc = target();
+       final keys = [
+         'fixture.sofa.three',
+         'fixture.nightstand.single',
+         'fixture.armchair.single'
+       ];
+       // Three definitions in one document (each box must read only its own
+@@ -308,36 +51,12 @@ void main() {
+             at: Vector2(1e5 + 250.0 * i, -7e4 - 125.0 * i),
+             quarterTurns: i + 1,
+             mirrored: i.isOdd));
+       }
+       for (final key in keys) {
+         expect(boxOfDefinition(doc, definitionOf(doc, key)),
+             boxOfEntry(entryIn(lib, key)),
+             reason: key);
+       }
+     });
+-
+-    test(
+-        'not a definition (the root, a leaf, nothing), or a definition '
+-        'without leaves: no box', () {
+-      final doc = target();
+-      doc.commands.execute(AddDefinitionCommand(Definition(
+-          handle: const Handle(0x7A1),
+-          name: 'empty',
+-          basePoint: Vector2(-40, 75),
+-          children: const [])));
+-      // The root owns a drawn line and a circle: it is not a definition.
+-      doc.commands.execute(CompoundCommand([
+-        AddEntityCommand(
+-            record: leafRecord(0x7B0, doc.rootHandle, EntityKind.line),
+-            payload: linePayload(Vector2(1e5, -7e4), Vector2(1e5 + 900, -7e4))),
+-        AddEntityCommand(
+-            record: leafRecord(0x7B1, doc.rootHandle, EntityKind.circle),
+-            payload: circlePayload(Vector2(-310, 925), 60)),
+-      ], label: 'Model space'));
+-      expect(boxOfDefinition(doc, const Handle(0x7A1)), isNull);
+-      expect(boxOfDefinition(doc, const Handle(0x7A2)), isNull);
+-      expect(boxOfDefinition(doc, doc.rootHandle), isNull);
+-      expect(boxOfDefinition(doc, const Handle(0x7B0)), isNull);
+-    });
+   });
+ }
+diff --git a/packages/jet_cad_2d_plan/test/symbols/symbol_ghost_test.dart b/packages/jet_cad_2d_plan/test/symbols/symbol_ghost_test.dart
+index 56f5f893..9d528d81 100644
+--- a/packages/jet_cad_2d_plan/test/symbols/symbol_ghost_test.dart
++++ b/packages/jet_cad_2d_plan/test/symbols/symbol_ghost_test.dart
+@@ -29,21 +29,20 @@ import 'package:jet_cad_2d_kit/authoring.dart'
+         Catalog,
+         CatalogArc,
+         CatalogCircle,
+         CatalogLine,
+         CatalogPolyline,
+         CatalogShape,
+         CatalogSymbol,
+         encodeLibrary;
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+ import 'package:jet_cad_2d_plan/src/symbols/symbol_ghost.dart';
+-import 'package:jet_cad_2d_plan/src/symbols/symbol_placer.dart';
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ /// A closed rectangle from (x0, y0) to (x1, y1).
+ CatalogPolyline rect(double x0, double y0, double x1, double y1) =>
+     CatalogPolyline([(x0, y0), (x1, y0), (x1, y1), (x0, y1)], closed: true);
+ 
+ CatalogSymbol symbol(
+         String key, (double, double) base, List<CatalogShape> shapes) =>
+     CatalogSymbol(
+         key: key,
+diff --git a/packages/jet_cad_2d_plan/test/symbols/symbol_placer_test.dart b/packages/jet_cad_2d_plan/test/symbols/symbol_placer_test.dart
+index aec245ef..ea91c0c0 100644
+--- a/packages/jet_cad_2d_plan/test/symbols/symbol_placer_test.dart
++++ b/packages/jet_cad_2d_plan/test/symbols/symbol_placer_test.dart
+@@ -1,16 +1,18 @@
+ // Spec 09 D6, plan 09a Task 4: the placer. Fixtures avoid the degenerate
+ // cases (P-4): every base point is off the origin, every `at` is off the
+ // origin, placements are rotated and mirrored, instance style fields differ
+ // from the defaults, the target document holds handles the library also uses,
+ // a foreign definition has the symbol's own name, and an older version lives
+ // beside a newer one.
++// The group 'placementTransform' moved into the contract (3a Task 1):
++// jet_cad_2d_kit's test/model/placement_transform_test.dart.
+ import 'dart:convert';
+ import 'dart:math' as math;
+ import 'dart:typed_data';
+ 
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_kit/authoring.dart'
+     show
+         Catalog,
+         CatalogLine,
+@@ -183,223 +185,20 @@ final List<(String, double, double)> rotations = [
+   ('30°', math.sqrt(3) / 2, 0.5),
+   (
+     '−112.5°',
+     math.cos(-112.5 * math.pi / 180),
+     math.sin(-112.5 * math.pi / 180)
+   ),
+ ];
+ const Tolerance tol = Tolerance.standard;
+ 
+ void main() {
+-  group('placementTransform', () {
+-    test(
+-        'P1 the base point lands on at, and a leaf endpoint where the '
+-        'independent formula says, for every quarter turn, mirrored or not',
+-        () {
+-      final e = sofa();
+-      final base = e.definition.basePoint;
+-      expect(base.x, isNot(0));
+-      expect(base.y, isNot(0));
+-      final line =
+-          e.leaves.firstWhere((l) => l.record.handle.value == sofaLine);
+-      final p0 = line.payload.pointAt(0);
+-      final p1 = line.payload.pointAt(1);
+-      for (final mirrored in [false, true]) {
+-        for (var q = 0; q < 4; q++) {
+-          final t = placementTransform(
+-              at: at, basePoint: base, quarterTurns: q, mirrored: mirrored);
+-          expect(tol.eqPoint(t.transformPoint(base), at), isTrue,
+-              reason: 'q=$q mirrored=$mirrored base point');
+-          for (final p in [p0, p1]) {
+-            final want = expectedWorld(p, base, at, q, mirrored);
+-            expect(tol.eqPoint(t.transformPoint(p), want), isTrue,
+-                reason: 'q=$q mirrored=$mirrored $p -> '
+-                    '${t.transformPoint(p)}, want $want');
+-          }
+-        }
+-      }
+-    });
+-
+-    test('P2 quarter turns are taken modulo 4, negative allowed', () {
+-      final base = Vector2(900, 400);
+-      List<double> t(int q) => placementTransform(
+-              at: at, basePoint: base, quarterTurns: q, mirrored: true)
+-          .toJson()
+-          .cast<double>();
+-      expect(t(-1), t(3));
+-      expect(t(4), t(0));
+-      expect(t(5), t(1));
+-      expect(t(-6), t(2));
+-      expect(t(1), isNot(t(3)));
+-    });
+-
+-    test(
+-        'P3 the matrix is exactly 0 and ±1 in its linear part and never '
+-        '-0.0, for every quarter turn, mirrored or not', () {
+-      final base = Vector2(900, 400);
+-      for (final mirrored in [false, true]) {
+-        for (var q = -2; q < 6; q++) {
+-          final t = placementTransform(
+-              at: at, basePoint: base, quarterTurns: q, mirrored: mirrored);
+-          for (final v in [t.a, t.b, t.c, t.d]) {
+-            expect([0.0, 1.0, -1.0], contains(v),
+-                reason: 'q=$q mirrored=$mirrored ${t.toJson()}');
+-          }
+-          for (final v in [t.a, t.b, t.c, t.d, t.e, t.f]) {
+-            expect(v == 0 && v.isNegative, isFalse,
+-                reason: 'q=$q mirrored=$mirrored has -0.0: ${t.toJson()}');
+-          }
+-        }
+-      }
+-    });
+-
+-    test(
+-        'P4 a mirror flips the local x axis whatever the turns (det < 0), '
+-        'and the turn order is rotate after mirror', () {
+-      final base = Vector2(900, 400);
+-      for (var q = 0; q < 4; q++) {
+-        expect(
+-            placementTransform(
+-                    at: at, basePoint: base, quarterTurns: q, mirrored: true)
+-                .determinant,
+-            -1.0);
+-        expect(
+-            placementTransform(at: at, basePoint: base, quarterTurns: q)
+-                .determinant,
+-            1.0);
+-      }
+-      // Local +x under q=1 mirrored: mirrored to -x, rotated to -y.
+-      final t = placementTransform(
+-          at: at, basePoint: base, quarterTurns: 1, mirrored: true);
+-      final d = t.transformDirection(Vector2(1, 0));
+-      expect(d.x, 0.0);
+-      expect(d.y, -1.0);
+-    });
+-
+-    // Plan 09c-1 Task 5 (spec D5): the rotation as a unit vector. The
+-    // fixtures: a 30° and a −112.5° vector (no 0 or ±1 in either), `far` and
+-    // the sofa's base point off the origin and off each other.
+-
+-    test(
+-        'P20 a rotation vector gives translate(at) · R · S · '
+-        'translate(−base), written out by hand, mirrored or not', () {
+-      final e = sofa();
+-      final base = e.definition.basePoint;
+-      final line =
+-          e.leaves.firstWhere((l) => l.record.handle.value == sofaLine);
+-      for (final (name, cos, sin) in rotations) {
+-        for (final mirrored in [false, true]) {
+-          final why = '$name mirrored=$mirrored';
+-          final s = mirrored ? -1.0 : 1.0;
+-          final t = placementTransform(
+-              at: far,
+-              basePoint: base,
+-              rotation: (cos, sin),
+-              mirrored: mirrored);
+-          // The local x is mirrored first, then turned: (s·cos, s·sin);
+-          // the local y turns alone: (−sin, cos). Exact doubles.
+-          expect(
+-              t.toJson(),
+-              [
+-                s * cos,
+-                s * sin,
+-                -sin,
+-                cos,
+-                far.x - (s * cos * base.x - sin * base.y),
+-                far.y - (s * sin * base.x + cos * base.y),
+-              ],
+-              reason: why);
+-          expect(tol.eqPoint(t.transformPoint(base), far), isTrue,
+-              reason: '$why base point');
+-          for (final p in [line.payload.pointAt(0), line.payload.pointAt(1)]) {
+-            final u = (p.x - base.x) * s, v = p.y - base.y;
+-            final want =
+-                Vector2(far.x + cos * u - sin * v, far.y + sin * u + cos * v);
+-            expect(tol.eqPoint(t.transformPoint(p), want), isTrue,
+-                reason: '$why $p -> ${t.transformPoint(p)}, want $want');
+-          }
+-          expect(t.determinant, closeTo(s, 1e-12), reason: why);
+-        }
+-      }
+-    });
+-
+-    test(
+-        'P21 quarterTurns and rotation together are refused (an '
+-        'ArgumentError, not only an assert)', () {
+-      for (final q in [0, 1]) {
+-        expect(
+-            () => placementTransform(
+-                at: far,
+-                basePoint: Vector2(900, 400),
+-                quarterTurns: q,
+-                rotation: (rotations.first.$2, rotations.first.$3)),
+-            throwsArgumentError,
+-            reason: 'quarterTurns: $q');
+-      }
+-      // Neither: no turn.
+-      expect(
+-          placementTransform(at: far, basePoint: Vector2(900, 400)).toJson(),
+-          placementTransform(
+-              at: far,
+-              basePoint: Vector2(900, 400),
+-              rotation: (1.0, 0.0)).toJson());
+-    });
+-
+-    test(
+-        'P22 the quarter-turn form is the rotation form at the exact table: '
+-        'the same bytes for every turn, mirrored or not', () {
+-      const table = [(1.0, 0.0), (0.0, 1.0), (-1.0, 0.0), (0.0, -1.0)];
+-      final base = Vector2(900, 400);
+-      for (final mirrored in [false, true]) {
+-        for (var q = -2; q < 6; q++) {
+-          expect(
+-              placementTransform(
+-                      at: far,
+-                      basePoint: base,
+-                      quarterTurns: q,
+-                      mirrored: mirrored)
+-                  .toJson(),
+-              placementTransform(
+-                      at: far,
+-                      basePoint: base,
+-                      rotation: table[((q % 4) + 4) % 4],
+-                      mirrored: mirrored)
+-                  .toJson(),
+-              reason: 'q=$q mirrored=$mirrored');
+-        }
+-      }
+-    });
+-
+-    test(
+-        'P23 an axis-aligned rotation vector (cos or sin −0.0, as a face '
+-        'normal gives it) stores no −0.0, mirrored or not (M-09c-n: the '
+-        'named axis-aligned exception)', () {
+-      final base = Vector2(900, 400);
+-      for (final r in [
+-        (-0.0, 1.0),
+-        (0.0, 1.0),
+-        (-0.0, -1.0),
+-        (1.0, -0.0),
+-        (-1.0, -0.0),
+-      ]) {
+-        for (final mirrored in [false, true]) {
+-          final t = placementTransform(
+-              at: far, basePoint: base, rotation: r, mirrored: mirrored);
+-          for (final v in t.toJson()) {
+-            expect(v == 0 && v.isNegative, isFalse,
+-                reason: '$r mirrored=$mirrored has -0.0: ${t.toJson()}');
+-          }
+-        }
+-      }
+-    });
+-  });
+-
+   group('placeSymbol', () {
+     test(
+         'P5 is labelled, does not execute, allocates handles at '
+         'construction and writes no table record', () {
+       final doc = target();
+       final e = sofa();
+       final tablesBefore = DraftDocumentCodec.encode(doc)['tables'];
+       final seedBefore = doc.handleSeed.current;
+       final cmd = placeSymbol(doc, e, at: at);
+       expect(cmd.label, 'Place Three-seat sofa');
+diff --git a/packages/jet_cad_2d_plan/test/tools/move_resolver_test.dart b/packages/jet_cad_2d_plan/test/tools/move_resolver_test.dart
+index 189122c2..bcd794ee 100644
+--- a/packages/jet_cad_2d_plan/test/tools/move_resolver_test.dart
++++ b/packages/jet_cad_2d_plan/test/tools/move_resolver_test.dart
+@@ -2,21 +2,20 @@
+ // registry for a root-level symbol instance whose jetcad.symbol attaches
+ // somewhere; the query is the plain-moved transform, anchored on the moved
+ // footprint's back-centre, the node excluded. A turned, mirrored placement
+ // far from the origin; a camera at 0.1 px/mm.
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ import 'package:jet_cad_2d_kit/authoring.dart' show Catalog, encodeLibrary;
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+ import 'package:jet_cad_2d_plan/src/attach/attachment_registry.dart';
+-import 'package:jet_cad_2d_plan/src/symbols/symbol_box.dart';
+ import 'package:jet_cad_2d_plan/src/symbols/symbol_placer.dart';
+ import 'package:jet_cad_2d_plan/src/tools/move_resolver.dart';
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import '../support/attach_fixtures.dart';
+ import '../support/symbol_fixtures.dart';
+ 
+ final class _ServicesStub implements PlanServices {
+   @override
+   dynamic noSuchMethod(Invocation invocation) =>
+diff --git a/packages/jet_cad_2d_plan/test/tools/plan_symbol_tool_test.dart b/packages/jet_cad_2d_plan/test/tools/plan_symbol_tool_test.dart
+index 9cafa709..5a3033d5 100644
+--- a/packages/jet_cad_2d_plan/test/tools/plan_symbol_tool_test.dart
++++ b/packages/jet_cad_2d_plan/test/tools/plan_symbol_tool_test.dart
+@@ -36,23 +36,21 @@ import 'package:flutter/widgets.dart'
+         KeyEventResult,
+         SizedBox,
+         TextDirection;
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ import 'package:jet_cad_2d_kit/authoring.dart' show Catalog, encodeLibrary;
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+ import 'package:jet_cad_2d_plan/src/attach/attachment_registry.dart';
+-import 'package:jet_cad_2d_plan/src/symbols/symbol_box.dart';
+ import 'package:jet_cad_2d_plan/src/symbols/symbol_ghost.dart';
+-import 'package:jet_cad_2d_plan/src/symbols/symbol_placer.dart';
+ import 'package:jet_cad_2d_plan/src/tools/plan_symbol_tool.dart';
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import '../support/attach_fixtures.dart';
+ import '../support/symbol_fixtures.dart';
+ import '../support/test_kit.dart' show TestEdge;
+ 
+ final SymbolLibrary library =
+     SymbolLibrary.decode(bytesOf(buildValidLibrary()));
+ 

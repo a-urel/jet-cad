@@ -1,0 +1,741 @@
+# Review package: 8102f8a4..HEAD
+
+## Commits
+711889c1 feat(kit-architecture): the box
+
+## Files changed
+ .../test/box/planner_box_test.dart                 | 187 +++++++++++++++++++++
+ packages/jet_cad_2d_kit_architecture/CHANGELOG.md  |   3 +
+ .../lib/jet_cad_2d_kit_architecture.dart           |   1 +
+ .../lib/src/box/box.dart                           | 129 ++++++++++++++
+ .../lib/src/box/box_plan.dart                      |  50 ++++++
+ .../lib/src/box/box_tool.dart                      |  49 ++++++
+ .../jet_cad_2d_kit_architecture/lib/src/kit.dart   |   3 +
+ .../test/box/box_plan_test.dart                    |  93 ++++++++++
+ .../test/box/box_test.dart                         |  95 +++++++++++
+ .../test/support/catalog.dart                      |  21 +++
+ 10 files changed, 631 insertions(+)
+
+## Diff
+diff --git a/packages/jet_cad_2d_integration/test/box/planner_box_test.dart b/packages/jet_cad_2d_integration/test/box/planner_box_test.dart
+new file mode 100644
+index 00000000..772bed0e
+--- /dev/null
++++ b/packages/jet_cad_2d_integration/test/box/planner_box_test.dart
+@@ -0,0 +1,187 @@
++// Ported from jet_cad_floor_plan/test/planner_box_test.dart (BX1-BX6, spec
++// 06 D13); assertions unchanged. PlannerShell becomes PlanEditor over
++// architectureController() (spec 3a C6, C7); the palette's 'tool-box' is
++// 'tool-architecture.box' (C7 class 1, ids); BX4's drift is asked of the
++// kit's types (kitCatalog) instead of the floor planner's catalog. The
++// fixture is box_rig.dart's boxDoc (a 1:20 page anchored at (7000, 3000),
++// nothing drawn) opened by the controller, its grid snap on: under the
++// editor's turned camera a click's world point does not come back exactly
++// (the plan library's selection_panel_test.dart:38-43 measured a box of
++// 120 x 69.99999999999955), and the grid gives the clicks today's corners.
++import 'package:flutter/material.dart';
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_integration/jet_cad_2d_integration.dart';
++import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/editor_rig.dart';
++
++/// box_rig.dart's `pumpDraw(tester, boxDoc(...))`: the page opened by a
++/// controller over the kit, its editor under the turned, zoomed camera
++/// centred on (7150, 3110).
++Future<PlanController> pumpBoxes(WidgetTester tester) async {
++  final c = architectureController(
++      json: pagePlanJson(PageComponent(
++          scaleDenominator: 20,
++          originX: 7000,
++          originY: 3000,
++          snapToGrid: true)));
++  addTearDown(c.dispose);
++  await pumpEditor(tester, c, centre: Vector2(7150, 3110));
++  return c;
++}
++
++/// box_rig.dart's `boxKids` (:77-80): [box]'s generated children,
++/// ascending, found by owner.
++List<Handle> boxKids(DraftDocument doc, Handle box) => [
++      for (final slot in doc.leavesByOwner()[box] ?? const <int>[])
++        doc.entities.handleAt(slot),
++    ];
++
++/// box_rig.dart's `boxes` (:84-85).
++List<Handle> boxes(DraftDocument doc) =>
++    doc.components.withComponent<BoxParams>().toList();
++
++/// World coordinates of a box's local point (the box's own transform is a
++/// pure translation -- spec 06 D13's Box tool is world-axis aligned, never
++/// rotated).
++Vector2 _worldOf(DraftDocument doc, Handle box, Vector2 local) =>
++    doc.tree.accumulatedTransform(box).transformPoint(local);
++
++/// A generated child's world midpoint, from its (local) line payload.
++Vector2 _childMidpoint(DraftDocument doc, Handle box, Handle child) {
++  final slot = doc.entities.slotOf(child)!;
++  final payload = doc.geometry.read(doc.entities.geomIndexAt(slot));
++  final mid = (payload.pointAt(0) + payload.pointAt(1)) * 0.5;
++  return _worldOf(doc, box, mid);
++}
++
++/// Strictly inside the world-axis-aligned rectangle `(minX,minY)-(maxX,maxY)`
++/// spanned by [box]'s own `BoxParams` (Tolerance is not needed: the sampled
++/// midpoints below never sit on a boundary).
++bool _strictlyInside(DraftDocument doc, Handle box, Vector2 p) {
++  final params = doc.components.get<BoxParams>(box)!;
++  final origin = _worldOf(doc, box, Vector2.zero());
++  return p.x > origin.x &&
++      p.x < origin.x + params.width &&
++      p.y > origin.y &&
++      p.y < origin.y + params.height;
++}
++
++void main() {
++  testWidgets('BX1 B and the palette entry activate the Box tool',
++      (tester) async {
++    await pumpBoxes(tester);
++    await press(tester, LogicalKeyboardKey.keyB);
++    expect(status(tester), 'Box');
++    await press(tester, LogicalKeyboardKey.keyV);
++    await tester.tap(find.byKey(const Key('tool-${ArchitectureTools.box}')));
++    await tester.pump();
++    expect(status(tester), 'Box');
++  });
++
++  testWidgets('BX2 two clicks: one box, four lines, one undo step',
++      (tester) async {
++    final c = await pumpBoxes(tester);
++    final doc = c.document;
++    await press(tester, LogicalKeyboardKey.keyB);
++    await tester.tapAt(globalOf(tester, c, 7010, 3020));
++    await tester.tapAt(globalOf(tester, c, 7130, 3090));
++    await tester.pump();
++    final b = boxes(doc).single;
++    expect(doc.components.get<BoxParams>(b)!.width, closeTo(120, 1e-6));
++    expect(doc.components.get<BoxParams>(b)!.height, closeTo(70, 1e-6));
++    expect(boxKids(doc, b), hasLength(4));
++    expect(doc.commands.undoDepth, 1);
++    doc.commands.undo();
++    await tester.pump();
++    expect(boxes(doc), isEmpty);
++    expect(doc.entities.liveSlots, isEmpty);
++  });
++
++  testWidgets('BX3 Fill does not apply to a box', (tester) async {
++    final c = await pumpBoxes(tester);
++    await press(tester, LogicalKeyboardKey.keyF);
++    await press(tester, LogicalKeyboardKey.keyB);
++    await tester.tapAt(globalOf(tester, c, 7010, 3020));
++    await tester.tapAt(globalOf(tester, c, 7130, 3090));
++    await tester.pump();
++    for (final s in c.document.entities.liveSlots) {
++      expect(c.document.entities.kindAt(s), EntityKind.line);
++    }
++  });
++
++  testWidgets('BX4 two overlapping boxes read as one outline', (tester) async {
++    final c = await pumpBoxes(tester);
++    final doc = c.document;
++    await press(tester, LogicalKeyboardKey.keyB);
++    await tester.tapAt(globalOf(tester, c, 7010, 3020));
++    await tester.tapAt(globalOf(tester, c, 7130, 3090));
++    await tester.tapAt(globalOf(tester, c, 7100, 3060));
++    await tester.tapAt(globalOf(tester, c, 7190, 3120));
++    await tester.pump();
++    final bs = boxes(doc);
++    expect(bs, hasLength(2));
++    // Box A: (7010,3020)-(7130,3090); Box B: (7100,3060)-(7190,3120). They
++    // overlap in the corner rectangle (7100,3060)-(7130,3090): A's east and
++    // north edges each lose the segment running through that corner, and
++    // B's west and south edges each lose the same. Each box keeps its two
++    // untouched edges whole and its two touched edges as one shortened
++    // piece apiece: four children each.
++    expect(boxKids(doc, bs[0]), hasLength(4));
++    expect(boxKids(doc, bs[1]), hasLength(4));
++    expect(ParametricSystem(doc, kitCatalog()).drift(), isEmpty);
++    // Every child midpoint lies outside the other box's interior.
++    for (final child in boxKids(doc, bs[0])) {
++      final mid = _childMidpoint(doc, bs[0], child);
++      expect(_strictlyInside(doc, bs[1], mid), isFalse,
++          reason: 'box A child $child at $mid lies inside box B');
++    }
++    for (final child in boxKids(doc, bs[1])) {
++      final mid = _childMidpoint(doc, bs[1], child);
++      expect(_strictlyInside(doc, bs[0], mid), isFalse,
++          reason: 'box B child $child at $mid lies inside box A');
++    }
++  });
++
++  testWidgets(
++      'BX5 click a box, Delete: gone with its component; cmd+Z '
++      'brings both back (Review Focus 2)', (tester) async {
++    final c = await pumpBoxes(tester);
++    final doc = c.document;
++    await press(tester, LogicalKeyboardKey.keyB);
++    await tester.tapAt(globalOf(tester, c, 7010, 3020));
++    await tester.tapAt(globalOf(tester, c, 7130, 3090));
++    await tester.tapAt(globalOf(tester, c, 7100, 3060));
++    await tester.tapAt(globalOf(tester, c, 7190, 3120));
++    await press(tester, LogicalKeyboardKey.keyV);
++    final first = boxes(doc).first;
++    // The first box's bottom edge, away from the second box.
++    await tester.tapAt(globalOf(tester, c, 7040, 3020));
++    await tester.pump();
++    await press(tester, LogicalKeyboardKey.delete);
++    expect(doc.tree[first], isNull);
++    expect(doc.components.get<BoxParams>(first), isNull);
++    expect(boxKids(doc, boxes(doc).single), hasLength(4));
++    await tester.sendKeyDownEvent(LogicalKeyboardKey.meta);
++    await press(tester, LogicalKeyboardKey.keyZ);
++    await tester.sendKeyUpEvent(LogicalKeyboardKey.meta);
++    expect(doc.components.get<BoxParams>(first), isNotNull);
++    expect(boxes(doc), hasLength(2));
++  });
++
++  testWidgets('BX6 typing B in the page panel field does not switch tools',
++      (tester) async {
++    await pumpBoxes(tester);
++    final field = find.descendant(
++        of: find.byKey(const Key('chrome-right')),
++        matching: find.byType(EditableText));
++    await tester.tap(field.first);
++    await tester.pump();
++    await press(tester, LogicalKeyboardKey.keyB);
++    expect(status(tester), isNot('Box'));
++  });
++}
+diff --git a/packages/jet_cad_2d_kit_architecture/CHANGELOG.md b/packages/jet_cad_2d_kit_architecture/CHANGELOG.md
+index b2febefc..e5013930 100644
+--- a/packages/jet_cad_2d_kit_architecture/CHANGELOG.md
++++ b/packages/jet_cad_2d_kit_architecture/CHANGELOG.md
+@@ -1,8 +1,11 @@
+ ## 0.1.0 (unreleased)
+ 
+ The architecture kit of jet_cad_2d plans (sub-project 3a).
+ 
+ - `architectureKit`: the kit's descriptor (id `architecture`), its type and
+   tool ids (`ArchitectureTypes`, `ArchitectureTools`), its words in
+   English, German and Turkish, and its `prepare`, which gives a plan the
+   plan library makes the separators' DASHED linetype.
++- The box (`architecture.box`, `BoxParams`): a rectangle whose outline
++  loses what lies inside an overlapping box; its width and height in the
++  property panel; the Box tool (B).
+diff --git a/packages/jet_cad_2d_kit_architecture/lib/jet_cad_2d_kit_architecture.dart b/packages/jet_cad_2d_kit_architecture/lib/jet_cad_2d_kit_architecture.dart
+index 491e0e89..906364d8 100644
+--- a/packages/jet_cad_2d_kit_architecture/lib/jet_cad_2d_kit_architecture.dart
++++ b/packages/jet_cad_2d_kit_architecture/lib/jet_cad_2d_kit_architecture.dart
+@@ -1,9 +1,10 @@
+ /// The architecture kit of jet_cad_2d plans (sub-project 3a): walls,
+ /// openings, room separators, rooms, dimensions, boxes, a furniture library
+ /// and wall attachment, as one `PlanKit` a host passes to the plan library,
+ /// `PlanController(kits: [architectureKit])`. The parameter classes and the
+ /// type ids let a host build a plan in code.
+ library;
+ 
++export 'src/box/box.dart' show BoxParams;
+ export 'src/ids.dart' show ArchitectureTools, ArchitectureTypes;
+ export 'src/kit.dart' show architectureKit;
+diff --git a/packages/jet_cad_2d_kit_architecture/lib/src/box/box.dart b/packages/jet_cad_2d_kit_architecture/lib/src/box/box.dart
+new file mode 100644
+index 00000000..ef31a243
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/lib/src/box/box.dart
+@@ -0,0 +1,129 @@
++// The box (spec 3a C3.1), ported from
++// jet_cad_floor_plan/lib/src/parametric/box.dart: its parameters and its
++// type, unchanged but for its id.
++import 'dart:math' as math;
++
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../ids.dart';
++
++/// The demo parametric object's parameters (spec 06 D13), in mm.
++final class BoxParams implements Component {
++  const BoxParams(this.width, this.height);
++
++  static const String componentTypeId = ArchitectureTypes.box;
++
++  final double width;
++  final double height;
++
++  @override
++  String get typeId => componentTypeId;
++
++  @override
++  Map<String, Object?> toJson() => {'width': width, 'height': height};
++
++  static BoxParams fromJson(Map<String, Object?> json) => BoxParams(
++      (json['width']! as num).toDouble(), (json['height']! as num).toDouble());
++
++  BoxParams copyWith({double? width, double? height}) =>
++      BoxParams(width ?? this.width, height ?? this.height);
++
++  @override
++  bool operator ==(Object other) =>
++      other is BoxParams && other.width == width && other.height == height;
++
++  @override
++  int get hashCode => Object.hash(width, height);
++}
++
++List<Vector2> _corners(BoxParams p) => [
++      Vector2(0, 0),
++      Vector2(p.width, 0),
++      Vector2(p.width, p.height),
++      Vector2(0, p.height),
++    ];
++
++/// A rectangle whose outline loses what lies strictly inside any
++/// overlapping box: overlapping boxes read as one outline, the wall
++/// clean-up preview (spec 06 D13).
++final class BoxType extends ParametricType<BoxParams> {
++  const BoxType();
++
++  @override
++  Capability get editCapability => Capability.geometry;
++
++  @override
++  Aabb2 reach(BoxParams params, Transform2 toWorld) => Aabb2.fromPoints(
++      [for (final c in _corners(params)) toWorld.transformPoint(c)]);
++
++  @override
++  List<Generated> generate(ParametricView view, Handle self) {
++    final p = view.paramsOf<BoxParams>(self)!;
++    final toLocal = view.toWorld(self).invert();
++    final quads = [
++      for (final n in view.neighbours(self))
++        if (view.paramsOf<BoxParams>(n) case final q?)
++          [
++            for (final c in _corners(q))
++              toLocal.transformPoint(view.toWorld(n).transformPoint(c)),
++          ],
++    ];
++    final c = _corners(p);
++    const tol = Tolerance.standard;
++    final out = <Generated>[];
++    for (var i = 0; i < 4; i++) {
++      final a = c[i], b = c[(i + 1) % 4];
++      final len = (b - a).length;
++      var keep = <(double, double)>[(0, 1)];
++      for (final q in quads) {
++        final inside = _insideInterval(a, b, q);
++        if (inside == null) continue;
++        keep = [
++          for (final (lo, hi) in keep) ...[
++            if ((math.min(hi, inside.$1) - lo) * len > tol.linear)
++              (lo, math.min(hi, inside.$1)),
++            if ((hi - math.max(lo, inside.$2)) * len > tol.linear)
++              (math.max(lo, inside.$2), hi),
++          ],
++        ];
++      }
++      for (final (lo, hi) in keep) {
++        out.add(Generated(
++            EntityKind.line, linePayload(a + (b - a) * lo, a + (b - a) * hi)));
++      }
++    }
++    return out;
++  }
++}
++
++/// The open parameter interval of a->b strictly inside the convex quad [q].
++(double, double)? _insideInterval(Vector2 a, Vector2 b, List<Vector2> q) {
++  const tol = Tolerance.standard;
++  var area = 0.0;
++  for (var i = 0; i < 4; i++) {
++    final u = q[i], v = q[(i + 1) % 4];
++    area += u.x * v.y - v.x * u.y;
++  }
++  final s = area > 0 ? 1.0 : -1.0;
++  final d = b - a;
++  var lo = 0.0, hi = 1.0;
++  for (var i = 0; i < 4; i++) {
++    final u = q[i], v = q[(i + 1) % 4];
++    final e = v - u;
++    final len = e.length;
++    final f0 = s * (e.x * (a.y - u.y) - e.y * (a.x - u.x)) / len;
++    final fd = s * (e.x * d.y - e.y * d.x) / len;
++    if (fd.abs() <= tol.linear) {
++      if (f0 <= tol.linear) return null;
++      continue;
++    }
++    final t = (tol.linear - f0) / fd;
++    if (fd > 0) {
++      lo = math.max(lo, t);
++    } else {
++      hi = math.min(hi, t);
++    }
++  }
++  return (hi - lo) * d.length > tol.linear ? (lo, hi) : null;
++}
+diff --git a/packages/jet_cad_2d_kit_architecture/lib/src/box/box_plan.dart b/packages/jet_cad_2d_kit_architecture/lib/src/box/box_plan.dart
+new file mode 100644
+index 00000000..c8a52e49
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/lib/src/box/box_plan.dart
+@@ -0,0 +1,50 @@
++// The box as the kit declares it (spec 3a C3.1): its PlanType, whose two
++// properties are lengths above zero (today's panel rule,
++// jet_cad_floor_plan/lib/src/selection_panel.dart:415-417), refused in
++// write and gated by reshape (:384-390); and its PlanTool, B (today's
++// palette entry, planner_shell.dart:546-552). No grips, as today.
++import 'package:flutter/material.dart' show Icons;
++import 'package:jet_cad_2d/jet_cad_2d.dart' show Capability;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++
++import '../ids.dart';
++import 'box.dart';
++import 'box_tool.dart';
++
++/// [v] when it is above zero; otherwise an [ArgumentError], which the
++/// property panel takes as a silent refusal (the field shows the stored
++/// value). The field has already refused a value that is not finite.
++double _positive(double v) =>
++    v > 0 ? v : throw ArgumentError.value(v, 'length', 'must be above 0');
++
++/// The box's type: width and height, each a length above zero.
++final PlanType<BoxParams> boxPlanType = PlanType<BoxParams>(
++  id: ArchitectureTypes.box,
++  fromJson: BoxParams.fromJson,
++  parametric: const BoxType(),
++  properties: [
++    LengthProperty<BoxParams>(
++        id: 'width',
++        read: (p) => p.width,
++        write: (p, v) => p.copyWith(width: _positive(v)),
++        gate: PlanGate.reshape),
++    LengthProperty<BoxParams>(
++        id: 'height',
++        read: (p) => p.height,
++        write: (p, v) => p.copyWith(height: _positive(v)),
++        gate: PlanGate.reshape),
++  ],
++);
++
++/// The Box tool: two opposite corners, one box.
++final PlanTool boxPlanTool = PlanTool(
++  id: ArchitectureTools.box,
++  icon: Icons.crop_din,
++  letter: 'B',
++  needs: const {
++    Capability.structure,
++    Capability.components,
++    Capability.geometry,
++  },
++  create: (_) => BoxTool(),
++);
+diff --git a/packages/jet_cad_2d_kit_architecture/lib/src/box/box_tool.dart b/packages/jet_cad_2d_kit_architecture/lib/src/box/box_tool.dart
+new file mode 100644
+index 00000000..2cb50381
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/lib/src/box/box_tool.dart
+@@ -0,0 +1,49 @@
++// The Box tool (spec 3a C3.1), ported unchanged from
++// jet_cad_floor_plan/lib/src/parametric/box_tool.dart.
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import 'box.dart';
++
++/// Spec 06 D13: two opposite corners, world-axis aligned, committed as a
++/// parametric box — a group at the lower-left corner carrying [BoxParams].
++/// The expander generates its lines. Fill does not apply.
++class BoxTool extends RectangleTool {
++  BoxTool();
++
++  @override
++  String get name => 'Box';
++
++  @override
++  void accept(Vector2 point, ToolContext ctx) {
++    if (points.isEmpty) {
++      points.add(point);
++      return;
++    }
++    final c1 = points.first;
++    if (isDegenerateRectangle(c1, point)) return;
++    commit(ctx, () {
++      final doc = ctx.document;
++      final h = doc.handleSeed.next();
++      final minX = c1.x < point.x ? c1.x : point.x;
++      final minY = c1.y < point.y ? c1.y : point.y;
++      return CompoundCommand([
++        AddNodeCommand(GroupNode(
++            handle: h,
++            parent: doc.rootHandle,
++            transform: Transform2.translation(minX, minY),
++            children: const [])),
++        SetComponentCommand<BoxParams>(
++            h, BoxParams((point.x - c1.x).abs(), (point.y - c1.y).abs())),
++        // Spec 12b D2: a new object takes the current layer.
++        SetComponentCommand<ObjectLayer>(h, ObjectLayer(drawingLayer(doc))),
++      ], label: 'Add box');
++    }, needs: const {
++      Capability.structure,
++      Capability.components,
++      Capability.geometry,
++    });
++    clearShape();
++  }
++}
+diff --git a/packages/jet_cad_2d_kit_architecture/lib/src/kit.dart b/packages/jet_cad_2d_kit_architecture/lib/src/kit.dart
+index bfe31aeb..d17e50ce 100644
+--- a/packages/jet_cad_2d_kit_architecture/lib/src/kit.dart
++++ b/packages/jet_cad_2d_kit_architecture/lib/src/kit.dart
+@@ -1,17 +1,20 @@
+ // The architecture kit's descriptor (spec 3a C2): its types, tools,
+ // attachment providers, symbols, words and prepare. Each type task adds its
+ // own (Tasks 10-25); the tools keep today's palette order (box, wall, door,
+ // window, gap, room, separator, dimension; planner_shell.dart:546-601).
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+ 
++import 'box/box_plan.dart';
+ import 'separator_linetype.dart';
+ import 'words/words.dart';
+ 
+ /// The architecture kit: a host passes it to the plan library,
+ /// `PlanController(kits: [architectureKit])`.
+ final PlanKit architectureKit = PlanKit(
+   id: 'architecture',
+   version: '0.1.0',
++  types: [boxPlanType],
++  tools: [boxPlanTool],
+   names: architectureNames,
+   prepare: ensureDashedLinetype,
+ );
+diff --git a/packages/jet_cad_2d_kit_architecture/test/box/box_plan_test.dart b/packages/jet_cad_2d_kit_architecture/test/box/box_plan_test.dart
+new file mode 100644
+index 00000000..7464daf6
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/test/box/box_plan_test.dart
+@@ -0,0 +1,93 @@
++// Spec 3a C3.1: the box as the kit declares it. Its two properties are
++// lengths above zero, the bound strict and refused in write (today's
++// selection_panel.dart:415-417), gated by reshape (today's _capable,
++// :384-390); its type has no grips, colour or section and is exported; its
++// tool is B. The box sits in a group turned 30 degrees, off the origin.
++import 'dart:math' as math;
++
++import 'package:flutter/widgets.dart' show Locale;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:jet_cad_2d_kit/testing.dart';
++import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
++import 'package:jet_cad_2d_kit_architecture/src/box/box_plan.dart';
++import 'package:jet_cad_2d_kit_architecture/src/box/box_tool.dart';
++
++import '../support/catalog.dart';
++
++final Transform2 atA = Transform2.translation(7010.5, 3020.25)
++    .multiply(Transform2.rotation(math.pi / 6));
++
++/// The panel's words (English, no kit words: the box's fields need none).
++final KitWords words = KitNamesWords(KitNames.empty, () => const Locale('en'));
++
++void main() {
++  const a = Handle(1000);
++
++  test(
++      'BX-props width and height: a positive length commits one step, zero, '
++      '-0.0 and a negative are refused in write; both need reshape', () {
++    final doc = DraftDocument.empty();
++    addTearDown(doc.dispose);
++    installParametric(doc);
++    doc.commands.execute(CompoundCommand([
++      AddNodeCommand(GroupNode(
++          handle: a,
++          parent: doc.rootHandle,
++          transform: atA,
++          children: const [])),
++      SetComponentCommand<BoxParams>(a, const BoxParams(1200.5, 800.25)),
++    ], label: 'Add box'));
++    final [width, height] = boxPlanType.fieldsOf(doc, a, words);
++    expect(width.wordId, 'property:architecture.box.width');
++    expect(height.wordId, 'property:architecture.box.height');
++    expect((width.value, height.value), (1200.5, 800.25));
++    for (final f in [width, height]) {
++      // M-BX-2: a side without its gate.
++      expect(f.spec.gate, PlanGate.reshape, reason: f.wordId);
++      for (final bad in [0.0, -0.0, -3.0]) {
++        // M-BX-1: the bound inclusive (`v >= 0`).
++        expect(() => boxPlanType.commitField(doc, a, f, bad, words),
++            throwsArgumentError,
++            reason: '${f.wordId} $bad');
++      }
++    }
++    final depth = doc.commands.undoDepth;
++    doc.commands.execute(boxPlanType.commitField(doc, a, width, 1e-3, words));
++    doc.commands
++        .execute(boxPlanType.commitField(doc, a, height, 950.75, words));
++    expect(doc.components.get<BoxParams>(a), const BoxParams(1e-3, 950.75));
++    expect(doc.commands.undoDepth, depth + 2, reason: 'one step each');
++    expect(ParametricSystem(doc, testCatalog()).drift(), isEmpty);
++  });
++
++  test(
++      'BX-kit the kit carries the box: its type (no grips, colour or '
++      'section; exported) and its tool B, which needs structure, components '
++      'and geometry, has no settings and makes a BoxTool', () {
++    expect(architectureKit.types, contains(boxPlanType));
++    expect(boxPlanType.id, ArchitectureTypes.box);
++    expect(BoxParams.componentTypeId, boxPlanType.id);
++    expect(boxPlanType.grips, isNull);
++    expect(boxPlanType.hasColour, isFalse);
++    expect(boxPlanType.hasSection, isFalse);
++    expect(boxPlanType.exported, isTrue);
++    expect(architectureKit.tools, contains(boxPlanTool));
++    expect(boxPlanTool.id, ArchitectureTools.box);
++    // M-BX-3: another letter.
++    expect(boxPlanTool.letter, 'B');
++    expect(boxPlanTool.needs,
++        {Capability.structure, Capability.components, Capability.geometry});
++    expect(boxPlanTool.settings, isNull);
++    expect(architectureKit.propertyIds,
++        containsAll(['architecture.box.width', 'architecture.box.height']));
++    final doc = DraftDocument.empty();
++    addTearDown(doc.dispose);
++    final services = FakePlanServices(document: doc);
++    addTearDown(services.dispose);
++    final tool = boxPlanTool.create(services);
++    addTearDown(tool.dispose);
++    expect(tool, isA<BoxTool>());
++  });
++}
+diff --git a/packages/jet_cad_2d_kit_architecture/test/box/box_test.dart b/packages/jet_cad_2d_kit_architecture/test/box/box_test.dart
+new file mode 100644
+index 00000000..2aeae5b8
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/test/box/box_test.dart
+@@ -0,0 +1,95 @@
++// Ported from jet_cad_floor_plan/test/box_test.dart (spec 06 D13);
++// assertions unchanged but BT1's id (spec 3a C7 class 1). The floor
++// planner's catalog becomes the kit tests' (test/support/catalog.dart).
++import 'dart:math' as math;
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit_architecture/src/box/box.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/catalog.dart';
++
++final Transform2 atA = Transform2.translation(7010, 3020)
++    .multiply(Transform2.rotation(math.pi / 6));
++Transform2 onA(double x, double y, double turn) => atA
++    .multiply(Transform2.translation(x, y))
++    .multiply(Transform2.rotation(turn));
++
++DraftCommand box(
++        DraftDocument doc, Handle h, Transform2 at, double w, double hh) =>
++    CompoundCommand([
++      AddNodeCommand(GroupNode(
++          handle: h,
++          parent: doc.rootHandle,
++          transform: at,
++          children: const [])),
++      SetComponentCommand<BoxParams>(h, BoxParams(w, hh)),
++    ], label: 'Add box');
++
++List<Handle> kids(DraftDocument doc, Handle g) => [
++      for (final s in doc.entities.liveSlots)
++        if (doc.entities.ownerAt(s) == g) doc.entities.handleAt(s),
++    ];
++
++void main() {
++  const a = Handle(1000), b = Handle(2000);
++
++  test('BT1 BoxParams: value equality, key order, round trip', () {
++    const p = BoxParams(1200, 800);
++    expect(p.toJson().keys.toList(), ['width', 'height']);
++    expect(BoxParams.fromJson(p.toJson()), p);
++    expect(p.copyWith(height: 5), const BoxParams(1200, 5));
++    expect(p.typeId, 'architecture.box');
++    expect(const BoxParams(1200, 800) == const BoxParams(1200, 801), isFalse);
++    expect(const BoxParams(1200, 800) == const BoxParams(1201, 800), isFalse);
++    expect(const BoxParams(1200, 800).hashCode,
++        const BoxParams(1200, 800).hashCode);
++  });
++
++  test('BT2 an isolated box is four lines at its corners', () {
++    final doc = DraftDocument.empty();
++    installParametric(doc);
++    doc.commands.execute(box(doc, a, atA, 1200, 800));
++    expect(kids(doc, a), hasLength(4));
++  });
++
++  test(
++      'BT3 a rotated overlapping pair clips each other: A 5, B 3 '
++      '(M-06g app, M-06o)', () {
++    final doc = DraftDocument.empty();
++    installParametric(doc);
++    doc.commands.execute(box(doc, a, atA, 2000, 1000));
++    doc.commands.execute(box(doc, b, onA(800, 700, 0.3), 400, 900));
++    expect(kids(doc, a), hasLength(5));
++    expect(kids(doc, b), hasLength(3));
++    expect(ParametricSystem(doc, testCatalog()).drift(), isEmpty);
++  });
++
++  test(
++      'BT4 two boxes sharing an edge exactly are not neighbours '
++      '(Review Focus 5)', () {
++    final doc = DraftDocument.empty();
++    installParametric(doc);
++    doc.commands.execute(box(doc, a, atA, 1000, 1000));
++    doc.commands.execute(box(doc, b, onA(1000, 0, 0), 1000, 1000));
++    expect(kids(doc, a), hasLength(4));
++    expect(kids(doc, b), hasLength(4));
++  });
++
++  test('BT5 editCapability is geometry', () {
++    expect(const BoxType().editCapability, Capability.geometry);
++  });
++
++  test('BT6 a box reaches exactly its transformed corners', () {
++    final r = const BoxType().reach(const BoxParams(2000, 1000), atA);
++    final c = [
++      Vector2(0, 0),
++      Vector2(2000, 0),
++      Vector2(2000, 1000),
++      Vector2(0, 1000)
++    ].map(atA.transformPoint);
++    expect(r.minX, c.map((v) => v.x).reduce(math.min));
++    expect(r.maxY, c.map((v) => v.y).reduce(math.max));
++  });
++}
+diff --git a/packages/jet_cad_2d_kit_architecture/test/support/catalog.dart b/packages/jet_cad_2d_kit_architecture/test/support/catalog.dart
+new file mode 100644
+index 00000000..d804cd40
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/test/support/catalog.dart
+@@ -0,0 +1,21 @@
++// The kit tests' engine catalog (spec 3a "Tests": every type's generate
++// through the engine's ParametricSystem): today's global parametricCatalog
++// and installParametric (jet_cad_floor_plan/lib/src/parametric/
++// catalog.dart:27-39, :64-65) for the kit's own tests. The kit's raw types
++// (no plan guard), under their ArchitectureTypes ids, in today's order --
++// box, wall, opening, separator, room, dimension -- each type task adding
++// its line (this task the box's).
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit_architecture/src/box/box.dart';
++
++final ParametricCatalog _testCatalog = ParametricCatalog()
++  ..register<BoxParams>(
++      BoxParams.componentTypeId, BoxParams.fromJson, const BoxType());
++
++/// The kit tests' catalog (ruling R-P13): the one instance above, so every
++/// call sees every registration the type tasks append to its cascade.
++ParametricCatalog testCatalog() => _testCatalog;
++
++/// Builds and installs [doc]'s parametric system over [testCatalog].
++ParametricSystem installParametric(DraftDocument doc) =>
++    ParametricSystem(doc, testCatalog())..install();

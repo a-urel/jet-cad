@@ -1,0 +1,1098 @@
+# Review package: 31c2b976..HEAD
+
+## Commits
+1eef1a22 feat(kit): words with parameters (spec 3a C1.6)
+
+## Files changed
+ docs/kits.md                                       |  10 +-
+ .../specs/2026-10-13-kit-contract-design.md        |  12 +++
+ .../lib/src/authoring/conformance.dart             |  41 ++++++-
+ .../jet_cad_2d_kit/lib/src/kit/host_words.dart     |   4 +-
+ packages/jet_cad_2d_kit/lib/src/kit/plan_kit.dart  |   5 +-
+ .../jet_cad_2d_kit/lib/src/kit/plan_services.dart  |  17 ++-
+ .../jet_cad_2d_kit/lib/src/model/kit_problem.dart  |   4 +
+ .../jet_cad_2d_kit/lib/src/model/kit_text.dart     |  57 ++++++++++
+ packages/jet_cad_2d_kit/lib/src/model/model.dart   |   2 +
+ .../lib/src/model/numbered_names.dart              |  29 +++++
+ .../jet_cad_2d_kit/lib/src/model/plan_words.dart   |  10 ++
+ .../authoring/text_words_conformance_test.dart     | 104 ++++++++++++++++++
+ .../jet_cad_2d_kit/test/kit/kit_words_test.dart    | 120 +++++++++++++++++++++
+ .../jet_cad_2d_kit/test/model/kit_text_test.dart   |  64 +++++++++++
+ .../test/model/numbered_names_test.dart            |  33 ++++++
+ .../lib/src/controller/plan_controller.dart        |   6 +-
+ .../lib/src/l10n/numbered_names.dart               |  41 ++++---
+ .../test/controller/kit_words_controller_test.dart |  57 ++++++++++
+ 18 files changed, 585 insertions(+), 31 deletions(-)
+
+## Diff
+diff --git a/docs/kits.md b/docs/kits.md
+index f7bebbfc..2dc7e003 100644
+--- a/docs/kits.md
++++ b/docs/kits.md
+@@ -115,28 +115,32 @@ in two of them.
+ a word id to the word.
+ 
+ | Word id | For |
+ |---|---|
+ | `symbol:<key>` | a symbol's name (all versions of the key) |
+ | `category:<kit id>/<English category>` | a category, under the kit's id: two kits may both have a `Bar` |
+ | `type:<type id>` | a type's name: its panel section's title (§10.2) |
+ | `tool:<tool id>` | a tool's name in the palette (§10.5) |
+ | `property:<type or tool id>.<property id>` | a field of a type, or of a tool's settings (§10.3) |
+ | `property:<type or tool id>.<property id>.<value>` | a choice's value: an enum's name, else the value's text |
++| `text:<kit id>.<id>` | a message or a template (a tool's notice, a numbered name, a label): `{name}` placeholders, filled by `KitWords.text`; a choice of words is two texts, one passed to the other |
+ 
+ Every word id carries its kit's id, so two kits never share one;
+ `PlanKit.validate` reports a word under another kit's id. Lookup
+ (`symbolName(locale, symbol)`, `categoryName(locale, kit, category)`)
+ falls back from the locale to English, then, for a symbol or a category,
+ to the library's stored English. English is required for every
+ word with no stored English. A kit's other locales are optional, and a kit
+-that declares one declares it complete.
++that declares one declares it complete. A text's every locale carries
++English's placeholders (the conformance test's `placeholderMismatch`).
++`KitWords.decimalSeparator` is the UI language's separator, for a number a
++kit prints in the UI's words.
+ 
+ ## 6. The descriptor
+ 
+ The snippets in sections 6 to 8 are files under the package's `example/`
+ (`cafe_kit.dart`, `generate_cafe.dart`, `cafe_conformance_test.dart`),
+ analysed with the package; `example.dart` is the file with
+ `buildCafeCatalog` and `cafeNames`.
+ 
+ ```dart
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+@@ -276,21 +280,23 @@ committed `key@N` whose geometry or unit changed, that was removed, or a
+ new one the snapshot lacks; a declared locale missing a word, or giving the
+ English word unless `sameAsEnglish` allows it; a word for a key or category
+ the catalog lacks; a locale with words that is not declared.
+ 
+ A kit with a code side also passes its ids: `typeIds:` (`[for (final t in
+ kit.types) t.id]`), `toolIds:` (`[for (final t in kit.tools) t.id]`) and
+ `propertyIds:` (`kit.propertyIds`). Each id must be under the kit's id
+ (`typeOutsideKit`, `toolOutsideKit`, and `foreignWordId` for a property),
+ its word must have English (`missingEnglish`), and every declared locale
+ holds it like a symbol's word (`wordMissing`, `wordUntranslated`). Without
+-them, the code side is not checked.
++them, the code side is not checked. A kit's `text:` words are held the
++same way, and a text whose placeholders are not English's is
++`placeholderMismatch`.
+ 
+ ## 9. A new kit, the symbol part
+ 
+ 1. A package `packages/jet_cad_2d_kit_<id>` depending on `jet_cad_2d_kit`
+    (and nothing of the plan library or another kit).
+ 2. Its catalog (`lib/src/catalog.dart`), keys under its id.
+ 3. Its words (`KitNames`), English for everything without stored English,
+    each declared locale complete.
+ 4. Its generator (`tool/generate.dart`), run once: the `.jetlib` asset,
+    declared in its pubspec, and the snapshot under `test/`.
+diff --git a/docs/superpowers/specs/2026-10-13-kit-contract-design.md b/docs/superpowers/specs/2026-10-13-kit-contract-design.md
+index 0af455c2..24bf5575 100644
+--- a/docs/superpowers/specs/2026-10-13-kit-contract-design.md
++++ b/docs/superpowers/specs/2026-10-13-kit-contract-design.md
+@@ -423,20 +423,32 @@ Each line is written by the 3a task that lands it (the 3a spec,
+   keeps no copy.
+ - **Object views and hidden fields** (3a C1.1, C1.7): the surface gains
+   `PlanObject`, `DocumentPlanObject`, `TextDisplay`,
+   `LengthProperty.range`, `PropertySpec.visible`,
+   `PropertyField.visible`, `PlanSection` (the escape hatch's one context)
+   and `KitProblemCode.settingsNeedObject`; `PlanType.fieldsOf`,
+   `commitField` and `sectionFor` take a `DraftDocument`, and `fieldsOf`
+   and `commitField` the kit's words, which the object carries
+   (`PlanObject.words`, a `PlanWords`: the pure interface `KitWords` now
+   implements, exported by both libraries).
++- **K4, texts** (3a C1.6): a fourth kind of word id, `text:<kit id>.<id>`,
++  for a kit's messages and templates, with `{name}` placeholders filled
++  when read (`KitWords.text`; a missing argument is left as written; a
++  choice of words is two texts). English is required, `validateHostWords`
++  accepts them, and the conformance test holds them to the declared
++  locales and asks every locale's text for English's placeholders
++  (`placeholderMismatch`).
++- **Words with parameters** (3a C1.6, C1.2): the surface gains `KitText`,
++  `fillText`, `placeholdersOf`, `numberedNameIndex` (moved from the plan
++  library, over patterns that name no plan type), `PlanWords.text` and
++  `PlanWords.decimalSeparator`, inherited by `KitWords` (the UI
++  language's separator, which the plan fills from its `PlanStrings`).
+ 
+ ## Inputs for sub-project 2
+ 
+ The final review's API risks, none needing a breaking change if settled in
+ sub-project 2's spec before the wave publishes 0.1.0:
+ 
+ - **R1 Per-unit data has no home.** `UnitComponent` sits on a definition;
+   umbrella A6's per-unit label (`assigned`, set by a kit's type) and number
+   (`numbered`) need an instance-level contract component, so
+   `registerKitComponents`' "the four and nothing else" changes. A parametric
+diff --git a/packages/jet_cad_2d_kit/lib/src/authoring/conformance.dart b/packages/jet_cad_2d_kit/lib/src/authoring/conformance.dart
+index e5742cf8..7b1d310f 100644
+--- a/packages/jet_cad_2d_kit/lib/src/authoring/conformance.dart
++++ b/packages/jet_cad_2d_kit/lib/src/authoring/conformance.dart
+@@ -3,20 +3,21 @@
+ // committed geometry snapshot and its words.
+ //
+ // Pure Dart: no Flutter, no dart:io.
+ import 'dart:typed_data';
+ 
+ import 'package:jet_cad_2d/jet_cad_2d.dart' show listEquals;
+ 
+ import '../model/kit_ids.dart';
+ import '../model/kit_names.dart';
+ import '../model/kit_problem.dart';
++import '../model/kit_text.dart' show placeholdersOf;
+ import '../model/symbol_library.dart';
+ import '../model/unit_component.dart' show UnitKinds;
+ import 'builder.dart';
+ import 'catalog.dart';
+ import 'snapshot.dart';
+ 
+ /// The problems of a kit: its [catalog], its [committedLibrary] bytes, its
+ /// [committedSnapshot] text, its [names] and its declared non-English
+ /// [locales]. [sameAsEnglish] lists, per locale, the word ids whose right
+ /// word is the English one. Empty when the kit conforms.
+@@ -24,20 +25,24 @@ import 'snapshot.dart';
+ /// The code side (contract R3): [typeIds], [toolIds] and [propertyIds] (a
+ /// `PlanKit`'s `propertyIds`, without the `property:` prefix) must be under
+ /// the kit's id, and each one's word (`type:<id>`, `tool:<id>`,
+ /// `property:<id>`) must have English and a word in every declared locale.
+ /// A code-side word that names none of them is not reported: a kit may pass
+ /// a part of its ids.
+ ///
+ /// A unit kind the contract does not name ([UnitKinds]) needs an English
+ /// `unit:<kit>/<kind>` word ([KitProblemCode.unitKindWord], spec 2b S4).
+ ///
++/// A kit's `text:` words (spec 3a C1.6) are held to the declared locales
++/// like its code side's, and every locale's text must carry English's
++/// placeholders ([KitProblemCode.placeholderMismatch]).
++///
+ /// Throws [ArgumentError] when [locales] lists English: English is always
+ /// required, by stored text or by words.
+ List<KitProblem> conformance({
+   required Catalog catalog,
+   required Uint8List committedLibrary,
+   required String committedSnapshot,
+   required KitNames names,
+   required List<String> locales,
+   Map<String, Set<String>> sameAsEnglish = const {},
+   Iterable<String> typeIds = const [],
+@@ -73,21 +78,22 @@ List<KitProblem> conformance({
+     }
+   } on SymbolLibraryError catch (e) {
+     problems.add(KitProblem(KitProblemCode.libraryInvalid,
+         'the committed library is refused, rule ${e.rule}: ${e.message}'));
+   }
+   final code = _codeIds(catalog.kit, typeIds, toolIds, propertyIds);
+   problems
+     ..addAll(_snapshotProblems(catalog, committedSnapshot))
+     ..addAll(code.problems)
+     ..addAll(_unitKindProblems(catalog, names))
+-    ..addAll(_wordProblems(catalog, names, locales, sameAsEnglish, code.words));
++    ..addAll(_wordProblems(catalog, names, locales, sameAsEnglish, code.words))
++    ..addAll(_placeholderProblems(names));
+   return problems;
+ }
+ 
+ /// Spec 2b S4: every unit kind the catalog carries that the contract does
+ /// not name ([UnitKinds]) has an English `unit:<kit>/<kind>` word; one
+ /// problem per kind. The declared locales are not held to it.
+ List<KitProblem> _unitKindProblems(Catalog catalog, KitNames names) {
+   final english = names.words[KitNames.english] ?? const <String, String>{};
+   final problems = <KitProblem>[];
+   final asked = <String>{};
+@@ -244,28 +250,61 @@ List<KitProblem> _wordProblems(
+   final stored = names.words[KitNames.english] ?? const <String, String>{};
+   for (final id in codeWords) {
+     final en = stored[id];
+     if (en == null) {
+       problems.add(KitProblem(
+           KitProblemCode.missingEnglish, '"$id" has no English word'));
+     } else {
+       english[id] = en;
+     }
+   }
++  // Spec 3a C1.6: the kit's texts have no stored English; every declared
++  // locale holds them like the code side's words.
++  for (final MapEntry(key: id, value: en) in stored.entries) {
++    if (id.startsWith('text:') && kitOfKey(id.substring(5)) == catalog.kit) {
++      english[id] = en;
++    }
++  }
+   for (final locale in locales) {
+     final words = names.words[locale] ?? const <String, String>{};
+     final allowed = sameAsEnglish[locale] ?? const <String>{};
+     for (final MapEntry(key: id, value: en) in english.entries) {
+       final word = words[id];
+       if (word == null) {
+         problems.add(KitProblem(
+             KitProblemCode.wordMissing, '$locale: no word for "$id"'));
+       } else if (word == en && !allowed.contains(id)) {
+         problems.add(KitProblem(
+             KitProblemCode.wordUntranslated,
+             '$locale: "$id" is its English, "$en"; list it in sameAsEnglish '
+             'if that is the right word'));
+       }
+     }
+   }
+   return problems;
+ }
++
++/// Spec 3a C1.6: every locale's `text:` word whose id has English carries
++/// English's placeholders, no more and no fewer.
++List<KitProblem> _placeholderProblems(KitNames names) {
++  final english = names.words[KitNames.english] ?? const <String, String>{};
++  final problems = <KitProblem>[];
++  for (final MapEntry(key: locale, value: words) in names.words.entries) {
++    if (locale == KitNames.english) continue;
++    for (final MapEntry(key: id, value: word) in words.entries) {
++      final en = english[id];
++      if (!id.startsWith('text:') || en == null) continue;
++      final want = placeholdersOf(en), got = placeholdersOf(word);
++      if (got.length != want.length || !got.containsAll(want)) {
++        problems.add(KitProblem(
++            KitProblemCode.placeholderMismatch,
++            '$locale: "$id" has the placeholders ${_listed(got)}, English '
++            '${_listed(want)}'));
++      }
++    }
++  }
++  return problems;
++}
++
++String _listed(Set<String> names) => names.isEmpty
++    ? 'none'
++    : (names.toList()..sort()).map((n) => '{$n}').join(' ');
+diff --git a/packages/jet_cad_2d_kit/lib/src/kit/host_words.dart b/packages/jet_cad_2d_kit/lib/src/kit/host_words.dart
+index 992c3fce..f4459376 100644
+--- a/packages/jet_cad_2d_kit/lib/src/kit/host_words.dart
++++ b/packages/jet_cad_2d_kit/lib/src/kit/host_words.dart
+@@ -2,38 +2,38 @@
+ // PlanController(words:), merged before each kit's own. Checked here, so
+ // the plan library refuses a word no kit could ever read.
+ //
+ // Pure Dart: no Flutter, no dart:io.
+ import '../model/kit_ids.dart';
+ import '../model/kit_names.dart';
+ import '../model/kit_problem.dart';
+ 
+ /// The problems of a host's [words], in their order (locale, then word
+ /// id): an id in no known namespace (`symbol:`, `category:`, `tool:`,
+-/// `type:`, `property:`, `unit:`) is [KitProblemCode.unknownWordId]; one
++/// `type:`, `property:`, `unit:`, `text:`) is [KitProblemCode.unknownWordId]; one
+ /// that names no kit is [KitProblemCode.foreignWordId]. Any kit will do: a
+ /// host's word may be for a kit it has not loaded. A `category:` or `unit:`
+ /// id names its kit before a `/`, the others before their first `.`.
+ /// Empty when sound.
+ List<KitProblem> validateHostWords(KitNames words) {
+   final problems = <KitProblem>[];
+   for (final MapEntry(key: locale, value: map) in words.words.entries) {
+     for (final wordId in map.keys) {
+       final colon = wordId.indexOf(':');
+       final namespace = colon < 0 ? '' : wordId.substring(0, colon);
+       final rest = wordId.substring(colon + 1);
+       final bool named;
+       switch (namespace) {
+         case 'category' || 'unit':
+           final slash = rest.indexOf('/');
+           named = slash > 0 && isKitId(rest.substring(0, slash));
+-        case 'symbol' || 'tool' || 'type' || 'property':
++        case 'symbol' || 'tool' || 'type' || 'property' || 'text':
+           named = rest.contains('.') && isKitId(kitOfKey(rest));
+         default:
+           problems.add(KitProblem(KitProblemCode.unknownWordId,
+               '$locale: "$wordId" is in no known namespace'));
+           continue;
+       }
+       if (!named) {
+         problems.add(KitProblem(
+             KitProblemCode.foreignWordId, '$locale: "$wordId" names no kit'));
+       }
+diff --git a/packages/jet_cad_2d_kit/lib/src/kit/plan_kit.dart b/packages/jet_cad_2d_kit/lib/src/kit/plan_kit.dart
+index 7e0fd438..99753bb3 100644
+--- a/packages/jet_cad_2d_kit/lib/src/kit/plan_kit.dart
++++ b/packages/jet_cad_2d_kit/lib/src/kit/plan_kit.dart
+@@ -46,21 +46,22 @@ final class PlanKit {
+   /// `<owner id>.<spec id>.<value>` per value. Pass it to `conformance`.
+   List<String> get propertyIds => [
+         for (final type in types) ..._specIds(type.id, type.properties),
+         for (final tool in tools)
+           if (tool.settings case final settings?)
+             ..._specIds(tool.id, settings.specs),
+       ];
+ 
+   /// The descriptor's problems: a bad id, an empty version, a word under
+   /// another kit's id or in no known namespace (a `category:` or `unit:` word
+-  /// names the kit before its `/`); a type or tool id that is not
++  /// names the kit before its `/`), a `text:` word without English; a type
++  /// or tool id that is not
+   /// `<this kit's id>.<name>` or is repeated; a word with no stored English
+   /// missing from English, for every word a type, tool or property needs.
+   /// A tool's setting that reads an object (spec 3a C1.1).
+   /// Empty when sound. Problems across kits are the plan library's.
+   List<KitProblem> validate() {
+     final problems = <KitProblem>[];
+     if (!isKitId(id)) {
+       problems.add(KitProblem(
+           KitProblemCode.badKitId,
+           '"$id" is not a kit id: a lower-case letter, then lower-case '
+@@ -75,21 +76,21 @@ final class PlanKit {
+     for (final MapEntry(key: locale, value: words) in names.words.entries) {
+       for (final wordId in words.keys) {
+         final colon = wordId.indexOf(':');
+         final namespace = colon < 0 ? '' : wordId.substring(0, colon);
+         final rest = wordId.substring(colon + 1);
+         var foreign = false;
+         switch (namespace) {
+           case 'category' || 'unit':
+             final slash = rest.indexOf('/');
+             foreign = slash < 0 || rest.substring(0, slash) != id;
+-          case 'symbol' || 'tool' || 'type' || 'property':
++          case 'symbol' || 'tool' || 'type' || 'property' || 'text':
+             foreign = !rest.contains('.') || kitOfKey(rest) != id;
+             if (!foreign && namespace != 'symbol') needEnglish.add(wordId);
+           default:
+             problems.add(KitProblem(KitProblemCode.unknownWordId,
+                 '$locale: "$wordId" is in no known namespace'));
+         }
+         if (foreign) {
+           problems.add(KitProblem(KitProblemCode.foreignWordId,
+               '$locale: "$wordId" is not under the kit "$id"'));
+         }
+diff --git a/packages/jet_cad_2d_kit/lib/src/kit/plan_services.dart b/packages/jet_cad_2d_kit/lib/src/kit/plan_services.dart
+index 4914d83b..f4fe50b3 100644
+--- a/packages/jet_cad_2d_kit/lib/src/kit/plan_services.dart
++++ b/packages/jet_cad_2d_kit/lib/src/kit/plan_services.dart
+@@ -4,47 +4,60 @@
+ // symbol definitions a kit's types place.
+ import 'dart:ui' show Locale;
+ 
+ import 'package:flutter/foundation.dart' show ValueListenable;
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
+     show CameraController;
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import '../model/kit_names.dart';
++import '../model/kit_text.dart';
+ import '../model/plan_words.dart';
+ import 'attachment.dart';
+ import 'symbols_state.dart';
+ 
+ /// A kit's words at the plan's current locale (spec 2a P5): the pure
+ /// [PlanWords] and the locale they are in.
+ abstract interface class KitWords implements PlanWords {
+   /// The locale the words are in now.
+   Locale get locale;
+ }
+ 
+ /// [KitWords] over a kit's [names], at the locale [locale] answers each
+-/// time it is read: a change of the plan's language shows at once.
++/// time it is read: a change of the plan's language shows at once. The
++/// separator is [decimalSeparator]'s answer at each read, `.` without one.
+ final class KitNamesWords implements KitWords {
+-  KitNamesWords(this.names, Locale Function() locale) : _locale = locale;
++  KitNamesWords(this.names, Locale Function() locale,
++      {String Function()? decimalSeparator})
++      : _locale = locale,
++        _separator = decimalSeparator;
+ 
+   final KitNames names;
+   final Locale Function() _locale;
++  final String Function()? _separator;
+ 
+   @override
+   Locale get locale => _locale();
+ 
+   @override
+   String? maybe(String wordId) => names.word(locale.languageCode, wordId);
+ 
+   @override
+   String word(String wordId) => maybe(wordId) ?? wordId;
++
++  @override
++  String text(String id, [Map<String, Object> args = const {}]) =>
++      fillText(word(id), args);
++
++  @override
++  String get decimalSeparator => _separator?.call() ?? '.';
+ }
+ 
+ /// What a kit's `shared` object implements to be released with its
+ /// document (spec 2a P1, lifetimes).
+ abstract interface class Disposable {
+   void dispose();
+ }
+ 
+ /// A symbol definition a kit's code uses (spec 2b S2): a parametric type
+ /// generates instances of it (E5), a tool places it. Every value is in the
+diff --git a/packages/jet_cad_2d_kit/lib/src/model/kit_problem.dart b/packages/jet_cad_2d_kit/lib/src/model/kit_problem.dart
+index 2376d81a..7ce657eb 100644
+--- a/packages/jet_cad_2d_kit/lib/src/model/kit_problem.dart
++++ b/packages/jet_cad_2d_kit/lib/src/model/kit_problem.dart
+@@ -37,20 +37,24 @@ enum KitProblemCode {
+   toolOutsideKit,
+   typePlaceConflict,
+ 
+   // Spec 2b S4: conformance, a unit kind the contract does not name with no
+   // English `unit:<kit>/<kind>` word.
+   unitKindWord,
+ 
+   // Spec 3a C1.1: PlanKit.validate, a tool's settings holding a spec that
+   // reads an object (a TextDisplay, a LengthProperty with a range).
+   settingsNeedObject,
++
++  // Spec 3a C1.6: conformance, a locale's `text:` word whose placeholders
++  // are not English's.
++  placeholderMismatch,
+ }
+ 
+ @immutable
+ final class KitProblem {
+   const KitProblem(this.code, this.message);
+ 
+   final KitProblemCode code;
+   final String message;
+ 
+   @override
+diff --git a/packages/jet_cad_2d_kit/lib/src/model/kit_text.dart b/packages/jet_cad_2d_kit/lib/src/model/kit_text.dart
+new file mode 100644
+index 00000000..4f189d6e
+--- /dev/null
++++ b/packages/jet_cad_2d_kit/lib/src/model/kit_text.dart
+@@ -0,0 +1,57 @@
++// A kit's words with parameters (spec 3a C1.6): a `text:<kit>.<id>` word is
++// a template whose `{name}` placeholders are filled when it is read, so a
++// tool's notice (C1.2) is a word id and its arguments, put into words in
++// the language of the moment.
++//
++// Pure Dart: no Flutter, no dart:io.
++import 'package:meta/meta.dart';
++
++/// A placeholder: `{`, a letter, then letters and digits, `}`.
++final RegExp _placeholder = RegExp(r'\{([A-Za-z][A-Za-z0-9]*)\}');
++
++/// A word id and its arguments, put into words when read
++/// (`KitWords.text`). Equal by its id and its arguments' values, whatever
++/// their order.
++@immutable
++final class KitText {
++  const KitText(this.id, [this.args = const {}]);
++
++  /// `text:<kit>.<id>`.
++  final String id;
++
++  /// The values of the word's placeholders, by name.
++  final Map<String, Object> args;
++
++  @override
++  bool operator ==(Object other) {
++    if (other is! KitText || other.id != id) return false;
++    final theirs = other.args;
++    if (theirs.length != args.length) return false;
++    for (final MapEntry(:key, :value) in args.entries) {
++      if (!theirs.containsKey(key) || theirs[key] != value) return false;
++    }
++    return true;
++  }
++
++  @override
++  int get hashCode => Object.hash(
++      id,
++      Object.hashAllUnordered(
++          [for (final e in args.entries) Object.hash(e.key, e.value)]));
++
++  @override
++  String toString() => 'KitText($id, $args)';
++}
++
++/// [template] with each placeholder `{name}` that [args] has replaced by
++/// `'${args[name]}'`; a placeholder without an argument is left as
++/// written, an argument the template does not name is ignored.
++String fillText(String template, Map<String, Object> args) =>
++    template.replaceAllMapped(_placeholder, (m) {
++      final value = args[m[1]!];
++      return value == null ? m[0]! : '$value';
++    });
++
++/// The names of [template]'s placeholders.
++Set<String> placeholdersOf(String template) =>
++    {for (final m in _placeholder.allMatches(template)) m[1]!};
+diff --git a/packages/jet_cad_2d_kit/lib/src/model/model.dart b/packages/jet_cad_2d_kit/lib/src/model/model.dart
+index ba5ec48e..81d88a20 100644
+--- a/packages/jet_cad_2d_kit/lib/src/model/model.dart
++++ b/packages/jet_cad_2d_kit/lib/src/model/model.dart
+@@ -1,13 +1,15 @@
+ // The model's single export list: both public libraries export this file,
+ // so the contract and the authoring toolkit carry the same model.
+ export 'kit_ids.dart';
+ export 'kit_names.dart';
+ export 'kit_problem.dart';
++export 'kit_text.dart';
+ export 'library_component.dart';
+ export 'manifest_component.dart';
++export 'numbered_names.dart';
+ export 'plan_words.dart';
+ export 'register.dart' show registerKitComponents;
+ export 'symbol_box.dart';
+ export 'symbol_library.dart';
+ export 'symbol_component.dart';
+ export 'unit_component.dart';
+diff --git a/packages/jet_cad_2d_kit/lib/src/model/numbered_names.dart b/packages/jet_cad_2d_kit/lib/src/model/numbered_names.dart
+new file mode 100644
+index 00000000..4ffa9443
+--- /dev/null
++++ b/packages/jet_cad_2d_kit/lib/src/model/numbered_names.dart
+@@ -0,0 +1,29 @@
++// Names a plan writes once and counts (spec 14d L7, moved into the
++// contract by 3a C1.6): a new layer's `Layer n`, a new room's `Room n`, in
++// the language of the moment, the lowest free `n` counted over every
++// language's name, so a plan edited in two languages never gets `Room 3`
++// and `Oda 3`. The patterns name no plan type: a kit passes one per locale
++// of its words, the plan library one per built-in language.
++//
++// Pure Dart: no Flutter, no dart:io.
++
++final RegExp _numbered = RegExp(r'^(.*) ([1-9][0-9]*)$');
++
++/// The `n` of [name] when [name] is one of [patterns] at `n`, compared by
++/// [fold] (none: exactly); otherwise null. `n` is a positive integer
++/// written without a leading zero, after a space, at the end.
++int? numberedNameIndex(String name, Iterable<String Function(int n)> patterns,
++    {String Function(String)? fold}) {
++  final m = _numbered.firstMatch(name);
++  if (m == null) return null;
++  final n = int.tryParse(m[2]!);
++  if (n == null) return null;
++  final f = fold ?? _same;
++  final folded = f(name);
++  for (final pattern in patterns) {
++    if (f(pattern(n)) == folded) return n;
++  }
++  return null;
++}
++
++String _same(String s) => s;
+diff --git a/packages/jet_cad_2d_kit/lib/src/model/plan_words.dart b/packages/jet_cad_2d_kit/lib/src/model/plan_words.dart
+index 363bf2c4..cf38f47f 100644
+--- a/packages/jet_cad_2d_kit/lib/src/model/plan_words.dart
++++ b/packages/jet_cad_2d_kit/lib/src/model/plan_words.dart
+@@ -5,11 +5,21 @@
+ // Pure Dart: no Flutter, no dart:io.
+ 
+ /// A kit's words at the plan's current locale, as a property reads them.
+ abstract interface class PlanWords {
+   /// The word [wordId] in the locale, else in English, else [wordId] itself
+   /// (a missing word shows its id, never nothing).
+   String word(String wordId);
+ 
+   /// The word [wordId] in the locale, else in English, else null.
+   String? maybe(String wordId);
++
++  /// The text [id] (a `text:<kit>.<id>` word) in the locale, else in
++  /// English, else [id] itself, its `{name}` placeholders filled from
++  /// [args] (spec 3a C1.6): `fillText(word(id), args)`.
++  String text(String id, [Map<String, Object> args = const {}]);
++
++  /// The decimal separator of the UI language (`.` or `,`), for a number a
++  /// kit prints in the UI's words (a dimension's axes line). A number that
++  /// follows the page (an area, a dimension's value) reads the page's.
++  String get decimalSeparator;
+ }
+diff --git a/packages/jet_cad_2d_kit/test/authoring/text_words_conformance_test.dart b/packages/jet_cad_2d_kit/test/authoring/text_words_conformance_test.dart
+new file mode 100644
+index 00000000..0fa9679a
+--- /dev/null
++++ b/packages/jet_cad_2d_kit/test/authoring/text_words_conformance_test.dart
+@@ -0,0 +1,104 @@
++// Spec 3a C1.6, C2, umbrella A16: conformance holds a kit's `text:` words
++// to its declared locales, like its code-side words, and asks every
++// locale's text to carry English's placeholders. Over the sample kit, its
++// words grown by three texts.
++import 'dart:io';
++import 'dart:typed_data';
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_kit/authoring.dart';
++
++import '../fixtures/sample_kit/sample_kit.dart';
++
++const String dir = 'test/fixtures/sample_kit';
++
++const KitNames texts = KitNames({
++  'en': {
++    'text:sample.seated': 'Table {name} seats {n}',
++    'text:sample.free': 'Free',
++    'text:sample.value': '{value}',
++  },
++  'de': {
++    'text:sample.seated': 'Tisch {name} hat {n} Plätze',
++    'text:sample.free': 'Frei',
++    'text:sample.value': '{value}',
++  },
++  'tr': {
++    'text:sample.seated': '{name} masası {n} kişilik',
++    'text:sample.free': 'Boş',
++    'text:sample.value': '{value}',
++  },
++});
++
++/// A lone value reads the same in every language.
++const Map<String, Set<String>> sameAsEnglish = {
++  'de': {'category:sample/Bar', 'text:sample.value'},
++  'tr': {'category:sample/Bar', 'text:sample.value'},
++};
++
++List<KitProblem> problems(KitNames names,
++        {Map<String, Set<String>> same = sameAsEnglish}) =>
++    conformance(
++      catalog: sampleCatalog,
++      committedLibrary:
++          Uint8List.fromList(File('$dir/sample.jetlib').readAsBytesSync()),
++      committedSnapshot: File('$dir/sample_snapshot.json').readAsStringSync(),
++      names: names,
++      locales: sampleLocales,
++      sameAsEnglish: same,
++    );
++
++List<KitProblemCode> codes(List<KitProblem> problems) =>
++    [for (final p in problems) p.code];
++
++/// [texts] with [locale]'s [id] replaced by [word].
++KitNames textsWith(String locale, String id, String? word) => KitNames({
++      for (final MapEntry(key: l, value: map) in texts.words.entries)
++        l: {
++          for (final MapEntry(key: k, value: v) in map.entries)
++            if (!(l == locale && k == id)) k: v,
++          if (l == locale && word != null) id: word,
++        },
++    });
++
++void main() {
++  test('KW-conf the sample kit with its texts conforms', () {
++    expect(problems(sampleNames.merge(texts)), isEmpty);
++  });
++
++  test(
++      'KW-conf-placeholders a locale\'s text that drops, adds or renames a '
++      'placeholder is one problem naming both sets (M-KW-conf-placeholders)',
++      () {
++    for (final (locale, word) in [
++      ('tr', '{name} masası'), // drops {n}
++      ('de', 'Tisch {name} hat {n} Plätze ({extra})'), // adds one
++      ('tr', '{ad} masası {n} kişilik'), // renames {name}
++    ]) {
++      final found = problems(
++          sampleNames.merge(textsWith(locale, 'text:sample.seated', word)));
++      // M-KW-conf-placeholders: the check dropped.
++      expect(codes(found), [KitProblemCode.placeholderMismatch],
++          reason: '$locale $word');
++      expect(found.single.message, startsWith('$locale: '));
++      expect(found.single.message, contains('text:sample.seated'));
++    }
++  });
++
++  test(
++      'KW-conf-complete a declared locale missing a text, or giving its '
++      'English unasked, is reported like any word (M-KW-conf-complete)', () {
++    // M-KW-conf-complete: the kit's text words not added to the words the
++    // locales must have.
++    expect(
++        codes(problems(
++            sampleNames.merge(textsWith('de', 'text:sample.free', null)))),
++        [KitProblemCode.wordMissing]);
++    expect(
++        codes(problems(
++            sampleNames.merge(textsWith('tr', 'text:sample.free', 'Free')))),
++        [KitProblemCode.wordUntranslated]);
++    expect(codes(problems(sampleNames.merge(texts), same: sampleSameAsEnglish)),
++        [KitProblemCode.wordUntranslated, KitProblemCode.wordUntranslated]);
++  });
++}
+diff --git a/packages/jet_cad_2d_kit/test/kit/kit_words_test.dart b/packages/jet_cad_2d_kit/test/kit/kit_words_test.dart
+new file mode 100644
+index 00000000..a81570c4
+--- /dev/null
++++ b/packages/jet_cad_2d_kit/test/kit/kit_words_test.dart
+@@ -0,0 +1,120 @@
++// Spec 3a C1.6: a kit's words with parameters: KitWords.text fills a
++// `text:` word in the locale; KitWords.decimalSeparator is the UI
++// language's, read live; PlanKit.validate and validateHostWords accept the
++// `text:` namespace.
++import 'dart:ui' show Locale;
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart' show DraftDocument, Handle;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++
++const KitNames words = KitNames({
++  'en': {
++    'text:test.busy': 'Already a room: {name}',
++    'text:test.ends': '{wall} {end} ({side})',
++    'tool:test.slab': 'Slab',
++  },
++  'tr': {'text:test.busy': 'Zaten bir oda: {name}'},
++});
++
++List<KitProblemCode> codes(List<KitProblem> problems) =>
++    [for (final p in problems) p.code];
++
++void main() {
++  test(
++      'KW-words text fills the word of the locale, else English; a missing '
++      'word is its id (M-KW-args)', () {
++    var locale = const Locale('tr');
++    final w = KitNamesWords(words, () => locale);
++    // M-KW-args: `text` returning `word(id)` unfilled.
++    expect(w.text('text:test.busy', {'name': 'Oda 3'}), 'Zaten bir oda: Oda 3');
++    expect(w.text('text:test.ends', {'wall': '7A', 'end': 'end', 'side': 'x'}),
++        '7A end (x)');
++    locale = const Locale('en');
++    expect(
++        w.text('text:test.busy', {'name': 'Room 3'}), 'Already a room: Room 3');
++    expect(w.text('text:test.none', {'name': 'x'}), 'text:test.none');
++    expect(w.text('text:test.busy'), 'Already a room: {name}');
++  });
++
++  test(
++      'KW-separator the decimal separator is read at each call, from the '
++      'given closure; "." without one (M-KW-separator)', () {
++    var separator = ',';
++    final w = KitNamesWords(words, () => const Locale('de'),
++        decimalSeparator: () => separator);
++    expect(w.decimalSeparator, ',');
++    // M-KW-separator: the closure read once, in the constructor.
++    separator = '.';
++    expect(w.decimalSeparator, '.');
++    expect(
++        KitNamesWords(words, () => const Locale('tr')).decimalSeparator, '.');
++  });
++
++  test(
++      'PO-words-separator a text display reads the UI separator through its '
++      'object\'s words (rulings R-P4, R-P7: the dimension\'s axes line) '
++      '(M-KW-separator, M-KW-plan-words)', () {
++    final doc = DraftDocument.empty();
++    addTearDown(doc.dispose);
++    final PlanWords words = KitNamesWords(
++        KitNames.empty, () => const Locale('de'),
++        decimalSeparator: () => ',');
++    final field = TextDisplay<double>(
++            id: 'degrees',
++            read: (v, o) =>
++                v.toStringAsFixed(1).replaceAll('.', o.words.decimalSeparator))
++        .bind(12.5,
++            wordId: 'property:test.slab.degrees',
++            object: DocumentPlanObject(doc, const Handle(0x4C1), words));
++    expect(field.value, '12,5');
++    // Through the pure interface, as a kit's property reads it.
++    expect(words.text('text:test.none', {'n': 1}), 'text:test.none');
++  });
++
++  test(
++      'KW-validate a kit\'s text words: under the kit and in English, sound; '
++      'under another kit or none, foreign; without English, missing '
++      '(M-KW-validate, M-KW-validate-en)', () {
++    // M-KW-validate: `text` left out of the namespaces (unknownWordId).
++    expect(const PlanKit(id: 'test', version: '1.0.0', names: words).validate(),
++        isEmpty);
++    for (final id in ['text:other.busy', 'text:test', 'text:busy']) {
++      final kit = PlanKit(
++          id: 'test',
++          version: '1.0.0',
++          names: KitNames({
++            'en': {id: 'x'},
++          }));
++      expect(codes(kit.validate()), [KitProblemCode.foreignWordId], reason: id);
++    }
++    // M-KW-validate-en: a text word asked no English.
++    const turkishOnly = PlanKit(
++        id: 'test',
++        version: '1.0.0',
++        names: KitNames({
++          'tr': {'text:test.busy': 'Zaten bir oda: {name}'},
++        }));
++    expect(codes(turkishOnly.validate()), [KitProblemCode.missingEnglish]);
++  });
++
++  test(
++      'KW-host a host may word any kit\'s texts; a text id that names no '
++      'kit is foreign (M-KW-host)', () {
++    // M-KW-host: `text` left out of validateHostWords' namespaces.
++    expect(
++        validateHostWords(const KitNames({
++          'tr': {'text:architecture.room-occupied': 'Zaten oda: {name}'},
++          'de': {'text:acme.note': 'Notiz'},
++        })),
++        isEmpty);
++    for (final id in ['text:Acme.note', 'text:acme', 'text:']) {
++      expect(
++          codes(validateHostWords(KitNames({
++            'de': {id: 'x'},
++          }))),
++          [KitProblemCode.foreignWordId],
++          reason: id);
++    }
++  });
++}
+diff --git a/packages/jet_cad_2d_kit/test/model/kit_text_test.dart b/packages/jet_cad_2d_kit/test/model/kit_text_test.dart
+new file mode 100644
+index 00000000..4f31fdf7
+--- /dev/null
++++ b/packages/jet_cad_2d_kit/test/model/kit_text_test.dart
+@@ -0,0 +1,64 @@
++// Spec 3a C1.6, C1.2: a word id and its arguments (KitText), put into
++// words when read; a template's placeholders filled (fillText) and listed
++// (placeholdersOf). Pure Dart, like the rest of the model.
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_kit/authoring.dart' as authoring
++    show KitText, fillText, numberedNameIndex, placeholdersOf;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++
++void main() {
++  test(
++      'KW-fill every placeholder that has an argument is filled, each time '
++      'it appears; one without is left as written; an unused argument is '
++      'ignored (M-KW-missing, M-KW-first)', () {
++    expect(fillText('Already a room: {name}', {'name': 'Oda 3'}),
++        'Already a room: Oda 3');
++    expect(
++        fillText('{wall} {end} ({side}), {wall}',
++            {'wall': '7A', 'end': 'start', 'side': 'left face', 'n': 4}),
++        '7A start (left face), 7A');
++    // M-KW-missing: a missing argument filled as ''.
++    expect(
++        fillText('Bedroom {n} of {count}', {'n': 2}), 'Bedroom 2 of {count}');
++    // A non-String argument is printed with its toString.
++    expect(fillText('{degrees}°', {'degrees': 12.5}), '12.5°');
++    // Braces that are no placeholder.
++    expect(fillText('{ name } {} {2} {name', {'name': 'x'}),
++        '{ name } {} {2} {name');
++    expect(fillText('Yatak odası {n}', const {'n': 1}), 'Yatak odası 1');
++    expect(fillText('No placeholder', {'name': 'x'}), 'No placeholder');
++  });
++
++  test('KW-placeholders the set of names a template holds', () {
++    // M-KW-placeholders: placeholdersOf answers an empty set.
++    expect(placeholdersOf('{wall} {end} ({side}), {wall}'),
++        {'wall', 'end', 'side'});
++    expect(placeholdersOf('{ name } {} {2}'), isEmpty);
++    expect(placeholdersOf('Raum {n}'), {'n'});
++  });
++
++  test(
++      'KW-text KitText equals by its id and its arguments, whatever their '
++      'order; any other id or value differs (M-KW-eq)', () {
++    final a = KitText('text:test.busy', {'name': 'Slab 1', 'n': 2});
++    final b = KitText('text:test.busy', {'n': 2, 'name': 'Slab 1'});
++    // M-KW-eq: `==` comparing the maps by identity.
++    expect(a, b);
++    expect(a.hashCode, b.hashCode);
++    expect(a, isNot(KitText('text:test.busy', {'name': 'Slab 2', 'n': 2})));
++    expect(a, isNot(KitText('text:test.free', {'name': 'Slab 1', 'n': 2})));
++    expect(a, isNot(const KitText('text:test.busy', {'name': 'Slab 1'})));
++    expect(const KitText('text:test.idle').args, isEmpty);
++  });
++
++  test(
++      'KW-barrels the authoring library exports KitText, fillText, '
++      'placeholdersOf and numberedNameIndex (pure Dart)', () {
++    // A premise of the export list, exempt from the mutation rule beyond
++    // M-KW-export: without it this file does not compile.
++    expect(identical(authoring.fillText, fillText), isTrue);
++    expect(identical(authoring.placeholdersOf, placeholdersOf), isTrue);
++    expect(identical(authoring.numberedNameIndex, numberedNameIndex), isTrue);
++    expect(const authoring.KitText('text:a.b'), const KitText('text:a.b'));
++  });
++}
+diff --git a/packages/jet_cad_2d_kit/test/model/numbered_names_test.dart b/packages/jet_cad_2d_kit/test/model/numbered_names_test.dart
+new file mode 100644
+index 00000000..5f8c6190
+--- /dev/null
++++ b/packages/jet_cad_2d_kit/test/model/numbered_names_test.dart
+@@ -0,0 +1,33 @@
++// Spec 3a C1.6: numbered names in the contract, over patterns that name no
++// plan type. A room tool passes one pattern per locale of its words; the
++// plan's layer panel one per built-in language and the current one.
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++
++String room(int n) => 'Room $n';
++String raum(int n) => 'Raum $n';
++String oda(int n) => 'Oda $n';
++
++void main() {
++  test(
++      'KW-numbered the n of a name made by any of the patterns, compared by '
++      'the fold (M-KW-first-pattern, M-KW-fold)', () {
++    final patterns = [room, raum, oda];
++    expect(numberedNameIndex('Room 4', patterns), 4);
++    // M-KW-first-pattern: only the first pattern compared.
++    expect(numberedNameIndex('Oda 12', patterns), 12);
++    expect(numberedNameIndex('Raum 3', patterns), 3);
++    // Folded: the fold given meets a case difference, on both sides.
++    // M-KW-fold: the fold applied to the name only.
++    expect(
++        numberedNameIndex('ODA 7', patterns, fold: (s) => s.toLowerCase()), 7);
++    expect(numberedNameIndex('ODA 7', patterns), isNull);
++  });
++
++  test('KW-numbered-shape a name of another shape takes no n', () {
++    for (final name in ['Room 0', 'Room 2 ', 'Room', 'Raum 2a', 'Hall 3', '']) {
++      expect(numberedNameIndex(name, [room, raum, oda]), isNull, reason: name);
++    }
++    expect(numberedNameIndex('Room 3', const []), isNull);
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart b/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
+index 104801f9..980755ae 100644
+--- a/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
++++ b/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
+@@ -348,21 +348,25 @@ class PlanController extends ChangeNotifier {
+       document: () => activeDocument,
+       catalog: () => catalog,
+       settle: settlePendingInput,
+       load: load,
+       // The active document's units (Task 9): the built-ins' fills.
+       units: () => unitIndex,
+     );
+     _services = {
+       for (final kit in kits.kits)
+         kit.id: KitServices(
+-            kit, _host, KitNamesWords(_names[kit.id]!, () => _locale.value)),
++            kit,
++            _host,
++            KitNamesWords(_names[kit.id]!, () => _locale.value,
++                // Spec 3a C1.6: the UI language's separator, live.
++                decimalSeparator: () => planStrings.decimalSeparator)),
+     };
+     _open(document, measurer, loadDiagnostics);
+     _savedState = document.commands.stateId;
+     if (unsettled) _unsettled = (document: document, at: _savedState);
+     _placeNominally();
+     _refreshFlags();
+     // The tool letters are the kit set's (Task 16): a letterTaken
+     // diagnostic is in the log before any widget is built.
+     planToolEntries(this);
+     // Last: a constructor that threw leaves no load running.
+diff --git a/packages/jet_cad_2d_plan/lib/src/l10n/numbered_names.dart b/packages/jet_cad_2d_plan/lib/src/l10n/numbered_names.dart
+index 55f61334..a4e07444 100644
+--- a/packages/jet_cad_2d_plan/lib/src/l10n/numbered_names.dart
++++ b/packages/jet_cad_2d_plan/lib/src/l10n/numbered_names.dart
+@@ -1,34 +1,33 @@
+ // Names the planner writes once and counts (spec 14d L7): a new layer's
+ // `Layer n`, in the language of the moment, the lowest free `n` counted
+ // over the names of every built-in language, so a plan edited in two
+-// languages never gets `Layer 3` and `Katman 3`.
+-// Ported from jet_cad_floor_plan (2a Task 9).
++// languages never gets `Layer 3` and `Katman 3`. Ported from
++// jet_cad_floor_plan (2a Task 9); the counting is the contract's since 3a
++// Task 3 (spec C1.6), this file only hands it the plan's languages.
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' as kit
++    show numberedNameIndex;
++
+ import 'strings.dart';
+ import 'strings_de.dart';
+ import 'strings_en.dart';
+ import 'strings_tr.dart';
+ 
+-final RegExp _numbered = RegExp(r'^(.*) ([1-9][0-9]*)$');
+-
+ /// The `n` of [name] when [name] is [pattern]`(n)` in [current] or in a
+ /// built-in language, compared by [fold]; otherwise null.
+ int? numberedNameIndex(String name,
+-    String Function(PlanStrings s, int n) pattern, PlanStrings current,
+-    {String Function(String s) fold = _same}) {
+-  final m = _numbered.firstMatch(name);
+-  if (m == null) return null;
+-  final n = int.tryParse(m[2]!);
+-  if (n == null) return null;
+-  final folded = fold(name);
+-  for (final s in <PlanStrings>[
+-    current,
+-    const PlanStringsEn(),
+-    const PlanStringsDe(),
+-    const PlanStringsTr(),
+-  ]) {
+-    if (fold(pattern(s, n)) == folded) return n;
+-  }
+-  return null;
+-}
++        String Function(PlanStrings s, int n) pattern, PlanStrings current,
++        {String Function(String s) fold = _same}) =>
++    kit.numberedNameIndex(
++        name,
++        [
++          for (final s in <PlanStrings>[
++            current,
++            const PlanStringsEn(),
++            const PlanStringsDe(),
++            const PlanStringsTr(),
++          ])
++            (int n) => pattern(s, n),
++        ],
++        fold: fold);
+ 
+ String _same(String s) => s;
+diff --git a/packages/jet_cad_2d_plan/test/controller/kit_words_controller_test.dart b/packages/jet_cad_2d_plan/test/controller/kit_words_controller_test.dart
+new file mode 100644
+index 00000000..13d4cd9d
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/controller/kit_words_controller_test.dart
+@@ -0,0 +1,57 @@
++// Spec 3a C1.6: the words the plan gives a kit carry the UI language's
++// decimal separator, live, from the PlanStrings the widgets report (a
++// host's own class included); and a host may word a kit's texts.
++import 'package:flutter/widgets.dart' show Locale;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++
++import '../support/test_kit.dart';
++
++/// English words with a comma: a host's own language class (NS7's case).
++final class CommaEnglish extends PlanStringsEn {
++  const CommaEnglish();
++
++  @override
++  String get decimalSeparator => ',';
++}
++
++void main() {
++  TestWidgetsFlutterBinding.ensureInitialized();
++
++  test(
++      'KW-plan-separator a kit\'s words read the reported language\'s '
++      'separator at each call: English ".", Turkish ",", a host\'s own '
++      'class its own (M-KW-plan-separator)', () {
++    final c = PlanController(kits: [testKit()]);
++    addTearDown(c.dispose);
++    final words = c.servicesOf('test').words;
++    // M-KW-plan-separator: the plan builds KitNamesWords without it ('.').
++    expect(words.decimalSeparator, '.');
++    c.reportLocale(const Locale('tr'));
++    expect(words.decimalSeparator, ',');
++    c.reportLocale(const Locale('de'));
++    expect(words.decimalSeparator, ',');
++    c.reportLocale(const Locale('en'), strings: const CommaEnglish());
++    expect(words.decimalSeparator, ',');
++    c.reportLocale(const Locale('en'));
++    expect(words.decimalSeparator, '.');
++  });
++
++  test(
++      'KW-plan-host a host\'s text word is accepted and read before the '
++      'kit\'s, in the locale (M-KW-host)', () {
++    final c = PlanController(
++        kits: [testKit()],
++        words: const KitNames({
++          'en': {'text:test.busy': 'Taken by {name}'},
++          'tr': {'text:test.busy': '{name} tarafından alındı'},
++        }));
++    addTearDown(c.dispose);
++    final words = c.servicesOf('test').words;
++    expect(words.text('text:test.busy', {'name': 'Slab 1'}), 'Taken by Slab 1');
++    c.reportLocale(const Locale('tr'));
++    expect(words.text('text:test.busy', {'name': 'Slab 1'}),
++        'Slab 1 tarafından alındı');
++  });
++}

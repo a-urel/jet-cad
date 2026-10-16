@@ -459,12 +459,13 @@ final PlanType<DiscParams> discType = PlanType<DiscParams>(
   ],
   colour: ColourTarget<DiscParams>(
       read: (p) => p.colour, write: (p, s) => p.withColour(s)),
-  section: (context, value, commit, words) {
+  section: (context, section) {
+    final value = section.value;
     if (value.radius > 5000) throw StateError('a disc over 5 m');
     return OutlinedButton(
         key: const Key('disc-grow'),
-        onPressed: () => commit(value.withRadius(value.radius * 2)),
-        child: Text(words.word('property:disc.disc.grow')));
+        onPressed: () => section.commit(value.withRadius(value.radius * 2)),
+        child: Text(section.words.word('property:disc.disc.grow')));
   },
 );
 

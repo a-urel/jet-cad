@@ -1,0 +1,494 @@
+import 'dart:ui' show Canvas, Offset, Rect;
+
+import 'package:flutter/foundation.dart' show immutable, visibleForTesting;
+import 'package:flutter/gestures.dart' show kPrimaryButton;
+import 'package:jet_cad_2d/jet_cad_2d.dart';
+import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show PlanServices;
+import 'package:vector_math/vector_math_64.dart' show Vector2;
+
+import '../ids.dart';
+import '../live.dart';
+import '../wall/wall_bands.dart';
+import '../wall/wall_geometry.dart' show wallsInDocument;
+import 'opening.dart';
+import 'opening_geometry.dart';
+
+/// An opening tool's settings (spec 08 D14, Ruling 08-17): the width of the
+/// next opening, in mm. The plan holds one per tool (spec 2a P3); the
+/// property panel edits the active tool's (spec 3a C3.3).
+@immutable
+final class OpeningSettings {
+  const OpeningSettings({required this.width});
+
+  /// D14's defaults: 900 for a door, 1,200 for a window, 900 for a gap.
+  factory OpeningSettings.defaultFor(OpeningKind kind) =>
+      OpeningSettings(width: kind == OpeningKind.window ? 1200 : 900);
+
+  final double width;
+
+  OpeningSettings copyWith({double? width}) =>
+      OpeningSettings(width: width ?? this.width);
+
+  @override
+  bool operator ==(Object other) =>
+      other is OpeningSettings && other.width == width;
+
+  @override
+  int get hashCode => width.hashCode;
+
+  @override
+  String toString() => 'OpeningSettings($width)';
+}
+
+/// The tool id of the opening tool of [kind] (spec 3a C2).
+String openingToolIdOf(OpeningKind kind) => switch (kind) {
+      OpeningKind.door => ArchitectureTools.door,
+      OpeningKind.window => ArchitectureTools.window,
+      OpeningKind.gap => ArchitectureTools.gap,
+    };
+
+/// Where a click would put an opening (spec 08 D14): its parameters and its
+/// cut (D8; null when it is no-fit).
+typedef _Placement = ({OpeningParams params, Cut? cut});
+
+/// Spec 08 D14: the Door (D), Window (N) and Gap (G) tools, one class and
+/// three instances. A `PlacementTool` whose **first click commits** one
+/// opening; the tool stays active, so a run of doors is a run of clicks,
+/// and Escape (with nothing pending, ever) returns to the select tool.
+///
+/// - **The host** is the wall whose band contains the **raw** pointer, the
+///   lowest handle when several do: [WallBands.hostAt], shared with the Wall
+///   tool. The scan is not gated on object snap (Ruling 08-11): finding the
+///   host is not a snap. **Only a wall the user can see and select hosts**
+///   (spec 12b S-11, [isUsableHost]): its object layer must be visible and
+///   unlocked; another wall is passed over, as if it had no band. No wall
+///   under the pointer: no preview, and a click does nothing.
+/// - **The position** is `u` of the **resolved** point (the snap chain's)
+///   projected onto the host's centreline in its local space, unless an
+///   **edge snap** wins (D15, [selfSnap]): with object snap on, an edge of
+///   the would-be opening at the raw point's projection within the aperture
+///   of one of the host's stretch ends or of its other openings' drawn cut
+///   edges ([edgeSnap]) puts that edge on it, outright. What is
+///   stored is the centre of the cut the opening would get there (D8): `u`
+///   itself when it fits there, the clamped centre ([storedCentreOf]) when
+///   it had to move into a stretch, and `u` clamped to `[0, L]` when it
+///   is no-fit (D6: the tools only produce positions on the wall; the slide
+///   grip clamps the same way).
+/// - **A door's swing** is the side of the band's **midline** the raw
+///   click lies on (D14 as amended, Ruling 08-23): `left` when
+///   `(p − s)·n − (lOff + rOff)/2 ≥ 0`. **Its hinge** is `start` when the
+///   stored centre is at most `L/2`, `end` otherwise. A window or a gap is
+///   written `start` and `left`.
+/// - **The commit** is one [CompoundCommand]: the opening's group at the
+///   identity, then its `OpeningParams`. One undo step, in which the host
+///   regenerates. A refused one (a malformed host from a file) places
+///   nothing.
+///
+/// **The snap marker** ([markerPoint], Ruling 08-14) is drawn at the
+/// projected point on the host's centreline, not at the chain's point.
+///
+/// **The frame cache** (Ruling 08-13): the hovered host's frame, stretches,
+/// other openings and their drawn cuts, from the document adapter
+/// ([wallsInDocument]). It is
+/// rebuilt only when the hovered host changes, when the document reports a
+/// change ([WallBands.generation]), and at every click. A pointer move over
+/// the same host costs a projection, a placement and the preview's few
+/// points.
+///
+/// Ported from jet_cad_floor_plan's lib/src/parametric/opening_tool.dart
+/// (spec 3a C3.3, R15-1): the width, the band cache and the live walls
+/// come from the plan's services.
+class OpeningTool extends PlacementTool {
+  /// An opening tool of [kind] over [services]: the width is the plan's
+  /// settings of [openingToolIdOf] `(kind)`, read at each hover and click;
+  /// the band cache is the kit's shared one ([wallBandsOf]); the walls and
+  /// openings it sees are the services' live ones (spec 3a C1.5).
+  OpeningTool(this.kind, this.services)
+      : _bands = wallBandsOf(services),
+        _live = liveTypesOf(services);
+
+  final OpeningKind kind;
+
+  /// The plan's services: read, never kept beyond the document.
+  final PlanServices services;
+
+  final WallBands _bands;
+  final LiveTypeOf _live;
+
+  /// The width of the next opening: the tool's settings now.
+  double get _width =>
+      services.settingsOf<OpeningSettings>(openingToolIdOf(kind)).width;
+
+  /// The context of the last pointer event, for [hovered], which has none.
+  ToolContext? _context;
+
+  /// The raw world point of the last press (Ruling 08-14): `accept` is
+  /// handed the resolved point only.
+  final Vector2 _raw = Vector2.zero();
+
+  // The frame cache (Ruling 08-13).
+  Handle? _frameHost;
+  DraftDocument? _frameDocument;
+  int _frameGeneration = -1;
+  HostLayout? _layout;
+  Transform2? _toWorld, _toLocal;
+  List<(Handle, double, double)> _others = const [];
+
+  /// The drawn cuts (D8) of [_others] that fit: [edgeSnap]'s candidates.
+  List<(double, double)> _otherCuts = const [];
+
+  // The last host scan (Ruling 08-12): [selfSnap] and [hovered] ask for the
+  // same raw point on one move, and the scan runs once.
+  DraftDocument? _scanDocument;
+  int _scanGeneration = -1;
+  int _scanTables = -1;
+  double _scanX = double.nan, _scanY = double.nan;
+  Handle? _scanHost;
+
+  /// Whether the bands were refreshed during the current pointer event
+  /// (spec 3a C1.5): the edge snap's scan and the preview's or the click's
+  /// read of it share one refresh. Cleared at each event and after the
+  /// event's last read.
+  bool _bandsFresh = false;
+
+  /// Whether the last resolution's self-snap was an edge snap, on which
+  /// host, and the centre it gave, exactly (spec 08 D15): the world point
+  /// handed on is only its image through the host's transform.
+  bool _edgeSnapped = false;
+  Handle? _edgeHost;
+  double _edgeU = 0;
+
+  /// The snap marker's point while a host is hovered: the projected point on
+  /// its centreline (Ruling 08-14).
+  final Vector2 _marker = Vector2.zero();
+  bool _onHost = false;
+
+  /// The hover preview, in world: the would-be symbol, then the would-be
+  /// cut's two jamb lines. Built per pointer move, painted per frame.
+  List<(EntityKind, GeometryPayload)> _preview = const [];
+
+  /// How many times the frame cache was rebuilt.
+  @visibleForTesting
+  int debugFrameBuilds = 0;
+
+  /// How many hover previews were built.
+  @visibleForTesting
+  int debugPreviewBuilds = 0;
+
+  /// The hover preview, in world.
+  @visibleForTesting
+  List<(EntityKind, GeometryPayload)> get debugPreview => _preview;
+
+  @override
+  String get name => switch (kind) {
+        OpeningKind.door => 'Door',
+        OpeningKind.window => 'Window',
+        OpeningKind.gap => 'Gap',
+      };
+
+  @override
+  void onPointerMove(ToolPointerEvent e, ToolContext ctx) {
+    _context = ctx;
+    _bandsFresh = false;
+    super.onPointerMove(e, ctx);
+  }
+
+  @override
+  void onPointerDown(ToolPointerEvent e, ToolContext ctx) {
+    _context = ctx;
+    _bandsFresh = false;
+    if (e.buttons & kPrimaryButton != 0) {
+      _raw.setFrom(e.world);
+      // Rebuilt at every click (Ruling 08-13), before the press resolves:
+      // the change stream delivers after the current task, so an edit in
+      // the same synchronous task as this click would otherwise leave the
+      // scan, the frame and the edge snap stale.
+      _bands.invalidate();
+    }
+    super.onPointerDown(e, ctx);
+  }
+
+  /// Spec 08 D15's edge snap, as 05 D4's self-snap: it wins outright over
+  /// the chain. With object snap on and a host under [raw], the raw point
+  /// is projected onto the host's centreline and [edgeSnap] is applied
+  /// there; on a hit, the snapped centre's world point on the centreline.
+  @override
+  Vector2? selfSnap(Vector2 raw, double apertureWorld) {
+    _edgeSnapped = false;
+    final ctx = _context;
+    if (ctx == null || !(ctx.snap?.objectSnap ?? true)) return null;
+    final doc = ctx.document;
+    final host = _hostAt(doc, raw);
+    if (host == null || !_ready(doc, host)) return null;
+    final layout = _layout!;
+    final toWorld = _toWorld!;
+    final f = layout.frame;
+    final v = edgeSnap(
+        layout.stretches,
+        _otherCuts,
+        f.uOf(_toLocal!.transformPoint(raw)),
+        _width,
+        // The aperture in the host's local units along its centreline: one
+        // local unit along `d` is `|toWorld · d|` in world, exactly, even
+        // for a non-uniformly scaled group.
+        apertureWorld / toWorld.transformDirection(f.d).length);
+    if (v == null) return null;
+    _edgeSnapped = true;
+    _edgeHost = host;
+    _edgeU = v;
+    return toWorld.transformPoint(f.at(v, 0));
+  }
+
+  /// The snap marker sits at the projected point on the hovered host's
+  /// centreline (Ruling 08-14); elsewhere, at the chain's point.
+  @override
+  Vector2 get markerPoint => _onHost ? _marker : super.markerPoint;
+
+  /// Runs after every hover's resolution, so [hoverPoint] is the resolved
+  /// point and [raw] the pointer's.
+  @override
+  void hovered(Vector2 raw) {
+    final ctx = _context;
+    final host = ctx == null ? null : _hostAt(ctx.document, raw);
+    // The move's last read of the bands: the next one refreshes them.
+    _bandsFresh = false;
+    if (host == null || !_ready(ctx!.document, host)) {
+      _preview = const [];
+      _onHost = false;
+      return;
+    }
+    debugPreviewBuilds++;
+    _preview = _previewOf(_place(host, raw, hoverPoint, null));
+  }
+
+  @override
+  void accept(Vector2 point, ToolContext ctx) {
+    final doc = ctx.document;
+    _preview = const [];
+    _onHost = false;
+    final host = _hostAt(doc, _raw);
+    // The click's last read of the bands: the next one refreshes them.
+    _bandsFresh = false;
+    if (host == null || !_ready(doc, host)) return;
+    try {
+      commit(ctx, () {
+        // The new opening's handle, allocated first (after the permission
+        // check, Ruling 05-3): the placement is decided among the host's
+        // openings in ascending handle order (D8's "a wall keeps a piece"),
+        // and this one takes its place there.
+        final h = doc.handleSeed.next();
+        final placed = _place(host, _raw, point, h);
+        return CompoundCommand([
+          AddNodeCommand(GroupNode(
+              handle: h,
+              parent: doc.rootHandle,
+              transform: Transform2.identity(),
+              children: const [])),
+          SetComponentCommand<OpeningParams>(h, placed.params),
+          // Spec 12b D2: a new object takes the current layer.
+          SetComponentCommand<ObjectLayer>(h, ObjectLayer(drawingLayer(doc))),
+        ], label: 'Add $name');
+      }, needs: const {
+        Capability.structure,
+        Capability.components,
+        Capability.geometry,
+      });
+    } on ArgumentError {
+      // A malformed host from a file: nothing is placed.
+    } on StateError {
+      // Likewise.
+    } on DanglingReferenceError {
+      // The host stopped being an object: nothing is placed.
+    }
+  }
+
+  /// The wall whose band contains [raw] ([WallBands.hostAt]) and that
+  /// [isUsableHost] accepts, scanned once per raw point, band generation and
+  /// table revision (a layer hidden or locked since the last scan is seen
+  /// at once, not only when the change stream delivers; a wall frozen since
+  /// then, at the event's first read of the bands).
+  Handle? _hostAt(DraftDocument doc, Vector2 raw) {
+    if (identical(doc, _scanDocument) &&
+        doc.tables.mutationRevision == _scanTables &&
+        raw.x == _scanX &&
+        raw.y == _scanY) {
+      // A plan freezes a wall with no document change (spec 3a C1.5): the
+      // bands' refresh, which every other read of them runs, moves the
+      // generation if a cached wall is no longer live, so neither this
+      // scan nor the frame cache built at it outlives a freeze. Once per
+      // pointer event: O(cached objects) `liveTypeIdOf` calls, each over
+      // the catalog's types; no allocation.
+      if (!_bandsFresh) {
+        _bands.liveWalls(doc);
+        _bandsFresh = true;
+      }
+      if (_bands.generation == _scanGeneration) return _scanHost;
+    }
+    final host = _bands.hostAt(doc, raw.x, raw.y, accept: isUsableHost);
+    _bandsFresh = true;
+    _scanDocument = doc;
+    _scanGeneration = _bands.generation;
+    _scanTables = doc.tables.mutationRevision;
+    _scanX = raw.x;
+    _scanY = raw.y;
+    return _scanHost = host;
+  }
+
+  /// Refreshes the frame cache for [host] (Ruling 08-13). False when [host]
+  /// has no frame: not a live wall, or degenerate.
+  bool _frameFor(DraftDocument doc, Handle host) {
+    final generation = _bands.generation;
+    if (host == _frameHost &&
+        identical(doc, _frameDocument) &&
+        generation == _frameGeneration) {
+      return _layout != null;
+    }
+    debugFrameBuilds++;
+    _frameHost = host;
+    _frameDocument = doc;
+    _frameGeneration = generation;
+    final walls = wallsInDocument(doc, host, _live);
+    _layout = walls == null ? null : layoutOf(walls.host, walls.walls);
+    _toWorld = walls?.host.toWorld;
+    _toLocal = _toWorld?.invert();
+    final layout = _layout;
+    _others = layout == null
+        ? const []
+        : [
+            for (final (h, o) in openingsInDocument(doc, host, _live))
+              (h, o.position, o.width),
+          ];
+    _otherCuts = layout == null
+        ? const []
+        : [
+            for (final c in cutsOf(layout.frame, layout.stretches, [
+              for (final (_, c, w) in _others) (c, w),
+            ]).cuts)
+              if (c != null) (c.a, c.b),
+          ];
+    return layout != null;
+  }
+
+  /// Whether an opening can be placed on [host] now: the settings hold a
+  /// width the tools may give, and the frame cache holds [host]'s frame.
+  bool _ready(DraftDocument doc, Handle host) =>
+      isOpeningWidth(kind, _width) && _frameFor(doc, host);
+
+  /// Where an opening [self] of this tool's kind and width goes on [host]
+  /// for a press at [raw] resolved to [resolved] (spec 08 D14), once
+  /// [_ready]. A null [self] is the hover's would-be opening: the handle the
+  /// next commit allocates is above every handle in the document, so it is
+  /// admitted after all of the host's openings.
+  _Placement _place(Handle host, Vector2 raw, Vector2 resolved, Handle? self) {
+    final w = _width;
+    final layout = _layout!;
+    final f = layout.frame;
+    final toLocal = _toLocal!;
+    // An edge snap's centre exactly; otherwise the resolved point projected.
+    final u = _edgeSnapped && host == _edgeHost
+        ? _edgeU
+        : f.uOf(toLocal.transformPoint(resolved));
+    _marker.setFrom(_toWorld!.transformPoint(f.at(u, 0)));
+    _onHost = true;
+    final cut = _cutAmong(layout, u, w, self);
+    final c = cut == null
+        ? (u < 0 ? 0.0 : (u > f.len ? f.len : u))
+        : !cut.clamped
+            ? u
+            : storedCentreOf(layout.stretches, cut, w);
+    // The raw click's side of the band's midline (D14 as amended, Ruling
+    // 08-23): exactly on it swings left.
+    final side =
+        (toLocal.transformPoint(raw) - f.s).dot(f.n) - (f.lOff + f.rOff) / 2;
+    final params = switch (kind) {
+      OpeningKind.door => OpeningParams(host, c, w, kind,
+          hinge: c <= f.len / 2 ? HingeEnd.start : HingeEnd.end,
+          swing: side >= 0 ? SwingSide.left : SwingSide.right),
+      _ => OpeningParams(host, c, w, kind),
+    };
+    return (params: params, cut: c == u ? cut : _cutAmong(layout, c, w, self));
+  }
+
+  /// The cut (D8) an opening [self] centred at [c], [w] wide, gets among the
+  /// host's cached openings: admitted in ascending handle order, a null
+  /// [self] after all of them.
+  Cut? _cutAmong(HostLayout layout, double c, double w, Handle? self) {
+    final before = self == null
+        ? _others.length
+        : [
+            for (final (h, _, _) in _others)
+              if (h.value < self.value) h,
+          ].length;
+    final openings = [
+      for (final (_, oc, ow) in _others) (oc, ow),
+    ]..insert(before, (c, w));
+    return cutsOf(layout.frame, layout.stretches, openings).cuts[before];
+  }
+
+  /// The preview of [placed], in world: its symbol ([symbolOf], host-local
+  /// to world through the host's transform, the opening's own group being
+  /// at the identity), then, when it fits, its cut's two jamb lines across
+  /// the band.
+  List<(EntityKind, GeometryPayload)> _previewOf(_Placement placed) {
+    final f = _layout!.frame;
+    final toWorld = _toWorld!;
+    final cut = placed.cut;
+    Vector2 world(double u, double off) => toWorld.transformPoint(f.at(u, off));
+    return [
+      for (final g in symbolOf(f, placed.params, cut, toWorld))
+        (g.kind, g.payload),
+      if (cut != null)
+        for (final u in [cut.a, cut.b])
+          (
+            EntityKind.line,
+            linePayload(world(u, f.lOff), world(u, f.rOff)),
+          ),
+    ];
+  }
+
+  @override
+  void dispose() {
+    // The band cache is the kit's shared one: the plan disposes it with its
+    // document (spec 3a C2).
+    super.dispose();
+  }
+
+  /// The would-be symbol and cut, from the payloads the last pointer move
+  /// built; nothing is computed here.
+  @override
+  void paintRubberBand(Canvas canvas, Vector2 origin, double scale) {
+    final preview = _preview;
+    if (!hoverVisible || preview.isEmpty) return;
+    final ox = origin.x, oy = origin.y;
+    band.reset();
+    // Indexed: no iterator per frame.
+    for (var i = 0; i < preview.length; i++) {
+      final (kind, p) = preview[i];
+      final c = p.coords;
+      if (kind == EntityKind.arc) {
+        band.addArc(
+            Rect.fromCircle(
+                center: Offset(c[0] - ox, c[1] - oy), radius: p.scalars[0]),
+            p.scalars[1],
+            p.scalars[2]);
+      } else {
+        band
+          ..moveTo(c[0] - ox, c[1] - oy)
+          ..lineTo(c[2] - ox, c[3] - oy);
+      }
+    }
+    canvas.drawPath(band, bandPaint);
+  }
+}
+
+/// Whether wall [wall] of [doc] may host a new opening (spec 12b S-11): its
+/// object layer (`objectLayer`) is visible and unlocked. A tool acting on
+/// the wall under the pointer is selection-like, so a door is never placed
+/// on a wall the user cannot see or select. A missing record counts as
+/// visible and unlocked, as `FilterEvaluator` counts it. (Decision 8 is
+/// untouched: a hidden wall's existing openings still cut it.)
+bool isUsableHost(DraftDocument doc, Handle wall) {
+  final record = doc.tables.layers[objectLayer(doc, wall)];
+  return (record?.visible ?? true) && !(record?.locked ?? false);
+}

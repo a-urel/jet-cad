@@ -72,6 +72,7 @@ final class ServiceSession {
         damage,
     ValueListenable<Map<String, UnitGroup>>? groups,
     bool Function()? moves,
+    Set<Handle> Function(DraftDocument document, Handle object)? referencesOf,
   })  : page = PageNotifier(document),
         index = SpatialIndex(document) {
     // The selection before the outlines (it prunes a dead key first), as
@@ -96,7 +97,8 @@ final class ServiceSession {
         frozen: frozen,
         log: log,
         lock: (objects) => lock(this, objects),
-        damage: (error) => damage(this, error));
+        damage: (error) => damage(this, error),
+        referencesOf: referencesOf);
     // As the design's (plan_controller.dart's `_open`): a hook failure is
     // probed, frozen and retried once.
     lockExpander

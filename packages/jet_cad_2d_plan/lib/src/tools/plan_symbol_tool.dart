@@ -24,12 +24,17 @@ import 'package:flutter/widgets.dart' show KeyEventResult;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart'
-    show Attachment, AttachmentQuery, AttachmentRegistry;
+    show
+        Attachment,
+        AttachmentQuery,
+        AttachmentRegistry,
+        boxOfEntry,
+        footprintOf,
+        placementTransform;
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../attach/attachment_painter.dart';
 import '../symbols/plan_symbol.dart';
-import '../symbols/symbol_box.dart';
 import '../symbols/symbol_ghost.dart';
 import '../symbols/symbol_placer.dart';
 import '../units/unit_index.dart' show UnitIndex;

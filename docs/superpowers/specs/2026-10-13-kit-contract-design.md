@@ -409,6 +409,52 @@ version's English. The umbrella's A2 now matches K5 (words on the kit, a
   only whoever runs its tests, never a host; PR6 K6's `CatalogArc` bullet
   states the signed sweep that PR3 introduced.
 
+## Amendments from sub-project 3a (2026-10-15)
+
+Each line is written by the 3a task that lands it (the 3a spec,
+[2026-10-15-architecture-kit-design.md](2026-10-15-architecture-kit-design.md),
+"Amendments to other specs").
+
+- **The symbol box family** (3a C1.4): `SymbolBox`, `isOrthonormal`,
+  `boxOfLeaves`, `boxOfEntry`, `servedTopOfEntry`, `boxOfDefinition`,
+  `footprintOf` and `placementTransform` are the contract's, pure Dart in
+  the model (`lib/src/model/symbol_box.dart`), exported by both libraries;
+  moved unchanged from the plan library, which imports them from here and
+  keeps no copy.
+- **Object views and hidden fields** (3a C1.1, C1.7): the surface gains
+  `PlanObject`, `DocumentPlanObject`, `TextDisplay`,
+  `LengthProperty.range`, `PropertySpec.visible`,
+  `PropertyField.visible`, `PlanSection` (the escape hatch's one context)
+  and `KitProblemCode.settingsNeedObject`; `PlanType.fieldsOf`,
+  `commitField` and `sectionFor` take a `DraftDocument`, and `fieldsOf`
+  and `commitField` the kit's words, which the object carries
+  (`PlanObject.words`, a `PlanWords`: the pure interface `KitWords` now
+  implements, exported by both libraries).
+- **K4, texts** (3a C1.6): a fourth kind of word id, `text:<kit id>.<id>`,
+  for a kit's messages and templates, with `{name}` placeholders filled
+  when read (`KitWords.text`; a missing argument is left as written; a
+  choice of words is two texts). English is required, `validateHostWords`
+  accepts them, and the conformance test holds them to the declared
+  locales and asks every locale's text for English's placeholders
+  (`placeholderMismatch`).
+- **Words with parameters** (3a C1.6, C1.2): the surface gains `KitText`,
+  `fillText`, `placeholdersOf`, `numberedNameIndex` (moved from the plan
+  library, over patterns that name no plan type), `PlanWords.text` and
+  `PlanWords.decimalSeparator`, inherited by `KitWords` (the UI
+  language's separator, which the plan fills from its `PlanStrings`).
+- **Tool notices** (3a C1.2): the surface gains `ToolNotice`, a kit tool's
+  `ValueListenable<KitText?> notice`, which the plan library reads through
+  its guard and shows on the status line.
+- **Preparing and building a plan** (3a C1.3, C1.9): `PlanKit.prepare`
+  (`void Function(DraftDocument)?`) prepares every document the plan
+  library makes, never a loaded one; `PlanBuild` (`void
+  Function(DraftDocument, KitWords)`) is a host's build of a new plan.
+- **Live objects and the kit authors' double** (3a C1.5, C1.11):
+  `PlanServices.liveTypeIdOf(Handle)` answers a live object's type id and
+  null for a frozen one, a missing kit's, or anything else;
+  `package:jet_cad_2d_kit/testing.dart` exports `FakePlanServices`. Not
+  added: `isLocked`, `allows`, a settings listenable (no user today).
+
 ## Inputs for sub-project 2
 
 The final review's API risks, none needing a breaking change if settled in

@@ -1,8 +1,8 @@
 // The document a new plan opens with (today's spec 12a D4, Q0 N1): the
 // plan's components registered, millimetres, the default page, no history.
 // Ported from jet_cad_floor_plan's new_document.dart, without its DASHED
-// linetype (the separator's, sub-project 3) and with the registration
-// passed in (the kits').
+// linetype: a kit adds what its types draw with in its own prepare (spec
+// 3a C1.3), and with the registration passed in (the kits').
 import 'dart:ui' show Locale;
 
 import 'package:jet_cad_2d/jet_cad_2d.dart';

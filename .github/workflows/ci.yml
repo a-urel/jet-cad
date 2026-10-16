@@ -47,6 +47,14 @@ jobs:
             # The pick's and the band's allocation tests (2b Task 14) read
             # the VM's allocation profiler, as the planner's do.
             test_flags: --enable-vmservice
+          - package: packages/jet_cad_2d_kit_architecture
+            tool: flutter
+          - package: packages/jet_cad_2d_integration
+            tool: flutter
+            # The paint-allocation invariant over the sample flat (spec 3a
+            # C6) reads the VM's allocation profiler, as the plan
+            # library's does.
+            test_flags: --enable-vmservice
           - package: packages/jet_cad_floor_plan
             tool: flutter
             # The pick's allocation test reads the VM's allocation profiler,
@@ -177,6 +185,7 @@ jobs:
           - packages/jet_cad_2d_flutter
           - packages/jet_cad_2d_kit
           - packages/jet_cad_2d_plan
+          - packages/jet_cad_2d_kit_architecture
           - packages/jet_cad_floor_plan
     steps:
       - uses: actions/checkout@v5

@@ -9,10 +9,14 @@ import 'package:flutter/foundation.dart'
     show ValueListenable, visibleForTesting;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart'
-    show SymbolComponent, UnitComponent, UnitLabelling, kUnitLabelTag;
+    show
+        SymbolComponent,
+        UnitComponent,
+        UnitLabelling,
+        boxOfLeaves,
+        kUnitLabelTag;
 
 import '../kits/locks.dart';
-import '../symbols/symbol_box.dart' show boxOfLeaves;
 import 'unit_components.dart';
 import 'unit_label.dart';
 import 'unit_locks.dart';

@@ -6,6 +6,7 @@
 // flow after a failed edit: probe the type's objects (E2), freeze and lock
 // the failing ones, retry once; and the load's check. [DiagnosticsLog]
 // keeps one diagnostic per kit, subject and code.
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
@@ -242,6 +243,11 @@ T? guardFactory<T extends Object?>(
 ///   inner's gesture cancelled; no diagnostic.
 /// - A [KitHookFailure] is its kit's: a diagnostic, the inner cancelled,
 ///   [onFailed] (the controller arms `plan.select`).
+/// - Given [refusal] (plan.select's, spec 3a C1.8), an error the
+///   controller's `execute` refuses, thrown by `onPointerUp` (the drop), is
+///   a refusal: the gesture is cancelled, with no exception and no
+///   diagnostic beyond the one `execute` would report. Every other event
+///   keeps the rules above.
 /// - Anything else a kit tool throws is a diagnostic of [toolId], the
 ///   inner cancelled, [onFailed]; a generic tool's (kit id `plan`) is
 ///   rethrown unchanged, as today (`select_tool.dart:546-550`).
@@ -258,6 +264,7 @@ final class GuardedTool extends Tool {
     required this.log,
     required this.lockHint,
     required this.onFailed,
+    this.refusal,
   }) {
     inner.addListener(_forward);
   }
@@ -268,6 +275,11 @@ final class GuardedTool extends Tool {
   final DiagnosticsLog log;
   final ValueNotifier<bool> lockHint;
   final VoidCallback onFailed;
+
+  /// What the controller's `execute` refuses (spec 3a C1.8 (2)): given to
+  /// plan.select only, whose drop is executed by the Flutter layer's
+  /// `SelectTool` and would otherwise escape it. Null for every other tool.
+  final bool Function(Object error)? refusal;
 
   bool _broken = false;
 
@@ -298,9 +310,18 @@ final class GuardedTool extends Tool {
     }
   }
 
-  void _failed(Object error, StackTrace stack, ToolContext ctx) {
+  void _failed(Object error, StackTrace stack, ToolContext ctx,
+      {bool drop = false}) {
     if (error is PlanLocked || error is DanglingReferenceError) {
       lockHint.value = true;
+      _cancelInner(ctx);
+      return;
+    }
+    // Spec 3a C1.8 (2): a drop refused as `execute` refuses an edit cancels
+    // the drag; a StateError is no refusal and goes on below, as today.
+    // Only the drop: another event's error keeps 2a's rule.
+    final refused = refusal;
+    if (drop && refused != null && refused(error)) {
       _cancelInner(ctx);
       return;
     }
@@ -389,6 +410,28 @@ final class GuardedTool extends Tool {
     }
   }
 
+  bool _noticeRead = false;
+  _GuardedNotice? _notice;
+
+  /// The inner tool's notice when it is a [ToolNotice] (spec 3a C1.2),
+  /// through the guard: read once, then the same listenable for the tool's
+  /// life. A throwing `notice` getter is one diagnostic and no notice; a
+  /// throwing value or listener is one diagnostic, then null.
+  ValueListenable<KitText?>? get notice {
+    if (!_noticeRead) {
+      _noticeRead = true;
+      final inner = this.inner;
+      if (inner is ToolNotice) {
+        try {
+          _notice = _GuardedNotice(this, (inner as ToolNotice).notice);
+        } catch (e, s) {
+          _getterFailed(e, s);
+        }
+      }
+    }
+    return _notice;
+  }
+
   @override
   void onPointerDown(ToolPointerEvent e, ToolContext ctx) {
     try {
@@ -412,7 +455,7 @@ final class GuardedTool extends Tool {
     try {
       inner.onPointerUp(e, ctx);
     } catch (error, stack) {
-      _failed(error, stack, ctx);
+      _failed(error, stack, ctx, drop: true);
     }
   }
 
@@ -478,10 +521,59 @@ final class GuardedTool extends Tool {
   }
 }
 
-/// The grip provider behind the boundary: a call that throws is reported
-/// (once per type, through [typeIdOf]) and that object has no grips, no
-/// drag and does not move until the document is replaced (a drag in flight
-/// is refused: its `drag` answers null).
+/// A kit tool's notice read at the boundary (spec 3a C1.2): what it throws
+/// is its tool's getter failure (one diagnostic after the frame), and from
+/// then on it answers null and holds no listener.
+final class _GuardedNotice implements ValueListenable<KitText?> {
+  _GuardedNotice(this._tool, this._inner);
+
+  final GuardedTool _tool;
+  final ValueListenable<KitText?> _inner;
+  bool _failed = false;
+
+  void _fail(Object error, StackTrace stack) {
+    _failed = true;
+    _tool._getterFailed(error, stack);
+  }
+
+  @override
+  KitText? get value {
+    if (_failed) return null;
+    try {
+      return _inner.value;
+    } catch (e, s) {
+      _fail(e, s);
+      return null;
+    }
+  }
+
+  @override
+  void addListener(VoidCallback listener) {
+    if (_failed) return;
+    try {
+      _inner.addListener(listener);
+    } catch (e, s) {
+      _fail(e, s);
+    }
+  }
+
+  @override
+  void removeListener(VoidCallback listener) {
+    try {
+      _inner.removeListener(listener);
+    } catch (e, s) {
+      _fail(e, s);
+    }
+  }
+}
+
+/// The grip provider behind the boundary. An `ArgumentError` from `drag`
+/// or `preview` is the kit refusing that point (spec 3a C1.8): no move for
+/// that event (null, no preview), nothing reported, the grips kept.
+/// Anything else a call throws is reported (once per type, through
+/// [typeIdOf]) and that object has no grips, no drag and does not move
+/// until the document is replaced (a drag in flight is refused: its
+/// `drag` answers null), 2a's rule.
 final class GuardedGrips implements ObjectGripProvider {
   GuardedGrips(this._inner,
       {required String? Function(DraftDocument, Handle) typeIdOf,
@@ -526,6 +618,9 @@ final class GuardedGrips implements ObjectGripProvider {
     if (_failed.contains(group)) return null;
     try {
       return _inner.drag(d, group, grip, world);
+    } on ArgumentError {
+      // Spec 3a C1.8 (1): the kit refuses this point; the grips stay.
+      return null;
     } catch (error) {
       _fail(d, group, 'drag', error);
       return null;
@@ -538,6 +633,9 @@ final class GuardedGrips implements ObjectGripProvider {
     if (_failed.contains(group)) return const [];
     try {
       return _inner.preview(d, group, grip, world);
+    } on ArgumentError {
+      // Spec 3a C1.8 (1): the kit refuses this point; the grips stay.
+      return const [];
     } catch (error) {
       _fail(d, group, 'preview', error);
       return const [];
@@ -591,6 +689,7 @@ final class FailureBoundary {
     required this.log,
     required this.lock,
     required this.damage,
+    this.referencesOf,
   });
 
   final DraftDocument document;
@@ -607,6 +706,11 @@ final class FailureBoundary {
   /// The controller's damage handler (E3).
   final void Function(PartialMutationError error) damage;
 
+  /// The objects a frozen object references (spec 3a C1.10), locked with
+  /// it: the controller reads the object's type's `references`. Null: none.
+  final Set<Handle> Function(DraftDocument document, Handle object)?
+      referencesOf;
+
   void _report(KitHookFailure f) => log.add(KitDiagnostic(
       kitId: f.kitId,
       subject: f.typeId,
@@ -616,7 +720,16 @@ final class FailureBoundary {
 
   void _freeze(Set<Handle> objects) {
     frozen.addAll(objects);
-    lock(objects);
+    // Spec 3a C1.10 (decision 6): a frozen object is in no survey, so an
+    // edit of a live object it references would regenerate that one without
+    // it (a wall uncut beside a frozen door), and its delete would not
+    // cascade to it: what it references is locked with it.
+    final references = referencesOf;
+    lock({
+      ...objects,
+      if (references != null)
+        for (final object in objects) ...references(document, object),
+    });
   }
 
   /// [failure] reported; that type's objects probed, and the failing ones

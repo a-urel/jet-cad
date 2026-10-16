@@ -14,6 +14,7 @@ export 'src/kit/bundled_library.dart';
 export 'src/kit/colour.dart';
 export 'src/kit/host_words.dart';
 export 'src/kit/kit_diagnostic.dart';
+export 'src/kit/plan_build.dart';
 export 'src/kit/plan_kit.dart';
 export 'src/kit/plan_services.dart';
 export 'src/kit/plan_tool.dart';

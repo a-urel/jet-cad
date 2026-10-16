@@ -1,11 +1,13 @@
 // A kit's tool (spec 2a P1): a palette entry whose `create` makes the
 // Flutter layer's Tool over a plan's services, with optional settings the
 // property panel edits while the tool is active (spec 2a P3).
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/widgets.dart' show IconData;
 import 'package:jet_cad_2d/jet_cad_2d.dart' show Capability;
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show Tool;
 import 'package:meta/meta.dart';
 
+import '../model/kit_text.dart';
 import 'plan_services.dart';
 import 'properties.dart';
 
@@ -30,6 +32,15 @@ final class PlanToolSettings<S extends Object> {
           spec.bind(value,
               wordId: 'property:$toolId.${spec.id}', onCommit: store),
       ];
+}
+
+/// A kit's tool that has something to say on the status line (spec 3a
+/// C1.2): a word id and its arguments, put into words when the line is read,
+/// so a change of language re-words it at once. Null says nothing. The
+/// plan library reads it through its guard; a tool that does not implement
+/// this has no notice.
+abstract interface class ToolNotice {
+  ValueListenable<KitText?> get notice;
 }
 
 @immutable

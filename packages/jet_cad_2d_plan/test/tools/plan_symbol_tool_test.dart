@@ -43,9 +43,7 @@ import 'package:jet_cad_2d_kit/authoring.dart' show Catalog, encodeLibrary;
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 import 'package:jet_cad_2d_plan/src/attach/attachment_registry.dart';
-import 'package:jet_cad_2d_plan/src/symbols/symbol_box.dart';
 import 'package:jet_cad_2d_plan/src/symbols/symbol_ghost.dart';
-import 'package:jet_cad_2d_plan/src/symbols/symbol_placer.dart';
 import 'package:jet_cad_2d_plan/src/tools/plan_symbol_tool.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 

@@ -2,16 +2,21 @@
 // symbol's leaves in its definition's coordinates (the base point not
 // subtracted). The catalog's frame (F-1) puts the front of a piece on its
 // smallest y and its back on its largest, so `front = minY` and
-// `back = maxY`.
+// `back = maxY`. And the placement transform (spec 09 D6, 09c D5) and the
+// orthonormal test (09c W-8, S-10) a placement and an attachment use.
 //
-// No Flutter import and no `dart:ui`: this file is Dart over
-// `package:jet_cad_2d` and the kit's `SymbolEntry` only (spec D1, T-4;
-// ported to the plan library by Task 14).
+// Moved into the contract from jet_cad_2d_plan's symbols/symbol_box.dart
+// and symbol_placer.dart, unchanged (3a Task 1, spec C1.4): a kit's
+// attachment provider needs the neighbours' boxes and the exact placement
+// (the wall-face provider, spec 3a C5).
+//
+// Pure Dart: no Flutter, no dart:io.
 import 'dart:math' as math;
 
 import 'package:jet_cad_2d/jet_cad_2d.dart';
-import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show SymbolEntry;
 import 'package:vector_math/vector_math_64.dart' show Vector2;
+
+import 'symbol_library.dart' show SymbolEntry;
 
 /// The local box of a symbol: `left = minX`, `right = maxX`,
 /// `front = minY`, `back = maxY` in the definition's coordinates.
@@ -149,8 +154,9 @@ Aabb2 servedTopOfEntry(SymbolEntry entry) {
 /// leaves (the entities it owns); null when [definition] names no definition
 /// or none of its leaves draws.
 ///
-/// Not memoised: O(entities) per call. The per-document memo cleared on a
-/// document change belongs to the caller (`WallFaces`, spec D3, D4).
+/// Not memoised: O(entities) per call. A caller that asks often keeps its
+/// own memo and drops it when the document changes (its
+/// `commands.stateId`).
 SymbolBox? boxOfDefinition(DraftDocument doc, Handle definition) {
   if (doc.tree.definition(definition) == null) return null;
   final entities = doc.entities;
@@ -169,3 +175,57 @@ SymbolBox? boxOfDefinition(DraftDocument doc, Handle definition) {
 /// coordinates.
 Aabb2 footprintOf(SymbolBox box) =>
     Aabb2.raw(box.left, box.front, box.right, box.back);
+
+/// Whether [g]'s linear part is orthonormal (spec 09c W-8, S-10):
+/// `|a² + b² − 1|`, `|c² + d² − 1|` and `|ac + bd|` each at most
+/// `Tolerance.standard.linear`. A mirror is orthonormal; a scale is not.
+bool isOrthonormal(Transform2 g) {
+  final tol = Tolerance.standard.linear;
+  return (g.a * g.a + g.b * g.b - 1).abs() <= tol &&
+      (g.c * g.c + g.d * g.d - 1).abs() <= tol &&
+      (g.a * g.c + g.b * g.d).abs() <= tol;
+}
+
+/// `translation(at) · rotation · scale(mirrored ? -1 : 1, 1) ·
+/// translation(-basePoint)`: the definition's base point lands on [at]
+/// (spec F-2), and a mirror flips the **local** x axis whatever the
+/// rotation.
+///
+/// The rotation is given one of two ways, never both (an [ArgumentError],
+/// in release builds too):
+/// - [quarterTurns] counter-clockwise, taken modulo 4 (negative allowed),
+///   with exact cosine and sine from a table (0 and ±1, never `6e-17`);
+/// - [rotation], a unit vector `(cos, sin)` used exactly as given (spec 09c
+///   D5: a wall face's `t`).
+///
+/// Neither is no turn. The quarter-turn form is the [rotation] form at its
+/// table entry, so the two give the same bytes. No stored component is
+/// `-0.0` in either form, so a placement stores clean numbers in a file.
+Transform2 placementTransform({
+  required Vector2 at,
+  required Vector2 basePoint,
+  int? quarterTurns,
+  (double, double)? rotation,
+  bool mirrored = false,
+}) {
+  if (quarterTurns != null && rotation != null) {
+    throw ArgumentError(
+        'placementTransform takes quarterTurns or rotation, not both');
+  }
+  final (cos, sin) = rotation ?? _quarterTurn(quarterTurns ?? 0);
+  final m = Transform2.translation(at.x, at.y)
+      .multiply(Transform2(cos, sin, -sin, cos, 0, 0))
+      .multiply(Transform2.scale(mirrored ? -1 : 1, 1))
+      .multiply(Transform2.translation(-basePoint.x, -basePoint.y));
+  double clean(double v) => v == 0 ? 0.0 : v;
+  return Transform2(
+      clean(m.a), clean(m.b), clean(m.c), clean(m.d), clean(m.e), clean(m.f));
+}
+
+/// The exact `(cos, sin)` of [quarterTurns] counter-clockwise quarter turns.
+(double, double) _quarterTurn(int quarterTurns) => const [
+      (1.0, 0.0),
+      (0.0, 1.0),
+      (-1.0, 0.0),
+      (0.0, -1.0)
+    ][((quarterTurns % 4) + 4) % 4];

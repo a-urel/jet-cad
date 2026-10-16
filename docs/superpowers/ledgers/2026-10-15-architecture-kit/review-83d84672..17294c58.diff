@@ -1,0 +1,3824 @@
+# Review package: 83d84672..HEAD
+
+## Commits
+17294c58 test(kit-architecture): the dimension panel's integration cases (3a C3.6)
+90417584 fix(plan): a choice row hands the focus back to the canvas
+eef72684 feat(kit-architecture): the dimension type, grips and properties (3a C3.6)
+
+## Files changed
+ .../test/dimension/dimension_panel_test.dart       | 517 ++++++++++++
+ .../test/dimension/dimension_plans.dart            | 193 +++++
+ .../test/support/room_plans.dart                   |   6 +-
+ .../test/wall/wall_grips_test.dart                 | 143 +++-
+ .../lib/src/dimension/dimension_grips.dart         | 309 +++++++
+ .../lib/src/dimension/dimension_plan.dart          | 127 +++
+ .../jet_cad_2d_kit_architecture/lib/src/kit.dart   |   2 +
+ .../test/dimension/dimension_grips_test.dart       | 715 +++++++++++++++++
+ .../test/dimension/dimension_object_test.dart      | 886 +++++++++++++++++++++
+ .../test/dimension/dimension_plan_test.dart        | 243 ++++++
+ .../test/wall/wall_grips_test.dart                 | 233 +++++-
+ .../lib/src/panels/plan_property_panel.dart        |  42 +-
+ .../test/panels/property_panel_test.dart           |  35 +
+ 13 files changed, 3444 insertions(+), 7 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_integration/test/dimension/dimension_panel_test.dart b/packages/jet_cad_2d_integration/test/dimension/dimension_panel_test.dart
+new file mode 100644
+index 00000000..a6b458e3
+--- /dev/null
++++ b/packages/jet_cad_2d_integration/test/dimension/dimension_panel_test.dart
+@@ -0,0 +1,517 @@
++// ignore_for_file: invalid_use_of_internal_member
++
++// Spec 11 D14: the Selection panel's Dimension section. Shown for exactly
++// one selected dimension (10 D21's rule): its value, read-only, as its TEXT
++// child reads (decision 13), or `—` for a broken dimension; a switch
++// Aligned | Horizontal | Vertical, each click one `SetComponentCommand`
++// with only the kind changed (R-27); the axes line of a turned linear
++// dimension (D11, R-18); the two end lines (R-28). Read-only unless
++// `components` and `geometry` are allowed (07 WS8); a refused edit is
++// caught.
++//
++// The plan is C2's L -- A (0, 0) -> (4000, 0), B (4000, 0) -> (4000, 3000),
++// both 200 centred -- on a 1:50 page in millimetres, at the origin and at
++// the corpus far origin turned 23° with every wall in its own rotated,
++// translated group. Each dimension's group sits at the placement (and, in
++// PN3, turned further), so a local hand value holds at both. Expected
++// strings are hand arithmetic beside the assertion.
++// Ported to jet_cad_2d_integration (3a Task 21): PlanEditor's property
++// panel over a PlanController with the architecture kit (spec C6, C7).
++import 'dart:convert';
++import 'dart:math' as math;
++import 'dart:typed_data' show Float64List;
++
++import 'package:flutter/material.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_integration/jet_cad_2d_integration.dart';
++import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart' show PlanLocked;
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import 'dimension_plans.dart';
++
++const l = WallSide.left, r = WallSide.right;
++
++Finder get section => byKey('section-architecture.dimension');
++Finder get value => byKey('property-value');
++Finder get kindMenu => byKey('property-kind');
++Finder get axes => byKey('property-axes');
++
++String textAt(WidgetTester tester, String key) =>
++    tester.widget<Text>(byKey(key)).data!;
++
++String valueText(WidgetTester tester) => textAt(tester, 'property-value');
++
++DropdownButton<Object?> menuOf(WidgetTester tester) =>
++    tester.widget<DropdownButton<Object?>>(kindMenu);
++
++/// A choice of [kind] in the kind menu (DM-R3): open it, tap the item
++/// (the menu's copy, the last). A read-only menu does not open: the
++/// click lands on nothing, as a disabled segment's did.
++Future<void> tapKind(WidgetTester tester, DimKind kind) async {
++  final enabled = menuOf(tester).onChanged != null;
++  await tester.ensureVisible(kindMenu); // the plan panel's own tapKey
++  await tester.tap(kindMenu);
++  await tester.pumpAndSettle();
++  if (!enabled) return;
++  await tester.tap(byKey('property-kind-${kind.name}').last);
++  await tester.pumpAndSettle();
++}
++
++DimensionParams paramsOf(DraftDocument doc, Handle h) =>
++    doc.components.get<DimensionParams>(h)!;
++
++/// The group a dimension sits in: the placement, turned [deg] further.
++Transform2 turned(Placement place, double deg) =>
++    place.m.multiply(Transform2.rotation(deg * math.pi / 180));
++
++/// [h]'s children's payloads as bytes, ascending by handle, and its TEXT's
++/// string: what a kind switch and the switch back must restore bit for
++/// bit.
++(List<Handle>, List<List<int>>, String) childrenOf(
++        DraftDocument doc, Handle h) =>
++    (
++      kids(doc, h),
++      [
++        for (final k in kids(doc, h))
++          [
++            ...Float64List.fromList(payloadOf(doc, k).coords)
++                .buffer
++                .asUint8List(),
++            ...Float64List.fromList(payloadOf(doc, k).scalars)
++                .buffer
++                .asUint8List(),
++          ],
++      ],
++      dimText(doc, h),
++    );
++
++void main() {
++  for (final place in const [origin, corpusGroups]) {
++    testWidgets(
++        'PN1 the Dimension section shows for exactly one dimension, its '
++        'value as its text reads, at $place', (tester) async {
++      late final Handle a, b, d, d2, broken;
++      final c = planOf((doc) {
++        setPage(doc, mmPage);
++        final walls = buildPlanIn(doc, c2Walls, place: place).walls;
++        a = walls[0];
++        b = walls[1];
++        // From A/0/left (0, 100) to a fixed point (3450.6, 100): aligned,
++        // 3450.6 mm, which reads 3451 (half-up to the millimetre, 0.1 from
++        // the tie at 3450.5).
++        d = addDimension(
++            doc, AttachedEnd(a, 0, l), fixedAt(place.at(3450.6, 100), place.m),
++            kind: DimKind.aligned, offset: 400.25, at: place.m);
++        d2 = addDimension(doc, fixedAt(place.at(500.25, 1500.5), place.m),
++            fixedAt(place.at(2500.75, 2200.25), place.m),
++            kind: DimKind.horizontal, offset: -250.5, at: place.m);
++        // Broken (D15): an attached end with k = 2 generates nothing.
++        broken = addDimension(
++            doc, AttachedEnd(a, 2, l), fixedAt(place.at(3450.6, 100), place.m),
++            kind: DimKind.aligned, offset: 400.25, at: place.m);
++      });
++      final doc = c.document;
++      expect(kids(doc, broken), isEmpty, reason: 'premise: broken');
++      expect(dimText(doc, d), '3451', reason: 'premise: the TEXT');
++      await pumpPlan(tester, c);
++
++      expect(section, findsNothing, reason: 'none');
++      await select(tester, c, [d]);
++      expect(section, findsOneWidget);
++      expect(tester.widget<Text>(section).data, 'Dimension');
++      expect(valueText(tester), '3451');
++      expect(
++          textAt(tester, 'property-end-1'),
++          'Wall ${a.toHex()}, start, '
++          'left face');
++      expect(textAt(tester, 'property-end-2'), 'Fixed');
++
++      await select(tester, c, [d, d2]);
++      expect(section, findsNothing, reason: 'two dimensions');
++      await select(tester, c, [d, a]);
++      expect(section, findsNothing, reason: 'a dimension and a wall');
++      await select(tester, c, [a]);
++      expect(section, findsNothing, reason: 'a wall');
++      expect(byKey('section-architecture.wall'), findsOneWidget);
++      await select(tester, c, [b, d2]);
++      expect(section, findsNothing, reason: 'a wall and a dimension');
++      await select(tester, c, [broken]);
++      expect(section, findsOneWidget, reason: 'a broken dimension');
++      expect(valueText(tester), '—', reason: 'a broken dimension');
++
++      // A wall edit rewrites the value in place: A moved 500.25 along the
++      // plan's −x (its joint with B broken), so A/0/left is (−500.25, 100)
++      // and the value 3450.6 + 500.25 = 3950.85, which reads 3951.
++      await select(tester, c, [d]);
++      expect(valueText(tester), '3451');
++      final t = place.m.transformDirection(Vector2(-500.25, 0));
++      doc.commands.execute(TransformNodeCommand(a,
++          Transform2.translation(t.x, t.y).multiply(doc.tree[a]!.transform)));
++      await tester.pump();
++      await tester.pump();
++      expect(dimText(doc, d), '3951', reason: 'premise: regenerated');
++      expect(valueText(tester), '3951', reason: 'after the wall edit');
++      expect(driftOf(doc), isEmpty);
++    });
++
++    testWidgets(
++        'PN2 a kind click is one undo step that keeps the ends and the '
++        'offset; switching back restores the children bit for bit; the '
++        'current kind issues nothing, at $place', (tester) async {
++      late final Handle a, d, e;
++      final c = planOf((doc) {
++        setPage(doc, mmPage);
++        final walls = buildPlanIn(doc, c2Walls, place: place).walls;
++        a = walls[0];
++        // The non-axis pair (0, 0)-(3000, 1200), aligned, offset −617.375.
++        d = addDimension(doc, const FixedEnd(0, 0), const FixedEnd(3000, 1200),
++            kind: DimKind.aligned, offset: -617.375, at: place.m);
++        // The inner corner (3900, 100) is both A/1/left and B/0/left; this
++        // dimension stores A/1/left and a −0.0 offset (its side the right
++        // normal's, R-2), which a switch must keep as they are (D10: a switch
++        // re-decides no end).
++        e = addDimension(doc, AttachedEnd(a, 1, l),
++            fixedAt(place.at(1000.25, 1500.5), place.m),
++            kind: DimKind.aligned, offset: -0.0, at: place.m);
++      });
++      await pumpPlan(tester, c);
++      final doc = c.document;
++      await select(tester, c, [d]);
++      final p0 = paramsOf(doc, d);
++      final first = childrenOf(doc, d);
++      // Aligned: √(3000² + 1200²) = √10,440,000 = 3231.09.
++      expect(valueText(tester), '3231');
++      expect(menuOf(tester).value, DimKind.aligned);
++      final focus = FocusManager.instance.primaryFocus;
++
++      await tapKind(tester, DimKind.horizontal);
++      expect(doc.commands.undoDepth, 1, reason: 'Horizontal: one step');
++      var p = paramsOf(doc, d);
++      expect(p.kind, DimKind.horizontal);
++      expect(p.a, p0.a, reason: 'Horizontal: a kept');
++      expect(p.b, p0.b, reason: 'Horizontal: b kept');
++      expect(p.offset, -617.375, reason: 'Horizontal: the offset kept');
++      expect(p, p0.copyWith(kind: DimKind.horizontal));
++      // Horizontal along the group's x: 3000.
++      expect(dimText(doc, d), '3000');
++      expect(valueText(tester), '3000');
++      expect(menuOf(tester).value, DimKind.horizontal);
++      expect(FocusManager.instance.primaryFocus, focus,
++          reason: 'the click leaves the focus where it was');
++
++      await tapKind(tester, DimKind.aligned);
++      expect(doc.commands.undoDepth, 2, reason: 'Aligned: one step');
++      p = paramsOf(doc, d);
++      expect(p, p0, reason: 'back to the stored parameters');
++      expect(p.offset, -617.375);
++      final back = childrenOf(doc, d);
++      expect(back.$1, first.$1, reason: 'the same children');
++      expect(back.$2, first.$2, reason: 'their payloads bit for bit');
++      expect(back.$3, first.$3);
++      expect(valueText(tester), '3231');
++
++      // The current kind: a click issues nothing (the segmented button
++      // does not call back for its selected segment), nor does the
++      // callback itself (a click that lands before a rebuild).
++      await tapKind(tester, DimKind.aligned);
++      expect(doc.commands.undoDepth, 2, reason: 'a click on Aligned');
++      menuOf(tester).onChanged!(DimKind.aligned);
++      await tester.pump();
++      await tester.pump();
++      expect(doc.commands.undoDepth, 2, reason: 'the callback on Aligned');
++      expect(paramsOf(doc, d), p0);
++
++      // The corner end and the −0.0 offset through a switch and back.
++      await select(tester, c, [e]);
++      final q0 = paramsOf(doc, e);
++      await tapKind(tester, DimKind.vertical);
++      expect(doc.commands.undoDepth, 3);
++      expect(paramsOf(doc, e).a, AttachedEnd(a, 1, l),
++          reason: 'the corner end not re-decided');
++      expect(paramsOf(doc, e).offset.isNegative, isTrue,
++          reason: 'the −0.0 offset kept');
++      expect(paramsOf(doc, e), q0.copyWith(kind: DimKind.vertical));
++      await tapKind(tester, DimKind.aligned);
++      expect(paramsOf(doc, e), q0);
++
++      doc.commands.undo();
++      doc.commands.undo();
++      doc.commands.undo();
++      doc.commands.undo();
++      await tester.pump();
++      await tester.pump();
++      expect(paramsOf(doc, d), p0);
++      expect(paramsOf(doc, e), q0);
++      expect(driftOf(doc), isEmpty);
++    });
++
++    testWidgets(
++        'PN3 a linear dimension turned shows Axes turned by the rounded '
++        'angle; aligned and unturned show none; 0.04° and −0.04° show none, '
++        '0.06° shows 0.1°, at $place', (tester) async {
++      // The group's world rotation is the placement's plus the turn: 0 + 30
++      // and 0 − 30 at the origin, 23 + 30 = 53 and 23 − 30 = −7 at the
++      // corpus placement.
++      final (plus, minus) =
++          place == origin ? ('30.0', '-30.0') : ('53.0', '-7.0');
++      late final List<(String, Handle, String?)> cases;
++      final c = planOf((doc) {
++        setPage(doc, mmPage);
++        buildPlanIn(doc, c2Walls, place: place);
++        // A group at the placement's point with world rotation [deg]
++        // exactly.
++        final o = place.at(500.5, 800.25);
++        Transform2 world(double deg) => Transform2.translation(o.x, o.y)
++            .multiply(Transform2.rotation(deg * math.pi / 180));
++        Handle dim(DimKind kind, Transform2 at) => addDimension(
++            doc, const FixedEnd(0.25, 0.5), const FixedEnd(3000.75, 1200.25),
++            kind: kind, offset: 300.5, at: at);
++        cases = <(String, Handle, String?)>[
++          ('horizontal +30', dim(DimKind.horizontal, turned(place, 30)), plus),
++          ('vertical +30', dim(DimKind.vertical, turned(place, 30)), plus),
++          (
++            'horizontal −30',
++            dim(DimKind.horizontal, turned(place, -30)),
++            minus
++          ),
++          ('aligned +30', dim(DimKind.aligned, turned(place, 30)), null),
++          ('horizontal at 0°', dim(DimKind.horizontal, world(0)), null),
++          ('horizontal at 0.04°', dim(DimKind.horizontal, world(0.04)), null),
++          // Prints -0.0: the number decides, not the string (S-8).
++          ('horizontal at −0.04°', dim(DimKind.horizontal, world(-0.04)), null),
++          ('vertical at 0.06°', dim(DimKind.vertical, world(0.06)), '0.1'),
++          // Rounded to tenths, then normalised: −179.96° rounds to −180.0,
++          // which is 180.0 in (−180°, 180°], as 179.96° reads.
++          (
++            'horizontal at −179.96°',
++            dim(DimKind.horizontal, world(-179.96)),
++            '180.0'
++          ),
++          (
++            'horizontal at 179.96°',
++            dim(DimKind.horizontal, world(179.96)),
++            '180.0'
++          ),
++        ];
++      });
++      await pumpPlan(tester, c);
++      for (final (why, h, want) in cases) {
++        await select(tester, c, [h]);
++        expect(section, findsOneWidget, reason: why);
++        if (want == null) {
++          expect(axes, findsNothing, reason: why);
++        } else {
++          expect(textAt(tester, 'property-axes'), 'Axes turned $want°',
++              reason: why);
++        }
++      }
++      // The aligned one switched to horizontal: now linear and turned.
++      await select(tester, c, [cases[3].$2]);
++      await tapKind(tester, DimKind.horizontal);
++      expect(textAt(tester, 'property-axes'), 'Axes turned $plus°');
++      expect(menuOf(tester).value, DimKind.horizontal,
++          reason: 'the switch still reads Horizontal');
++    });
++
++    testWidgets(
++        'PN4 the end lines read Wall <hex>, start or end, left face, '
++        'centreline or right face, or Fixed, at $place', (tester) async {
++      late final Handle wc, d1, d2;
++      final c = planOf((doc) {
++        setPage(doc, mmPage);
++        buildPlanIn(doc, c2Walls, place: place);
++        // A third wall C with a handle whose hex has a letter: 0x3E.
++        doc.handleSeed.raiseTo(const Handle(0x3D));
++        wc = doc.handleSeed.next();
++        doc.commands.execute(addWallLocal(
++            doc,
++            wc,
++            const WallParams(
++                0, 1500.5, 2500.25, 1500.5, 150, Justification.centre),
++            place.m));
++        d1 = addDimension(
++            doc, AttachedEnd(wc, 1, r), AttachedEnd(wc, 0, WallSide.centre),
++            kind: DimKind.aligned, offset: 200.5, at: place.m);
++        d2 = addDimension(doc, AttachedEnd(wc, 0, l),
++            fixedAt(place.at(2000.25, 2500.5), place.m),
++            kind: DimKind.aligned, offset: 200.5, at: place.m);
++      });
++      expect(wc.value, 0x3E);
++      await pumpPlan(tester, c);
++      await select(tester, c, [d1]);
++      expect(textAt(tester, 'property-end-1'), 'Wall 3E, end, right face');
++      expect(textAt(tester, 'property-end-2'), 'Wall 3E, start, centreline');
++      await select(tester, c, [d2]);
++      expect(textAt(tester, 'property-end-1'), 'Wall 3E, start, left face');
++      expect(textAt(tester, 'property-end-2'), 'Fixed');
++    });
++
++    testWidgets(
++        'PN5 under runtime permissions the switch is read-only; a refused '
++        'edit leaves the switch on the model\'s kind, at $place',
++        (tester) async {
++      late final Handle d, e;
++      final c = planOf((doc) {
++        setPage(doc, mmPage);
++        final [a, _] = buildPlanIn(doc, c2Walls, place: place).walls;
++        d = addDimension(doc, const FixedEnd(0, 0), const FixedEnd(3000, 1200),
++            kind: DimKind.aligned, offset: -617.375, at: place.m);
++        e = addDimension(doc, AttachedEnd(a, 1, l),
++            fixedAt(place.at(1000.25, 1500.5), place.m),
++            kind: DimKind.aligned, offset: 250.5, at: place.m);
++      });
++      await pumpPlan(tester, c);
++      final doc = c.document;
++      final p0 = paramsOf(doc, d);
++
++      // Read-only unless both components and geometry are allowed.
++      for (final (why, perms) in [
++        ('runtime', DraftPermissions.runtime),
++        (
++          'components denied',
++          const DraftPermissions(
++              transform: true,
++              components: false,
++              geometry: true,
++              structure: true)
++        ),
++        (
++          'geometry denied',
++          const DraftPermissions(
++              transform: true,
++              components: true,
++              geometry: false,
++              structure: true)
++        ),
++      ]) {
++        doc.commands.permissions = perms;
++        await select(tester, c, [e]);
++        await select(tester, c, [d]);
++        expect(menuOf(tester).onChanged, isNull, reason: why);
++        await tapKind(tester, DimKind.horizontal);
++        expect(paramsOf(doc, d), p0, reason: why);
++        expect(doc.commands.undoDepth, 0, reason: why);
++        expect(menuOf(tester).value, DimKind.aligned, reason: why);
++      }
++      doc.commands.permissions = DraftPermissions.all;
++      await select(tester, c, [e]);
++      await select(tester, c, [d]);
++      expect(menuOf(tester).onChanged, isNotNull,
++          reason: 'the control: editable with every permission');
++
++      // Runtime set with no rebuild: the switch still holds the callback it
++      // was built with, and a click that lands before the rebuild calls it.
++      // The edit is checked again when it runs: nothing is issued and
++      // nothing throws (the document would refuse it with a
++      // PermissionDeniedError, which the switch does not catch).
++      final stale = menuOf(tester).onChanged!;
++      doc.commands.permissions = DraftPermissions.runtime;
++      stale(DimKind.horizontal);
++      expect(paramsOf(doc, d), p0, reason: 'stale callback under runtime');
++      expect(doc.commands.undoDepth, 0, reason: 'stale callback under runtime');
++      await tester.pump();
++      await tester.pump();
++      expect(tester.takeException(), isNull);
++      // A permission change alone rebuilds nothing; a reselection does.
++      await select(tester, c, [e]);
++      await select(tester, c, [d]);
++      expect(menuOf(tester).onChanged, isNull,
++          reason: 'read-only once rebuilt');
++      doc.commands.permissions = DraftPermissions.all;
++      await select(tester, c, [e]);
++      await select(tester, c, [d]);
++
++      // The group removed under the panel, the click landing before the
++      // panel rebuilds: nothing is issued -- no component on the dead
++      // handle -- and nothing escapes.
++      final click = menuOf(tester).onChanged!;
++      doc.commands.execute(deleteObject(doc, d));
++      expect(doc.tree[d], isNull);
++      click(DimKind.horizontal);
++      await tester.pump();
++      await tester.pump();
++      expect(tester.takeException(), isNull);
++      expect(doc.components.get<DimensionParams>(d), isNull,
++          reason: 'no component on the dead handle');
++      expect(doc.commands.undoDepth, 1, reason: 'the delete alone');
++      expect(section, findsNothing);
++    });
++  }
++
++  // PN5-open replaces today's "PN5 a refused edit" (the notes' Task 18
++  // rule, as RN5-open). Decided: the old premise (an engine StateError
++  // reaching a live dimension's kind switch) cannot exist under C1.10's
++  // freeze at open: the plan opens a dimension whose regeneration the
++  // engine refuses frozen, so its kind switch is the lock's refusal and it
++  // shows no Dimension section. No live dimension's kind switch can be
++  // refused by the type or the document (every kind is one of the menu's
++  // values; a regeneration the engine refuses is frozen at open), so the
++  // old intent's live half has no premise; the panel's catch of a refused
++  // edit on a live dimension is PN5's stale callback under runtime.
++  testWidgets(
++      'PN5-open a loaded dimension whose group holds a fill naming a '
++      'wall\'s outline opens frozen: its kind switch is locked, it shows no '
++      'Dimension section', (tester) async {
++    late final Handle a, d;
++    final src = planOf((doc) {
++      setPage(doc, mmPage);
++      a = buildPlanIn(doc, c2Walls, place: corpusGroups).walls[0];
++      d = addDimension(doc, const FixedEnd(0, 0), const FixedEnd(3000, 1200),
++          kind: DimKind.aligned, offset: -617.375, at: corpusGroups.m);
++    });
++    final aFill = kids(src.document, a)
++        .firstWhere((k) => kindOf(src.document, k) == EntityKind.fill);
++    final aOutline = payloadOf(src.document, aFill).scalars[0];
++    // A file no program regenerated: the dimension's group holds a region,
++    // then the region's fill is repointed at A's outline (spec 07 D8: a
++    // loaded file can name any handle), which the regeneration refuses.
++    late Handle stray;
++    final file = stalePlan(src.save(), (bare) {
++      final region = AddRegionCommand.allocate(
++          seed: bare.handleSeed,
++          owner: d,
++          boundaryKind: EntityKind.polyline,
++          boundaryPayload: polylinePayload(
++              [Vector2(0, 0), Vector2(100, 0), Vector2(100, 100)],
++              closed: true),
++          layer: ReservedHandles.layerZero,
++          fillColor: const ByLayerColor(),
++          boundaryColor: const ByLayerColor());
++      stray = region.fill.handle;
++      bare.commands.execute(region);
++    });
++    final j = jsonDecode(file) as Map<String, Object?>;
++    var repointed = 0;
++    for (final x in j['entities']! as List) {
++      final entity = x as Map<String, Object?>;
++      if ((entity['record']! as Map)['handle'] == stray.value) {
++        (entity['geometry']! as Map)['scalars'] = [aOutline];
++        repointed++;
++      }
++    }
++    expect(repointed, 1);
++    final c = architectureController(json: jsonEncode(j));
++    addTearDown(c.dispose);
++    await pumpPlan(tester, c);
++    final doc = c.document;
++    expect(c.frozen, contains(d), reason: 'frozen at open');
++    expect(c.frozen, isNot(contains(a)));
++    final p0 = paramsOf(doc, d);
++    final before = canon(doc);
++    // The premise: the plan refuses the switch (the lock, spec C1.10).
++    expect(
++        () => doc.commands.execute(SetComponentCommand<DimensionParams>(
++            d, p0.copyWith(kind: DimKind.horizontal))),
++        throwsA(isA<PlanLocked>()));
++    expect(canon(doc), before);
++
++    await select(tester, c, [d]);
++    expect(tester.takeException(), isNull);
++    expect(section, findsNothing, reason: 'a frozen dimension has no section');
++    expect(paramsOf(doc, d), p0);
++    expect(canon(doc), before);
++    expect(doc.commands.undoDepth, 0);
++  });
++}
+diff --git a/packages/jet_cad_2d_integration/test/dimension/dimension_plans.dart b/packages/jet_cad_2d_integration/test/dimension/dimension_plans.dart
+new file mode 100644
+index 00000000..50b8007d
+--- /dev/null
++++ b/packages/jet_cad_2d_integration/test/dimension/dimension_plans.dart
+@@ -0,0 +1,193 @@
++// Plans for the dimension's integration tests (3a Tasks 21, 22), built in
++// code through the plan's build seam (spec C1.9) over the architecture
++// kit's public types, and read back through the plan's public API (C6).
++// Copied, not imported (the plan's Ruling 11-22), from
++// jet_cad_floor_plan/test/support/room_fixture.dart (:118-194),
++// dimension_fixture.dart (:366-403) and room_diagnostics_test.dart's
++// `staleFile`. The rig's helpers and the integration package's own copies
++// of the room and wall fixtures (the plan model, `kids`, `canon`,
++// `deleteObject`, ...) are imported, not copied again (R-P14).
++import 'package:flutter/material.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/room_plans.dart';
++import '../support/wall_fixture.dart';
++
++export '../support/editor_rig.dart'
++    show activeTool, kitCatalog, press, pumpEditor, status;
++export '../support/room_plans.dart'
++    show
++        O,
++        Placement,
++        S,
++        W,
++        corpusGroups,
++        deleteObject,
++        groupFor,
++        origin,
++        select;
++export '../support/wall_fixture.dart'
++    show addWallLocal, canon, driftOf, enc, kids, kindOf, payloadOf;
++
++/// C2: an L, A east then B north, 200 each (dimension_fixture.dart:76).
++const List<W> c2Walls = [W(0, 0, 4000, 0, 200), W(4000, 0, 4000, 3000, 200)];
++
++/// A page at 1:50 in millimetres (dimension_fixture.dart:366-367).
++PageComponent get mmPage =>
++    PageComponent().copyWith(displayUnit: DisplayUnit.millimeters);
++
++/// [page] on [doc]'s root, one command.
++void setPage(DraftDocument doc, PageComponent page) => doc.commands
++    .execute(SetComponentCommand<PageComponent>(doc.rootHandle, page));
++
++/// A controller over the architecture kit whose new plan [build] fills
++/// (spec C1.9: the plan's own document, system and DASHED record; the
++/// history cleared after). A throw inside [build] fails the test (the
++/// controller would only report it as a diagnostic). Disposed at
++/// tear-down.
++PlanController planOf(void Function(DraftDocument doc) build) {
++  Object? failure;
++  StackTrace? trace;
++  final c = PlanController(
++      kits: [architectureKit],
++      build: (doc, _) {
++        try {
++          build(doc);
++        } catch (e, s) {
++          failure = e;
++          trace = s;
++          rethrow;
++        }
++      });
++  addTearDown(c.dispose);
++  if (failure != null) fail('the build threw: $failure\n$trace');
++  return c;
++}
++
++/// What [buildPlanIn] added, in the order given.
++typedef Built = ({
++  List<Handle> walls,
++  List<Handle> seps,
++  List<Handle> openings
++});
++
++/// room_fixture.dart:118-163's `buildPlan` on [doc], the plan's own
++/// document inside a `PlanBuild`: [walls], then [seps], then [openings]
++/// (hosted by the walls they index), each object one command, at [place].
++/// Without `installParametric` and `ensureDashedLinetype`: the plan
++/// installed its system and prepared the DASHED record (spec C1.3, C1.9).
++Built buildPlanIn(DraftDocument doc, List<W> walls,
++    {List<S> seps = const [],
++    List<O> openings = const [],
++    Placement place = origin}) {
++  final wh = <Handle>[], sh = <Handle>[], oh = <Handle>[];
++  var k = 0;
++  for (final w in walls) {
++    final h = doc.handleSeed.next();
++    final g = place.groups ? groupFor(place, k++) : Transform2.identity();
++    final inv = g.invert();
++    final s = inv.transformPoint(place.at(w.sx, w.sy));
++    final e = inv.transformPoint(place.at(w.ex, w.ey));
++    doc.commands.execute(
++        addWallLocal(doc, h, WallParams(s.x, s.y, e.x, e.y, w.t, w.j), g));
++    wh.add(h);
++  }
++  for (final (sx, sy, ex, ey) in seps) {
++    sh.add(addSeparator(doc, place.at(sx, sy), place.at(ex, ey),
++        at: place.groups ? groupFor(place, k++) : null));
++  }
++  for (final (i, position, width, kind, swing) in openings) {
++    oh.add(addOpening(
++        doc, OpeningParams(wh[i], position, width, kind, swing: swing)));
++  }
++  return (walls: wh, seps: sh, openings: oh);
++}
++
++/// A separator from world [s] to world [e] in its own root group [at]
++/// (room_fixture.dart:165-178).
++Handle addSeparator(DraftDocument doc, Vector2 s, Vector2 e, {Transform2? at}) {
++  final h = doc.handleSeed.next();
++  final g = at ?? Transform2.identity();
++  final inv = g.invert();
++  final ls = inv.transformPoint(s), le = inv.transformPoint(e);
++  doc.commands.execute(CompoundCommand([
++    AddNodeCommand(GroupNode(
++        handle: h, parent: doc.rootHandle, transform: g, children: const [])),
++    SetComponentCommand<SeparatorParams>(
++        h, SeparatorParams(ls.x, ls.y, le.x, le.y)),
++  ], label: 'Add separator'));
++  return h;
++}
++
++/// Opening [o] in its own root group at the identity, one command
++/// (room_fixture.dart:180-194).
++Handle addOpening(DraftDocument doc, OpeningParams o) {
++  final h = doc.handleSeed.next();
++  doc.commands.execute(CompoundCommand([
++    AddNodeCommand(GroupNode(
++        handle: h,
++        parent: doc.rootHandle,
++        transform: Transform2.identity(),
++        children: const [])),
++    SetComponentCommand<OpeningParams>(h, o),
++  ], label: 'Add opening'));
++  return h;
++}
++
++/// A dimension from [a] to [b] in its own root group at [at]: the
++/// Dimension tool's commit (dimension_fixture.dart:373-386).
++Handle addDimension(DraftDocument doc, DimEnd a, DimEnd b,
++    {DimKind kind = DimKind.aligned, double offset = 500, Transform2? at}) {
++  final h = doc.handleSeed.next();
++  doc.commands.execute(CompoundCommand([
++    AddNodeCommand(GroupNode(
++        handle: h,
++        parent: doc.rootHandle,
++        transform: at ?? Transform2.identity(),
++        children: const [])),
++    SetComponentCommand<DimensionParams>(
++        h, DimensionParams(a, b, kind, offset)),
++  ], label: 'Add dimension'));
++  return h;
++}
++
++/// A fixed end at world [w] in a group at [at] (dimension_fixture.dart:
++/// 390-393).
++FixedEnd fixedAt(Vector2 w, [Transform2? at]) {
++  final l = (at ?? Transform2.identity()).invert().transformPoint(w);
++  return FixedEnd(l.x, l.y);
++}
++
++/// Dimension [h]'s value string: its one TEXT child's
++/// (dimension_fixture.dart:396-403).
++String dimText(DraftDocument doc, Handle h) {
++  final text =
++      kids(doc, h).singleWhere((k) => kindOf(doc, k) == EntityKind.text);
++  return doc.entities.textAt(doc.entities.slotOf(text)!);
++}
++
++/// A saved plan with what [add] adds to a copy of [saved] that has no
++/// parametric system (room_diagnostics_test.dart's `staleFile`): the
++/// commands land as given and nothing is generated, as a file written by
++/// another program.
++String stalePlan(String saved, void Function(DraftDocument bare) add) {
++  final bare = decodePlan(saved, register: (r) {
++    PageComponent.register(r);
++    registerKitComponents(r);
++    kitCatalog().registerComponents(r);
++  }, diagnostics: <Diagnostic>[]);
++  add(bare);
++  return encodePlan(bare, validateKitSet([architectureKit]));
++}
++
++/// [c]'s editor in a 1440 x 900 window, one frame: the rig's [pumpEditor].
++Future<void> pumpPlan(WidgetTester tester, PlanController c,
++        {Locale locale = const Locale('en')}) =>
++    pumpEditor(tester, c, locale: locale);
++
++Finder byKey(String k) => find.byKey(Key(k));
+diff --git a/packages/jet_cad_2d_integration/test/support/room_plans.dart b/packages/jet_cad_2d_integration/test/support/room_plans.dart
+index 3f4e9f3f..8920af0d 100644
+--- a/packages/jet_cad_2d_integration/test/support/room_plans.dart
++++ b/packages/jet_cad_2d_integration/test/support/room_plans.dart
+@@ -91,21 +91,21 @@ const placements = [
+   corpus,
+   corpusGroups,
+   km1000,
+   km1000Axis,
+   km1000Groups,
+ ];
+ 
+ /// A group transform for object number [k] of a [Placement.groups] plan: a
+ /// translation near the placement times a rotation that is never a multiple
+ /// of 90°.
+-Transform2 _groupFor(Placement p, int k) => p.m
++Transform2 groupFor(Placement p, int k) => p.m
+     .multiply(Transform2.translation(311.5 * (k % 7), -173.25 * (k % 5)))
+     .multiply(Transform2.rotation(0.3 + 0.7 * (k % 9)));
+ 
+ // ---------------------------------------------------------------------------
+ // Entity helpers, copied (room_fixture.dart:196-210).
+ 
+ EntityRecord recordOf(DraftDocument doc, Handle h) =>
+     doc.entities.read(doc.entities.slotOf(h)!);
+ 
+ /// Entity [h]'s payload points, less a closed polyline's repeated first
+@@ -345,36 +345,36 @@ RoomPlan roomPlan(List<W> walls,
+             transform: g,
+             children: const [])),
+         set,
+       ], label: label));
+   final c = PlanController(
+     kits: [architectureKit],
+     build: (doc, _) {
+       var k = 0;
+       for (final w in walls) {
+         final h = doc.handleSeed.next();
+-        final g = place.groups ? _groupFor(place, k++) : Transform2.identity();
++        final g = place.groups ? groupFor(place, k++) : Transform2.identity();
+         final inv = g.invert();
+         final s = inv.transformPoint(place.at(w.sx, w.sy));
+         final e = inv.transformPoint(place.at(w.ex, w.ey));
+         group(
+             doc,
+             h,
+             g,
+             SetComponentCommand<WallParams>(
+                 h, WallParams(s.x, s.y, e.x, e.y, w.t, w.j)),
+             'Add wall');
+         wh.add(h);
+       }
+       for (final (sx, sy, ex, ey) in seps) {
+         final h = doc.handleSeed.next();
+-        final g = place.groups ? _groupFor(place, k++) : Transform2.identity();
++        final g = place.groups ? groupFor(place, k++) : Transform2.identity();
+         final inv = g.invert();
+         final s = inv.transformPoint(place.at(sx, sy));
+         final e = inv.transformPoint(place.at(ex, ey));
+         group(
+             doc,
+             h,
+             g,
+             SetComponentCommand<SeparatorParams>(
+                 h, SeparatorParams(s.x, s.y, e.x, e.y)),
+             'Add separator');
+diff --git a/packages/jet_cad_2d_integration/test/wall/wall_grips_test.dart b/packages/jet_cad_2d_integration/test/wall/wall_grips_test.dart
+index 487477fd..d7e10bdb 100644
+--- a/packages/jet_cad_2d_integration/test/wall/wall_grips_test.dart
++++ b/packages/jet_cad_2d_integration/test/wall/wall_grips_test.dart
+@@ -1,19 +1,22 @@
+ // Ported from jet_cad_floor_plan/test/wall_grips_test.dart (3a Task 12):
+ // EG1-EG6, and EG7, EG8 (3a Task 17, R-P8: their door and separator), over
+ // a PlanController of the architecture kit in PlanEditor, assertions
+ // unchanged; the provider-direct tails of EG1, EG3, EG4, EG6 and EG8 use
+ // the kit's WallGrips and run in the kit as EG1-k, EG3-k, EG4-k, EG6-k and
+ // EG8-k (R-P1, R12-3); the shown grips are the controller's grip cache
+-// (R-P9). EG9, EG10 move to Task 21 (R-P8).
++// (R-P9). EG9, EG10 (3a Task 21, R-P8): the panel, the Position field and
++// the corner drag here; their adapters, band cache, attach, room inputs and
++// grips run in the kit as EG9-k, EG10-k.
+ // WG-refuse-short is new (Review Focus 3's kit half, R-P15).
+ // ignore_for_file: invalid_use_of_internal_member
++import 'package:flutter/foundation.dart' show Key;
+ import 'package:flutter/gestures.dart' show PointerDeviceKind, kPrimaryButton;
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
+ import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
+ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import '../support/editor_rig.dart';
+ import '../support/wall_fixture.dart';
+@@ -517,11 +520,149 @@ void main() {
+     await dragWorld(tester, ctrl, corner, q);
+     expect(tester.takeException(), isNull);
+     expect(doc.commands.undoDepth, 1, reason: 'the commit succeeds');
+     expect(doc.components.get<WallParams>(shadow), wallP);
+     expect(doc.components.get<OpeningParams>(shadow), openingP);
+     expect(doc.components.get<SeparatorParams>(sep), sepS);
+     expect(doc.components.get<OpeningParams>(sep), sepO);
+     await undoKey(tester);
+     expect(canon(doc), before);
+   });
++
++  testWidgets(
++      'EG9 (fix/live-object-rule) a file\'s group carrying WallParams and '
++      'OpeningParams is an opening everywhere and a wall nowhere; a '
++      'separator carrying OpeningParams is a separator everywhere and an '
++      'opening nowhere', (tester) async {
++    final ctrl = shadowController(dangling: false);
++    final doc = ctrl.document;
++    // A file's opening hosted on the shadow, which is no wall.
++    const orphan = Handle(5700);
++    doc.commands.execute(AddNodeCommand(GroupNode(
++        handle: orphan,
++        parent: doc.rootHandle,
++        transform: Transform2.translation(ox + 1500.25, oy - 900.5)
++            .multiply(Transform2.rotation(1.3)),
++        children: const [])));
++    doc.commands.clearHistory();
++    doc.components.attach<OpeningParams>(
++        orphan, const OpeningParams(shadow, 300, 600, OpeningKind.window));
++    final m = doc.tree.accumulatedTransform(shadow);
++    final tipW = m.transformPoint(shadowTip(doc));
++    final ws = worldWallOf(doc, shadow);
++    expect((tipW - ws.e).length, lessThan(1e-6),
++        reason: 'premise: the shadow\'s WallParams ends on its own child');
++
++    // The adapters, the band cache, the attach, the room inputs and the
++    // grips: EG9-k (the kit).
++
++    // The panel: the Opening section for the shadow, no section for the
++    // separator.
++    await pumpEditor(tester, ctrl, centre: lCorner, scale: 0.15);
++    ctrl.activeSelection.replace([SelectionKey.root(shadow)]);
++    await tester.pump();
++    expect(
++        find.byKey(const Key('section-architecture.opening')), findsOneWidget);
++    expect(find.byKey(const Key('section-architecture.wall')), findsNothing);
++    ctrl.activeSelection.replace([SelectionKey.root(sep)]);
++    await tester.pump();
++    expect(find.byKey(const Key('section-architecture.opening')), findsNothing);
++    expect(find.byKey(const Key('section-architecture.wall')), findsNothing);
++
++    // The Position field: an opening hosted on the shadow has no wall, so
++    // no position is valid (the field reverts, nothing is written); the
++    // shadow's own position, on C, commits one step.
++    Future<void> enter(String text) async {
++      await tester.enterText(find.byKey(const Key('property-position')), text);
++      await tester.testTextInput.receiveAction(TextInputAction.done);
++      await tester.pump();
++    }
++
++    final o2 = doc.components.get<OpeningParams>(orphan)!;
++    ctrl.activeSelection.replace([SelectionKey.root(orphan)]);
++    await tester.pump();
++    expect(
++        find.byKey(const Key('section-architecture.opening')), findsOneWidget);
++    expect(ws.s.distanceTo(ws.e), greaterThan(50),
++        reason: "premise: 50 lies within the shadow's WallParams");
++    await enter('50');
++    expect(doc.components.get<OpeningParams>(orphan), o2);
++    expect(doc.commands.undoDepth, 0);
++    ctrl.activeSelection.replace([SelectionKey.root(shadow)]);
++    await tester.pump();
++    await enter('650');
++    expect(doc.components.get<OpeningParams>(shadow)!.position, 650);
++    expect(doc.commands.undoDepth, 1);
++  });
++
++  testWidgets(
++      'EG10 (fix/live-object-rule, the L2 review\'s m1) a file\'s dimension '
++      'group carrying WallParams on the joint is a dimension, not a wall: '
++      'not among the adapter\'s walls, the band cache\'s or the attach\'s, '
++      'no wall grips or wall section, and the corner drag leaves it alone',
++      (tester) async {
++    // Not an opening: a fix that skips only groups carrying OpeningParams
++    // leaves this one a wall.
++    const dim = Handle(0x1A2B);
++    final at = Transform2.translation(ox + 820.5, oy - 1330.25)
++        .multiply(Transform2.rotation(0.7));
++    final toDim = at.invert();
++    // Across the stray's line (below), beyond its far end: the dimension
++    // line crosses it.
++    final d0 = toDim.transformPoint(plan(4200, 1500));
++    final d1 = toDim.transformPoint(plan(6600, 1500));
++    final ctrl = wallController(gripPlan((doc) {
++      addL(doc);
++      doc.commands.execute(CompoundCommand([
++        AddNodeCommand(GroupNode(
++            handle: dim,
++            parent: doc.rootHandle,
++            transform: at,
++            children: const [])),
++        SetComponentCommand<DimensionParams>(
++            dim,
++            DimensionParams(FixedEnd(d0.x, d0.y), FixedEnd(d1.x, d1.y),
++                DimKind.aligned, 350.5)),
++      ], label: 'Add dimension'));
++    }));
++    final doc = ctrl.document;
++    expect(kids(doc, dim), isNotEmpty,
++        reason: 'premise: regenerated as a dimension');
++    // Written straight into the store, as a file brings it in: 400 thick,
++    // from the L's corner (on the joint, in world) out between B and C.
++    final ws0 = toDim.transformPoint(lCorner);
++    final we0 = toDim.transformPoint(polar(lCorner, 23 + 40, 1800));
++    final stray =
++        WallParams(ws0.x, ws0.y, we0.x, we0.y, 400, Justification.left);
++    doc.components.attach<WallParams>(dim, stray);
++    final dimP = doc.components.get<DimensionParams>(dim)!;
++    final corner = endOf(doc, wa, 1);
++    final ws = worldWallOf(doc, dim);
++    expect((ws.s - corner).length, lessThan(wallJoin.linear),
++        reason: 'premise: on the joint in world; only the rule excludes it');
++    expect((ws.s - Vector2(ox, oy)).length, greaterThan(1000));
++
++    // The adapters, the band cache, the attach, the room inputs and the
++    // grips: EG10-k (the kit).
++
++    // The corner drag: A and B only; the dimension group as loaded.
++    final q = gridOf(doc, plan(3500, -400));
++    // The provider directly: EG10-k (the kit).
++    await pumpEditor(tester, ctrl, centre: lCorner, scale: 0.15);
++    final before = canon(doc);
++    await selectWall(tester, ctrl, wa);
++    await dragWorld(tester, ctrl, corner, q);
++    expect(tester.takeException(), isNull);
++    expect(doc.commands.undoDepth, 1, reason: 'the commit succeeds');
++    expect(doc.components.get<WallParams>(dim), stray);
++    expect(doc.components.get<DimensionParams>(dim), dimP);
++    await undoKey(tester);
++    expect(canon(doc), before);
++
++    // The panel: the Dimension section, not the Wall section.
++    ctrl.activeSelection.replace([SelectionKey.root(dim)]);
++    await tester.pump();
++    expect(find.byKey(const Key('section-architecture.dimension')),
++        findsOneWidget);
++    expect(find.byKey(const Key('section-architecture.wall')), findsNothing);
++  });
+ }
+diff --git a/packages/jet_cad_2d_kit_architecture/lib/src/dimension/dimension_grips.dart b/packages/jet_cad_2d_kit_architecture/lib/src/dimension/dimension_grips.dart
+new file mode 100644
+index 00000000..8e21612a
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/lib/src/dimension/dimension_grips.dart
+@@ -0,0 +1,309 @@
++// A dimension's grips (spec 11 D13), moved from jet_cad_floor_plan (3a
++// spec C3.6): the live walls are the plan's (C1.5), through [live].
++import 'dart:async' show StreamSubscription, unawaited;
++
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../ids.dart';
++import '../live.dart';
++import '../wall/wall.dart' show WallParams, wallJoin;
++import '../wall/wall_geometry.dart' show wallsInDocument;
++import 'dimension.dart';
++import 'dimension_attach.dart';
++
++/// The page a dimension reads when the root carries none (spec 11 D3): the
++/// one `generate` reads.
++final PageComponent _defaultPage = PageComponent();
++
++/// A dimension as it stands: its parameters, its group's local-to-world
++/// transform, its two measured world points and its layout.
++typedef _Dim = ({
++  DimensionParams params,
++  Transform2 m,
++  Vector2 p0,
++  Vector2 p1,
++  DimLayout layout,
++});
++
++/// A dimension's grips (spec 11 D13), through the render layer's object
++/// grip seam. Every coordinate is world, and every grip is a `stretch` grip,
++/// so it is hit and dragged only while `components` and `geometry` are
++/// allowed (07 `OG5`). The ordinals (R-26):
++///
++/// 0. **the offset grip**, at the dimension line's midpoint `(Q0 + Q1) / 2`:
++///    a drop stores [offsetFor] of the drop with the dimension's **current**
++///    kind, which the grip never changes; null when the new offset
++///    `compareTo`s equal to the stored one;
++/// 1. **the end grip at `a`**, at `P0`; 2. **the end grip at `b`**, at `P1`:
++///    a drop makes the dropped end D10's choice at the drop, and only that
++///    end (decision 22): the attach candidates gathered afresh against the
++///    document as it is then ([attachCandidates], by position while F3 is
++///    on, decision 23; the plan's Ruling 11-8: no memo), decided by
++///    [decideEnd] with the current kind and the other end's current world
++///    point, or a [FixedEnd] at the drop in the group's local space when
++///    nothing attaches (F3 off, or no wall end point there). So an end
++///    attaches, detaches or moves to another wall end point (decision 11).
++///    The other end keeps its stored reference, and the offset is kept.
++///    Null when the new end equals the stored one, or when the result is
++///    degenerate: the two ends' points within `wallJoin.linear`, or the new
++///    end equal to the other end.
++///
++/// Each `drag` receives the point the select tool already resolved through
++/// its snap chain (08's Ruling 08-15) and returns one
++/// `SetComponentCommand<DimensionParams>`: one undo step, in which the
++/// dimension regenerates.
++///
++/// **Preview:** the would-be five lines (the dimension line, the extension
++/// lines at `a` and `b`, the slashes at `a` and `b`), in world, from
++/// [layoutDimension] with the would-be parameters (the plan's Ruling 11-3),
++/// computed once per pointer move; nothing when the drop would be refused as
++/// degenerate or cannot be laid out. **No attach ring** (R-34): a preview is
++/// world geometry and knows no camera; the select tool's snap marker shows
++/// where the drop resolves.
++///
++/// **The per-drag memo** (Task 11's review, M-2): the previews of one drag
++/// (one dimension, one grip) share the dimension as it stands, `T`
++/// ([thickestWall]) and each wall's six points, handed to
++/// [attachCandidates]' `points` map as the Dimension tool's hover memo does.
++/// So a drag sliding along a wall's line lays that wall out once, not once
++/// per move. The memo is made at the first preview of a drag and dropped at
++/// the drop, when a preview names another dimension or grip (a drag that
++/// was cancelled and another begun), and on any document change heard
++/// (`doc.changes`; nothing changes the document during a drag). **The drop
++/// never reads it** (the plan's Ruling 11-8): it gathers afresh against the
++/// document as it is then.
++///
++/// **A freeze drops it too** (spec 3a C1.5, C1.10): the plan freezes an
++/// object without changing the document, so no change reaches the stream,
++/// yet every point in the memo, and `T`, was laid out among the walls live
++/// when it was made (`wallsInDocument` reads every live wall). The memo
++/// keeps those walls, and every preview that would read it first checks
++/// that each is still a live wall ([live]); one that is not drops it, and
++/// the preview lays out afresh. Freezes only remove (the plan never
++/// unfreezes) and a new wall is a document change, so that check is the
++/// whole of it: O(walls) calls of [live], no allocation.
++///
++/// **A broken dimension** (D15: an end that does not resolve, an offset that
++/// is not finite, or a layout that is not finite) has no grips.
++///
++/// **Movable:** the select tool moves and rotates a dimension like a box
++/// (D11, R-19): a fixed end moves with its group, an attached end stays on
++/// its wall.
++final class DimensionGrips implements ObjectGripProvider {
++  DimensionGrips(
++      {required this.index, required this.objectSnap, required this.live});
++
++  /// The plan's spatial index, which [attachCandidates] queries.
++  final SpatialIndex index;
++
++  /// Whether object snap (F3) is on, read at each drag event: with it off
++  /// nothing attaches (decision 4).
++  final bool Function() objectSnap;
++
++  /// The plan's live types (spec 3a C1.5): which walls an end attaches to
++  /// and reads its point from.
++  final LiveTypeOf live;
++
++  // The per-drag memo: valid for [_memoDoc]'s [_memoGroup] and grip
++  // [_memoOrdinal] while [_memoChanges] listens and every wall in
++  // [_memoWalls] is still live.
++  DraftDocument? _memoDoc;
++  Handle? _memoGroup;
++  int _memoOrdinal = -1;
++  _Dim? _memoDim;
++  double _memoThickest = 0;
++  final Map<Handle, WallPoints> _memoPoints = {};
++  final List<Handle> _memoWalls = [];
++  StreamSubscription<DocChange>? _memoChanges;
++
++  @override
++  List<Grip> gripsOf(DraftDocument d, Handle group) {
++    final s = _stateOf(d, group, null);
++    if (s == null) return const [];
++    final mid = (s.layout.q0 + s.layout.q1) * 0.5;
++    return [
++      Grip(GripRole.stretch, 0, mid.x, mid.y),
++      Grip(GripRole.stretch, 1, s.p0.x, s.p0.y),
++      Grip(GripRole.stretch, 2, s.p1.x, s.p1.y),
++    ];
++  }
++
++  /// The drop: afresh against the document as it is now, never the memo,
++  /// which it drops (Ruling 11-8).
++  @override
++  DraftCommand? drag(DraftDocument d, Handle group, Grip grip, Vector2 world) {
++    _dropMemo();
++    final s = _stateOf(d, group, null);
++    if (s == null) return null;
++    final next = _dropped(d, s, grip.index, world, thickestWall(d, live), null);
++    if (next == null || next.params == s.params) return null;
++    return SetComponentCommand<DimensionParams>(group, next.params);
++  }
++
++  @override
++  List<(EntityKind, GeometryPayload)> preview(
++      DraftDocument d, Handle group, Grip grip, Vector2 world) {
++    _syncMemo(d, group, grip.index);
++    final s = _memoDim;
++    if (s == null) return const [];
++    final next = _dropped(d, s, grip.index, world, _memoThickest, _memoPoints);
++    if (next == null) return const [];
++    final p = next.params;
++    final l =
++        layoutDimension(next.p0, next.p1, p.kind, s.m, p.offset, _pageOf(d));
++    if (l == null) return const [];
++    return [
++      for (final (a, b) in [(l.q0, l.q1), l.ext0, l.ext1, l.slash0, l.slash1])
++        (EntityKind.line, linePayload(a, b)),
++    ];
++  }
++
++  @override
++  bool movable(DraftDocument d, Handle group) => true;
++
++  /// Makes the memo for a drag of grip [ordinal] of [group] in [d], unless
++  /// it is already that drag's and no wall it was laid out among has been
++  /// frozen since.
++  void _syncMemo(DraftDocument d, Handle group, int ordinal) {
++    if (_memoChanges != null &&
++        identical(_memoDoc, d) &&
++        _memoGroup == group &&
++        _memoOrdinal == ordinal &&
++        _memoStillLive()) {
++      return;
++    }
++    _dropMemo();
++    _memoDoc = d;
++    _memoGroup = group;
++    _memoOrdinal = ordinal;
++    _memoChanges = d.changes.listen((_) => _dropMemo());
++    for (final h in d.components.withComponent<WallParams>()) {
++      if (live(h) == ArchitectureTypes.wall) _memoWalls.add(h);
++    }
++    _memoThickest = thickestWall(d, live);
++    _memoDim = _stateOf(d, group, _memoPoints);
++  }
++
++  /// Whether every wall the memo was laid out among is still a live wall
++  /// by [live]: a freeze changes no document, so the stream never hears
++  /// it. Iterates [_memoWalls] in place: no allocation.
++  bool _memoStillLive() {
++    for (var i = 0; i < _memoWalls.length; i++) {
++      if (live(_memoWalls[i]) != ArchitectureTypes.wall) return false;
++    }
++    return true;
++  }
++
++  /// Forgets the memo, and stops listening for the change that would.
++  void _dropMemo() {
++    final changes = _memoChanges;
++    if (changes != null) unawaited(changes.cancel());
++    _memoChanges = null;
++    _memoDoc = null;
++    _memoGroup = null;
++    _memoOrdinal = -1;
++    _memoDim = null;
++    _memoPoints.clear();
++    _memoWalls.clear();
++  }
++
++  /// The page [d]'s dimensions read, from the root, as `generate`'s view
++  /// reads it.
++  static PageComponent _pageOf(DraftDocument d) =>
++      d.components.get<PageComponent>(d.rootHandle) ?? _defaultPage;
++
++  /// Dimension [group] as it stands; null when it is not a dimension or is
++  /// broken (D15): an end that does not resolve, an offset that is not
++  /// finite, or a layout that is not finite. [points], when given, memoises
++  /// each wall's six points.
++  _Dim? _stateOf(
++      DraftDocument d, Handle group, Map<Handle, WallPoints>? points) {
++    final p = d.components.get<DimensionParams>(group);
++    if (p == null || !p.offset.isFinite) return null;
++    final m = d.tree.accumulatedTransform(group);
++    final p0 = _pointOf(d, m, p.a, points), p1 = _pointOf(d, m, p.b, points);
++    if (p0 == null || p1 == null) return null;
++    final l = layoutDimension(p0, p1, p.kind, m, p.offset, _pageOf(d));
++    if (l == null) return null;
++    return (params: p, m: m, p0: p0, p1: p1, layout: l);
++  }
++
++  /// The world point of [end] in a dimension group whose local-to-world
++  /// transform is [m], through the document (08's document adapter), or
++  /// null when it is broken (D7): an attached end whose wall is not a live
++  /// wall or whose `k` is outside {0, 1}, a fixed end with a coordinate that
++  /// is not finite. The layout guards the rest. [points], when given,
++  /// memoises the wall's six points.
++  Vector2? _pointOf(DraftDocument d, Transform2 m, DimEnd end,
++      Map<Handle, WallPoints>? points) {
++    switch (end) {
++      case FixedEnd(:final x, :final y):
++        if (!x.isFinite || !y.isFinite) return null;
++        return m.transformPoint(end.point);
++      case AttachedEnd(:final wall, :final k, :final side):
++        if (k != 0 && k != 1) return null;
++        final memo = points?[wall];
++        if (memo != null) return _find(memo, k, side);
++        final ws = wallsInDocument(d, wall, live);
++        if (ws == null) return null;
++        if (points == null) return wallEndPoint(ws.host, ws.walls, k, side);
++        final six = points[wall] = wallEndPoints(ws.host, ws.walls);
++        return _find(six, k, side);
++    }
++  }
++
++  /// The dimension [s] with grip [ordinal] dropped at world point [q]: the
++  /// parameters it would store and their two measured world points; null
++  /// when the drop is refused as degenerate (an end grip only). [thickest]
++  /// is `T`; [points], when given, memoises each wall's six points (a
++  /// preview's; the drop passes none).
++  ({DimensionParams params, Vector2 p0, Vector2 p1})? _dropped(
++      DraftDocument d,
++      _Dim s,
++      int ordinal,
++      Vector2 q,
++      double thickest,
++      Map<Handle, WallPoints>? points) {
++    final p = s.params;
++    if (ordinal == 0) {
++      // The current kind; the grip never changes it (R-26).
++      final o = offsetFor(q, s.p0, s.p1, p.kind, s.m);
++      return (params: p.copyWith(offset: o), p0: s.p0, p1: s.p1);
++    }
++    final atA = ordinal == 1;
++    final other = atA ? p.b : p.a;
++    final otherW = atA ? s.p1 : s.p0;
++    // Decision 22: the dropped end only, at the drop, with the current kind
++    // and the other end's current point, from candidates gathered now.
++    final candidates = attachCandidates(d, index, q,
++        live: live,
++        objectSnap: objectSnap(),
++        thickest: thickest,
++        points: points);
++    final DimEnd end =
++        decideEnd(d, candidates, kind: p.kind, at: q, other: otherW, m: s.m) ??
++            _fixedAt(s.m, q);
++    if (end == other) return null;
++    final w = _pointOf(d, s.m, end, points);
++    if (w == null || (w - otherW).length <= wallJoin.linear) return null;
++    return atA
++        ? (params: p.copyWith(a: end), p0: w, p1: s.p1)
++        : (params: p.copyWith(b: end), p0: s.p0, p1: w);
++  }
++
++  /// Point ([k], [side]) among a wall's [six].
++  static Vector2? _find(WallPoints six, int k, WallSide side) {
++    for (final (kk, s, w) in six) {
++      if (kk == k && s == side) return w;
++    }
++    return null;
++  }
++
++  /// World point [q] as a fixed end: in the group's local space (R-1).
++  static FixedEnd _fixedAt(Transform2 m, Vector2 q) {
++    final l = m.invert().transformPoint(q);
++    return FixedEnd(l.x, l.y);
++  }
++}
+diff --git a/packages/jet_cad_2d_kit_architecture/lib/src/dimension/dimension_plan.dart b/packages/jet_cad_2d_kit_architecture/lib/src/dimension/dimension_plan.dart
+new file mode 100644
+index 00000000..13d2a4bc
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/lib/src/dimension/dimension_plan.dart
+@@ -0,0 +1,127 @@
++// The dimension as a plan type (3a spec C3.6, C1.1): today's Dimension
++// section (jet_cad_floor_plan/lib/src/selection_panel.dart:846-976) as
++// property specs over the object, and the grips over the plan's services.
++//
++// - Value: the TEXT child's string as drawn, '—' without one (a broken
++//   dimension, D15), read once per dimension and history state (today:
++//   once per document change, :232-236, :851-864).
++// - Kind: a choice; a change keeps the ends and the offset (R-27). Gated
++//   by `reshape` (today's `_dimensionEditable`, :870-875: the host's
++//   reshape, then the document's `components` and the type's geometry,
++//   which the plan's panel checks for every type).
++// - Axes: a linear dimension's group's world rotation, rounded to tenths
++//   and normalised to (−180°, 180°], in the UI language's words and
++//   decimal separator; omitted for aligned and below 0.05° (:901-916).
++// - End 1, End 2: `Wall <hex>, start|end, <side>` or `Fixed` (:918-931).
++import 'dart:math' as math;
++
++import 'package:flutter/foundation.dart' show visibleForTesting;
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++
++import '../ids.dart';
++import '../live.dart';
++import 'dimension.dart';
++import 'dimension_grips.dart';
++
++/// The dimension's plan type (Shared interfaces, spec C3.6).
++final PlanType<DimensionParams> dimensionPlanType = PlanType<DimensionParams>(
++  id: ArchitectureTypes.dimension,
++  fromJson: DimensionParams.fromJson,
++  parametric: const DimensionType(),
++  grips: (s) => DimensionGrips(
++      index: s.index, objectSnap: () => s.objectSnap, live: liveTypesOf(s)),
++  properties: [
++    TextDisplay<DimensionParams>(id: 'value', read: dimensionValueOf),
++    ChoiceProperty<DimensionParams, DimKind>(
++        id: 'kind',
++        values: DimKind.values,
++        read: (p) => p.kind,
++        write: (p, kind) => p.copyWith(kind: kind),
++        gate: PlanGate.reshape),
++    TextDisplay<DimensionParams>(id: 'axes', read: dimensionAxesOf),
++    TextDisplay<DimensionParams>(
++        id: 'end-1', read: (p, o) => dimensionEndLine(p.a, o.words)),
++    TextDisplay<DimensionParams>(
++        id: 'end-2', read: (p, o) => dimensionEndLine(p.b, o.words)),
++  ],
++);
++
++/// Every scan [dimensionValueOf] made of a document's entities. Tests read
++/// the difference across calls: one per dimension shown and history state.
++@visibleForTesting
++int debugDimensionValueScans = 0;
++
++/// The last value read, per document.
++final class _ValueMemo {
++  Handle? handle;
++  int state = 0;
++  String? text;
++}
++
++final Expando<_ValueMemo> _valueMemo = Expando<_ValueMemo>('dimension value');
++
++/// The Value line (spec 11 D14, decision 13): [object]'s TEXT child's
++/// stored string, exactly as drawn, or '—' when it has none (a broken
++/// dimension generates no child, D7, D15). Read once per dimension and
++/// `document.commands.stateId` (spec 3a C1.1): a wall edit or a page change
++/// is a command and rewrites the string in place.
++String? dimensionValueOf(DimensionParams p, PlanObject object) {
++  final doc = object.document;
++  final state = doc.commands.stateId;
++  final memo = _valueMemo[doc] ??= _ValueMemo();
++  if (memo.handle != object.handle || memo.state != state) {
++    debugDimensionValueScans++;
++    final entities = doc.entities;
++    String? text;
++    for (final slot in entities.liveSlots) {
++      if (entities.ownerAt(slot) == object.handle &&
++          entities.kindAt(slot) == EntityKind.text) {
++        text = entities.textAt(slot);
++        break;
++      }
++    }
++    memo
++      ..handle = object.handle
++      ..state = state
++      ..text = text;
++  }
++  return memo.text ?? '—';
++}
++
++/// The axes line (spec 11 D11, R-18), or null: for a linear kind whose
++/// group's world rotation, `atan2(M.b, M.a)` in degrees, is at least 0.05°
++/// either way (the number, not its printed string, S-8). Rounded to tenths
++/// first and then normalised to (−180°, 180°], so −179.96° reads `180.0°`,
++/// in [object]'s words with their decimal separator (spec 3a C1.6).
++String? dimensionAxesOf(DimensionParams p, PlanObject object) {
++  if (p.kind == DimKind.aligned) return null;
++  final m = object.world;
++  final angle = math.atan2(m.b, m.a) * 180 / math.pi;
++  if (angle.abs() < 0.05) return null;
++  var shown = double.parse(angle.toStringAsFixed(1));
++  if (shown <= -180) shown += 360;
++  final words = object.words;
++  return words.text('text:architecture.axes-turned', {
++    'degrees': shown.toStringAsFixed(1).replaceAll('.', words.decimalSeparator),
++  });
++}
++
++/// An end line (spec 11 D14, R-28): for an attached end, its wall's handle
++/// in hex, the start or end word for its `k` and the side's word (`Wall 1A,
++/// end, left face`); the fixed word for a fixed end.
++String dimensionEndLine(DimEnd end, PlanWords words) => switch (end) {
++      FixedEnd() => words.word('text:architecture.end-fixed'),
++      AttachedEnd(:final wall, :final k, :final side) =>
++        words.text('text:architecture.end-on-wall', {
++          'wall': wall.toHex(),
++          'end': words.word(k == 0
++              ? 'text:architecture.end-start'
++              : 'text:architecture.end-end'),
++          'side': words.word(switch (side) {
++            WallSide.left => 'text:architecture.face-left',
++            WallSide.centre => 'text:architecture.face-centre',
++            WallSide.right => 'text:architecture.face-right',
++          }),
++        }),
++    };
+diff --git a/packages/jet_cad_2d_kit_architecture/lib/src/kit.dart b/packages/jet_cad_2d_kit_architecture/lib/src/kit.dart
+index 2a09f779..6bdf0f31 100644
+--- a/packages/jet_cad_2d_kit_architecture/lib/src/kit.dart
++++ b/packages/jet_cad_2d_kit_architecture/lib/src/kit.dart
+@@ -1,35 +1,37 @@
+ // The architecture kit's descriptor (spec 3a C2): its types, tools,
+ // attachment providers, symbols, words and prepare. Each type task adds its
+ // own (Tasks 10-25); the tools keep today's palette order (box, wall, door,
+ // window, gap, room, separator, dimension; planner_shell.dart:546-601).
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+ 
+ import 'box/box_plan.dart';
++import 'dimension/dimension_plan.dart';
+ import 'opening/opening_plan.dart';
+ import 'room/room_plan.dart';
+ import 'separator/separator_plan.dart';
+ import 'separator_linetype.dart';
+ import 'wall/wall_plan.dart';
+ import 'words/words.dart';
+ 
+ /// The architecture kit: a host passes it to the plan library,
+ /// `PlanController(kits: [architectureKit])`.
+ final PlanKit architectureKit = PlanKit(
+   id: 'architecture',
+   version: '0.1.0',
+   types: [
+     boxPlanType,
+     wallPlanType,
+     openingPlanType,
+     separatorPlanType,
+     roomPlanType,
++    dimensionPlanType,
+   ],
+   tools: [
+     boxPlanTool,
+     wallPlanTool,
+     doorPlanTool,
+     windowPlanTool,
+     gapPlanTool,
+     roomPlanTool,
+     separatorPlanTool,
+   ],
+diff --git a/packages/jet_cad_2d_kit_architecture/test/dimension/dimension_grips_test.dart b/packages/jet_cad_2d_kit_architecture/test/dimension/dimension_grips_test.dart
+new file mode 100644
+index 00000000..a6e12cfc
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/test/dimension/dimension_grips_test.dart
+@@ -0,0 +1,715 @@
++// Spec 11 D13: a dimension's grips. Three `stretch` grips, in world: the
++// offset grip (ordinal 0) at the dimension line's midpoint, the end grips at
++// `a` (1) and `b` (2) on the measured points (R-26). The offset grip stores
++// D6's `offsetFor` of the drop with the dimension's current kind; an end
++// grip makes the dropped end D10's choice at the drop, and only that end
++// (decision 22), from candidates gathered afresh, by position while F3 is on
++// (decision 23), or a fixed end at the drop in the group's local space. A
++// drop that changes nothing or makes the dimension degenerate is refused;
++// the grips are hit only while `components` and `geometry` are allowed
++// (07 OG5, the plan's Ruling 11-25); a broken dimension has none; the
++// preview is the committed lines (S-15).
++//
++// Every relational case runs at the origin and at the corpus far origin
++// with every wall in its own rotated, translated group; the dimension's
++// group sits at the placement and, where the case does not measure along a
++// wall, is turned 30° further, so a local hand value holds at every
++// placement and a world/local confusion shows at the origin too. Expected
++// values are hand arithmetic beside the assertion.
++import 'dart:math' as math;
++
++import 'package:jet_cad_2d_kit_architecture/src/dimension/dimension.dart';
++import 'package:jet_cad_2d_kit_architecture/src/dimension/dimension_attach.dart';
++import 'package:jet_cad_2d_kit_architecture/src/dimension/dimension_grips.dart';
++import 'package:jet_cad_2d_kit_architecture/src/wall/wall.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:jet_cad_2d_kit/testing.dart' show FakePlanServices;
++import 'package:jet_cad_2d_kit_architecture/src/dimension/dimension_plan.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/dimension_fixture.dart';
++
++const l = WallSide.left, r = WallSide.right;
++
++/// The group a dimension sits in: the placement, turned [deg] further.
++Transform2 turned(Placement place, double deg) =>
++    place.m.multiply(Transform2.rotation(deg * math.pi / 180));
++
++/// A [DimensionGrips] over [doc]'s own spatial index, F3 as [snap] says at
++/// each call; torn down with the test.
++(DimensionGrips, SpatialIndex) gripsFor(DraftDocument doc,
++    {bool Function()? snap}) {
++  final index = SpatialIndex(doc);
++  addTearDown(index.dispose);
++  return (
++    DimensionGrips(
++        index: index, objectSnap: snap ?? () => true, live: liveOf(doc)),
++    index
++  );
++}
++
++/// The grip of [dim] with ordinal [ordinal].
++Grip gripOf(DimensionGrips g, DraftDocument doc, Handle dim, int ordinal) =>
++    g.gripsOf(doc, dim)[ordinal];
++
++Vector2 at(Grip g) => Vector2(g.x, g.y);
++
++DimensionParams paramsOf(DraftDocument doc, Handle h) =>
++    doc.components.get<DimensionParams>(h)!;
++
++/// Drops [ordinal] of [dim] at world [q] and executes the command, which
++/// must exist: one undo step.
++void drop(DimensionGrips g, DraftDocument doc, Handle dim, int ordinal,
++    Vector2 q, String why) {
++  final depth = doc.commands.undoDepth;
++  final cmd = g.drag(doc, dim, gripOf(g, doc, dim, ordinal), q);
++  expect(cmd, isNotNull, reason: '$why: a command');
++  doc.commands.execute(cmd!);
++  expect(doc.commands.undoDepth, depth + 1, reason: '$why: one undo step');
++}
++
++/// [w] in the local frame of [m].
++Vector2 localOf(Transform2 m, Vector2 w) => m.invert().transformPoint(w);
++
++void expectNear(Vector2 got, Vector2 want, double tol, String why) =>
++    expect((got - want).length, lessThan(tol), reason: '$why: $got vs $want');
++
++void main() {
++  for (final place in const [origin, corpusGroups]) {
++    test(
++        'GE1 a dimension has three grips, at its line\'s midpoint and its '
++        'two measured points, in world, under a turned group, at $place', () {
++      final plan = buildPlan(c2Walls, place: place);
++      final doc = plan.doc;
++      attachPage(doc, mmPage);
++      final [a, _] = plan.walls;
++      final (grips, _) = gripsFor(doc);
++      final g = turned(place, 30);
++
++      // Fixed-fixed, horizontal, offset 500.5: u = the group's x, n its y.
++      // h0 = 0, h1 = 889.75 − (−310.25) = 1200, so hi = 1200 and the line
++      // at c = 1200 + 500.5 = 1700.5 above P0: local y −310.25 + 1700.5 =
++      // 1390.25, from Q0 (1234.5, 1390.25) to Q1 (4234.5, 1390.25). Its
++      // midpoint is (2734.5, 1390.25).
++      final dim = addDimension(
++          doc, const FixedEnd(1234.5, -310.25), const FixedEnd(4234.5, 889.75),
++          kind: DimKind.horizontal, offset: 500.5, at: g);
++      var gs = grips.gripsOf(doc, dim);
++      expect(gs, hasLength(3));
++      for (var i = 0; i < 3; i++) {
++        expect(gs[i].role, GripRole.stretch, reason: 'grip $i');
++        expect(gs[i].index, i, reason: 'grip $i: its ordinal');
++      }
++      expectNear(at(gs[0]), g.transformPoint(Vector2(2734.5, 1390.25)), 1e-6,
++          'the offset grip at the midpoint');
++      expectNear(at(gs[1]), g.transformPoint(Vector2(1234.5, -310.25)), 1e-6,
++          'the grip at a');
++      expectNear(at(gs[2]), g.transformPoint(Vector2(4234.5, 889.75)), 1e-6,
++          'the grip at b');
++
++      // Attached-fixed, aligned, offset 300.25: a = A/1/left, the L's inner
++      // corner (3900, 100) (A's left face y 100 meets B's left face x
++      // 3900); b fixed at (1000.25, 1500.5) in the plan. d = b − a =
++      // (−2899.75, 1400.5), |d| = √(2899.75² + 1400.5²) = √10,369,950.3 =
++      // 3,220.24; the left normal n = (−d.y, d.x) / |d| = (−1400.5,
++      // −2899.75) / 3,220.24. The line 300.25 along n from both points,
++      // its midpoint ((3900 + 1000.25) / 2, (100 + 1500.5) / 2) + 300.25 n
++      // = (2450.125, 800.25) + 300.25 n, in the plan (aligned measures in
++      // world; the group's own turn does not enter it).
++      final inner = place.at(3900, 100);
++      expect(bruteCandidates(doc, inner), contains(AttachedEnd(a, 1, l)),
++          reason: 'premise: A/1/left is the inner corner');
++      final dim2 = addDimension(
++          doc, AttachedEnd(a, 1, l), fixedAt(place.at(1000.25, 1500.5), g),
++          kind: DimKind.aligned, offset: 300.25, at: g);
++      final len = math.sqrt(2899.75 * 2899.75 + 1400.5 * 1400.5);
++      expect(len, closeTo(3220.24, 0.005));
++      final n = Vector2(-1400.5, -2899.75) / len;
++      gs = grips.gripsOf(doc, dim2);
++      expect(gs, hasLength(3));
++      final mid = Vector2(2450.125, 800.25) + n * 300.25;
++      expectNear(at(gs[0]), place.at(mid.x, mid.y), 1e-6,
++          'attached-fixed: the offset grip');
++      expectNear(at(gs[1]), inner, 1e-6, 'attached-fixed: the grip at a');
++      expectNear(at(gs[2]), place.at(1000.25, 1500.5), 1e-6,
++          'attached-fixed: the grip at b');
++
++      // Through the plan type's provider over the plan's services: the
++      // same grips, and a dimension is movable (R-19).
++      final services = FakePlanServices(document: doc, catalog: testCatalog());
++      addTearDown(services.dispose);
++      final objects = dimensionPlanType.gripsFor(services)!;
++      expect(objects.gripsOf(doc, dim2), gs);
++      expect(objects.movable(doc, dim2), isTrue);
++      expect(driftOf(doc), isEmpty);
++    });
++  }
++
++  for (final place in const [origin, corpusGroups]) {
++    test(
++        'GE2 the offset grip stores offsetFor of the drop with the current '
++        'kind: outermost, between band, sign bit; one undo step; a drop that '
++        'changes nothing returns null, at $place', () {
++      final plan = buildPlan(const [], place: place);
++      final doc = plan.doc;
++      attachPage(doc, mmPage);
++      final (grips, _) = gripsFor(doc);
++      final g = turned(place, 30);
++      // Horizontal over (0, 0) and (3000, 1200): n = the group's y, h0 = 0,
++      // h1 = 1200, so lo = 0 and hi = 1200 (DL2).
++      final dim = addDimension(
++          doc, const FixedEnd(0, 0), const FixedEnd(3000, 1200),
++          kind: DimKind.horizontal, offset: 7.5, at: g);
++      final before = paramsOf(doc, dim);
++
++      /// The dimension line, local: both ends at local y [y], x 0 and 3000.
++      void lineAt(double y, String why) {
++        final line = dimLines(doc, dim)[0];
++        expectNear(localOf(g, line.$1), Vector2(0, y), 1e-6, '$why: Q0');
++        expectNear(localOf(g, line.$2), Vector2(3000, y), 1e-6, '$why: Q1');
++      }
++
++      // DL2's local heights, dropped at x 1500.5 and taken to world:
++      // - y 2000 ≥ hi: 2000 − 1200 = +800, the line at 2000;
++      // - y −300 ≤ lo: −(0 − (−300)) = −300, the line at −300;
++      // - y 900, between: hi − hq = 300 ≤ hq − lo = 900, the upper extreme,
++      //   +0.0, the line at 1200;
++      // - y 400, between: hi − hq = 800 > hq − lo = 400, the lower extreme,
++      //   −0.0 (its side the sign bit, R-2), the line at 0.
++      for (final (y, want, negative, line) in const [
++        (2000.0, 800.0, false, 2000.0),
++        (-300.0, -300.0, true, -300.0),
++        (900.0, 0.0, false, 1200.0),
++        (400.0, 0.0, true, 0.0),
++      ]) {
++        final why = 'drop at local y $y';
++        drop(grips, doc, dim, 0, g.transformPoint(Vector2(1500.5, y)), why);
++        final p = paramsOf(doc, dim);
++        expect(p.offset, closeTo(want, 1e-6), reason: why);
++        expect(p.offset.isNegative, negative, reason: '$why: the sign bit');
++        expect(p.kind, DimKind.horizontal, reason: '$why: the kind kept');
++        expect((p.a, p.b), (before.a, before.b), reason: '$why: the ends');
++        lineAt(line, why);
++        expect(driftOf(doc), isEmpty);
++      }
++
++      // Drops that change nothing: null, nothing executed. Deep in the
++      // between band on the lower side (local y 350) the offset is −0.0
++      // again; then +800 again, and a second drop at the point that gave it
++      // (local (1500.5, 2000), on the line now) gives the same offset.
++      final depth = doc.commands.undoDepth;
++      final g0 = gripOf(grips, doc, dim, 0);
++      expect(grips.drag(doc, dim, g0, g.transformPoint(Vector2(700.25, 350))),
++          isNull,
++          reason: 'the between band, the same side');
++      drop(grips, doc, dim, 0, g.transformPoint(Vector2(1500.5, 2000)),
++          'back to +800');
++      final q800 = g.transformPoint(Vector2(1500.5, 2000));
++      expect(grips.drag(doc, dim, gripOf(grips, doc, dim, 0), q800), isNull,
++          reason: 'a drop on the line itself');
++      expect(doc.commands.undoDepth, depth + 1, reason: 'one step only');
++    });
++  }
++
++  for (final place in const [origin, corpusGroups]) {
++    test(
++        'GE3 an end grip attaches a fixed end, detaches an attached one, '
++        'moves one to another wall\'s point, and never re-decides the other '
++        'end, at $place', () {
++      // The L of C2: A (0, 0) -> (4000, 0), B (4000, 0) -> (4000, 3000),
++      // 200 centred. A's free start's left corner (0, 100) is A/0/left
++      // alone; B's free end's left corner (3900, 3000) is B/1/left alone.
++      final plan = buildPlan(c2Walls, place: place);
++      final doc = plan.doc;
++      attachPage(doc, mmPage);
++      final [a, b] = plan.walls;
++      var snap = true;
++      final (grips, index) = gripsFor(doc, snap: () => snap);
++      List<AttachedEnd> candidatesAt(Vector2 q) =>
++          attachCandidates(doc, index, q,
++              live: liveOf(doc),
++              objectSnap: true,
++              thickest: thickestWall(doc, liveOf(doc)));
++      final a0 = place.at(0, 100), b1 = place.at(3900, 3000);
++      expect(candidatesAt(a0), [AttachedEnd(a, 0, l)],
++          reason: 'premise: A/0/left');
++      expect(candidatesAt(b1), [AttachedEnd(b, 1, l)],
++          reason: 'premise: B/1/left');
++
++      // Aligned, both ends fixed, in a group turned 30° further.
++      final g = turned(place, 30);
++      final fixedB = fixedAt(place.at(2500.75, 2200.25), g);
++      final dim = addDimension(
++          doc, fixedAt(place.at(500.25, 1500.5), g), fixedB,
++          kind: DimKind.aligned, offset: 250.5, at: g);
++      void kept(String why) {
++        final p = paramsOf(doc, dim);
++        expect(p.b, fixedB, reason: '$why: the other end kept');
++        expect(p.kind, DimKind.aligned, reason: '$why: the kind kept');
++        expect(p.offset, 250.5, reason: '$why: the offset kept');
++        expect(driftOf(doc), isEmpty);
++      }
++
++      // -- Attach: a dropped on A/0/left, F3 on.
++      drop(grips, doc, dim, 1, a0, 'attach');
++      expect(paramsOf(doc, dim).a, AttachedEnd(a, 0, l), reason: 'attached');
++      kept('attach');
++
++      // -- Move: dropped on B/1/left.
++      drop(grips, doc, dim, 1, b1, 'move');
++      expect(paramsOf(doc, dim).a, AttachedEnd(b, 1, l), reason: 'moved');
++      kept('move');
++
++      // -- Detach: dropped mid-room, where nothing attaches: a fixed end at
++      // the drop in the group's local space (not the world point).
++      final free = place.at(2000.25, 1000.75);
++      expect(candidatesAt(free), isEmpty, reason: 'premise: nothing there');
++      drop(grips, doc, dim, 1, free, 'detach mid-room');
++      final got = paramsOf(doc, dim).a as FixedEnd;
++      expectNear(got.point, localOf(g, free), 1e-6, 'detached, local');
++      kept('detach mid-room');
++
++      // -- Detach with F3 off, on the corner itself: re-attached first,
++      // then dropped on the same corner with F3 off. A fixed end at the
++      // corner, local.
++      drop(grips, doc, dim, 1, a0, 're-attach');
++      expect(paramsOf(doc, dim).a, AttachedEnd(a, 0, l));
++      snap = false;
++      drop(grips, doc, dim, 1, a0, 'F3 off');
++      final off = paramsOf(doc, dim).a as FixedEnd;
++      expectNear(
++          off.point, localOf(g, a0), 1e-6, 'F3 off: fixed at the corner');
++      kept('F3 off');
++      snap = true;
++
++      // -- Decision 22 in the group's axes (the review's I-2): a horizontal
++      // dimension in a group turned 90° further than the placement, so its
++      // x runs along the plan's y, along B. Its a dropped on the L's outer
++      // corner (4100, −100), A/1/right and B/0/right: u = the group's x,
++      // σ_B = 0 < σ_A = 1, so B/0/right (A has the lower handle here, so
++      // the lowest-handle step alone would store A). Decided in world axes
++      // it would be A/1/right at both placements (world x: σ_A = 0 at the
++      // origin; sin 23° = 0.39 < cos 23° = 0.92 at the far origin).
++      {
++        expect(a.value < b.value, isTrue, reason: 'premise: A is lower');
++        final outer = place.at(4100, -100);
++        expect(
++            candidatesAt(outer), [AttachedEnd(a, 1, r), AttachedEnd(b, 0, r)],
++            reason: 'premise: the outer corner is A/1/right and B/0/right');
++        final g90 = turned(place, 90);
++        final dim90 = addDimension(doc, fixedAt(place.at(1500.25, 2000.5), g90),
++            fixedAt(place.at(3000.5, 3000.25), g90),
++            kind: DimKind.horizontal, offset: 300.75, at: g90);
++        drop(grips, doc, dim90, 1, outer, 'horizontal in a turned group');
++        expect(paramsOf(doc, dim90).a, AttachedEnd(b, 0, r),
++            reason: 'along the group\'s x: B');
++      }
++
++      // -- A flush door (the review's M-1): spike C5's T, the door on the
++      // stem S at c = 450 swinging left, clamped flush with S's butt end on
++      // C's face (flushT). S/0/right, (2,500 + 50, 100), is the far jamb
++      // corner: no child of S reaches it, and the door's leaf and arc stand
++      // on its left face, 100 mm off. Only the host box grown by T (C's 200)
++      // finds S there; a drop on it attaches.
++      {
++        final plan = flushT(place);
++        final doc = plan.doc;
++        attachPage(doc, mmPage);
++        final [_, s] = plan.walls;
++        final (grips, _) = gripsFor(doc);
++        // The drop 5e-6 mm off the corner, within the attach tolerance
++        // (1e-5): it attaches, so the committed line starts on the corner,
++        // not on the drop; the preview must show the same (its own T).
++        final corner = plan.at(2550, 100) + Vector2(5e-6, 0);
++        expect(bruteCandidates(doc, corner), [AttachedEnd(s, 0, r)],
++            reason: 'premise: S/0/right alone');
++        final dim = addDimension(doc, fixedAt(plan.at(1000.25, 2000.5)),
++            fixedAt(plan.at(4000.5, 2500.25)),
++            kind: DimKind.aligned, offset: 300.75);
++        final preview =
++            grips.preview(doc, dim, gripOf(grips, doc, dim, 1), corner);
++        drop(grips, doc, dim, 1, corner, 'onto the far jamb corner');
++        final lines = dimLines(doc, dim);
++        expect((at(gripOf(grips, doc, dim, 1)) - corner).length,
++            closeTo(5e-6, 1e-7),
++            reason: 'premise: the committed end is the corner, not the drop');
++        for (var i = 0; i < 5; i++) {
++          final c = preview[i].$2.coords;
++          expectNear(Vector2(c[0], c[1]), lines[i].$1, 1e-9, 'flush, $i');
++          expectNear(Vector2(c[2], c[3]), lines[i].$2, 1e-9, 'flush, $i');
++        }
++        expect(paramsOf(doc, dim).a, AttachedEnd(s, 0, r));
++        expect(driftOf(doc), isEmpty);
++      }
++
++      // -- The other end (AM3's L, B with the lower handle). B (4000, 0) ->
++      // (4000, 3000), then A (0, 0) -> (4000, 0), 200 centred; the inner
++      // corner (3900, 100) is B/0/left and A/1/left. The dimension's group
++      // sits at the placement, so horizontal runs along A and vertical
++      // along B.
++      {
++        final (doc, hs) = docOfWalls(worldWalls(const [
++          W(4000, 0, 4000, 3000, 200),
++          W(0, 0, 4000, 0, 200),
++        ], place));
++        attachPage(doc, mmPage);
++        final bw = hs[0], aw = hs[1];
++        expect(bw.value < aw.value, isTrue, reason: 'premise: B is lower');
++        final (grips, index) = gripsFor(doc);
++        final inner = place.at(3900, 100);
++        expect(
++            attachCandidates(doc, index, inner,
++                live: liveOf(doc),
++                objectSnap: true,
++                thickest: thickestWall(doc, liveOf(doc))),
++            [AttachedEnd(bw, 0, l), AttachedEnd(aw, 1, l)],
++            reason: 'premise: the inner corner is B/0/left and A/1/left');
++        // Decision 22 at a drop: the dropped end is decided with the
++        // current kind and, for aligned, the other end's current point. The
++        // outer corner (4100, −100) is B/0/right and A/1/right; b fixed at
++        // (3000, 3000). Aligned: u ∝ (3000 − 4100, 3000 + 100) = (−1,100,
++        // 3,100), |·| = 3,289.4, so σ_B = |u.x| = 0.334 < σ_A = |u.y| =
++        // 0.942: B/0/right. Horizontal: u = the group's x, along A, σ_A = 0:
++        // A/1/right.
++        final outer = place.at(4100, -100);
++        expect(
++            attachCandidates(doc, index, outer,
++                live: liveOf(doc),
++                objectSnap: true,
++                thickest: thickestWall(doc, liveOf(doc))),
++            [AttachedEnd(bw, 0, r), AttachedEnd(aw, 1, r)],
++            reason: 'premise: the outer corner is B/0/right and A/1/right');
++        for (final (kind, want) in [
++          (DimKind.aligned, AttachedEnd(bw, 0, r)),
++          (DimKind.horizontal, AttachedEnd(aw, 1, r)),
++        ]) {
++          final far = fixedAt(place.at(3000, 3000), place.m);
++          final dim = addDimension(
++              doc, fixedAt(place.at(1500.25, 2000.5), place.m), far,
++              kind: kind, offset: 300.75, at: place.m);
++          drop(grips, doc, dim, 1, outer, '${kind.name} onto the corner');
++          expect(paramsOf(doc, dim).a, want, reason: kind.name);
++          expect(paramsOf(doc, dim).b, far, reason: '${kind.name}: b kept');
++        }
++
++        // 1. Horizontal from A/0/left to a fixed point; its b dropped on
++        // the inner corner: u = the group's x, along A, σ_A = 0 < σ_B = 1,
++        // so A/1/left.
++        final dim = addDimension(doc, AttachedEnd(aw, 0, l),
++            fixedAt(place.at(2000.5, 1800.25), place.m),
++            kind: DimKind.horizontal, offset: 400.5, at: place.m);
++        drop(grips, doc, dim, 2, inner, 'b onto the inner corner');
++        expect(paramsOf(doc, dim).b, AttachedEnd(aw, 1, l),
++            reason: 'stored on A, the wall the kind runs along');
++        // 2. The kind switched to vertical, the kind alone (the command
++        // the panel issues): the corner end is not re-decided.
++        doc.commands.execute(SetComponentCommand<DimensionParams>(
++            dim, paramsOf(doc, dim).copyWith(kind: DimKind.vertical)));
++        expect(paramsOf(doc, dim).b, AttachedEnd(aw, 1, l));
++        // 3. The other end, a, dropped at (0, 1500), where nothing
++        // attaches. Re-deciding the corner now (vertical: u along B, σ_B =
++        // 0) would store B/0/left; the corner end keeps A/1/left.
++        final q = place.at(0, 1500);
++        expect(
++            attachCandidates(doc, index, q,
++                live: liveOf(doc),
++                objectSnap: true,
++                thickest: thickestWall(doc, liveOf(doc))),
++            isEmpty,
++            reason: 'premise: nothing attaches at (0, 1500)');
++        drop(grips, doc, dim, 1, q, 'a dragged');
++        final p = paramsOf(doc, dim);
++        expectNear((p.a as FixedEnd).point, Vector2(0, 1500), 1e-6,
++            'a fixed at (0, 1500), local');
++        expect(p.b, AttachedEnd(aw, 1, l), reason: 'the corner end kept');
++        expect(p.kind, DimKind.vertical);
++        expect(driftOf(doc), isEmpty);
++      }
++    });
++  }
++
++  for (final place in const [origin, corpusGroups]) {
++    test(
++        'GE4 a degenerate drop returns null; under runtime permissions no '
++        'grip is hit and no drag lands; a broken dimension has no grips, at '
++        '$place', () {
++      final plan = buildPlan(c2Walls, place: place);
++      final doc = plan.doc;
++      attachPage(doc, mmPage);
++      final [a, _] = plan.walls;
++      var snap = true;
++      final (grips, _) = gripsFor(doc, snap: () => snap);
++      final g = turned(place, 30);
++
++      // -- Degenerate. a fixed, b fixed: a dropped on b's point.
++      final wa = place.at(500.25, 1500.5), wb = place.at(2500.75, 2200.25);
++      final ff = addDimension(doc, fixedAt(wa, g), fixedAt(wb, g),
++          kind: DimKind.aligned, offset: 250.5, at: g);
++      final depth = doc.commands.undoDepth;
++      expect(grips.drag(doc, ff, gripOf(grips, doc, ff, 1), wb), isNull,
++          reason: 'a onto b\'s point');
++      expect(grips.preview(doc, ff, gripOf(grips, doc, ff, 1), wb), isEmpty,
++          reason: 'no preview of a refused drop');
++      // a fixed, b = A/0/left (0, 100): a dropped on that wall end point,
++      // with F3 on (it would store the same end) and off (a fixed point on
++      // b's). Then b = A/1/left, the inner corner (3900, 100), and a dropped
++      // there with F3 on: whichever wall it is stored on, the two points
++      // coincide.
++      final a0 = place.at(0, 100), inner = place.at(3900, 100);
++      for (final (end, point) in [
++        (AttachedEnd(a, 0, l), a0),
++        (AttachedEnd(a, 1, l), inner),
++      ]) {
++        final dim = addDimension(doc, fixedAt(wa, g), end,
++            kind: DimKind.aligned, offset: 250.5, at: g);
++        for (final on in [true, false]) {
++          snap = on;
++          expect(
++              grips.drag(doc, dim, gripOf(grips, doc, dim, 1), point), isNull,
++              reason: 'a onto $end, F3 ${on ? 'on' : 'off'}');
++        }
++        snap = true;
++      }
++      expect(doc.commands.undoDepth, depth + 2, reason: 'no drop executed');
++
++      // -- Runtime permissions, through a real grip cache: the control
++      // hits each grip under full permissions; runtime hits none, and a
++      // drag's command is null.
++      final selection = SelectionController(doc);
++      final outlines = OutlineCache(doc, selection);
++      final ObjectGripProvider objects = grips;
++      final cache = GripCache(doc, selection, outlines, objects: objects);
++      addTearDown(() {
++        cache.dispose();
++        outlines.dispose();
++        selection.dispose();
++      });
++      selection.replace([SelectionKey.root(ff)]);
++      final shown = [
++        for (final ref in cache.grips)
++          if (ref.object && ref.key.target == ff) ref.grip,
++      ];
++      expect(shown, grips.gripsOf(doc, ff), reason: 'the three grips shown');
++      // 0.1 px/mm: the grips lie hundreds of mm apart, tens of pixels.
++      final m = Transform2.translation(-0.1 * wa.x + 700, -0.1 * wa.y + 450)
++          .multiply(Transform2.scale(0.1, 0.1));
++      Offset screen(Grip gr) {
++        final s = m.transformPoint(at(gr));
++        return Offset(s.x, s.y);
++      }
++
++      final q = place.at(900.5, 1300.25);
++      for (final gr in shown) {
++        final hit = cache.hitTest(screen(gr), m);
++        expect(hit, isNot(-1), reason: 'control: grip ${gr.index} is hit');
++        expect(cache.grips[hit].grip, gr);
++        final drag =
++            GripDrag.reshapeObject(doc, SelectionKey.root(ff), gr, objects)!
++              ..moveTo(q);
++        expect(drag.command(DraftPermissions.all), isNotNull,
++            reason: 'control: grip ${gr.index} lands with every permission');
++      }
++      doc.commands.permissions = DraftPermissions.runtime;
++      for (final gr in shown) {
++        expect(cache.hitTest(screen(gr), m), -1,
++            reason: 'runtime: grip ${gr.index} is not hit');
++        final drag =
++            GripDrag.reshapeObject(doc, SelectionKey.root(ff), gr, objects)!
++              ..moveTo(q);
++        expect(drag.command(DraftPermissions.runtime), isNull,
++            reason: 'runtime: grip ${gr.index} lands nothing');
++      }
++      doc.commands.permissions = DraftPermissions.all;
++
++      // -- Broken: an attached end with k = 2 (D15). The control, k = 1,
++      // has its three grips.
++      final ok = addDimension(doc, AttachedEnd(a, 1, l), fixedAt(wa, g),
++          kind: DimKind.aligned, offset: 250.5, at: g);
++      expect(grips.gripsOf(doc, ok), hasLength(3));
++      final broken = addDimension(doc, AttachedEnd(a, 2, l), fixedAt(wa, g),
++          kind: DimKind.aligned, offset: 250.5, at: g);
++      expect(grips.gripsOf(doc, broken), isEmpty);
++      expect(objects.gripsOf(doc, broken), isEmpty);
++    });
++  }
++
++  for (final place in const [origin, corpusGroups]) {
++    test(
++        'GE5 the preview equals the committed lines on a horizontal '
++        'dimension over the non-axis pair, for an offset drag and an end '
++        'drag, on a 1:50 mm page and a 1:100 ft-in page; after another '
++        'dimension\'s drag abandoned the preview equals a fresh provider\'s, '
++        'at $place', () {
++      // The page's paper lengths enter the lines (D7): at 1:100 the
++      // extension line's overshoot is 2 × 100 = 200 mm and a slash 3 × 100
++      // = 300 mm, twice 1:50's, so a preview laid out on another page than
++      // the document's differs from the committed lines.
++      final ftIn100 = PageComponent()
++          .copyWith(displayUnit: DisplayUnit.feetInches, scaleDenominator: 100);
++      for (final page in [mmPage, ftIn100]) {
++        final plan = buildPlan(const [], place: place);
++        final doc = plan.doc;
++        attachPage(doc, page);
++        final (grips, _) = gripsFor(doc);
++        final g = turned(place, 30);
++        // Horizontal over (0, 0) and (3000, 1200): aligned would lay the
++        // line along the pair, (3000, 1200) / 3231.1, not along the group's
++        // x.
++        final dim = addDimension(
++            doc, const FixedEnd(0, 0), const FixedEnd(3000, 1200),
++            kind: DimKind.horizontal, offset: 7.5, at: g);
++        for (final (ordinal, local) in [
++          (0, Vector2(1500.5, 2000.25)), // the offset: +800.25
++          (2, Vector2(3500.75, 1700.5)), // b moved, fixed
++          (1, Vector2(-400.25, -600.75)), // a moved, fixed
++        ]) {
++          final why = '1:${page.scaleDenominator}, grip $ordinal to $local';
++          final q = g.transformPoint(local);
++          final gr = gripOf(grips, doc, dim, ordinal);
++          final preview = grips.preview(doc, dim, gr, q);
++          expect(preview, hasLength(5), reason: why);
++          drop(grips, doc, dim, ordinal, q, why);
++          expect(paramsOf(doc, dim).kind, DimKind.horizontal);
++          final lines = dimLines(doc, dim);
++          // Premise: the page reached the children (the extension line at
++          // a overshoots the dimension line by 2 paper mm).
++          expect((lines[1].$2 - lines[0].$1).length,
++              closeTo(2.0 * page.scaleDenominator, 1e-6),
++              reason: '$why: premise: the page');
++          for (var i = 0; i < 5; i++) {
++            final (kind, payload) = preview[i];
++            expect(kind, EntityKind.line);
++            final p = payload.coords;
++            expectNear(Vector2(p[0], p[1]), lines[i].$1, 1e-9, '$why: line $i');
++            expectNear(Vector2(p[2], p[3]), lines[i].$2, 1e-9, '$why: line $i');
++          }
++        }
++        expect(driftOf(doc), isEmpty);
++      }
++
++      // -- A drag abandoned for another dimension's (Task 11's re-review):
++      // X's grip previewed, then Y's with no drop and no document change
++      // in between, as after an Esc-cancelled drag. Y's previews equal a
++      // fresh provider's, point for point, so no memo of X's leaks into Y.
++      // X is aligned and fixed-fixed; Y horizontal with b attached to B's
++      // end corner, so the two lay out differently at every drop point.
++      final plan = buildPlan(c2Walls, place: place);
++      final doc = plan.doc;
++      attachPage(doc, mmPage);
++      final [_, b] = plan.walls;
++      final (memo, index) = gripsFor(doc);
++      DimensionGrips fresh() => DimensionGrips(
++          index: index, objectSnap: () => true, live: liveOf(doc));
++      final g = turned(place, 30);
++      final x = addDimension(doc, fixedAt(plan.at(500.25, 1500.5), g),
++          fixedAt(plan.at(2500.75, 2200.25), g),
++          kind: DimKind.aligned, offset: 250.5, at: g);
++      final y = addDimension(
++          doc, AttachedEnd(b, 1, l), fixedAt(plan.at(1200.5, 2600.25), g),
++          kind: DimKind.horizontal, offset: -180.25, at: g);
++      final qs = [
++        plan.at(4100, -100),
++        plan.at(1700.5, 900.25),
++        plan.at(3900, 100),
++      ];
++      List<double> flat(List<(EntityKind, GeometryPayload)> p) =>
++          [for (final (_, pl) in p) ...pl.coords];
++      void same(Handle h, int ordinal, String why) {
++        for (final q in qs) {
++          final gr = gripOf(memo, doc, h, ordinal);
++          final got = flat(memo.preview(doc, h, gr, q));
++          expect(got, hasLength(20), reason: '$why at $q: five lines');
++          expect(got, flat(fresh().preview(doc, h, gr, q)),
++              reason: '$why at $q');
++        }
++      }
++
++      final depth = doc.commands.undoDepth;
++      same(x, 1, 'X grip 1');
++      same(y, 1, 'Y grip 1 after X\'s drag abandoned');
++      same(y, 2, 'Y grip 2');
++      same(x, 0, 'X grip 0');
++      expect(doc.commands.undoDepth, depth, reason: 'no document change');
++    });
++  }
++
++  test(
++      'GE5b among 612 walls the end grip\'s previews along a face line lay '
++      'each wall out once per drag, the drop lays out afresh, and a document '
++      'change starts the memo afresh; the time per preview is printed',
++      () async {
++    final plan = dimGridDoor();
++    final doc = plan.doc;
++    attachPage(doc, mmPage);
++    expect(plan.walls, hasLength(612));
++    final (grips, _) = gripsFor(doc);
++    final dim = addDimension(doc, const FixedEnd(24500.25, 25000.5),
++        const FixedEnd(26500.75, 26000.25),
++        kind: DimKind.aligned, offset: 300.5);
++    // The history is capped; start it empty so a drop's step shows.
++    doc.commands.clearHistory();
++    final g1 = gripOf(grips, doc, dim, 1);
++    // The path wall (24,000, 24,000) -> (27,000, 24,000), 200 centred: its
++    // left face line y 24,100, from x 24,300 to 26,700 in 61 moves (step
++    // 40), past the door's cut (x 25,050-25,950). Each move lies on that
++    // line, so the path wall passes the line test, and 200 mm or more from
++    // the nodes at x 24,000 and 27,000, beyond the neighbours' boxes (whose
++    // face lines y 24,100 it also lies on).
++    Vector2 on(int i) => Vector2(24300 + 40.0 * i, 24100);
++    int layouts() => debugWallPointComputations;
++
++    // -- One drag: the first preview lays the path wall out, the other 60
++    // lay out nothing; the same 61 moves again lay out nothing.
++    var w = layouts();
++    final times = <int>[];
++    for (var i = 0; i <= 60; i++) {
++      final sw = Stopwatch()..start();
++      final preview = grips.preview(doc, dim, g1, on(i));
++      sw.stop();
++      times.add(sw.elapsedMicroseconds);
++      expect(preview, hasLength(5), reason: 'move $i');
++    }
++    expect(layouts(), w + 1, reason: 'the path wall, once per drag');
++    for (var i = 60; i >= 0; i--) {
++      grips.preview(doc, dim, g1, on(i));
++    }
++    expect(layouts(), w + 1, reason: 'the way back: nothing more');
++    final first = times.first;
++    times.sort();
++
++    // -- The drop gathers afresh (Ruling 11-8): the path wall laid out
++    // again, with no memo. The end stays fixed (no wall end point there).
++    w = layouts();
++    final q = on(30);
++    drop(grips, doc, dim, 1, q, 'the drop on the face line');
++    expect(layouts(), w + 1, reason: 'the drop lays out afresh');
++    expect(paramsOf(doc, dim).a, isA<FixedEnd>());
++
++    // -- A new drag makes a new memo: once more, then nothing.
++    w = layouts();
++    final g1b = gripOf(grips, doc, dim, 1);
++    for (var i = 5; i < 15; i++) {
++      grips.preview(doc, dim, g1b, on(i));
++    }
++    expect(layouts(), w + 1, reason: 'the next drag, once');
++
++    // -- A document change (a far wall moved), heard at a pump: the memo
++    // starts afresh within the same drag.
++    doc.commands.execute(SetComponentCommand<WallParams>(plan.walls[0],
++        const WallParams(0, -0.25, 3000, -0.25, 200, Justification.centre)));
++    await Future<void>.delayed(Duration.zero);
++    w = layouts();
++    for (var i = 15; i < 25; i++) {
++      grips.preview(doc, dim, g1b, on(i));
++    }
++    expect(layouts(), w + 1, reason: 'once after the change');
++
++    // ignore: avoid_print
++    print('GE5b 612 walls: end-grip preview along a face line: first '
++        '$first us, median ${times[times.length ~/ 2]} us, worst '
++        '${times.last} us, over 1 ms ${times.where((t) => t > 1000).length}'
++        '/61 (printed, not asserted)');
++  });
++}
+diff --git a/packages/jet_cad_2d_kit_architecture/test/dimension/dimension_object_test.dart b/packages/jet_cad_2d_kit_architecture/test/dimension/dimension_object_test.dart
+new file mode 100644
+index 00000000..0bd7873e
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/test/dimension/dimension_object_test.dart
+@@ -0,0 +1,886 @@
++// Spec 11 D3, D7, D8, D15, D16: a dimension as an object. Its six records
++// and their attributes, its page key (a page change rewrites every dimension
++// in the page edit's own undo step; a paper or grid change generates none),
++// save and load, its handles across regenerations, and its diagnostics.
++// Every expected value is hand arithmetic beside the assertion; each
++// dimension's own group sits at the placement (and, in `DO1` and `DO3`,
++// turned further), so a hand value in the plan's frame holds at every
++// placement. Ported from the spike's `engine_test.dart` (`Q5a`) and
++// `drift_test.dart` (`Q2d`); the file cases from 10's
++// `room_diagnostics_test.dart` (`staleFile`).
++import 'dart:convert' show jsonDecode, jsonEncode;
++import 'dart:math' as math;
++
++import 'package:jet_cad_2d_kit_architecture/src/box/box.dart';
++import 'package:jet_cad_2d_kit_architecture/src/dimension/dimension.dart';
++import 'package:jet_cad_2d_kit_architecture/src/wall/wall.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/dimension_fixture.dart';
++
++const l = WallSide.left, r = WallSide.right;
++
++/// [doc]'s `dimension.` diagnostics.
++List<Diagnostic> dimDiagnostics(DraftDocument doc) =>
++    codedAs(diagnosticsOf(doc), 'dimension.');
++
++/// `dimension.degenerate` for [h] (D15).
++Diagnostic degenerate(Handle h) => Diagnostic(
++      severity: DiagnosticSeverity.warning,
++      code: 'dimension.degenerate',
++      message: '${h.toHex()} measures zero',
++      handles: [h],
++    );
++
++/// `dimension.broken` for [h] (D15), for the reasons [why].
++Diagnostic broken(Handle h, String why) => Diagnostic(
++      severity: DiagnosticSeverity.error,
++      code: 'dimension.broken',
++      message: '${h.toHex()} is broken ($why): it draws nothing',
++      handles: [h],
++    );
++
++/// [dim]'s parameters with [change] applied, one command.
++DraftCommand setDim(DraftDocument doc, Handle dim,
++        DimensionParams Function(DimensionParams p) change) =>
++    SetComponentCommand<DimensionParams>(
++        dim, change(doc.components.get<DimensionParams>(dim)!));
++
++/// Wall [w]'s thickness to [t], one command.
++DraftCommand thickness(DraftDocument doc, Handle w, double t) =>
++    SetComponentCommand<WallParams>(
++        w, doc.components.get<WallParams>(w)!.copyWith(thickness: t));
++
++/// The page edit the Page panel makes: [change] of the root's page.
++DraftCommand setPage(
++        DraftDocument doc, PageComponent Function(PageComponent p) change) =>
++    SetComponentCommand<PageComponent>(doc.rootHandle, change(pageOf(doc)));
++
++/// 1:100 in feet-inches.
++PageComponent ftIn100(PageComponent p) =>
++    p.copyWith(scaleDenominator: 100, displayUnit: DisplayUnit.feetInches);
++
++/// `DO3`'s and `DO4`'s L at [place], a millimetres page at 1:50: A (0, 0)
++/// → (4000, 0) and B (4000, 0) → (4000, 3000), 200 each, and three
++/// dimensions:
++///
++/// - [d1], attached to attached: A/0/right (0, −100) → A/1/right, the outer
++///   mitre (4100, −100), aligned, offset −612.25: 4100;
++/// - [d2], attached to a fixed fractional point, in a group turned a further
++///   30°: B/1/left (3900, 3000) → the plan point (1234.5, 2500.25), aligned,
++///   offset 400.75: √(2665.5² + 499.75²) = √(7,104,890.25 + 249,750.0625) =
++///   √7,354,640.3125 = 2,711.944: 2712;
++/// - [d3], a `-0.0` offset: A/0/left (0, 100) → A/1/left, the inner corner
++///   (3900, 100), horizontal: 3900.
++({Plan plan, Handle a, Handle b, Handle d1, Handle d2, Handle d3}) threeOnL(
++    Placement place) {
++  final plan = buildPlan(
++      const [W(0, 0, 4000, 0, 200), W(4000, 0, 4000, 3000, 200)],
++      place: place);
++  final doc = plan.doc;
++  attachPage(doc, mmPage);
++  final [a, b] = plan.walls;
++  final g = place.m;
++  final turned = g.multiply(Transform2.rotation(math.pi / 6));
++  final d1 = addDimension(doc, AttachedEnd(a, 0, r), AttachedEnd(a, 1, r),
++      offset: -612.25, at: g);
++  final d2 = addDimension(
++      doc, AttachedEnd(b, 1, l), fixedAt(plan.at(1234.5, 2500.25), turned),
++      offset: 400.75, at: turned);
++  final d3 = addDimension(doc, AttachedEnd(a, 0, l), AttachedEnd(a, 1, l),
++      kind: DimKind.horizontal, offset: -0.0, at: g);
++  return (plan: plan, a: a, b: b, d1: d1, d2: d2, d3: d3);
++}
++
++void main() {
++  test(
++      'DO1 a dimension\'s children are five LINEs and one TEXT in handle '
++      'order; only the two extension lines carry EntityFlags.unpickable; '
++      'lineweight 25, ByLayer, layer 0, bottom-centre text', () {
++    const place = corpusGroups;
++    final plan = buildPlan(const [W(0, 0, 4000, 0, 200)], place: place);
++    final doc = plan.doc;
++    attachPage(doc, mmPage);
++    final [a] = plan.walls;
++    // The dimension's group at the placement, turned a further 37°.
++    final g = place.m.multiply(Transform2.rotation(37 * math.pi / 180));
++    final dim = addDimension(doc, AttachedEnd(a, 0, l), AttachedEnd(a, 1, l),
++        offset: 600.5, at: g);
++    // A/0/left (0, 100) → A/1/left (4000, 100), aligned: 4000.
++    expect(dimText(doc, dim), '4000');
++
++    final ks = kids(doc, dim);
++    expect(ks, hasLength(6));
++    for (var i = 1; i < ks.length; i++) {
++      expect(ks[i].value, greaterThan(ks[i - 1].value), reason: 'ascending');
++    }
++    expect([
++      for (final k in ks) kindOf(doc, k)
++    ], [
++      EntityKind.line,
++      EntityKind.line,
++      EntityKind.line,
++      EntityKind.line,
++      EntityKind.line,
++      EntityKind.text,
++    ]);
++    // The premise: the not-pickable bit is 1 << 1 (D19).
++    expect(EntityFlags.unpickable, 2);
++    const flags = [0, 2, 2, 0, 0, 0];
++    expect([for (final k in ks) recordOf(doc, k).flags], flags);
++
++    final bottomCentre =
++        packTextAttrs(h: TextJustifyH.centre, v: TextJustifyV.bottom);
++    expect(kDimTextAttrs, bottomCentre);
++    for (var i = 0; i < ks.length; i++) {
++      final rec = recordOf(doc, ks[i]);
++      final what = 'child $i';
++      expect(rec.owner, dim, reason: what);
++      expect(rec.color, const ByLayerColor(), reason: what);
++      expect(rec.linetype, ReservedHandles.byLayerLinetype, reason: what);
++      expect(rec.layer, ReservedHandles.layerZero, reason: what);
++      // 0.25 mm on the five LINEs (decision 20); the TEXT ByLayer.
++      final lw = i < 5 ? 25 : kByLayer;
++      final attrs = i < 5 ? 0 : bottomCentre;
++      expect(rec.lineweight, lw, reason: what);
++      expect(rec.textAttrs, attrs, reason: what);
++      // Every other attribute is draftRecord's default.
++      final want = draftRecord(ks[i], dim, kindOf(doc, ks[i]),
++              text: rec.text, layer: ReservedHandles.layerZero)
++          .copyWith(flags: flags[i], lineweight: lw, textAttrs: attrs);
++      expect(rec.toJson(), want.toJson(), reason: what);
++    }
++    expect(driftOf(doc), isEmpty);
++  });
++
++  for (final place in [origin, corpusGroups]) {
++    test(
++        'DO2 a page change rewrites every dimension in one undo step with '
++        'the same child handles; a paper colour or grid change generates '
++        'none; no page reads as 1:50 m, at $place', () {
++      // Q5a: A (0, 0) → (4000, 0), 200; A/0/left (0, 100) → A/1/left (4000,
++      // 100), aligned, offset 600. u = (1, 0), n = (0, 1): the line at y 100
++      // + 600 = 700; at 1:50 the text 1 × 50 = 50 above it at (2000, 750),
++      // 2.5 × 50 = 125 tall.
++      final plan = buildPlan(const [W(0, 0, 4000, 0, 200)], place: place);
++      final doc = plan.doc;
++      attachPage(doc, mmPage);
++      final [a] = plan.walls;
++      final dim = addDimension(doc, AttachedEnd(a, 0, l), AttachedEnd(a, 1, l),
++          offset: 600, at: place.m);
++      void expectText(String text, double height, double y, String what) {
++        expect(dimText(doc, dim), text, reason: what);
++        final (at, h, _) = dimTextGeometry(doc, dim);
++        expect(h, closeTo(height, 1e-9), reason: what);
++        expect((at - plan.at(2000, y)).length, lessThan(1e-6), reason: what);
++        final line = dimLines(doc, dim)[0];
++        expect((line.$1 - plan.at(0, 700)).length, lessThan(1e-6),
++            reason: what);
++        expect((line.$2 - plan.at(4000, 700)).length, lessThan(1e-6),
++            reason: what);
++      }
++
++      expectText('4000', 125, 750, '1:50 mm');
++      final ks = kids(doc, dim);
++      expect(ks, hasLength(6));
++
++      // The page key holds both halves (D3): a scale-only change (1:50 →
++      // 1:100 in mm: the text 250 tall, 100 above the line at (2000, 800),
++      // still 4000) and a unit-only change (mm → cm at 1:50: 4000 mm = 4000
++      // tenths of a cm, 400.0) each regenerate the text; each is undone.
++      for (final (what, change, text, height, y) in [
++        (
++          'scale only',
++          (PageComponent p) => p.copyWith(scaleDenominator: 100),
++          '4000',
++          250.0,
++          800.0
++        ),
++        (
++          'unit only',
++          (PageComponent p) => p.copyWith(displayUnit: DisplayUnit.centimeters),
++          '400.0',
++          125.0,
++          750.0
++        ),
++      ]) {
++        final n = debugDimensionGenerates;
++        doc.commands.execute(setPage(doc, change));
++        expect(debugDimensionGenerates, greaterThan(n), reason: what);
++        expectText(text, height, y, what);
++        expect(kids(doc, dim), ks, reason: what);
++        doc.commands.undo();
++        expectText('4000', 125, 750, '$what undone');
++      }
++
++      // 1:50 mm → 1:100 ft-in, one command. 4000 / 25.4 = 157.48"; in
++      // quarters 629.92 → 630 = 13 × 48 + 6: 13'-1 1/2". The text 2.5 × 100
++      // = 250 tall, 1 × 100 = 100 above the line: (2000, 800). The line
++      // stays at 700: the offset is a model length (decision 18).
++      final depth = doc.commands.undoDepth;
++      final gens = debugDimensionGenerates;
++      doc.commands.execute(setPage(doc, ftIn100));
++      expect(doc.commands.undoDepth, depth + 1);
++      expect(debugDimensionGenerates, greaterThan(gens));
++      expectText("13'-1 1/2\"", 250, 800, '1:100 ft-in');
++      expect(kids(doc, dim), ks);
++      expect(driftOf(doc), isEmpty);
++      doc.commands.undo();
++      expectText('4000', 125, 750, 'undone');
++      expect(kids(doc, dim), ks);
++      doc.commands.redo();
++      expectText("13'-1 1/2\"", 250, 800, 'redone');
++      expect(kids(doc, dim), ks);
++
++      // A paper colour change and a grid step change: each one step, and no
++      // dimension generates (D3's page key).
++      for (final (what, change) in [
++        ('paper', (PageComponent p) => p.copyWith(background: 0xFF1E3A5F)),
++        ('grid', (PageComponent p) => p.copyWith(gridStepMm: 250.0)),
++      ]) {
++        final before = pageOf(doc);
++        final d = doc.commands.undoDepth;
++        final n = debugDimensionGenerates;
++        doc.commands.execute(setPage(doc, change));
++        expect(doc.commands.undoDepth, d + 1, reason: what);
++        expect(pageOf(doc) == before, isFalse, reason: what);
++        expect(debugDimensionGenerates, n, reason: what);
++        expectText("13'-1 1/2\"", 250, 800, what);
++      }
++      expect(driftOf(doc), isEmpty);
++
++      // No page attached: PageComponent()'s defaults, 1:50 in metres. 4000
++      // mm = 400 hundredths of a metre: 4.00, 125 tall.
++      final bare = buildPlan(const [W(0, 0, 4000, 0, 200)], place: place);
++      expect(bare.doc.components.isRegistered<PageComponent>(), isFalse);
++      final [ba] = bare.walls;
++      final noPage = addDimension(
++          bare.doc, AttachedEnd(ba, 0, l), AttachedEnd(ba, 1, l),
++          offset: 600, at: place.m);
++      expect(dimText(bare.doc, noPage), '4.00');
++      expect(dimTextGeometry(bare.doc, noPage).$2, closeTo(125, 1e-9));
++    });
++
++    test(
++        'DO3 save, load and save is byte-identical, with references intact, '
++        'drift() empty after the load, and a -0.0 offset kept, at $place', () {
++      final (:plan, :a, :b, :d1, :d2, :d3) = threeOnL(place);
++      final doc = plan.doc;
++      expect(dimText(doc, d1), '4100');
++      expect(dimText(doc, d2), '2712');
++      expect(dimText(doc, d3), '3900');
++      final s1 = enc(doc);
++      final back = reloadWithPage(s1);
++      expect(enc(back), s1);
++      expect(driftOf(back), isEmpty);
++      for (final d in [d1, d2, d3]) {
++        expect(back.components.get<DimensionParams>(d),
++            doc.components.get<DimensionParams>(d));
++        expect(kids(back, d), kids(doc, d));
++      }
++      expect(
++          back.components.get<DimensionParams>(d3)!.offset.isNegative, isTrue);
++      // The equality above tells the loaded -0.0 from +0.0 (D2: the offset
++      // by compareTo), so it is not blind to the zero's sign: d3 read back
++      // is not its +0.0 twin.
++      final d3back = back.components.get<DimensionParams>(d3)!;
++      expect(d3back == d3back.copyWith(offset: 0.0), isFalse);
++      expect(
++          (back.components.get<DimensionParams>(d1)!.a as AttachedEnd).wall, a);
++      expect(
++          (back.components.get<DimensionParams>(d2)!.a as AttachedEnd).wall, b);
++
++      // The references are intact: B 200 → 300 moves its faces to 4000 ±
++      // 150. d1's outer mitre goes to (4150, −100): 4150. d2's B/1/left to
++      // (3850, 3000): √(2615.5² + 499.75²) = √(6,840,840.25 + 249,750.0625)
++      // = √7,090,590.3125 = 2,662.816: 2663. d3's inner corner to (3850,
++      // 100): 3850.
++      back.commands.execute(thickness(back, b, 300));
++      expect(dimText(back, d1), '4150');
++      expect(dimText(back, d2), '2663');
++      expect(dimText(back, d3), '3850');
++      expect(driftOf(back), isEmpty);
++      expect(
++          back.components.get<DimensionParams>(d3)!.offset.isNegative, isTrue);
++    });
++  }
++
++  test('DO4 the same state plus the same edit gives the same bytes', () {
++    final x = threeOnL(corpusGroups), y = threeOnL(corpusGroups);
++    expect(enc(x.plan.doc), enc(y.plan.doc));
++    for (final t in [x, y]) {
++      t.plan.doc.commands.execute(thickness(t.plan.doc, t.b, 300.5));
++      // B's outer face at 4000 + 150.25: 4150.25 → 4150.
++      expect(dimText(t.plan.doc, t.d1), '4150');
++    }
++    expect(enc(x.plan.doc), enc(y.plan.doc));
++  });
++
++  // The -0.0 arises only in an unturned group: in a turned one the text's
++  // world angle less the group's is x − x, which is +0.0 in round-to-nearest,
++  // or a nonzero residue. So the row sits at the three unturned placements,
++  // the far ones among them.
++  for (final place in [origin, corpusAxis, km1000Axis]) {
++    test(
++        'DO6 (rvF-textAngleNoZero) a right-to-left aligned pair stores its '
++        'TEXT rotation as +0.0, not -0.0 (D8\'s "+ 0.0"), generated and '
++        'after save and load, at $place', () {
++      final doc = buildPlan(const [], place: place).doc;
++      attachPage(doc, mmPage);
++      final g = place.m;
++      // (1000, 0) → (0, 0) in the group: d = (−1000, 0), u = (−1, 0),
++      // which readable() reverses to ur = (1, −0.0); the world angle is
++      // atan2(−0.0, 1) = −0.0, and the group's atan2(0.0, 1) = +0.0, so
++      // angle − group = −0.0 − 0.0 = −0.0 before the + 0.0.
++      final dim = addDimension(
++          doc, const FixedEnd(1000, 0), const FixedEnd(0, 0),
++          offset: 400.75, at: g);
++      expect(dimText(doc, dim), '1000');
++      final l = layoutDimension(place.at(1000, 0), place.at(0, 0),
++          DimKind.aligned, g, 400.75, mmPage)!;
++      expect(l.textAngle, 0.0);
++      expect(l.textAngle.isNegative, isTrue,
++          reason: 'premise: the world angle is -0.0');
++      expect(math.atan2(g.b, g.a).isNegative, isFalse,
++          reason: 'premise: the group\'s angle is +0.0');
++
++      final rotation = payloadOf(doc, dimTextHandle(doc, dim)).scalars[1];
++      expect(rotation, 0.0);
++      expect(rotation.isNegative, isFalse,
++          reason: 'the generated TEXT stores +0.0');
++
++      final s1 = enc(doc);
++      final back = reloadWithPage(s1);
++      expect(enc(back), s1);
++      expect(driftOf(back), isEmpty);
++      final loaded = payloadOf(back, dimTextHandle(back, dim)).scalars[1];
++      expect(loaded, 0.0);
++      expect(loaded.isNegative, isFalse, reason: 'the loaded TEXT keeps +0.0');
++    });
++  }
++
++  for (final place in [origin, corpusGroups]) {
++    test(
++        'DO5 a dimension keeps its six child handles across twenty '
++        'regenerations, undo and redo, a zero value included, at $place', () {
++      final plan = buildPlan(
++          const [W(0, 0, 4000, 0, 200), W(4000, 0, 4000, 3000, 200)],
++          place: place);
++      final doc = plan.doc;
++      attachPage(doc, mmPage);
++      final [a, b] = plan.walls;
++      // A/0/left (0, 100) → A/1/left, the inner corner (3900, 100),
++      // horizontal: 3900.
++      final dim = addDimension(doc, AttachedEnd(a, 0, l), AttachedEnd(a, 1, l),
++          kind: DimKind.horizontal, offset: 500.25, at: place.m);
++      expect(dimText(doc, dim), '3900');
++      final ks = kids(doc, dim);
++      expect(ks, hasLength(6));
++
++      final edits = <(String, DraftCommand Function())>[
++        ('A longer', () => moveWall(plan, 0, const W(0, 0, 4200.25, 0, 200))),
++        ('A back', () => moveWall(plan, 0, const W(0, 0, 4000, 0, 200))),
++        (
++          'B longer',
++          () => moveWall(plan, 1, const W(4000, 0, 4000, 3500.75, 200))
++        ),
++        ('A thicker', () => thickness(doc, a, 300.5)),
++        ('offset', () => setDim(doc, dim, (p) => p.copyWith(offset: 612.375))),
++        (
++          'offset < 0',
++          () => setDim(doc, dim, (p) => p.copyWith(offset: -250.125))
++        ),
++        (
++          'offset -0.0',
++          () => setDim(doc, dim, (p) => p.copyWith(offset: -0.0))
++        ),
++        ('offset +0.0', () => setDim(doc, dim, (p) => p.copyWith(offset: 0.0))),
++        (
++          'vertical',
++          () => setDim(doc, dim, (p) => p.copyWith(kind: DimKind.vertical))
++        ),
++        (
++          'aligned',
++          () => setDim(doc, dim, (p) => p.copyWith(kind: DimKind.aligned))
++        ),
++        (
++          'horizontal',
++          () => setDim(doc, dim, (p) => p.copyWith(kind: DimKind.horizontal))
++        ),
++        ('1:100 ft-in', () => setPage(doc, ftIn100)),
++        ('1:50 mm', () => setPage(doc, (_) => mmPage)),
++        // A turned north: its left face at x −100, so A/0/left (−100, 0) and
++        // A/1/left (−100, 3000.5) differ along y only: horizontal 0.
++        ('zero', () => moveWall(plan, 0, const W(0, 0, 0, 3000.5, 300.5))),
++        ('restored', () => moveWall(plan, 0, const W(0, 0, 4000, 0, 300.5))),
++        (
++          'A left-justified',
++          () => SetComponentCommand<WallParams>(
++              a,
++              doc.components
++                  .get<WallParams>(a)!
++                  .copyWith(justification: Justification.left))
++        ),
++        (
++          'offset again',
++          () => setDim(doc, dim, (p) => p.copyWith(offset: 1000.5))
++        ),
++        (
++          'B moved',
++          () => moveWall(plan, 1, const W(4000, 0, 4200.5, 3000, 200))
++        ),
++        ('B thinner', () => thickness(doc, b, 150.5)),
++        (
++          'vertical again',
++          () => setDim(doc, dim, (p) => p.copyWith(kind: DimKind.vertical))
++        ),
++      ];
++      expect(edits, hasLength(20));
++      final texts = <String>[dimText(doc, dim)];
++      final depth = doc.commands.undoDepth;
++      for (final (what, edit) in edits) {
++        final n = debugDimensionGenerates;
++        doc.commands.execute(edit());
++        expect(debugDimensionGenerates, greaterThan(n), reason: what);
++        expect(kids(doc, dim), ks, reason: what);
++        texts.add(dimText(doc, dim));
++        if (what == 'zero') expect(dimText(doc, dim), '0', reason: what);
++      }
++      expect(doc.commands.undoDepth, depth + 20);
++      expect(driftOf(doc), isEmpty);
++      for (var i = edits.length - 1; i >= 0; i--) {
++        doc.commands.undo();
++        expect(kids(doc, dim), ks, reason: 'undo ${edits[i].$1}');
++        expect(dimText(doc, dim), texts[i], reason: 'undo ${edits[i].$1}');
++      }
++      for (var i = 0; i < edits.length; i++) {
++        doc.commands.redo();
++        expect(kids(doc, dim), ks, reason: 'redo ${edits[i].$1}');
++        expect(dimText(doc, dim), texts[i + 1], reason: 'redo ${edits[i].$1}');
++      }
++      expect(driftOf(doc), isEmpty);
++    });
++
++    test(
++        'DD1 dimension.degenerate is one warning while the value is within '
++        'wallJoin.linear of zero, and clears when it grows, at $place', () {
++      final plan = buildPlan(const [W(0, 0, 4000, 0, 200)], place: place);
++      final doc = plan.doc;
++      attachPage(doc, mmPage);
++      final [a] = plan.walls;
++      final g = place.m;
++      // Horizontal A/0/left (0, 100) → A/1/left (4000, 100): 4000.
++      final dim = addDimension(doc, AttachedEnd(a, 0, l), AttachedEnd(a, 1, l),
++          kind: DimKind.horizontal, offset: 500.5, at: g);
++      expect(dimText(doc, dim), '4000');
++      expect(dimDiagnostics(doc), isEmpty);
++
++      // Made zero by a wall edit: A's end to (0, 3000.5), so A runs north,
++      // its left face at x −100: A/0/left (−100, 0), A/1/left (−100,
++      // 3000.5), which differ along y only. Horizontal: 0.
++      doc.commands.execute(moveWall(plan, 0, const W(0, 0, 0, 3000.5, 200)));
++      expect(dimText(doc, dim), '0');
++      expect(kids(doc, dim), hasLength(6));
++      expect(dimDiagnostics(doc), [degenerate(dim)]);
++      expect(driftOf(doc), isEmpty);
++      doc.commands.undo();
++      expect(dimText(doc, dim), '4000');
++      expect(dimDiagnostics(doc), isEmpty);
++
++      // Made zero by a rotation: the dimension's group alone turned a further
++      // 90° (decision 17: the axis turns with the group, the attached ends
++      // stay). Its local x is now the plan's y, along which the pair (0,
++      // 100)-(4000, 100) does not differ: 0.
++      doc.commands.execute(TransformNodeCommand(
++          dim, g.multiply(Transform2.rotation(math.pi / 2))));
++      expect(dimText(doc, dim), '0');
++      expect(kids(doc, dim), hasLength(6));
++      expect(dimDiagnostics(doc), [degenerate(dim)]);
++      expect(driftOf(doc), isEmpty);
++      doc.commands.undo();
++      expect(dimText(doc, dim), '4000');
++      expect(dimDiagnostics(doc), isEmpty);
++      doc.commands.redo();
++      expect(dimDiagnostics(doc), [degenerate(dim)]);
++      doc.commands.undo();
++
++      // The bound, where the arithmetic is exact (the origin, a group at the
++      // identity, fixed ends): a horizontal component of exactly 1e-6 =
++      // wallJoin.linear is zero; 2e-6 is not.
++      if (place == origin) {
++        expect(wallJoin.linear, 1e-6);
++        final at = addDimension(
++            doc, const FixedEnd(0, 0), const FixedEnd(1e-6, 5000.5),
++            kind: DimKind.horizontal, offset: 300.25);
++        final over = addDimension(
++            doc, const FixedEnd(0, 0), const FixedEnd(2e-6, 5000.5),
++            kind: DimKind.horizontal, offset: 300.25);
++        expect(dimText(doc, at), '0');
++        expect(dimText(doc, over), '0');
++        expect(dimDiagnostics(doc), [degenerate(at)]);
++      }
++    });
++
++    test(
++        'DD2 dimension.broken from a file (a live box as the wall, k = 2, '
++        'an infinite point, an infinite offset) and from a command (a NaN '
++        'point, a NaN offset): each an error, childless; a dead wall handle '
++        'is parametric.dangling only, at $place', () {
++      final plan = buildPlan(const [W(0, 0, 4000, 0, 200)], place: place);
++      final doc = plan.doc;
++      attachPage(doc, mmPage);
++      final [a] = plan.walls;
++      final g = place.m;
++      // A live box, a root-level group far from the wall.
++      final box = doc.handleSeed.next();
++      doc.commands.execute(CompoundCommand([
++        AddNodeCommand(GroupNode(
++            handle: box,
++            parent: doc.rootHandle,
++            transform: g.multiply(Transform2.translation(9000.5, 3000.25)),
++            children: const [])),
++        SetComponentCommand<BoxParams>(box, const BoxParams(1200, 800)),
++      ], label: 'Add box'));
++
++      // --- The file cases (Ruling 11-12): a file no program regenerated,
++      // with markers where the file will carry 1e999 and -1e999.
++      const pointMarker = 98765.4375, offsetMarker = 7777.125;
++      late final Handle dBox, dK2, dPoint, dOffset, dDead, dKm1, ghost;
++      final clean = staleFile(doc, (bare) {
++        dBox = addDimension(bare, AttachedEnd(box, 0, l), AttachedEnd(a, 1, l),
++            offset: 600.5, at: g);
++        dK2 = addDimension(bare, AttachedEnd(a, 0, r), AttachedEnd(a, 1, r),
++            offset: 600.5, at: g);
++        dPoint = addDimension(
++            bare, AttachedEnd(a, 0, l), const FixedEnd(pointMarker, 250.25),
++            offset: 600.5, at: g);
++        dOffset = addDimension(bare, AttachedEnd(a, 0, l), AttachedEnd(a, 1, l),
++            offset: offsetMarker, at: g);
++        // A handle the seed issued that names no object at all.
++        ghost = bare.handleSeed.next();
++        dDead = addDimension(
++            bare, AttachedEnd(ghost, 0, l), AttachedEnd(a, 1, l),
++            offset: 600.5, at: g);
++        dKm1 = addDimension(bare, AttachedEnd(a, 1, r), AttachedEnd(a, 0, l),
++            offset: 600.5, at: g);
++      });
++      // k = 2 by editing the JSON; then the two markers become 1e999 and
++      // -1e999 in the text, which jsonDecode reads as ±Infinity.
++      final json = jsonDecode(clean) as Map<String, Object?>;
++      final dims =
++          ((json['components']! as Map)[DimensionParams.componentTypeId]!
++              as Map)[dK2.value.toString()]! as Map;
++      (dims['a']! as Map)['k'] = 2;
++      ((((json['components']! as Map)[DimensionParams.componentTypeId]!
++          as Map)[dKm1.value.toString()]! as Map)['a']! as Map)['k'] = -1;
++      var file = jsonEncode(json);
++      for (final m in ['$pointMarker', '$offsetMarker']) {
++        expect(file.split(m), hasLength(2), reason: 'the marker $m, once');
++      }
++      file = file
++          .replaceFirst('$pointMarker', '1e999')
++          .replaceFirst('$offsetMarker', '-1e999');
++      final back = reloadWithPage(file);
++      // The premises: the file carried what it says.
++      DimensionParams paramsOf(Handle h) =>
++          back.components.get<DimensionParams>(h)!;
++      expect((paramsOf(dK2).a as AttachedEnd).k, 2);
++      expect((paramsOf(dKm1).a as AttachedEnd).k, -1);
++      expect((paramsOf(dPoint).b as FixedEnd).x, double.infinity);
++      expect(paramsOf(dOffset).offset, double.negativeInfinity);
++      expect(back.components.get<BoxParams>(box), isNotNull);
++      expect(back.tree[ghost], isNull);
++
++      final want = [
++        Diagnostic(
++          severity: DiagnosticSeverity.error,
++          code: 'parametric.dangling',
++          message: '${dDead.toHex()} references ${ghost.toHex()}, which is '
++              'not a live parametric object',
++          handles: [dDead, ghost],
++        ),
++        broken(dBox, 'end a names ${box.toHex()}, which is not a wall'),
++        broken(dK2, 'end a has k = 2, not 0 or 1'),
++        broken(dPoint, 'end b is a point that is not finite'),
++        broken(dOffset, 'the offset is not finite'),
++        broken(dKm1, 'end a has k = -1, not 0 or 1'),
++      ];
++      List<Diagnostic> reported(DraftDocument d) => [
++            for (final x in diagnosticsOf(d))
++              if (x.code.startsWith('dimension.') ||
++                  x.code.startsWith('parametric.'))
++                x,
++          ];
++      final all = [dBox, dK2, dPoint, dOffset, dDead, dKm1];
++      expect(reported(back), want);
++      expect(driftOf(back), isEmpty);
++      // A page change regenerates every dimension (D3): each broken one, and
++      // the dangling one, generates nothing.
++      back.commands.execute(setPage(back, ftIn100));
++      for (final h in all) {
++        expect(kids(back, h), isEmpty, reason: h.toHex());
++      }
++      expect(reported(back), want);
++      expect(driftOf(back), isEmpty);
++
++      // --- The command cases: NaN, which no file can carry. A live
++      // dimension, A/0/left (0, 100) → the fixed (2500.5, 1250.25), six
++      // children, then its point, its offset, and both made NaN.
++      final dim = addDimension(
++          doc, AttachedEnd(a, 0, l), fixedAt(plan.at(2500.5, 1250.25), g),
++          offset: 600.5, at: g);
++      final ks = kids(doc, dim);
++      expect(ks, hasLength(6));
++      expect(dimDiagnostics(doc), isEmpty);
++      for (final (what, change, why) in [
++        (
++          'NaN point',
++          (DimensionParams p) =>
++              p.copyWith(b: const FixedEnd(double.nan, 1250.25)),
++          'end b is a point that is not finite'
++        ),
++        (
++          'NaN offset',
++          (DimensionParams p) => p.copyWith(offset: double.nan),
++          'the offset is not finite'
++        ),
++        (
++          'both',
++          (DimensionParams p) => p.copyWith(
++              b: const FixedEnd(1250.25, double.nan), offset: double.nan),
++          'end b is a point that is not finite; the offset is not finite'
++        ),
++      ]) {
++        doc.commands.execute(setDim(doc, dim, change));
++        // Never == on a NaN-carrying value (a NaN coordinate equals
++        // nothing): the fields are read instead.
++        final p = doc.components.get<DimensionParams>(dim)!;
++        expect(
++            (p.b as FixedEnd).x.isNaN ||
++                (p.b as FixedEnd).y.isNaN ||
++                p.offset.isNaN,
++            isTrue,
++            reason: what);
++        expect(kids(doc, dim), isEmpty, reason: what);
++        expect(dimDiagnostics(doc), [broken(dim, why)], reason: what);
++        expect(driftOf(doc), isEmpty, reason: what);
++        doc.commands.undo();
++        expect(kids(doc, dim), ks, reason: '$what undone');
++        expect(dimDiagnostics(doc), isEmpty, reason: '$what undone');
++      }
++
++      // --- Unmeasurable: two finite fixed points whose world distance
++      // overflows (|x| = 1e200, the difference 2e200, its square beyond a
++      // double). No stored value is non-finite, but the aligned value is:
++      // layoutDimension gives nothing, generate makes no child, and the
++      // dimension is broken, never silently empty (D7).
++      final wide = addDimension(
++          doc, const FixedEnd(1e200, 0.5), const FixedEnd(-1e200, 0.5),
++          offset: 500.25, at: g);
++      final w0 = g.transformPoint(Vector2(1e200, 0.5));
++      final w1 = g.transformPoint(Vector2(-1e200, 0.5));
++      expect(w0.x.isFinite && w1.x.isFinite, isTrue);
++      expect((w1 - w0).length.isFinite, isFalse);
++      expect(
++          layoutDimension(w0, w1, DimKind.aligned, g, 500.25, mmPage), isNull);
++      expect(kids(doc, wide), isEmpty);
++      expect([
++        for (final x in diagnosticsOf(doc))
++          if (x.handles.contains(wide)) x,
++      ], [
++        broken(wide, 'it cannot be laid out in finite numbers')
++      ]);
++      expect(driftOf(doc), isEmpty);
++    });
++  }
++
++  for (final place in [origin, corpusAxis, corpusGroups]) {
++    test(
++        'DD3 a wall edit that overflows an aligned dimension\'s length makes '
++        'it broken, not silently empty, while a horizontal one on the same '
++        'points still draws and reads zero, at $place', () {
++      // Task 7's review (I1): A (0, 0) → (4000, 0), 200; both dimensions
++      // A/0/left (0, 100) → A/0/right (0, −100): aligned 200, horizontal 0
++      // (the pair differs along y only), each in a group at the placement.
++      final plan = buildPlan(const [W(0, 0, 4000, 0, 200)], place: place);
++      final doc = plan.doc;
++      attachPage(doc, mmPage);
++      final [a] = plan.walls;
++      final al = addDimension(doc, AttachedEnd(a, 0, l), AttachedEnd(a, 0, r),
++          offset: 300.25, at: place.m);
++      final ho = addDimension(doc, AttachedEnd(a, 0, l), AttachedEnd(a, 0, r),
++          kind: DimKind.horizontal, offset: 300.25, at: place.m);
++      expect(dimText(doc, al), '200');
++      expect(dimText(doc, ho), '0');
++      final alKids = kids(doc, al), hoKids = kids(doc, ho);
++      expect(alKids, hasLength(6));
++      expect(hoKids, hasLength(6));
++      expect(dimDiagnostics(doc), [degenerate(ho)]);
++
++      // One command: the thickness to 1.5e154, which a wall accepts. The
++      // faces lie ±7.5e153 off the centreline, so the pair is 1.5e154 apart,
++      // whose square (2.25e308) is beyond a double's 1.8e308: the aligned
++      // length overflows. The horizontal component is still (0, −1.5e154) ·
++      // (1, 0) = 0, exactly, where the wall is unturned.
++      final edit = thickness(doc, a, 1.5e154);
++      if (place.deg != 0) {
++        // Turned, 07's region check refuses the wall's own outline at this
++        // thickness, and the edit rolls back whole: the premise the clause
++        // needs is unreachable there, and nothing changes.
++        final depth = doc.commands.undoDepth;
++        expect(() => doc.commands.execute(edit), throwsArgumentError);
++        expect(doc.commands.undoDepth, depth);
++        expect(doc.components.get<WallParams>(a)!.thickness, 200);
++        expect(kids(doc, al), alKids);
++        expect(kids(doc, ho), hoKids);
++        expect(dimDiagnostics(doc), [degenerate(ho)]);
++        expect(driftOf(doc), isEmpty);
++        return;
++      }
++      doc.commands.execute(edit);
++      expect(kids(doc, al), isEmpty);
++      expect(kids(doc, ho), hoKids);
++      expect(dimText(doc, ho), '0');
++      expect(dimDiagnostics(doc), [
++        broken(al, 'it cannot be laid out in finite numbers'),
++        degenerate(ho),
++      ]);
++      expect(driftOf(doc), isEmpty);
++
++      doc.commands.undo();
++      expect(kids(doc, al), alKids);
++      expect(kids(doc, ho), hoKids);
++      expect(dimText(doc, al), '200');
++      expect(dimText(doc, ho), '0');
++      expect(dimDiagnostics(doc), [degenerate(ho)]);
++      expect(driftOf(doc), isEmpty);
++    });
++  }
++
++  for (final place in [origin, corpusGroups]) {
++    test(
++        'DD4 a page so large that the text height overflows makes a 4000 mm '
++        'dimension broken ("it cannot be laid out in finite numbers"); a NaN '
++        'offset on a coincident pair is broken only, never also degenerate, '
++        'at $place', () {
++      // Task 7's re-review (m1, m2). A (0, 0) → (4000, 0), 200.
++      final plan = buildPlan(const [W(0, 0, 4000, 0, 200)], place: place);
++      final doc = plan.doc;
++      attachPage(doc, mmPage);
++      final [a] = plan.walls;
++      final g = place.m;
++
++      // --- 1:1e308. A/0/left (0, 100) → A/1/left (4000, 100), aligned:
++      // 4000, finite and small. The page's paper lengths are not: the text
++      // height is 2.5 × 1e308 and the overshoot 2 × 1e308, both beyond a
++      // double's 1.8e308. So the dimension cannot be laid out, though its
++      // value can.
++      final dim = addDimension(doc, AttachedEnd(a, 0, l), AttachedEnd(a, 1, l),
++          offset: 600.5, at: g);
++      expect(dimText(doc, dim), '4000');
++      final ks = kids(doc, dim);
++      expect(ks, hasLength(6));
++      expect(dimDiagnostics(doc), isEmpty);
++      expect((kDimTextPaperMm * 1e308).isFinite, isFalse);
++      expect((kDimExtOvershootPaperMm * 1e308).isFinite, isFalse);
++      doc.commands
++          .execute(setPage(doc, (p) => p.copyWith(scaleDenominator: 1e308)));
++      expect(pageOf(doc).scaleDenominator, 1e308);
++      expect(kids(doc, dim), isEmpty);
++      expect(dimDiagnostics(doc),
++          [broken(dim, 'it cannot be laid out in finite numbers')]);
++      expect(driftOf(doc), isEmpty);
++      doc.commands.undo();
++      expect(kids(doc, dim), ks);
++      expect(dimText(doc, dim), '4000');
++      expect(dimDiagnostics(doc), isEmpty);
++      expect(driftOf(doc), isEmpty);
++
++      // --- A coincident aligned pair, the fixed plan point (1234.5,
++      // −310.25) twice: it measures 0 and is degenerate. Its offset made
++      // NaN: broken, and only broken. (The layout the diagnosis tries with a
++      // zero offset still measures 0; that is not reported.)
++      final zero = addDimension(doc, fixedAt(plan.at(1234.5, -310.25), g),
++          fixedAt(plan.at(1234.5, -310.25), g),
++          offset: 600.5, at: g);
++      final zks = kids(doc, zero);
++      expect(zks, hasLength(6));
++      expect(dimText(doc, zero), '0');
++      expect(dimDiagnostics(doc), [degenerate(zero)]);
++      doc.commands
++          .execute(setDim(doc, zero, (p) => p.copyWith(offset: double.nan)));
++      expect(doc.components.get<DimensionParams>(zero)!.offset.isNaN, isTrue);
++      expect(kids(doc, zero), isEmpty);
++      expect(dimDiagnostics(doc), [broken(zero, 'the offset is not finite')]);
++      expect(driftOf(doc), isEmpty);
++      doc.commands.undo();
++      expect(kids(doc, zero), zks);
++      expect(dimDiagnostics(doc), [degenerate(zero)]);
++      expect(driftOf(doc), isEmpty);
++    });
++  }
++
++  for (final place in [origin, corpusAxis]) {
++    test(
++        'DD5 a value above kDimMaxValueMm (1e15 mm) is not laid out: an '
++        'aligned dimension across a wall made 1e20 thick is broken and draws '
++        'nothing, while a horizontal one on the same points still reads 0, '
++        'at $place', () {
++      // Task 7's re-review (m3). The bound's two sides, through the one
++      // layout: 9.99e14 mm prints; 1.01e15 mm is not laid out.
++      final o = Vector2(1234.5, -310.25);
++      expect(kDimMaxValueMm, 1e15);
++      expect(
++          layoutDimension(o, o + Vector2(9.99e14, 0), DimKind.aligned,
++                  Transform2.identity(), 600.5, mmPage)!
++              .text,
++          '999000000000000');
++      expect(
++          layoutDimension(o, o + Vector2(1.01e15, 0), DimKind.aligned,
++              Transform2.identity(), 600.5, mmPage),
++          isNull);
++      // The premise the bound answers: the format cannot print 1e20 mm.
++      expect(formatDimension(1e20, DisplayUnit.millimeters),
++          isNot('100000000000000000000'));
++
++      // A (0, 0) → (4000, 0), 200, unturned (07's region check refuses a
++      // turned wall at an absurd thickness, DD3). Both dimensions A/0/left
++      // (0, 100) → A/0/right (0, −100): aligned 200, horizontal 0.
++      final plan = buildPlan(const [W(0, 0, 4000, 0, 200)], place: place);
++      final doc = plan.doc;
++      attachPage(doc, mmPage);
++      final [a] = plan.walls;
++      final al = addDimension(doc, AttachedEnd(a, 0, l), AttachedEnd(a, 0, r),
++          offset: 300.25, at: place.m);
++      final ho = addDimension(doc, AttachedEnd(a, 0, l), AttachedEnd(a, 0, r),
++          kind: DimKind.horizontal, offset: 300.25, at: place.m);
++      expect(dimText(doc, al), '200');
++      expect(dimText(doc, ho), '0');
++      final alKids = kids(doc, al), hoKids = kids(doc, ho);
++      expect(dimDiagnostics(doc), [degenerate(ho)]);
++
++      // The thickness to 1e20 through the panel's command: the faces lie
++      // ±5e19 off the centreline, so the aligned value is 1e20, finite and
++      // above 1e15; the horizontal component is still exactly 0.
++      doc.commands.execute(SetComponentCommand<WallParams>(
++          a, doc.components.get<WallParams>(a)!.copyWith(thickness: 1e20)));
++      expect(doc.components.get<WallParams>(a)!.thickness, 1e20);
++      expect(kids(doc, al), isEmpty);
++      expect(kids(doc, ho), hoKids);
++      expect(dimText(doc, ho), '0');
++      expect(dimDiagnostics(doc), [
++        broken(al, 'it cannot be laid out in finite numbers'),
++        degenerate(ho),
++      ]);
++      expect(driftOf(doc), isEmpty);
++
++      doc.commands.undo();
++      expect(kids(doc, al), alKids);
++      expect(dimText(doc, al), '200');
++      expect(dimDiagnostics(doc), [degenerate(ho)]);
++      expect(driftOf(doc), isEmpty);
++    });
++  }
++}
+diff --git a/packages/jet_cad_2d_kit_architecture/test/dimension/dimension_plan_test.dart b/packages/jet_cad_2d_kit_architecture/test/dimension/dimension_plan_test.dart
+new file mode 100644
+index 00000000..a11d1df7
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/test/dimension/dimension_plan_test.dart
+@@ -0,0 +1,243 @@
++// 3a Task 21, spec C3.6, C1.1, C1.5: the dimension as a plan type. Its five
++// fields over the object (the value as drawn, memoised by the history
++// state; the kind, gated by reshape; the axes line in the words' language
++// with their decimal separator, omitted when not turned; the two end
++// lines in words), and its grips over the plan's services: F3 and the live
++// types are the services' (spec C1.5: a frozen wall attaches nothing).
++// Today's section: jet_cad_floor_plan/lib/src/selection_panel.dart:846-976.
++// Every fixture is C2's L at the corpus far origin, each wall in its own
++// turned group, on a 1:50 mm page.
++import 'dart:math' as math;
++import 'dart:ui' show Locale;
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:jet_cad_2d_kit/testing.dart';
++import 'package:jet_cad_2d_kit_architecture/src/dimension/dimension.dart';
++import 'package:jet_cad_2d_kit_architecture/src/dimension/dimension_plan.dart';
++import 'package:jet_cad_2d_kit_architecture/src/words/words.dart'
++    show architectureNames;
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/dimension_fixture.dart';
++
++const l = WallSide.left, r = WallSide.right;
++
++/// The kit's words in [language], with [separator] as the UI's decimal
++/// separator.
++KitWords wordsIn(String language, {String separator = '.'}) =>
++    KitNamesWords(architectureNames, () => Locale(language),
++        decimalSeparator: () => separator);
++
++/// [h]'s fields as the plan's panel binds them (spec C1.1).
++List<PropertyField> fieldsOf(DraftDocument doc, Handle h, KitWords words) =>
++    dimensionPlanType.fieldsOf(doc, h, words);
++
++PropertyField fieldOf(List<PropertyField> fields, String id) =>
++    fields.singleWhere((f) => f.spec.id == id);
++
++/// C2's L at the corpus far origin in own groups, on a 1:50 mm page.
++Plan lPlan() {
++  final plan = buildPlan(c2Walls, place: corpusGroups);
++  attachPage(plan.doc, mmPage);
++  return plan;
++}
++
++/// The placement turned [deg] further: a dimension group's transform.
++Transform2 turned(double deg) =>
++    corpusGroups.m.multiply(Transform2.rotation(deg * math.pi / 180));
++
++void main() {
++  test(
++      'DM-fields five fields in order under property:architecture.dimension, '
++      'the kind gated by reshape; the value as drawn; no axes line for '
++      'aligned; the end lines in words (M-DM1, M-DM2)', () {
++    final plan = lPlan();
++    final doc = plan.doc;
++    final [a, _] = plan.walls;
++    // DO3's d1: A/0/right (0, −100) → A/1/right, the outer mitre (4100,
++    // −100), aligned, offset −612.25: 4100.
++    final d = addDimension(doc, AttachedEnd(a, 0, r), AttachedEnd(a, 1, r),
++        offset: -612.25, at: corpusGroups.m);
++    final fields = fieldsOf(doc, d, wordsIn('en'));
++    const ids = ['value', 'kind', 'axes', 'end-1', 'end-2'];
++    expect([for (final f in fields) f.spec.id], ids);
++    expect([for (final f in fields) f.wordId],
++        [for (final id in ids) 'property:architecture.dimension.$id']);
++    expect(fieldOf(fields, 'kind').spec.gate, PlanGate.reshape);
++    expect(fieldOf(fields, 'value').spec.gate, isNull);
++    expect(fieldOf(fields, 'value').value, '4100');
++    expect(fieldOf(fields, 'value').commit, isNull, reason: 'read-only');
++    expect(fieldOf(fields, 'kind').value, DimKind.aligned);
++    expect(fieldOf(fields, 'axes').visible, isFalse,
++        reason: 'aligned: no axes line');
++    expect(
++        fieldOf(fields, 'end-1').value, 'Wall ${a.toHex()}, start, right face');
++    expect(
++        fieldOf(fields, 'end-2').value, 'Wall ${a.toHex()}, end, right face');
++
++    // The kind's commit: only the kind changes (R-27), one command.
++    final p0 = doc.components.get<DimensionParams>(d)!;
++    final command = dimensionPlanType.commitField(
++        doc, d, fieldOf(fields, 'kind'), DimKind.horizontal, wordsIn('en'));
++    doc.commands.execute(command);
++    expect(doc.components.get<DimensionParams>(d),
++        p0.copyWith(kind: DimKind.horizontal));
++  });
++
++  test(
++      'DM-value the value as drawn, read once per history state; a wall '
++      'edit re-reads it; a broken dimension reads — (M-DM3, M-DM4)', () {
++    final plan = lPlan();
++    final doc = plan.doc;
++    final [a, _] = plan.walls;
++    // PN1's dimension: A/0/left (0, 100) to the plan point (3450.6, 100):
++    // 3450.6 mm, which reads 3451.
++    final d = addDimension(doc, AttachedEnd(a, 0, l),
++        fixedAt(plan.at(3450.6, 100), corpusGroups.m),
++        kind: DimKind.aligned, offset: 400.25, at: corpusGroups.m);
++    final broken = addDimension(doc, AttachedEnd(a, 2, l),
++        fixedAt(plan.at(3450.6, 100), corpusGroups.m),
++        kind: DimKind.aligned, offset: 400.25, at: corpusGroups.m);
++    final words = wordsIn('en');
++    String? value(Handle h) =>
++        fieldOf(fieldsOf(doc, h, words), 'value').value as String?;
++
++    expect(value(d), '3451');
++    final scans = debugDimensionValueScans;
++    expect(value(d), '3451');
++    expect(value(d), '3451');
++    expect(debugDimensionValueScans, scans, reason: 'one state: no rescan');
++
++    // A moved 500.25 along the plan's −x (its joint with B broken): A/0/left
++    // is (−500.25, 100), the value 3950.85, which reads 3951 (PN1).
++    final t = corpusGroups.m.transformDirection(Vector2(-500.25, 0));
++    doc.commands.execute(TransformNodeCommand(
++        a, Transform2.translation(t.x, t.y).multiply(doc.tree[a]!.transform)));
++    expect(dimText(doc, d), '3951', reason: 'premise: regenerated');
++    expect(value(d), '3951', reason: 'a new state is read');
++    expect(debugDimensionValueScans, scans + 1);
++
++    expect(kids(doc, broken), isEmpty, reason: 'premise: broken (D15)');
++    expect(value(broken), '—');
++  });
++
++  test(
++      'DM-axes the axes line in the words\' language with their decimal '
++      'separator; the end lines in Turkish (M-DM5, M-DM6)', () {
++    final plan = lPlan();
++    final doc = plan.doc;
++    final [a, _] = plan.walls;
++    // Horizontal in a group turned 30° past the placement's 23°: the world
++    // rotation is 53°, which reads 53.0.
++    final d = addDimension(
++        doc, AttachedEnd(a, 1, r), const FixedEnd(1000.25, 1500.5),
++        kind: DimKind.horizontal, offset: 300.5, at: turned(30));
++    expect(fieldOf(fieldsOf(doc, d, wordsIn('en')), 'axes').value,
++        'Axes turned 53.0°');
++    expect(
++        fieldOf(fieldsOf(doc, d, wordsIn('de', separator: ',')), 'axes').value,
++        'Achsen um 53,0° gedreht');
++    final tr = fieldsOf(doc, d, wordsIn('tr', separator: ','));
++    expect(fieldOf(tr, 'axes').value, 'Eksenler 53,0° döndürülmüş');
++    expect(fieldOf(tr, 'axes').visible, isTrue);
++    expect(fieldOf(tr, 'end-1').value, 'Duvar ${a.toHex()}, bitiş, sağ yüzey');
++    expect(fieldOf(tr, 'end-2').value, 'Sabit');
++  });
++
++  test(
++      'DM-grips the type\'s grips read the plan\'s services: F3 off fixes the '
++      'dropped end; a frozen wall attaches nothing (M-DM7, M-DM8)', () {
++    final plan = lPlan();
++    final doc = plan.doc;
++    final [a, _] = plan.walls;
++    final g = turned(30);
++    FakePlanServices services(
++        {bool objectSnap = true, Set<Handle> frozen = const {}}) {
++      final s = FakePlanServices(
++          document: doc,
++          catalog: testCatalog(),
++          objectSnap: objectSnap,
++          frozen: frozen);
++      addTearDown(s.dispose);
++      return s;
++    }
++
++    // A fresh fixed-fixed dimension; its grip at a dropped on A's free
++    // start's left corner (0, 100), A/0/left alone (GE3's premise).
++    DimEnd dropA(FakePlanServices s) {
++      final d = addDimension(doc, fixedAt(plan.at(500.25, 1500.5), g),
++          fixedAt(plan.at(2500.75, 2200.25), g),
++          kind: DimKind.aligned, offset: 250.5, at: g);
++      final grips = dimensionPlanType.gripsFor(s)!;
++      final grip = grips.gripsOf(doc, d)[1];
++      doc.commands.execute(grips.drag(doc, d, grip, plan.at(0, 100))!);
++      return doc.components.get<DimensionParams>(d)!.a;
++    }
++
++    expect(dropA(services()), AttachedEnd(a, 0, l), reason: 'control');
++    expect(dropA(services(objectSnap: false)), isA<FixedEnd>(),
++        reason: 'F3 off');
++    expect(dropA(services(frozen: {a})), isA<FixedEnd>(),
++        reason: 'A frozen: no wall end point');
++  });
++
++  test(
++      'DM-freeze a wall frozen during a grip drag, with no document change: '
++      'the very next preview reads the live walls as they are then, not the '
++      'per-drag memo of points laid out before (FREEZE RULE, M-DM11)', () {
++    List<double> flat(List<(EntityKind, GeometryPayload)> p) =>
++        [for (final (_, pl) in p) ...pl.coords];
++
++    // Each drag on its own L, its own services and its own memo: B is
++    // frozen between two previews of one drag, the first of which made
++    // the memo with B live. The dimension's b is A/1/right: the L's outer
++    // mitre (4100, −100) while B is live, A's free end's right corner
++    // (4000, −100) once B is frozen.
++    for (final (ordinal, x, y, why) in [
++      // The offset grip: the line and its extension at b move with b's
++      // point, which the memo holds as the dimension stood.
++      (0, 1700.5, 900.25, 'the offset grip'),
++      // a's grip on the outer mitre: while B is live, A/1/right is there,
++      // the most parallel to the group's x (A at 23°, B at 113°, the
++      // group at 53°), and equal to b, so the drop is refused and the
++      // preview empty. Once B is frozen, A/1/right is (4000, −100) and
++      // nothing attaches there: a fixed at the mitre, 100 from b.
++      (1, 4100.0, -100.0, 'a\'s grip on the outer mitre'),
++    ]) {
++      final plan = lPlan();
++      final doc = plan.doc;
++      final [a, b] = plan.walls;
++      final g = turned(30);
++      final frozen = <Handle>{};
++      final s = FakePlanServices(
++          document: doc, catalog: testCatalog(), frozen: frozen);
++      addTearDown(s.dispose);
++      final d = addDimension(
++          doc, fixedAt(plan.at(1200.5, 2600.25), g), AttachedEnd(a, 1, r),
++          kind: DimKind.horizontal, offset: -180.25, at: g);
++      final grips = dimensionPlanType.gripsFor(s)!;
++      final grip = grips.gripsOf(doc, d)[ordinal];
++      final q = plan.at(x, y);
++      final depth = doc.commands.undoDepth;
++
++      final before = flat(grips.preview(doc, d, grip, q));
++      frozen.add(b);
++      final after = flat(grips.preview(doc, d, grip, q));
++      final fresh =
++          flat(dimensionPlanType.gripsFor(s)!.preview(doc, d, grip, q));
++      expect(fresh, hasLength(20), reason: '$why: B frozen, five lines');
++      expect(fresh, isNot(before), reason: '$why: premise: the freeze shows');
++      expect(after, fresh, reason: '$why: the next preview, B frozen');
++      expect(doc.commands.undoDepth, depth, reason: '$why: no document change');
++
++      // The drop gathers afresh: b keeps its reference, a is fixed.
++      final command = grips.drag(doc, d, grip, q);
++      expect(command, isNotNull, reason: '$why: a drop');
++      doc.commands.execute(command!);
++      expect(doc.components.get<DimensionParams>(d)!.b, AttachedEnd(a, 1, r),
++          reason: '$why: b kept');
++    }
++  });
++}
+diff --git a/packages/jet_cad_2d_kit_architecture/test/wall/wall_grips_test.dart b/packages/jet_cad_2d_kit_architecture/test/wall/wall_grips_test.dart
+index 66bc514a..2fb7f30f 100644
+--- a/packages/jet_cad_2d_kit_architecture/test/wall/wall_grips_test.dart
++++ b/packages/jet_cad_2d_kit_architecture/test/wall/wall_grips_test.dart
+@@ -1,26 +1,42 @@
+ // Ported from jet_cad_floor_plan/test/wall_grips_test.dart (3a Task 12,
+-// R-P1): the provider-direct tails of EG1, EG3, EG4 and EG6, and of EG8
+-// (Task 17, R-P8), whose WallGrips is a kit internal, assertions
++// R-P1): the provider-direct tails of EG1, EG3, EG4 and EG6, of EG8
++// (Task 17, R-P8) and the kit's readers of EG9 and EG10 (Task 21, R-P8),
++// whose WallGrips is a kit internal, assertions
+ // unchanged, each over its case's fixture as the shell case leaves it
+ // there (the shell part ends undone or
+ // refused, so the document is the fixture's). The shell parts run in
+ // jet_cad_2d_integration. Every wall sits at the far origin in its own
+ // rotated group (`groupAt`, or a spoke's group at its hub).
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
++    show ObjectGripProvider;
++import 'package:jet_cad_2d_kit/testing.dart' show FakePlanServices;
++import 'package:jet_cad_2d_kit_architecture/src/dimension/dimension.dart';
++import 'package:jet_cad_2d_kit_architecture/src/dimension/dimension_attach.dart';
++import 'package:jet_cad_2d_kit_architecture/src/dimension/dimension_grips.dart';
++import 'package:jet_cad_2d_kit_architecture/src/kit.dart';
++import 'package:jet_cad_2d_kit_architecture/src/opening/opening_geometry.dart';
++import 'package:jet_cad_2d_kit_architecture/src/opening/opening_grips.dart';
++import 'package:jet_cad_2d_kit_architecture/src/room/room_inputs.dart';
++import 'package:jet_cad_2d_kit_architecture/src/separator/separator_grips.dart';
++import 'package:jet_cad_2d_kit_architecture/src/wall/wall_bands.dart';
++import 'package:jet_cad_2d_kit_architecture/src/wall/wall_geometry.dart'
++    show wallsInDocument;
+ import 'package:jet_cad_2d_kit_architecture/src/opening/opening.dart';
+ import 'package:jet_cad_2d_kit_architecture/src/separator/separator.dart';
+ import 'package:jet_cad_2d_kit_architecture/src/wall/wall.dart';
+ import 'package:jet_cad_2d_kit_architecture/src/wall/wall_grips.dart';
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
++import '../support/dimension_fixture.dart' show dimLines;
+ import '../support/wall_fixture.dart';
+ 
+ /// The walls [build] adds to an empty document with the kit tests' system,
+ /// with no undo history (wall_grips_test.dart:36-56's `gripDoc`, without
+ /// the page, which only the shell's snap reads).
+ DraftDocument gripDoc(void Function(DraftDocument doc) build) {
+   final doc = wallDoc();
+   build(doc);
+   doc.commands.clearHistory();
+   return doc;
+@@ -338,11 +354,224 @@ void main() {
+     final pieces = grips.preview(doc, wa, g, q);
+     expect(pieces.map((p) => p.$1), [EntityKind.line, EntityKind.line]);
+     final [a0, a1] = pointsOf(pieces[0].$2);
+     final [b0, b1] = pointsOf(pieces[1].$2);
+     expect((a0 - lStart).length, lessThan(1e-6));
+     for (final p in [a1, b0]) {
+       expect((p - q).length, lessThan(1e-6));
+     }
+     expect((b1 - lEnd).length, lessThan(1e-6));
+   });
++
++  test(
++      "EG9-k a file's group carrying WallParams and OpeningParams is an opening everywhere and a wall nowhere; a separator carrying OpeningParams is a separator everywhere, the kit's readers directly",
++      () {
++    final doc = shadowDoc(dangling: false);
++    // A file's opening hosted on the shadow, which is no wall.
++    const orphan = Handle(5700);
++    doc.commands.execute(AddNodeCommand(GroupNode(
++        handle: orphan,
++        parent: doc.rootHandle,
++        transform: Transform2.translation(ox + 1500.25, oy - 900.5)
++            .multiply(Transform2.rotation(1.3)),
++        children: const [])));
++    doc.commands.clearHistory();
++    doc.components.attach<OpeningParams>(
++        orphan, const OpeningParams(shadow, 300, 600, OpeningKind.window));
++    final m = doc.tree.accumulatedTransform(shadow);
++    final tipW = m.transformPoint(shadowTip(doc));
++    final ws = worldWallOf(doc, shadow);
++    expect((tipW - ws.e).length, lessThan(1e-6),
++        reason: 'premise: the shadow\'s WallParams ends on its own child');
++
++    // The document adapter (Ruling 08-8).
++    expect(wallsInDocument(doc, shadow, liveOf(doc)), isNull);
++    expect([
++      for (final w in wallsInDocument(doc, wc, liveOf(doc))!.walls) w.handle
++    ], [
++      wa,
++      wb
++    ]);
++    expect([for (final (h, _) in openingsInDocument(doc, wc, liveOf(doc))) h],
++        [shadow]);
++    expect(openingsInDocument(doc, wb, liveOf(doc)), isEmpty);
++
++    // The band cache: a point in the shadow's band only, and a control.
++    final bands = WallBands(liveOf(doc));
++    addTearDown(bands.dispose);
++    final n = Vector2(-ws.d.y, ws.d.x);
++    final inBand = (ws.s + ws.e) * 0.5 + n * 300;
++    expect(bands.hostAt(doc, inBand.x, inBand.y), isNull);
++    final aMid = (endOf(doc, wa, 0) + endOf(doc, wa, 1)) * 0.5;
++    expect(bands.hostAt(doc, aMid.x, aMid.y), wa);
++
++    // The dimension attach: T, and the candidates at the shadow's tip.
++    expect(thickestWall(doc, liveOf(doc)), closeTo(200, 1e-9),
++        reason: "A's, not 400");
++    final index = SpatialIndex(doc);
++    addTearDown(index.dispose);
++    final ends = attachCandidates(doc, index, tipW,
++        live: liveOf(doc),
++        objectSnap: true,
++        thickest: thickestWall(doc, liveOf(doc)));
++    expect([for (final e in ends) e.wall], isNot(contains(shadow)));
++    final atA = attachCandidates(doc, index, endOf(doc, wa, 0),
++        live: liveOf(doc),
++        objectSnap: true,
++        thickest: thickestWall(doc, liveOf(doc)));
++    expect([for (final e in atA) e.wall], contains(wa), reason: 'control');
++
++    // The rooms' document adapter.
++    final inputs = RoomInputs(doc, liveOf(doc));
++    addTearDown(inputs.dispose);
++    expect(inputs.inputOf(shadow), isNull);
++    expect(inputs.inputOf(sep), isNotNull);
++    expect(inputs.inputOf(wa), isNotNull);
++
++    // The grips: each group's naming type's provider.
++    List<(GripRole, int, double, double)> rows(List<Grip> gs) =>
++        [for (final g in gs) (g.role, g.index, g.x, g.y)];
++    final services = FakePlanServices(document: doc, catalog: testCatalog());
++    addTearDown(services.dispose);
++    ObjectGripProvider objectOf(Handle h) => architectureKit.types
++        .singleWhere((t) => t.id == liveOf(doc)(h))
++        .gripsFor(services)!;
++    final opening = rows(OpeningGrips(live: liveOf(doc)).gripsOf(doc, shadow));
++    expect(opening, isNotEmpty);
++    expect(rows(objectOf(shadow).gripsOf(doc, shadow)), opening);
++    expect(objectOf(shadow).movable(doc, shadow), isFalse);
++    final separator = rows(
++        SeparatorGrips(inputs: inputs, objectSnap: () => true)
++            .gripsOf(doc, sep));
++    expect(separator, hasLength(2));
++    expect(rows(objectOf(sep).gripsOf(doc, sep)), separator);
++    expect(objectOf(sep).movable(doc, sep), isTrue);
++  });
++
++  test(
++      "EG10-k a file's dimension group carrying WallParams on the joint is a dimension, not a wall, the kit's readers directly",
++      () {
++    // Not an opening: a fix that skips only groups carrying OpeningParams
++    // leaves this one a wall.
++    const dim = Handle(0x1A2B);
++    final at = Transform2.translation(ox + 820.5, oy - 1330.25)
++        .multiply(Transform2.rotation(0.7));
++    final toDim = at.invert();
++    // Across the stray's line (below), beyond its far end: the dimension
++    // line crosses it.
++    final d0 = toDim.transformPoint(plan(4200, 1500));
++    final d1 = toDim.transformPoint(plan(6600, 1500));
++    final doc = gripDoc((doc) {
++      addL(doc);
++      doc.commands.execute(CompoundCommand([
++        AddNodeCommand(GroupNode(
++            handle: dim,
++            parent: doc.rootHandle,
++            transform: at,
++            children: const [])),
++        SetComponentCommand<DimensionParams>(
++            dim,
++            DimensionParams(FixedEnd(d0.x, d0.y), FixedEnd(d1.x, d1.y),
++                DimKind.aligned, 350.5)),
++      ], label: 'Add dimension'));
++    });
++    expect(kids(doc, dim), isNotEmpty,
++        reason: 'premise: regenerated as a dimension');
++    // Written straight into the store, as a file brings it in: 400 thick,
++    // from the L's corner (on the joint, in world) out between B and C.
++    final ws0 = toDim.transformPoint(lCorner);
++    final we0 = toDim.transformPoint(polar(lCorner, 23 + 40, 1800));
++    final stray =
++        WallParams(ws0.x, ws0.y, we0.x, we0.y, 400, Justification.left);
++    doc.components.attach<WallParams>(dim, stray);
++    // Today's :803 (`dimP`) is read by the shell part's after-drag checks
++    // (EG10, the integration package's): unused here.
++    final corner = endOf(doc, wa, 1);
++    final ws = worldWallOf(doc, dim);
++    expect((ws.s - corner).length, lessThan(wallJoin.linear),
++        reason: 'premise: on the joint in world; only the rule excludes it');
++    expect((ws.s - Vector2(ox, oy)).length, greaterThan(1000));
++
++    // The document adapter: no wall, and not among A's others.
++    expect(wallsInDocument(doc, dim, liveOf(doc)), isNull);
++    expect([
++      for (final w in wallsInDocument(doc, wa, liveOf(doc))!.walls) w.handle
++    ], [
++      wb,
++      wc
++    ]);
++
++    // The band cache: a point in the stray's band only, and a control.
++    final bands = WallBands(liveOf(doc));
++    addTearDown(bands.dispose);
++    final n = Vector2(-ws.d.y, ws.d.x);
++    final inBand = (ws.s + ws.e) * 0.5 + n * 200;
++    expect(bands.hostAt(doc, inBand.x, inBand.y), isNull);
++    final aMid = (endOf(doc, wa, 0) + endOf(doc, wa, 1)) * 0.5;
++    expect(bands.hostAt(doc, aMid.x, aMid.y), wa, reason: 'control');
++
++    // The dimension attach: T, and the candidates where the stray's line
++    // (offset 0) crosses the dimension line, a point of the dimension's own
++    // children, so the index's tight box reaches the dimension group and the
++    // walk's owner check decides it (as EG9's shadow tip).
++    expect(thickestWall(doc, liveOf(doc)), closeTo(200, 1e-9),
++        reason: "A's, not 400");
++    final index = SpatialIndex(doc);
++    addTearDown(index.dispose);
++    final (a, b) = dimLines(doc, dim).first;
++    double cross(Vector2 u, Vector2 v) => u.x * v.y - u.y * v.x;
++    final t = cross(ws.s - a, ws.d) / cross(b - a, ws.d);
++    expect(t, inExclusiveRange(0.05, 0.95),
++        reason: "premise: the stray's line crosses the dimension line");
++    final hit = a + (b - a) * t;
++    expect(cross(hit - ws.s, ws.d).abs() / ws.d.length, lessThan(1e-6),
++        reason: "premise: on the stray's line");
++    final owners = <Handle>{};
++    final tight = dimAttach.linear;
++    index.forEachInRect(
++        Aabb2.raw(hit.x - tight, hit.y - tight, hit.x + tight, hit.y + tight),
++        const QueryFilter.rendering(),
++        (slot) => owners.add(doc.entities.ownerAt(slot)));
++    expect(owners, {dim},
++        reason: "premise: the tight box reaches the dimension's children");
++    final ends = attachCandidates(doc, index, hit,
++        live: liveOf(doc),
++        objectSnap: true,
++        thickest: thickestWall(doc, liveOf(doc)));
++    expect([for (final e in ends) e.wall], isNot(contains(dim)));
++    final atCorner = attachCandidates(doc, index, corner,
++        live: liveOf(doc),
++        objectSnap: true,
++        thickest: thickestWall(doc, liveOf(doc)));
++    expect([for (final e in atCorner) e.wall], containsAll([wa, wb]),
++        reason: "control: the stray's line at the joint finds A and B");
++
++    // The rooms' adapter: a wall would be an input.
++    final inputs = RoomInputs(doc, liveOf(doc));
++    addTearDown(inputs.dispose);
++    expect(inputs.inputOf(dim), isNull);
++    expect(inputs.inputOf(wa), isNotNull, reason: 'control');
++
++    // The grips: the dimension's, never the wall's.
++    List<(GripRole, int, double, double)> rows(List<Grip> gs) =>
++        [for (final g in gs) (g.role, g.index, g.x, g.y)];
++    expect(WallGrips(live: liveOf(doc)).gripsOf(doc, dim), isEmpty);
++    final services = FakePlanServices(document: doc, catalog: testCatalog());
++    addTearDown(services.dispose);
++    ObjectGripProvider objectOf(Handle h) => architectureKit.types
++        .singleWhere((t) => t.id == liveOf(doc)(h))
++        .gripsFor(services)!;
++    final own = rows(
++        DimensionGrips(index: index, objectSnap: () => true, live: liveOf(doc))
++            .gripsOf(doc, dim));
++    expect(own, hasLength(3));
++    expect(rows(objectOf(dim).gripsOf(doc, dim)), own);
++
++    final q = gridOf(plan(3500, -400));
++    final g = WallGrips(live: liveOf(doc)).gripsOf(doc, wa)[1];
++    final c =
++        WallGrips(live: liveOf(doc)).drag(doc, wa, g, q)! as CompoundCommand;
++    // ignore: avoid_dynamic_calls
++    expect([for (final m in c.children) (m as dynamic).handle as Handle],
++        [wa, wb]);
++  });
+ }
+diff --git a/packages/jet_cad_2d_plan/lib/src/panels/plan_property_panel.dart b/packages/jet_cad_2d_plan/lib/src/panels/plan_property_panel.dart
+index 2145d9d9..f3f7da36 100644
+--- a/packages/jet_cad_2d_plan/lib/src/panels/plan_property_panel.dart
++++ b/packages/jet_cad_2d_plan/lib/src/panels/plan_property_panel.dart
+@@ -143,20 +143,28 @@ final class _Field {
+     text.dispose();
+     focus.dispose();
+   }
+ }
+ 
+ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
+   PlanController get _c => widget.controller;
+ 
+   final Map<(_Scope, String), _Field> _fields = {};
+ 
++  /// Each choice row's focus node, by its key's name. The menu takes the
++  /// focus when it opens (`DropdownButton` asks for it); a choice hands it
++  /// back to the node that had it before -- the canvas -- as Enter does
++  /// for a text field, so the canvas's keys work at once (2a: the focus
++  /// rules are today's, whose segmented buttons never took it). The row
++  /// stays reachable from the keyboard.
++  final Map<String, PanelFieldFocusNode> _choiceFocus = {};
++
+   /// The document the subscriptions below belong to.
+   DraftDocument? _document;
+   StreamSubscription<DocChange>? _changes;
+   FrameSafeRelay? _selection;
+   VoidCallback? _releaseSettle;
+ 
+   /// The label field's last refusal and the unit it was for (today's
+   /// `_numberError`, selection_panel.dart:244-249).
+   String Function(PlanStrings)? _labelError;
+   Handle? _labelErrorFor;
+@@ -192,20 +200,23 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
+     _attach();
+     PlanLocaleScope.push(context, _c);
+   }
+ 
+   @override
+   void dispose() {
+     _detach(_c);
+     for (final f in _fields.values) {
+       f.dispose();
+     }
++    for (final focus in _choiceFocus.values) {
++      focus.dispose();
++    }
+     super.dispose();
+   }
+ 
+   static List<Listenable> _listened(PlanController c) =>
+       [c.activeTool, c.toolSettings, c.symbolsState, c.locked, c.locale];
+ 
+   void _attach() {
+     final c = _c;
+     c.addListener(_onController);
+     for (final l in _listened(c)) {
+@@ -721,39 +732,47 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
+       case ToggleProperty():
+         return SwitchListTile(
+           key: key,
+           dense: true,
+           contentPadding: EdgeInsets.zero,
+           title: Text(label),
+           value: field.value == true,
+           onChanged: editable ? (v) => _act(t, id, v) : null,
+         );
+       case ChoiceProperty(:final values):
++        final focus = _choiceFocus.putIfAbsent(
++            name, () => PanelFieldFocusNode(debugLabel: name));
+         return InputDecorator(
+           decoration:
+               InputDecoration(labelText: label, border: InputBorder.none),
+           child: DropdownButton<Object?>(
+             key: key,
++            focusNode: focus,
+             isExpanded: true,
+             value: field.value,
+             items: [
+               for (final v in values)
+                 DropdownMenuItem<Object?>(
+                   value: v,
+                   child: Text(
+                       planWordOf(_c, kitId,
+                               '${field.wordId}.${ChoiceProperty.segmentOf(v)}') ??
+                           ChoiceProperty.segmentOf(v),
+                       key: Key('$name-${ChoiceProperty.segmentOf(v)}')),
+                 ),
+             ],
+-            onChanged: editable ? (v) => _act(t, id, v) : null,
++            onChanged: editable
++                ? (v) {
++                    _act(t, id, v);
++                    _handBackAfterChoice(focus);
++                  }
++                : null,
+           ),
+         );
+       case ValueDisplay(:final unit):
+         return InputDecorator(
+           decoration:
+               InputDecoration(labelText: label, border: InputBorder.none),
+           child: Text(_valueText(field.value, unit), key: key),
+         );
+       case TextDisplay():
+         // Spec 3a C1.1: a read-only line, the text as the kit read it.
+@@ -766,20 +785,41 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
+         return Padding(
+           padding: const EdgeInsets.only(top: 8),
+           child: OutlinedButton(
+               key: key,
+               onPressed: editable ? () => _act(t, id, null) : null,
+               child: Text(label)),
+         );
+     }
+   }
+ 
++  /// Hands the focus from choice row [focus] back to the canvas once a
++  /// choice is made. `DropdownButton` took the focus for the row when its
++  /// menu opened, and the menu's route gives it back to the row as it
++  /// closes -- after `onChanged` runs, so the row does not have it yet
++  /// here. So the hand-back waits for the row to gain it, within the
++  /// frame; a row that already has it hands it back at once.
++  void _handBackAfterChoice(PanelFieldFocusNode focus) {
++    if (focus.hasFocus) {
++      focus.handBack();
++      return;
++    }
++    void restored() {
++      focus.removeListener(restored);
++      if (focus.hasFocus) focus.handBack();
++    }
++
++    focus.addListener(restored);
++    WidgetsBinding.instance
++        .addPostFrameCallback((_) => focus.removeListener(restored));
++  }
++
+   /// Whether [field] of [t] takes a row (spec 3a C1.7): not when its
+   /// `visible` says no (a text display that read nothing included), nor an
+   /// object's action whose gate the permissions refuse (today's S-11: a
+   /// button the capabilities refuse is not shown). A hidden field takes no
+   /// room.
+   bool _shows(_Target t, PropertyField field) {
+     if (!field.visible) return false;
+     final gate = field.spec.gate;
+     return !(t is _ObjectTarget &&
+         field.spec is ActionProperty &&
+diff --git a/packages/jet_cad_2d_plan/test/panels/property_panel_test.dart b/packages/jet_cad_2d_plan/test/panels/property_panel_test.dart
+index 318f2cb6..af9916f5 100644
+--- a/packages/jet_cad_2d_plan/test/panels/property_panel_test.dart
++++ b/packages/jet_cad_2d_plan/test/panels/property_panel_test.dart
+@@ -102,20 +102,55 @@ void main() {
+     // M-P-1b: the unchanged-text check dropped makes an Enter on the shown
+     // text a second step.
+     await enterAndSubmit(tester, 'property-label', 'Desk');
+     expect(c.document.commands.undoDepth, depth + 6);
+     // M-P-1c: a value the spec refuses (Task 3: over maxLength) reverts.
+     await enterAndSubmit(tester, 'property-label', 'A label of 13');
+     expect(textOf(tester, 'property-label'), 'Desk');
+     expect(c.document.commands.undoDepth, depth + 6);
+   });
+ 
++  testWidgets(
++      'P-choice-focus a value chosen in a choice row\'s menu hands the focus '
++      'back to the canvas, which had it before the menu opened; the '
++      'canvas\'s letters still work (2a "focus rules are today\'s"; '
++      'M-P-choice-focus)', (tester) async {
++    final c = boxController();
++    final b =
++        addBox(c, Vector2(7010, 3020), const BoxParams(120, 70), turn: 0.61);
++    await panel(tester, c);
++    await focusCanvas(tester);
++    await select(tester, c, [b]);
++    final canvas = canvasFocus(tester);
++    expect(FocusManager.instance.primaryFocus, same(canvas),
++        reason: 'premise: the canvas has the focus');
++    final depth = c.document.commands.undoDepth;
++
++    await tapKey(tester, 'property-finish');
++    expect(FocusManager.instance.primaryFocus, isNot(same(canvas)),
++        reason: 'premise: the open menu has the focus');
++    await tapKey(tester, 'property-finish-gloss');
++    expect(c.document.components.get<BoxParams>(b)!.finish, BoxFinish.gloss);
++    expect(c.document.commands.undoDepth, depth + 1);
++    expect(FocusManager.instance.primaryFocus, same(canvas),
++        reason: 'the choice hands the focus back');
++
++    // A second choice from the same row, then a letter: the canvas's.
++    await tapKey(tester, 'property-finish');
++    await tapKey(tester, 'property-finish-matte');
++    expect(c.document.components.get<BoxParams>(b)!.finish, BoxFinish.matte);
++    expect(FocusManager.instance.primaryFocus, same(canvas),
++        reason: 'the second choice hands it back too');
++    expect(await press(tester, LogicalKeyboardKey.keyB), isTrue);
++    expect(status(tester), startsWith('Box'));
++  });
++
+   testWidgets(
+       'P-2 a field\'s gate: reshape off makes Width and Height read-only and '
+       'refuses their commit; ungated fields stay editable (M-P-2)',
+       (tester) async {
+     final c = boxController();
+     final b = addBox(c, Vector2(7010, 3020), const BoxParams(120, 70));
+     await panel(tester, c);
+     c.permissions = PlanPermissions.full.copyWith(reshape: false);
+     await tester.pump();
+     await select(tester, c, [b]);

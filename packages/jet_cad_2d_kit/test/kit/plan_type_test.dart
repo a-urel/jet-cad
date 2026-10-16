@@ -29,6 +29,8 @@ final class RecordingGuard implements TypeGuard {
   }
 }
 
+final KitWords words = KitNamesWords(KitNames.empty, () => const Locale('en'));
+
 final class FakeServices implements PlanServices {
   @override
   Object? noSuchMethod(Invocation invocation) =>
@@ -87,7 +89,7 @@ void main() {
         slab: const Slab(width: 980.5, label: 'Pass'),
         post: const Post(width: 210.25, shape: 'square'));
     addTearDown(doc.dispose);
-    final slabFields = types[0].fieldsOf(doc, hSlab);
+    final slabFields = types[0].fieldsOf(doc, hSlab, words);
     // M-PT3: build the word from the spec id only.
     expect([
       for (final f in slabFields) f.wordId
@@ -103,27 +105,28 @@ void main() {
     ]);
     expect(slabFields[0].value, 980.5);
     expect(slabFields[5].value, 'Pass');
-    final postFields = types[1].fieldsOf(doc, hPost);
+    final postFields = types[1].fieldsOf(doc, hPost, words);
     expect([for (final f in postFields) f.value], [210.25, 'square']);
     expect(postFields[0].enabled, isFalse);
     // Not this type's object, or no object at all.
-    expect(types[0].fieldsOf(doc, hPost), isEmpty);
-    expect(types[0].fieldsOf(doc, hBare), isEmpty);
+    expect(types[0].fieldsOf(doc, hPost, words), isEmpty);
+    expect(types[0].fieldsOf(doc, hBare, words), isEmpty);
   });
 
   test('PT4 commitField is one SetComponentCommand<T>, one undo step', () {
     final List<PlanType<Component>> types = [slabType(), postType()];
     final (:doc, catalog: _) = objectDocument(types);
     addTearDown(doc.dispose);
-    final width = types[0].fieldsOf(doc, hSlab).first;
-    final command = types[0].commitField(doc, hSlab, width, 2400.75);
+    final width = types[0].fieldsOf(doc, hSlab, words).first;
+    final command = types[0].commitField(doc, hSlab, width, 2400.75, words);
     // M-PT4: `SetComponentCommand<Component>`: the store keyed by Slab
     // keeps the old value.
     expect(command, isA<SetComponentCommand<Slab>>());
     doc.commands.execute(command);
     expect(doc.components.get<Slab>(hSlab), const Slab(width: 2400.75));
-    final shape = types[1].fieldsOf(doc, hPost)[1];
-    doc.commands.execute(types[1].commitField(doc, hPost, shape, 'square'));
+    final shape = types[1].fieldsOf(doc, hPost, words)[1];
+    doc.commands
+        .execute(types[1].commitField(doc, hPost, shape, 'square', words));
     expect(doc.components.get<Post>(hPost), const Post(shape: 'square'));
     doc.commands.undo();
     expect(doc.components.get<Post>(hPost), const Post());
@@ -134,11 +137,11 @@ void main() {
     final type = slabType();
     final (:doc, catalog: _) = objectDocument([type, postType()]);
     addTearDown(doc.dispose);
-    final width = type.fieldsOf(doc, hSlab).first;
+    final width = type.fieldsOf(doc, hSlab, words).first;
     // Another edit lands between reading the field and committing it.
-    doc.commands.execute(
-        type.commitField(doc, hSlab, type.fieldsOf(doc, hSlab)[5], 'Pass'));
-    doc.commands.execute(type.commitField(doc, hSlab, width, 2400.75));
+    doc.commands.execute(type.commitField(
+        doc, hSlab, type.fieldsOf(doc, hSlab, words)[5], 'Pass', words));
+    doc.commands.execute(type.commitField(doc, hSlab, width, 2400.75, words));
     // M-PT5: commit through `field.commit` (the stale value): the label
     // goes back to 'Bar top'.
     expect(doc.components.get<Slab>(hSlab),
@@ -149,20 +152,20 @@ void main() {
     final List<PlanType<Component>> types = [slabType(), postType()];
     final (:doc, catalog: _) = objectDocument(types);
     addTearDown(doc.dispose);
-    final postWidth = types[1].fieldsOf(doc, hPost).first;
+    final postWidth = types[1].fieldsOf(doc, hPost, words).first;
     expect(postWidth.spec.id, 'width');
     // M-PT6: match the spec by id: the post's width commits the slab's.
-    expect(() => types[0].commitField(doc, hSlab, postWidth, 600),
+    expect(() => types[0].commitField(doc, hSlab, postWidth, 600, words),
         throwsArgumentError);
-    final area = types[0].fieldsOf(doc, hSlab)[6];
-    expect(
-        () => types[0].commitField(doc, hSlab, area, 1), throwsArgumentError);
-    final width = types[0].fieldsOf(doc, hSlab).first;
-    expect(() => types[0].commitField(doc, hBare, width, 600),
+    final area = types[0].fieldsOf(doc, hSlab, words)[6];
+    expect(() => types[0].commitField(doc, hSlab, area, 1, words),
+        throwsArgumentError);
+    final width = types[0].fieldsOf(doc, hSlab, words).first;
+    expect(() => types[0].commitField(doc, hBare, width, 600, words),
         throwsArgumentError);
     // Out of range: the field's own refusal, nothing executed.
-    expect(
-        () => types[0].commitField(doc, hSlab, width, 10), throwsArgumentError);
+    expect(() => types[0].commitField(doc, hSlab, width, 10, words),
+        throwsArgumentError);
     expect(doc.commands.canUndo, isFalse);
   });
 
@@ -222,9 +225,10 @@ void main() {
   testWidgets('PT10 sectionFor builds the section and commits a T',
       (tester) async {
     void Function(Slab)? commit;
-    final type = slabType(section: (context, value, c, words) {
-      commit = c;
-      return Text('${words.word('type:test.slab')}: ${value.label}',
+    final type = slabType(section: (context, section) {
+      commit = section.commit;
+      return Text(
+          '${section.words.word('type:test.slab')}: ${section.value.label}',
           textDirection: TextDirection.ltr);
     });
     final List<PlanType<Component>> types = [type, postType()];
@@ -238,8 +242,10 @@ void main() {
     final executed = <DraftCommand>[];
     Widget? post;
     await tester.pumpWidget(Builder(builder: (context) {
-      post = types[1].sectionFor(context, doc, hPost, executed.add, words);
-      return types[0].sectionFor(context, doc, hSlab, executed.add, words)!;
+      post = types[1]
+          .sectionFor(context, doc, hPost, executed.add, words, FakeServices());
+      return types[0].sectionFor(
+          context, doc, hSlab, executed.add, words, FakeServices())!;
     }));
     expect(find.text('Tezgâh: Bar top'), findsOneWidget);
     expect(post, isNull);

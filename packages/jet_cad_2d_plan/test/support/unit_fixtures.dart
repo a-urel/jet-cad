@@ -28,7 +28,7 @@ import 'package:jet_cad_2d_plan/src/service/service_session.dart'
     show serviceCopyOf;
 import 'package:jet_cad_2d_plan/src/service/unit_picker.dart';
 import 'package:jet_cad_2d_plan/src/symbols/symbol_placer.dart'
-    show definitionForEntry, placementTransform;
+    show definitionForEntry;
 import 'package:jet_cad_2d_plan/src/units/unit_index.dart';
 import 'package:jet_cad_2d_plan/src/units/unit_label.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;

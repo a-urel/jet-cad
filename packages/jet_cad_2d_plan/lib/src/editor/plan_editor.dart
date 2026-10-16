@@ -347,8 +347,13 @@ class _PlanEditorState extends State<PlanEditor> {
     _unbind();
     final c = widget.controller;
     _bound = c.document;
-    _status = FrameSafeRelay(
-        Listenable.merge([c.selection, c.toolController, c.activeTool]));
+    _status = FrameSafeRelay(Listenable.merge([
+      c.selection,
+      c.toolController,
+      c.activeTool,
+      c.toolNotice,
+      c.locale,
+    ]));
     final sources = _commandSources = FrameSafeRelay(Listenable.merge([
       c.toolController,
       c.canUndo,
@@ -511,11 +516,17 @@ class _PlanEditorState extends State<PlanEditor> {
     return _Toolbar(groups: groups);
   }
 
+  /// The active tool's label, the selection's size when it is not empty,
+  /// and the tool's notice when it has one (today's composition,
+  /// planner_shell.dart:989-1011; spec 3a C1.2), the notice worded now, in
+  /// the current language.
   String _statusLine(PlanStrings strings) {
     final c = widget.controller;
     final base = planToolLabel(context, c, c.activeTool.value);
     final n = c.selection.length;
-    return n == 0 ? base : '$base — ${strings.selectedCount(n)}';
+    final line = n == 0 ? base : '$base — ${strings.selectedCount(n)}';
+    final notice = c.toolNotice.value;
+    return notice == null ? line : '$line — ${c.textOf(notice)}';
   }
 
   String _zoomLine(PlanStrings strings) {

@@ -1,0 +1,28 @@
+name: jet_cad_2d_integration
+description: >-
+  Not published: the tests that run the architecture kit inside the plan
+  library's widgets, over both packages' public libraries.
+publish_to: none
+version: 0.0.0
+resolution: workspace
+
+environment:
+  sdk: ^3.6.0
+  flutter: ">=3.44.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  jet_cad_2d: ^0.7.2
+  jet_cad_2d_flutter: ^0.7.2
+  jet_cad_2d_kit: ^0.1.0
+  jet_cad_2d_kit_architecture: ^0.1.0
+  jet_cad_2d_plan: ^0.8.0
+  vector_math: ^2.2.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  lints: ^6.1.0
+  pdf: ^3.13.1
+  vm_service: ^15.2.0

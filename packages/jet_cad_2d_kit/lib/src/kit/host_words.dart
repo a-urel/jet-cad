@@ -9,7 +9,7 @@ import '../model/kit_problem.dart';
 
 /// The problems of a host's [words], in their order (locale, then word
 /// id): an id in no known namespace (`symbol:`, `category:`, `tool:`,
-/// `type:`, `property:`, `unit:`) is [KitProblemCode.unknownWordId]; one
+/// `type:`, `property:`, `unit:`, `text:`) is [KitProblemCode.unknownWordId]; one
 /// that names no kit is [KitProblemCode.foreignWordId]. Any kit will do: a
 /// host's word may be for a kit it has not loaded. A `category:` or `unit:`
 /// id names its kit before a `/`, the others before their first `.`.
@@ -26,7 +26,7 @@ List<KitProblem> validateHostWords(KitNames words) {
         case 'category' || 'unit':
           final slash = rest.indexOf('/');
           named = slash > 0 && isKitId(rest.substring(0, slash));
-        case 'symbol' || 'tool' || 'type' || 'property':
+        case 'symbol' || 'tool' || 'type' || 'property' || 'text':
           named = rest.contains('.') && isKitId(kitOfKey(rest));
         default:
           problems.add(KitProblem(KitProblemCode.unknownWordId,

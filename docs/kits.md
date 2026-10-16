@@ -122,6 +122,7 @@ a word id to the word.
 | `tool:<tool id>` | a tool's name in the palette (§10.5) |
 | `property:<type or tool id>.<property id>` | a field of a type, or of a tool's settings (§10.3) |
 | `property:<type or tool id>.<property id>.<value>` | a choice's value: an enum's name, else the value's text |
+| `text:<kit id>.<id>` | a message or a template (a tool's notice, a numbered name, a label): `{name}` placeholders, filled by `KitWords.text`; a choice of words is two texts, one passed to the other |
 
 Every word id carries its kit's id, so two kits never share one;
 `PlanKit.validate` reports a word under another kit's id. Lookup
@@ -129,7 +130,10 @@ Every word id carries its kit's id, so two kits never share one;
 falls back from the locale to English, then, for a symbol or a category,
 to the library's stored English. English is required for every
 word with no stored English. A kit's other locales are optional, and a kit
-that declares one declares it complete.
+that declares one declares it complete. A text's every locale carries
+English's placeholders (the conformance test's `placeholderMismatch`).
+`KitWords.decimalSeparator` is the UI language's separator, for a number a
+kit prints in the UI's words.
 
 ## 6. The descriptor
 
@@ -283,7 +287,9 @@ kit.types) t.id]`), `toolIds:` (`[for (final t in kit.tools) t.id]`) and
 (`typeOutsideKit`, `toolOutsideKit`, and `foreignWordId` for a property),
 its word must have English (`missingEnglish`), and every declared locale
 holds it like a symbol's word (`wordMissing`, `wordUntranslated`). Without
-them, the code side is not checked.
+them, the code side is not checked. A kit's `text:` words are held the
+same way, and a text whose placeholders are not English's is
+`placeholderMismatch`.
 
 ## 9. A new kit, the symbol part
 
@@ -341,7 +347,13 @@ final PlanKit cafeCodeKit = PlanKit(
 words. Its factories (a tool's `create`, a type's `grips`, the
 `attachments`) run **once per document**: when the plan is replaced
 (`load`, `newPlan`, an import), the plan library disposes what they made
-and runs them again, so nothing a kit holds outlives its document.
+and runs them again, so nothing a kit holds outlives its document. A
+kit's prepare (a void Function(DraftDocument)) sets up each plan the plan
+library makes, the empty plan of a new controller and every newPlan,
+before any edit and outside history: the records its types draw with (the
+separator's DASHED linetype). A loaded or imported plan is never prepared,
+so a file is saved back as it was read. A host may fill a new plan in code
+with a PlanBuild (PlanController(build:), newPlan(build:)).
 
 ### 10.2 A parametric type
 
@@ -352,7 +364,7 @@ and runs them again, so nothing a kit holds outlives its document.
 | `parametric` | the engine's `ParametricType<T>`: `reach`, `generate`, `references`, the place hooks |
 | `grips` | `ObjectGripProvider Function(PlanServices)?`: the Flutter layer's grips for its objects |
 | `properties` | the panel's fields (§10.3) |
-| `section` | the escape hatch: `(context, value, commit, words) => Widget`, for what specs cannot say; `commit(T)` is one undo step |
+| `section` | the escape hatch: `(context, section) => Widget`, for what specs cannot say; `section` (a `PlanSection`) holds the `value`, `commit` (one undo step), the kit's `words`, the `object` (document, handle, world) and the kit's `services` |
 | `title` | a word id for the section's title, from the value; default `type:<id>` |
 | `colour` | a `ColourTarget` (§10.4) |
 | `exported` | false leaves the type's objects out of every export |
@@ -399,18 +411,25 @@ final ColourTarget<CafeSign> signColour = ColourTarget<CafeSign>(
 
 | Kind | Holds | The panel |
 |---|---|---|
-| `LengthProperty` | `read`, `write`, `min`, `max` | millimetres, with the plan's decimal separator |
+| `LengthProperty` | `read`, `write`, `min`, `max`, `range(value, object)` (inclusive; null refuses every value) | millimetres, with the plan's decimal separator |
 | `AngleProperty` | `read`, `write` | radians stored, degrees shown |
 | `NumberProperty` | `read`, `write`, `min`, `max`, `decimals` (0 to 10) | rounded to `decimals` on commit |
 | `ChoiceProperty<T, V>` | `values`, `read`, `write` | one of `values`, compared with `==` |
 | `ToggleProperty` | `read`, `write` | a switch |
 | `TextProperty` | `read`, `write`, `maxLength` (code points) | a text field |
 | `ValueDisplay` | `read`, `unit` (`length`, `area`, `angle`, `none`) | read-only: a room's area |
+| `TextDisplay` | `read(value, object)` → a `String`, or null to omit the line | read-only: a room's area as drawn |
 | `ActionProperty` | `apply` | a button: a door's Flip hinge |
 
 - Every spec has an `id` (a lower-case letter, then lower-case letters,
   digits and hyphens), an optional `enabled(T)` that greys the field out,
-  and an optional `gate`, the `PlanGate` permission it needs.
+  an optional visible(T) that hides the field (a hidden field takes no
+  room; an action whose gate is refused is hidden too), and an optional
+  `gate`, the `PlanGate` permission it needs.
+- A TextDisplay and a range read the object a field is shown for
+  (PlanObject: document, handle, world, the kit's words); a tool's
+  settings have none, so PlanKit.validate refuses them there
+  (settingsNeedObject).
 - `write` and `apply` return a changed copy; the plan library commits it
   as one `SetComponentCommand<T>`, the parametric system regenerates, and
   the edit is one undo step.
@@ -451,6 +470,9 @@ command; the `recolor` permission gates it.
 | `words` | `KitWords`: this kit's words at the plan's locale, falling back to English, read live |
 | `settingsOf<S>(toolId)` | a tool's current settings |
 | `shared<T>(create)` | one `T` per kit and document, made on first use: what a kit's tools, grips and providers share (a wall's bands). A `T` that implements `Disposable` is disposed with its document |
+| `liveTypeIdOf(handle)` | the type id of a live object; null for a frozen one (its code failed), a missing kit's, or anything else: what a kit's caches ask before they read an object as theirs |
+
+A kit's own tests need no plan library: `package:jet_cad_2d_kit/testing.dart`'s `FakePlanServices` is a `PlanServices` over a document, with a real spatial index, a camera at a given scale, words from `KitNames` and settings from a map. It moves with the contract, so a kit's tests compile when the contract adds a member.
 
 ### 10.7 Attachment
 
@@ -474,15 +496,19 @@ once per subject and code:
 |---|---|
 | a `ParametricType` hook | the edit is rolled back; the type's objects are probed, and each one whose hooks throw is frozen (treated as a plain group) and locked; the edit is tried once more. One broken object blocks one edit, once |
 | a component's `fromJson`, on load | the component is kept as stored, and its object is locked |
-| grips, an attachment provider | none for that object; no attachment |
+| grips, an attachment provider | an `ArgumentError` from a grip's `drag` or `preview` refuses that point (no move, nothing reported); anything else: no grips for that object; no attachment |
 | a tool's `create` | the tool is disabled |
 | a tool's event or painting | the tool is cancelled and selection is armed |
 | a spec's `write` or `apply` | the field shows its stored value |
 | a section | a small "section failed" box in its place |
+| a kit's `prepare` | the plan opens; what it added before the throw stays |
 
 A plan that names a kit the host did not load opens: that kit's objects
 draw, are locked, and are saved back unchanged (`kitMissing`). A plan saved
 by a newer version of a loaded kit opens with a warning (`kitNewer`).
+
+A frozen object's live referents (an opening's host wall) are locked with
+it: they cannot be edited or deleted while it is frozen.
 
 ### 10.9 The engine's types, and byte equality
 

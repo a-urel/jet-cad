@@ -15,6 +15,7 @@ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart'
         SymbolEntry,
         UnitComponent,
         UnitLabelling,
+        placementTransform,
         unitLabelHeight,
         unitLabelPayload;
 import 'package:vector_math/vector_math_64.dart' show Vector2;
@@ -40,50 +41,6 @@ final class InstanceStyle {
     this.linetypeScale = 1.0,
   });
 }
-
-/// `translation(at) · rotation · scale(mirrored ? -1 : 1, 1) ·
-/// translation(-basePoint)`: the definition's base point lands on [at]
-/// (spec F-2), and a mirror flips the **local** x axis whatever the
-/// rotation.
-///
-/// The rotation is given one of two ways, never both (an [ArgumentError],
-/// in release builds too):
-/// - [quarterTurns] counter-clockwise, taken modulo 4 (negative allowed),
-///   with exact cosine and sine from a table (0 and ±1, never `6e-17`);
-/// - [rotation], a unit vector `(cos, sin)` used exactly as given (spec 09c
-///   D5: a wall face's `t`).
-///
-/// Neither is no turn. The quarter-turn form is the [rotation] form at its
-/// table entry, so the two give the same bytes. No stored component is
-/// `-0.0` in either form, so a placement stores clean numbers in a file.
-Transform2 placementTransform({
-  required Vector2 at,
-  required Vector2 basePoint,
-  int? quarterTurns,
-  (double, double)? rotation,
-  bool mirrored = false,
-}) {
-  if (quarterTurns != null && rotation != null) {
-    throw ArgumentError(
-        'placementTransform takes quarterTurns or rotation, not both');
-  }
-  final (cos, sin) = rotation ?? _quarterTurn(quarterTurns ?? 0);
-  final m = Transform2.translation(at.x, at.y)
-      .multiply(Transform2(cos, sin, -sin, cos, 0, 0))
-      .multiply(Transform2.scale(mirrored ? -1 : 1, 1))
-      .multiply(Transform2.translation(-basePoint.x, -basePoint.y));
-  double clean(double v) => v == 0 ? 0.0 : v;
-  return Transform2(
-      clean(m.a), clean(m.b), clean(m.c), clean(m.d), clean(m.e), clean(m.f));
-}
-
-/// The exact `(cos, sin)` of [quarterTurns] counter-clockwise quarter turns.
-(double, double) _quarterTurn(int quarterTurns) => const [
-      (1.0, 0.0),
-      (0.0, 1.0),
-      (-1.0, 0.0),
-      (0.0, -1.0)
-    ][((quarterTurns % 4) + 4) % 4];
 
 /// The definition a placement of [entry] in [doc] uses, and the commands
 /// that make it when it is a copy (none when one is reused). A definition

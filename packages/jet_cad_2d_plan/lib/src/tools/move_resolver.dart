@@ -7,20 +7,18 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
     show MoveResolver, ToolContext;
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart'
-    show Attachment, AttachmentQuery, AttachmentRegistry, SymbolComponent;
+    show
+        Attachment,
+        AttachmentQuery,
+        AttachmentRegistry,
+        SymbolBox,
+        SymbolComponent,
+        boxOfDefinition,
+        footprintOf,
+        isOrthonormal;
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
-import '../symbols/symbol_box.dart';
 import 'plan_symbol_tool.dart' show kAttachPixels;
-
-/// Whether [g]'s linear part is orthonormal (spec 09c W-8, S-10; ported
-/// from wall_attach.dart:402-407): a mirror is, a scale is not.
-bool isOrthonormal(Transform2 g) {
-  final tol = Tolerance.standard.linear;
-  return (g.a * g.a + g.b * g.b - 1).abs() <= tol &&
-      (g.c * g.c + g.d * g.d - 1).abs() <= tol &&
-      (g.a * g.c + g.b * g.d).abs() <= tol;
-}
 
 /// plan.select's [MoveResolver] over the current document's attachment
 /// registry (spec P3; today's `SymbolMoveResolver`, spec 09c D8).

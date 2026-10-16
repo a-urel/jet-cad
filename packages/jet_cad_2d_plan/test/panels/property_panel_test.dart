@@ -110,6 +110,59 @@ void main() {
   });
 
   testWidgets(
+      'P-choice-focus a value chosen in a choice row\'s menu hands the focus '
+      'back to the canvas, which had it before the menu opened; the '
+      'canvas\'s letters still work (2a "focus rules are today\'s"; '
+      'M-P-choice-focus)', (tester) async {
+    final c = boxController();
+    final b =
+        addBox(c, Vector2(7010, 3020), const BoxParams(120, 70), turn: 0.61);
+    await panel(tester, c);
+    await focusCanvas(tester);
+    await select(tester, c, [b]);
+    final canvas = canvasFocus(tester);
+    expect(FocusManager.instance.primaryFocus, same(canvas),
+        reason: 'premise: the canvas has the focus');
+    final depth = c.document.commands.undoDepth;
+
+    await tapKey(tester, 'property-finish');
+    expect(FocusManager.instance.primaryFocus, isNot(same(canvas)),
+        reason: 'premise: the open menu has the focus');
+    await tapKey(tester, 'property-finish-gloss');
+    expect(c.document.components.get<BoxParams>(b)!.finish, BoxFinish.gloss);
+    expect(c.document.commands.undoDepth, depth + 1);
+    expect(FocusManager.instance.primaryFocus, same(canvas),
+        reason: 'the choice hands the focus back');
+
+    // The menu dismissed with Esc: no choice, so nothing is handed back;
+    // the focus stays on the row (the menu's route returns it there), and
+    // the Esc reaches neither the document nor the canvas's tool.
+    // M-P-choice-esc: the row hands back whenever it gains the focus.
+    final row =
+        tester.widget<DropdownButton<Object?>>(byKey('property-finish'));
+    final before = c.document.commands.undoDepth;
+    await tapKey(tester, 'property-finish');
+    expect(FocusManager.instance.primaryFocus, isNot(same(canvas)),
+        reason: 'premise: the open menu has the focus');
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(c.document.components.get<BoxParams>(b)!.finish, BoxFinish.gloss);
+    expect(c.document.commands.undoDepth, before, reason: 'no choice');
+    expect(FocusManager.instance.primaryFocus, same(row.focusNode),
+        reason: 'Esc keeps the focus on the row: nothing handed back');
+    expect(status(tester), 'Select', reason: 'the tool kept');
+
+    // A second choice from the same row, then a letter: the canvas's.
+    await tapKey(tester, 'property-finish');
+    await tapKey(tester, 'property-finish-matte');
+    expect(c.document.components.get<BoxParams>(b)!.finish, BoxFinish.matte);
+    expect(FocusManager.instance.primaryFocus, same(canvas),
+        reason: 'the second choice hands it back too');
+    expect(await press(tester, LogicalKeyboardKey.keyB), isTrue);
+    expect(status(tester), startsWith('Box'));
+  });
+
+  testWidgets(
       'P-2 a field\'s gate: reshape off makes Width and Height read-only and '
       'refuses their commit; ungated fields stay editable (M-P-2)',
       (tester) async {

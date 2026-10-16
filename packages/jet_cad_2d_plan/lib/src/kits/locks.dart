@@ -106,8 +106,9 @@ final class LockSet {
   /// Every node and entity under a root when the set last changed.
   final Set<Handle> _closure = {};
 
-  /// The locked objects: a missing kit's, an unknown type's, a broken one's.
-  /// The guarded definitions are not listed.
+  /// The locked objects: a missing kit's, an unknown type's, a broken one's,
+  /// and the live objects a frozen one references (spec 3a C1.10). The
+  /// guarded definitions are not listed.
   Set<Handle> get objects => Set.unmodifiable({..._missing, ..._broken});
 
   bool get isEmpty => _roots.isEmpty;
@@ -122,7 +123,8 @@ final class LockSet {
   bool covers(CommandTarget target, Handle h) =>
       _closure.contains(h) || _walk(target, h);
 
-  /// Adds [objects], broken (Task 11), and refreshes what they contain.
+  /// Adds [objects] (broken, Task 11, or referenced by a frozen object,
+  /// spec 3a C1.10) and refreshes what they contain.
   void addBroken(CommandTarget target, Iterable<Handle> objects) {
     _broken.addAll(objects);
     _refresh(target);

@@ -1,0 +1,1074 @@
+# Review package: 1672344b..HEAD
+
+## Commits
+c91c046a feat(plan): kits prepare new plans; a host builds one (spec 3a C1.3, C1.9)
+
+## Files changed
+ docs/kits.md                                       |   9 +-
+ .../specs/2026-10-13-kit-contract-design.md        |   4 +
+ .../2026-10-14-plan-library-design-mode-design.md  |  12 +
+ packages/jet_cad_2d_kit/lib/jet_cad_2d_kit.dart    |   1 +
+ .../jet_cad_2d_kit/lib/src/kit/plan_build.dart     |  14 +
+ packages/jet_cad_2d_kit/lib/src/kit/plan_kit.dart  |  12 +-
+ .../jet_cad_2d_kit/test/kit/plan_build_test.dart   |  23 ++
+ .../lib/src/controller/new_plan.dart               |   4 +-
+ .../lib/src/controller/plan_controller.dart        | 101 ++++++-
+ .../test/controller/new_plan_test.dart             | 116 ++++++++
+ .../test/controller/prepare_build_test.dart        | 293 +++++++++++++++++++++
+ .../jet_cad_2d_plan/test/support/throwing_kit.dart |   3 +
+ 12 files changed, 577 insertions(+), 15 deletions(-)
+
+## Diff
+diff --git a/docs/kits.md b/docs/kits.md
+index 2dc7e003..93b2aeba 100644
+--- a/docs/kits.md
++++ b/docs/kits.md
+@@ -340,21 +340,27 @@ final PlanKit cafeCodeKit = PlanKit(
+   ],
+   names: cafeCodeNames,
+ );
+ ```
+ 
+ `PlanKit` carries `types` (`PlanType`), `tools` (`PlanTool`) and
+ `attachments` (factories of `AttachmentProvider`) beside its symbols and
+ words. Its factories (a tool's `create`, a type's `grips`, the
+ `attachments`) run **once per document**: when the plan is replaced
+ (`load`, `newPlan`, an import), the plan library disposes what they made
+-and runs them again, so nothing a kit holds outlives its document.
++and runs them again, so nothing a kit holds outlives its document. A
++kit's prepare (a void Function(DraftDocument)) sets up each plan the plan
++library makes, the empty plan of a new controller and every newPlan,
++before any edit and outside history: the records its types draw with (the
++separator's DASHED linetype). A loaded or imported plan is never prepared,
++so a file is saved back as it was read. A host may fill a new plan in code
++with a PlanBuild (PlanController(build:), newPlan(build:)).
+ 
+ ### 10.2 A parametric type
+ 
+ | `PlanType` field | What it is |
+ |---|---|
+ | `id` | `<kit id>.<name>`, equal to the component's `typeId`: a plan's manifest finds its kits by it |
+ | `fromJson` | the component's factory |
+ | `parametric` | the engine's `ParametricType<T>`: `reach`, `generate`, `references`, the place hooks |
+ | `grips` | `ObjectGripProvider Function(PlanServices)?`: the Flutter layer's grips for its objects |
+ | `properties` | the panel's fields (§10.3) |
+@@ -485,20 +491,21 @@ once per subject and code:
+ 
+ | What throws | What happens |
+ |---|---|
+ | a `ParametricType` hook | the edit is rolled back; the type's objects are probed, and each one whose hooks throw is frozen (treated as a plain group) and locked; the edit is tried once more. One broken object blocks one edit, once |
+ | a component's `fromJson`, on load | the component is kept as stored, and its object is locked |
+ | grips, an attachment provider | none for that object; no attachment |
+ | a tool's `create` | the tool is disabled |
+ | a tool's event or painting | the tool is cancelled and selection is armed |
+ | a spec's `write` or `apply` | the field shows its stored value |
+ | a section | a small "section failed" box in its place |
++| a kit's `prepare` | the plan opens without what it would have added |
+ 
+ A plan that names a kit the host did not load opens: that kit's objects
+ draw, are locked, and are saved back unchanged (`kitMissing`). A plan saved
+ by a newer version of a loaded kit opens with a warning (`kitNewer`).
+ 
+ ### 10.9 The engine's types, and byte equality
+ 
+ **The engine's types bind the contract.** A `PlanType` takes the engine's
+ `ParametricType<T>` and `Component`; a tool commits the engine's
+ `DraftCommand`s to its `DraftDocument`; a library's `SymbolLeaf` exposes
+diff --git a/docs/superpowers/specs/2026-10-13-kit-contract-design.md b/docs/superpowers/specs/2026-10-13-kit-contract-design.md
+index a9b620d6..1a52f95d 100644
+--- a/docs/superpowers/specs/2026-10-13-kit-contract-design.md
++++ b/docs/superpowers/specs/2026-10-13-kit-contract-design.md
+@@ -438,20 +438,24 @@ Each line is written by the 3a task that lands it (the 3a spec,
+   locales and asks every locale's text for English's placeholders
+   (`placeholderMismatch`).
+ - **Words with parameters** (3a C1.6, C1.2): the surface gains `KitText`,
+   `fillText`, `placeholdersOf`, `numberedNameIndex` (moved from the plan
+   library, over patterns that name no plan type), `PlanWords.text` and
+   `PlanWords.decimalSeparator`, inherited by `KitWords` (the UI
+   language's separator, which the plan fills from its `PlanStrings`).
+ - **Tool notices** (3a C1.2): the surface gains `ToolNotice`, a kit tool's
+   `ValueListenable<KitText?> notice`, which the plan library reads through
+   its guard and shows on the status line.
++- **Preparing and building a plan** (3a C1.3, C1.9): `PlanKit.prepare`
++  (`void Function(DraftDocument)?`) prepares every document the plan
++  library makes, never a loaded one; `PlanBuild` (`void
++  Function(DraftDocument, KitWords)`) is a host's build of a new plan.
+ 
+ ## Inputs for sub-project 2
+ 
+ The final review's API risks, none needing a breaking change if settled in
+ sub-project 2's spec before the wave publishes 0.1.0:
+ 
+ - **R1 Per-unit data has no home.** `UnitComponent` sits on a definition;
+   umbrella A6's per-unit label (`assigned`, set by a kit's type) and number
+   (`numbered`) need an instance-level contract component, so
+   `registerKitComponents`' "the four and nothing else" changes. A parametric
+diff --git a/docs/superpowers/specs/2026-10-14-plan-library-design-mode-design.md b/docs/superpowers/specs/2026-10-14-plan-library-design-mode-design.md
+index 3739e900..3949dd73 100644
+--- a/docs/superpowers/specs/2026-10-14-plan-library-design-mode-design.md
++++ b/docs/superpowers/specs/2026-10-14-plan-library-design-mode-design.md
+@@ -842,20 +842,32 @@ From the 3a spec
+   the words, the object and the kit's services. `PlanKit.validate` refuses
+   a `TextDisplay` or a `range` in a tool's settings (`settingsNeedObject`).
+ - **P2, the status line and tool notices** (3a C1.2): a kit's `Tool` may
+   implement `ToolNotice` (a `ValueListenable<KitText?>`); the guard
+   forwards it (`GuardedTool.notice`; a throw is one `hookFailed`, then
+   null); `PlanController.toolNotice` is the active tool's notice and
+   `textOf` puts a `KitText` into words (the host's first, then the kit's,
+   in the current locale). `PlanEditor`'s status line is the tool's label,
+   then ` — n selected` with a selection, then ` — <notice>`, worded when
+   it is read, so a language switch re-words it at once.
++- **P4, a new plan and the kit's `prepare`** (3a C1.3): the constructor's
++  plan without json and `newPlan` are prepared by every loaded kit, in
++  load order, before any system is installed, then the history is
++  cleared, before the save point and the unsettled baseline; a load or an
++  import never is. A prepare that throws is a `hookFailed`, and the plan
++  opens.
++- **P2, the controller's `build`** (3a C1.9): `PlanController(build:)`
++  (ignored with `json`) and `newPlan(build:)` run a `PlanBuild` on the new
++  plan once its system is installed, unrestricted, then clear the history,
++  so the built plan opens clean and still unsettled; its words are every
++  loaded kit's, the host's first. A build that throws leaves the empty
++  plan and is a `hookFailed` of the kit `plan`.
+ 
+ ## Risks
+ 
+ - **The contract is settled against a test kit only.** Sub-project 3's six
+   types are the real test. A field they need goes into this spec as an
+   amendment before the wave publishes 0.1.0.
+ - **The guarding adapter sits on the parametric hot path.** It must
+   allocate nothing per call in steady state. The existing query-allocation
+   invariant covers it once the adapter is in the catalog.
+ - **The size of the port.** The ported tests are the oracle (A12).
+diff --git a/packages/jet_cad_2d_kit/lib/jet_cad_2d_kit.dart b/packages/jet_cad_2d_kit/lib/jet_cad_2d_kit.dart
+index b4720853..f30195d5 100644
+--- a/packages/jet_cad_2d_kit/lib/jet_cad_2d_kit.dart
++++ b/packages/jet_cad_2d_kit/lib/jet_cad_2d_kit.dart
+@@ -7,20 +7,21 @@
+ /// A Flutter library: it reads bundled assets and builds on the Flutter
+ /// layer's tools and grips. The model it exports is pure Dart and is shared
+ /// with `package:jet_cad_2d_kit/authoring.dart`.
+ library;
+ 
+ export 'src/kit/attachment.dart';
+ export 'src/kit/bundled_library.dart';
+ export 'src/kit/colour.dart';
+ export 'src/kit/host_words.dart';
+ export 'src/kit/kit_diagnostic.dart';
++export 'src/kit/plan_build.dart';
+ export 'src/kit/plan_kit.dart';
+ export 'src/kit/plan_services.dart';
+ export 'src/kit/plan_tool.dart';
+ export 'src/kit/plan_type.dart';
+ export 'src/kit/properties.dart';
+ export 'src/kit/swatch.dart';
+ export 'src/kit/symbol_library_source.dart';
+ export 'src/kit/symbols_state.dart';
+ export 'src/kit/unit_label.dart';
+ export 'src/model/model.dart';
+diff --git a/packages/jet_cad_2d_kit/lib/src/kit/plan_build.dart b/packages/jet_cad_2d_kit/lib/src/kit/plan_build.dart
+new file mode 100644
+index 00000000..5eff85c4
+--- /dev/null
++++ b/packages/jet_cad_2d_kit/lib/src/kit/plan_build.dart
+@@ -0,0 +1,14 @@
++// Spec 3a C1.9: a plan a host builds in code.
++import 'package:jet_cad_2d/jet_cad_2d.dart' show DraftDocument;
++
++import 'plan_services.dart' show KitWords;
++
++/// Fills a new plan in code (spec 3a C1.9), given to
++/// `PlanController(build:)` or `newPlan(build:)`. [document] is the plan
++/// library's: set up, prepared by every loaded kit (`PlanKit.prepare`), its
++/// parametric system installed. The build adds objects by command; the plan
++/// library then clears the history and takes the save point, so the built
++/// plan opens clean, with nothing to undo. [words] are every loaded kit's,
++/// the host's first, in the controller's locale. A build that throws leaves
++/// the empty plan and is reported.
++typedef PlanBuild = void Function(DraftDocument document, KitWords words);
+diff --git a/packages/jet_cad_2d_kit/lib/src/kit/plan_kit.dart b/packages/jet_cad_2d_kit/lib/src/kit/plan_kit.dart
+index 99753bb3..27aac3ad 100644
+--- a/packages/jet_cad_2d_kit/lib/src/kit/plan_kit.dart
++++ b/packages/jet_cad_2d_kit/lib/src/kit/plan_kit.dart
+@@ -1,13 +1,13 @@
+ // A kit's descriptor (spec K5, grown by spec 2a P1): its symbols, its
+ // parametric types, its tools, its attachment providers and its words.
+-import 'package:jet_cad_2d/jet_cad_2d.dart' show Component;
++import 'package:jet_cad_2d/jet_cad_2d.dart' show Component, DraftDocument;
+ import 'package:meta/meta.dart';
+ 
+ import '../model/kit_ids.dart';
+ import '../model/kit_names.dart';
+ import '../model/kit_problem.dart';
+ import 'attachment.dart';
+ import 'plan_services.dart';
+ import 'plan_tool.dart';
+ import 'plan_type.dart';
+ import 'properties.dart';
+@@ -16,37 +16,47 @@ import 'symbol_library_source.dart';
+ @immutable
+ final class PlanKit {
+   const PlanKit({
+     required this.id,
+     required this.version,
+     this.symbols = const [],
+     this.types = const [],
+     this.tools = const [],
+     this.attachments = const [],
+     this.names = KitNames.empty,
++    this.prepare,
+   });
+ 
+   /// A kit id (K2): the first segment of the kit's keys, type and tool ids.
+   final String id;
+ 
+   /// The kit package's version, for the plan manifest.
+   final String version;
+ 
+   final List<SymbolLibrarySource> symbols;
+   final List<PlanType<Component>> types;
+   final List<PlanTool> tools;
+ 
+   /// Made once per document (spec 2a P1, lifetimes).
+   final List<AttachmentProvider Function(PlanServices)> attachments;
+ 
+   final KitNames names;
+ 
++  /// Prepares a document the plan library makes (spec 3a C1.3): the
++  /// constructor's plan without json and every `newPlan`, never a loaded or
++  /// imported one, so a plan without what it adds is never changed. Called
++  /// once per new document, in kit load order, before any parametric system
++  /// is installed; the history is cleared after it. It must be idempotent.
++  /// A throw is a `hookFailed` diagnostic and the plan opens. The
++  /// separator's DASHED linetype record is its first user.
++  final void Function(DraftDocument document)? prepare;
++
+   /// Every property word id of the kit without its `property:` prefix, in
+   /// declaration order: `<type id>.<spec id>` for each type's specs,
+   /// `<tool id>.<spec id>` for each tool's settings, and for a choice also
+   /// `<owner id>.<spec id>.<value>` per value. Pass it to `conformance`.
+   List<String> get propertyIds => [
+         for (final type in types) ..._specIds(type.id, type.properties),
+         for (final tool in tools)
+           if (tool.settings case final settings?)
+             ..._specIds(tool.id, settings.specs),
+       ];
+diff --git a/packages/jet_cad_2d_kit/test/kit/plan_build_test.dart b/packages/jet_cad_2d_kit/test/kit/plan_build_test.dart
+new file mode 100644
+index 00000000..c4871732
+--- /dev/null
++++ b/packages/jet_cad_2d_kit/test/kit/plan_build_test.dart
+@@ -0,0 +1,23 @@
++// Spec 3a C1.3, C1.9 (Task 5): a kit's document preparation and a host's
++// build are declared by the contract; the plan library runs them.
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart' show DraftDocument;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++
++void main() {
++  test(
++      'PB0 PlanKit carries its prepare, null by default; PlanBuild is the '
++      "contract's", () {
++    // A premise of the declarations, exempt from the mutation rule: without
++    // the field or the export this file does not compile.
++    final calls = <DraftDocument>[];
++    final void Function(DraftDocument) prepare = calls.add;
++    final kit = PlanKit(id: 'sample', version: '0.1.0', prepare: prepare);
++    expect(kit.prepare, same(prepare));
++    expect(const PlanKit(id: 'sample', version: '0.1.0').prepare, isNull);
++    expect(kit.validate(), isEmpty, reason: 'prepare needs no word');
++    void noop(DraftDocument document, KitWords words) {}
++    final PlanBuild build = noop;
++    expect(build, isA<void Function(DraftDocument, KitWords)>());
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/lib/src/controller/new_plan.dart b/packages/jet_cad_2d_plan/lib/src/controller/new_plan.dart
+index a178bae9..1fbfe25f 100644
+--- a/packages/jet_cad_2d_plan/lib/src/controller/new_plan.dart
++++ b/packages/jet_cad_2d_plan/lib/src/controller/new_plan.dart
+@@ -1,15 +1,15 @@
+ // The document a new plan opens with (today's spec 12a D4, Q0 N1): the
+ // plan's components registered, millimetres, the default page, no history.
+ // Ported from jet_cad_floor_plan's new_document.dart, without its DASHED
+-// linetype (the separator's, sub-project 3) and with the registration
+-// passed in (the kits').
++// linetype: a kit adds what its types draw with in its own prepare (spec
++// 3a C1.3), and with the registration passed in (the kits').
+ import 'dart:ui' show Locale;
+ 
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ 
+ import '../l10n/document_separator.dart';
+ import '../l10n/strings.dart';
+ 
+ /// A4 landscape at 1:50 in metres, every field at its default, with a
+ /// fixed origin that centres the sheet on the world origin.
+ PageComponent defaultPlanPage(
+diff --git a/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart b/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
+index 175cfa3b..83d7acde 100644
+--- a/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
++++ b/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
+@@ -243,31 +243,37 @@ class PlanController extends ChangeNotifier {
+   /// it or an edit touched it first (today's Q0 N1, N2).
+   ///
+   /// [symbols] and [thumbnails] may be shared by several controllers (a
+   /// host's own); a controller never disposes one it was given, and makes
+   /// and disposes its own otherwise. The symbol libraries start loading
+   /// here and never block an edit ([symbolsState]).
+   ///
+   /// [words] are the host's words (spec 2b S4): each kit reads them before
+   /// its own, per locale; an id in no known namespace or naming no kit is an
+   /// [ArgumentError] naming the first problem (`validateHostWords`).
++  ///
++  /// The empty plan is prepared by every kit (`PlanKit.prepare`, spec 3a
++  /// C1.3); a loaded one never is. [build] (spec 3a C1.9) then fills it
++  /// over the plan's own system, and it opens clean, with nothing to undo;
++  /// [build] is ignored with [json].
+   factory PlanController({
+     required List<PlanKit> kits,
+     String? json,
+     PlanSymbolLoader? symbols,
+     SymbolThumbnails? thumbnails,
+     List<PlanExporter> exporters = const [],
+     List<PlanImporter> importers = const [],
+     double minScale = kPlanMinScale,
+     double maxScale = kPlanMaxScale,
+     PlanPermissions permissions = PlanPermissions.full,
+     KitNames words = KitNames.empty,
++    PlanBuild? build,
+   }) {
+     final set = validateKitSet(kits);
+     final wordProblems = validateHostWords(words);
+     if (wordProblems.isNotEmpty) {
+       throw ArgumentError.value(words, 'words', '${wordProblems.first}');
+     }
+     PlanPageFlows.checkRegistry(exporters: exporters, importers: importers);
+     if (!minScale.isFinite || minScale < _minScaleFloor) {
+       throw ArgumentError.value(
+           minScale, 'minScale', 'must be finite and at least 1e-6');
+@@ -289,34 +295,38 @@ class PlanController extends ChangeNotifier {
+           : decodePlan(json,
+               register: (r) => _register(r, catalog),
+               diagnostics: diagnostics,
+               measurer: measurer);
+     } catch (_) {
+       measurer.clear();
+       rethrow;
+     }
+     return PlanController._(set, catalog, document, measurer,
+         unsettled: json == null,
++        made: json == null,
++        build: json == null ? build : null,
+         loadDiagnostics: diagnostics,
+         symbols: symbols,
+         thumbnails: thumbnails,
+         exporters: exporters,
+         importers: importers,
+         minScale: minScale,
+         maxScale: maxScale,
+         permissions: permissions,
+         words: words);
+   }
+ 
+   PlanController._(this.kits, this.catalog, DraftDocument document,
+       FlutterTextMeasurer measurer,
+       {required bool unsettled,
++      required bool made,
++      required PlanBuild? build,
+       required List<Diagnostic> loadDiagnostics,
+       required PlanSymbolLoader? symbols,
+       required SymbolThumbnails? thumbnails,
+       required List<PlanExporter> exporters,
+       required List<PlanImporter> importers,
+       required double minScale,
+       required double maxScale,
+       required PlanPermissions permissions,
+       required KitNames words})
+       : _permissions = permissions,
+@@ -354,21 +364,23 @@ class PlanController extends ChangeNotifier {
+     );
+     _services = {
+       for (final kit in kits.kits)
+         kit.id: KitServices(
+             kit,
+             _host,
+             KitNamesWords(_names[kit.id]!, () => _locale.value,
+                 // Spec 3a C1.6: the UI language's separator, live.
+                 decimalSeparator: () => planStrings.decimalSeparator)),
+     };
+-    _open(document, measurer, loadDiagnostics);
++    // Spec 3a C1.3: only a document the plan library made is prepared.
++    if (made) _prepare(document);
++    _open(document, measurer, loadDiagnostics, build: build);
+     _savedState = document.commands.stateId;
+     if (unsettled) _unsettled = (document: document, at: _savedState);
+     _placeNominally();
+     _refreshFlags();
+     // The tool letters are the kit set's (Task 16): a letterTaken
+     // diagnostic is in the log before any widget is built.
+     planToolEntries(this);
+     // Last: a constructor that threw leaves no load running.
+     unawaited(_loadSymbols());
+   }
+@@ -691,38 +703,97 @@ class PlanController extends ChangeNotifier {
+       measurer.clear();
+       rethrow;
+     }
+     _replace(next, measurer, unsettled: false, loadDiagnostics: diagnostics);
+   }
+ 
+   /// Replaces the plan with an empty one printing [decimalSeparator] (`.`
+   /// or `,`; any other is an [ArgumentError], and nothing changes); without
+   /// one, the separator of the locale last reported, or, with none
+   /// reported yet, point and unsettled, as the constructor's plan.
+-  void newPlan({String? decimalSeparator}) {
++  /// Every kit prepares it (spec 3a C1.3); [build] fills it (C1.9).
++  void newPlan({String? decimalSeparator, PlanBuild? build}) {
+     final DecimalSeparator? given = switch (decimalSeparator) {
+       null => null,
+       '.' => DecimalSeparator.point,
+       ',' => DecimalSeparator.comma,
+       _ => throw ArgumentError.value(
+           decimalSeparator, 'decimalSeparator', 'must be "." or ","'),
+     };
+     settlePendingInput();
+     final reported = _reported;
+     final separator = given ??
+         (reported == null ? DecimalSeparator.point : _separatorOf(reported));
+     final measurer = FlutterTextMeasurer();
+-    _replace(
+-        newPlanDocument(measurer,
+-            register: _registerComponents, decimalSeparator: separator),
+-        measurer,
+-        unsettled: given == null && reported == null);
++    final made = newPlanDocument(measurer,
++        register: _registerComponents, decimalSeparator: separator);
++    _prepare(made);
++    _replace(made, measurer,
++        unsettled: given == null && reported == null, build: build);
++  }
++
++  /// Every loaded kit's `prepare` on [document], a document the plan
++  /// library made (spec 3a C1.3): in load order, with no system installed,
++  /// then the history cleared, so the plan is prepared outside history. A
++  /// prepare that throws is a `hookFailed` diagnostic of its kit (subject
++  /// `prepare`); the later kits still run, and the plan opens. Never on a
++  /// loaded or imported plan: Open adds nothing (today's R-3).
++  void _prepare(DraftDocument document) {
++    for (final kit in kits.kits) {
++      final prepare = kit.prepare;
++      if (prepare == null) continue;
++      try {
++        prepare(document);
++      } catch (error) {
++        _diagnostics.add(KitDiagnostic(
++            kitId: kit.id,
++            subject: 'prepare',
++            code: KitDiagnosticCode.hookFailed,
++            message: 'prepare: $error',
++            error: error));
++      }
++    }
++    document.commands.clearHistory();
++  }
++
++  /// A [PlanBuild]'s words (spec 3a C1.9): every loaded kit's, the host's
++  /// first (spec 2b S4), then each kit's in load order; at the controller's
++  /// locale, read live, with the UI language's separator.
++  late final KitWords _buildWords = KitNamesWords(
++      kits.kits
++          .fold<KitNames>(_hostWords, (names, kit) => names.merge(kit.names)),
++      () => _locale.value,
++      decimalSeparator: () => planStrings.decimalSeparator);
++
++  /// [build] run on [document] over the plan's own system (spec 3a C1.9),
++  /// unrestricted (the host's construction, not an edit), then the history
++  /// cleared: the built plan opens with nothing to undo. A build that
++  /// throws leaves the empty plan: every step still in the history is
++  /// undone, and it is one `hookFailed` (kit `plan`, subject `build`).
++  void _runBuild(DraftDocument document, PlanBuild build) {
++    final commands = document.commands;
++    try {
++      _unrestricted(commands, () => build(document, _buildWords));
++    } catch (error) {
++      _unrestricted(commands, () {
++        while (commands.canUndo) {
++          commands.undo();
++        }
++      });
++      _diagnostics.add(KitDiagnostic(
++          kitId: 'plan',
++          subject: 'build',
++          code: KitDiagnosticCode.hookFailed,
++          message: 'build: $error',
++          error: error));
++    }
++    commands.clearHistory();
+   }
+ 
+   /// The kits the plan names or uses that are not loaded (spec P4).
+   Set<String> get missingKits => _missingKits;
+ 
+   /// The engine's diagnostics of the last load, kept (spec P4; Task 11).
+   @internal
+   List<Diagnostic> get loadDiagnostics => _loadDiagnostics;
+ 
+   // ---------------------------------------------------------------------
+@@ -1481,21 +1552,22 @@ class PlanController extends ChangeNotifier {
+     _refreshFlags();
+     if (_inDesign) _revision.value++;
+     _refreshSelected();
+     _reportUnits();
+   }
+ 
+   // ---------------------------------------------------------------------
+   // Opening and replacing documents.
+ 
+   void _open(DraftDocument document, FlutterTextMeasurer measurer,
+-      List<Diagnostic> loadDiagnostics) {
++      List<Diagnostic> loadDiagnostics,
++      {PlanBuild? build}) {
+     _pendingDefinitions.clear();
+     _damaged.value = false;
+     _disabledTools.clear();
+     // The engine's permissions follow the profile, before any system is
+     // installed over the document (spec P2); read-only while a service
+     // copy exists (a load in service, spec 2b S3).
+     document.commands.permissions = _designDraft;
+     for (final t in genericTools) {
+       _toolNeeds[t.id] = t.needs;
+     }
+@@ -1536,20 +1608,24 @@ class PlanController extends ChangeNotifier {
+         frozen: session.frozen,
+         log: _diagnostics,
+         lock: lockBroken,
+         damage: _damage);
+     session.lockExpander
+       ..onHookFailure = session.boundary.recover
+       ..onPartialMutation = session.boundary.partialMutation
+       ..onRefusedEdit = session.boundary.recoverRefused
+       ..onRetryFailed = session.boundary.retryFailed;
+     session.runKitFactories(kits, _services, _disabledTools);
++    // Spec 3a C1.9: the host's build, over this session's system, before
++    // the views listen, the change tracker takes its baseline and the save
++    // point is taken.
++    if (build != null) _runBuild(document, build);
+     session.tools.addListener(_onTools);
+     session.history = document.commands.changes.listen((_) {
+       if (!_disposed) _onDesignChange();
+     });
+     session.selection.addListener(_onDesignSelection);
+     _loadDiagnostics = List.unmodifiable(loadDiagnostics);
+     _readManifest();
+     _tracker.attach(document);
+     // The load's checks (spec P4), once the views, the kit products and the
+     // manifest's diagnostics are in place: E4's unreadable components, then
+@@ -1570,32 +1646,35 @@ class PlanController extends ChangeNotifier {
+       return;
+     }
+     final check = checkManifest(manifest, usedKits(d), kits);
+     _missingKits = check.missing;
+     _diagnostics.reportAll(check.diagnostics);
+   }
+ 
+   /// [document] becomes the plan (spec P1 lifetimes): 1. the active tool
+   /// cancelled and select armed; the old plan's owed changes reported;
+   /// 2. the old document's kit products disposed; 3. the factories run
+-  /// over the new document. The old views go after the next frame.
++  /// over the new document, prepared and built when the plan library made
++  /// it. The old views go after the next frame.
+   void _replace(DraftDocument document, FlutterTextMeasurer measurer,
+-      {required bool unsettled, List<Diagnostic> loadDiagnostics = const []}) {
++      {required bool unsettled,
++      List<Diagnostic> loadDiagnostics = const [],
++      PlanBuild? build}) {
+     final old = _session;
+     old.tools.activate(old.toolById(planSelectToolId)!);
+     old.tools.removeListener(_onTools);
+     _tracker.detach();
+     _reportUnits();
+     old.selection.removeListener(_onDesignSelection);
+     old.disposeKitProducts();
+     old.detach();
+-    _open(document, measurer, loadDiagnostics);
++    _open(document, measurer, loadDiagnostics, build: build);
+     // In service the copy is rebuilt from the new design, the mode kept
+     // (today's `_replaceDesign`).
+     final service = _service;
+     if (service != null) {
+       final copy = _buildService();
+       _attachService(copy);
+       _service = copy;
+       _groupsAtEnter = _groups.value;
+       _dropService(service);
+     }
+diff --git a/packages/jet_cad_2d_plan/test/controller/new_plan_test.dart b/packages/jet_cad_2d_plan/test/controller/new_plan_test.dart
+new file mode 100644
+index 00000000..ee8ba18c
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/controller/new_plan_test.dart
+@@ -0,0 +1,116 @@
++// D-28's generic half (spec 3a C1.3, Appendix A): jet_cad_floor_plan's
++// test/new_document_test.dart ND1, ND3 and two ND4 cases, ported over the
++// plan library's newPlanDocument and the test kit's registration (the
++// controller's), assertions unchanged. Not here: ND1's and ND3's DASHED
++// lines and ND4's "with registerAppComponents: a live page and live
++// walls", which need the architecture kit (Task 17); ND2, whose premise (a
++// set-up adding no page, new_document.dart:18-24) the plan library does not
++// have (new_plan.dart:23-33). The sample is two slabs off the origin,
++// turned, on a 1:100 page whose origin is not the new plan's.
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
++    show FlutterTextMeasurer;
++import 'package:jet_cad_2d_plan/src/controller/new_plan.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/harness.dart';
++import '../support/test_kit.dart';
++
++void main() {
++  late FlutterTextMeasurer measurer;
++  setUp(() {
++    measurer = FlutterTextMeasurer();
++    addTearDown(measurer.clear);
++  });
++
++  final catalog = catalogOf([testKit()]);
++  void register(ComponentRegistry r) => registerPlanComponents(r, catalog);
++
++  PageComponent? pageOf(DraftDocument d) =>
++      d.components.get<PageComponent>(d.rootHandle);
++
++  test(
++      'ND1 the new document is empty, has no history, is in millimetres, '
++      'and its page is the fixed literal (spec 12a D4, T-11)', () {
++    final doc = newPlanDocument(measurer, register: register);
++
++    expect(doc.entities.liveCount, 0);
++    expect(doc.commands.undoDepth, 0);
++    expect(doc.commands.canUndo, isFalse);
++    expect(doc.commands.canRedo, isFalse);
++    // The header's own default is unitless; the set-up changes it.
++    expect(DraftDocument.empty(measurer: measurer).header.units,
++        isNot(DrawingUnits.millimeters));
++    expect(doc.header.units, DrawingUnits.millimeters);
++
++    // The literal, written out here, not read from `defaultPlanPage`.
++    expect(pageOf(doc), PageComponent(originX: -7425, originY: -5250));
++    // And what the literal means: the A4 landscape sheet at 1:50, 14,850 x
++    // 10,500 world mm, centred on the world origin.
++    final sheet = sheetWorldRect(pageOf(doc)!);
++    expect([sheet.minX, sheet.minY, sheet.maxX, sheet.maxY],
++        [-7425.0, -5250.0, 7425.0, 5250.0]);
++  });
++
++  test(
++      "ND3 the new document encodes, and decodes with the plan's "
++      'registration to the same page, units and bytes (spec 12a D4, D8)', () {
++    final doc = newPlanDocument(measurer, register: register);
++    final saved = DraftDocumentCodec.encodeToString(doc);
++
++    final loaded = DraftDocumentCodec.decodeString(saved,
++        measurer: measurer, registerComponents: register);
++
++    expect(pageOf(loaded), PageComponent(originX: -7425, originY: -5250));
++    expect(pageOf(loaded), pageOf(doc));
++    expect(loaded.components.unknownOf(loaded.rootHandle), isEmpty);
++    expect(loaded.header.units, DrawingUnits.millimeters);
++    expect(DraftDocumentCodec.encodeToString(loaded), saved);
++  });
++
++  group("ND4 the sample's bytes, decoded (spec 12a D8, S-1)", () {
++    late DraftDocument sample;
++    late String bytes;
++    late List<Handle> sampleSlabs;
++    setUp(() {
++      sample = planDocument([testKit()], measurer: measurer);
++      sample.commands.execute(SetComponentCommand<PageComponent>(
++          sample.rootHandle,
++          PageComponent(
++              originX: -3100.5, originY: 820.25, scaleDenominator: 100)));
++      installSystem(sample, [testKit()]);
++      addObject<SlabComponent>(
++          sample, SlabComponent(width: 1800, height: 900, angle: 0.4),
++          at: Vector2(-2600, 1400));
++      addObject<SlabComponent>(
++          sample, SlabComponent(width: 1200, height: 700, angle: -1.1),
++          at: Vector2(2300, 1400));
++      bytes = DraftDocumentCodec.encodeToString(sample);
++      sampleSlabs = catalog.objectsOf<SlabComponent>(sample);
++      // The sample's page is off the world origin: not the new document's
++      // page.
++      expect(pageOf(sample), isNotNull);
++      expect(
++          pageOf(sample), isNot(PageComponent(originX: -7425, originY: -5250)));
++      expect(sampleSlabs, hasLength(2));
++    });
++
++    test("with the page's registration alone: no live slab", () {
++      final loaded = DraftDocumentCodec.decodeString(bytes,
++          measurer: measurer, registerComponents: PageComponent.register);
++      expect(pageOf(loaded), pageOf(sample));
++      expect(catalog.objectsOf<SlabComponent>(loaded), isEmpty);
++      expect(loaded.components.unknownOf(sampleSlabs.first), isNotEmpty);
++    });
++
++    test("with the catalog's registration alone: no live page", () {
++      final loaded = DraftDocumentCodec.decodeString(bytes,
++          measurer: measurer, registerComponents: catalog.registerComponents);
++      expect(catalog.objectsOf<SlabComponent>(loaded), sampleSlabs);
++      expect(loaded.components.isRegistered<PageComponent>(), isFalse);
++      expect(pageOf(loaded), isNull);
++      expect(loaded.components.unknownOf(loaded.rootHandle), isNotEmpty);
++    });
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/controller/prepare_build_test.dart b/packages/jet_cad_2d_plan/test/controller/prepare_build_test.dart
+new file mode 100644
+index 00000000..ce0da36b
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/controller/prepare_build_test.dart
+@@ -0,0 +1,293 @@
++// Spec 3a C1.3, C1.9 (Task 5): a kit's prepare runs on the documents the
++// plan library makes (the constructor's plan without json, and newPlan),
++// in kit load order, outside history, before the save point; never on a
++// loaded plan (Review Focus 1, the plan's half). A host's build fills a
++// new plan over the plan's own system, unrestricted, and the plan opens
++// clean, still unsettled; a failing prepare or build is one hookFailed
++// and the plan opens. Slabs off the origin, turned; a prepare sets the
++// page to 1:100.
++import 'dart:ui' show Locale;
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/harness.dart';
++import '../support/test_kit.dart';
++import '../support/throwing_kit.dart';
++
++/// What a `prep` kit's prepare adds: a linetype on the handle the engine
++/// keeps for an application's (`ReservedHandles.dashedLinetype`).
++const LinetypeRecord prepRecord = LinetypeRecord(
++  handle: ReservedHandles.dashedLinetype,
++  name: 'PREPPED',
++  description: 'Prepared __ __',
++  pattern: DashPattern(dashes: [300, -150], totalLength: 450),
++);
++
++/// A kit with no type whose prepare adds [prepRecord] when it is not there
++/// (idempotent), and logs `prep` in [log].
++PlanKit prepKit({List<String>? log}) => PlanKit(
++      id: 'prep',
++      version: '1.0.0',
++      prepare: (document) {
++        log?.add('prep');
++        final linetypes = document.tables.linetypes;
++        if (!linetypes.contains(prepRecord.handle)) linetypes.add(prepRecord);
++      },
++    );
++
++/// A kit whose prepare logs whether [prepRecord] is there already.
++PlanKit lateKit(List<String> log) => PlanKit(
++      id: 'late',
++      version: '1.0.0',
++      prepare: (document) => log
++          .add('late:${document.tables.linetypes.contains(prepRecord.handle)}'),
++    );
++
++bool prepared(DraftDocument d) =>
++    d.tables.linetypes[prepRecord.handle] == prepRecord;
++
++/// A build that records its words and adds one slab, 1800 x 900, turned
++/// 0.4 rad at (-2600, 1400), by command.
++PlanBuild slabBuild(List<KitWords> seen) => (document, words) {
++      seen.add(words);
++      addObject<SlabComponent>(
++          document, SlabComponent(width: 1800, height: 900, angle: 0.4),
++          at: Vector2(-2600, 1400));
++    };
++
++List<(String, String?, KitDiagnosticCode)> problemsOf(PlanController c) =>
++    [for (final d in c.diagnostics.value) (d.kitId, d.subject, d.code)];
++
++void main() {
++  TestWidgetsFlutterBinding.ensureInitialized();
++
++  testWidgets(
++      "PB1 the constructor's plan and newPlan's are prepared: the record "
++      'is there, nothing to undo, clean, no diagnostic', (tester) async {
++    final c = PlanController(kits: [testKit(), prepKit()]);
++    addTearDown(c.dispose);
++    // M-PB-1: the constructor without `_prepare`.
++    expect(prepared(c.document), isTrue);
++    expect(c.document.commands.canUndo, isFalse);
++    expect(c.canUndo.value, isFalse);
++    expect(c.dirty.value, isFalse);
++    expect(c.diagnostics.value, isEmpty);
++    final first = c.document;
++    c.newPlan();
++    await tester.pump();
++    expect(identical(c.document, first), isFalse, reason: 'premise');
++    // M-PB-2: newPlan without `_prepare`.
++    expect(prepared(c.document), isTrue);
++    expect(c.canUndo.value, isFalse);
++    expect(c.dirty.value, isFalse);
++  });
++
++  testWidgets(
++      "PB2 every kit's prepare runs once per new document, in load order",
++      (tester) async {
++    final log = <String>[];
++    final c =
++        PlanController(kits: [prepKit(log: log), testKit(), lateKit(log)]);
++    addTearDown(c.dispose);
++    // M-PB-3: `_prepare` over `kits.kits.reversed`: late runs first and
++    // sees no record.
++    expect(log, ['prep', 'late:true']);
++    c.newPlan();
++    await tester.pump();
++    expect(log, ['prep', 'late:true', 'prep', 'late:true']);
++  });
++
++  testWidgets(
++      'PB3-prepare-load a file without the record opens without it, by the '
++      'constructor and by load, saves back byte for byte and stays clean; '
++      "newPlan adds it (Review Focus 1, the plan's half)", (tester) async {
++    final text = planText([testKit(), prepKit()], (d) {
++      addObject<SlabComponent>(
++          d, SlabComponent(width: 1200, height: 700, angle: -1.1),
++          at: Vector2(2300, 1400));
++    });
++    expect(text, isNot(contains('PREPPED')), reason: 'premise: no record');
++    final c = PlanController(kits: [testKit(), prepKit()], json: text);
++    addTearDown(c.dispose);
++    // M-PB-4: `_prepare(document)` as the first statement of `_open`, so
++    // every document is prepared, a loaded one too.
++    expect(prepared(c.document), isFalse);
++    expect(c.document.tables.linetypes.contains(ReservedHandles.dashedLinetype),
++        isFalse);
++    expect(c.dirty.value, isFalse);
++    expect(c.save(), text);
++    c.newPlan();
++    await tester.pump();
++    expect(prepared(c.document), isTrue, reason: 'a new plan is prepared');
++    c.load(text);
++    await tester.pump();
++    expect(prepared(c.document), isFalse);
++    expect(c.dirty.value, isFalse);
++    expect(c.save(), text);
++  });
++
++  test(
++      'PB4 a prepare that throws is one hookFailed of its kit; the later '
++      'kits are still prepared and the plan opens', () {
++    final boom = ThrowingKit(failing: ['prepare']);
++    // M-PB-5: `_prepare` calling `prepare` bare: the constructor throws
++    // BoomFailure.
++    final c = PlanController(kits: [boom.kit, prepKit()]);
++    addTearDown(c.dispose);
++    expect(problemsOf(c), [('boom', 'prepare', KitDiagnosticCode.hookFailed)]);
++    expect(prepared(c.document), isTrue);
++    expect(c.document.components.get<PageComponent>(c.document.rootHandle),
++        isNotNull);
++    expect(c.dirty.value, isFalse);
++  });
++
++  test(
++      'PB5 a prepare that executes a command leaves nothing to undo: the '
++      "history is cleared after the last kit's", () {
++    final c = PlanController(kits: [
++      PlanKit(
++          id: 'scale',
++          version: '1.0.0',
++          prepare: (d) {
++            final page = d.components.get<PageComponent>(d.rootHandle)!;
++            d.commands.execute(SetComponentCommand<PageComponent>(
++                d.rootHandle, page.copyWith(scaleDenominator: 100)));
++          }),
++    ]);
++    addTearDown(c.dispose);
++    final d = c.document;
++    expect(
++        d.components.get<PageComponent>(d.rootHandle)!.scaleDenominator, 100);
++    // M-PB-6: `_prepare` without its `clearHistory()`.
++    expect(d.commands.canUndo, isFalse);
++    expect(c.canUndo.value, isFalse);
++    expect(c.dirty.value, isFalse);
++  });
++
++  test(
++      "PB6 a build fills the constructor's plan over the plan's system, "
++      "after the prepares, with every kit's words, the host's first: clean, "
++      'nothing to undo', () {
++    final seen = <KitWords>[];
++    var preparedFirst = false;
++    final c = PlanController(
++        kits: [testKit(), prepKit()],
++        words: const KitNames({
++          'en': {'tool:test.slab': 'Plate'},
++        }),
++        build: (document, words) {
++          preparedFirst = prepared(document);
++          slabBuild(seen)(document, words);
++        });
++    addTearDown(c.dispose);
++    final slab = slabsOf(c.document).single;
++    // M-PB-7: `_runBuild` called as the first statement of `_open`, before
++    // the session installs the system: the slab has no outline.
++    expect(leavesOf(c.document, slab), hasLength(1));
++    expect(preparedFirst, isTrue);
++    // M-PB-8: `_runBuild` without its `clearHistory()`.
++    expect(c.document.commands.canUndo, isFalse);
++    expect(c.canUndo.value, isFalse);
++    expect(c.dirty.value, isFalse);
++    expect(c.diagnostics.value, isEmpty);
++    final words = seen.single;
++    // M-PB-9: the build's names folded with the host's last
++    // (`kits.kits.fold(KitNames.empty, ...).merge(_hostWords)`).
++    expect(words.word('tool:test.slab'), 'Plate');
++    expect(words.word('property:test.slab.width'), 'Width');
++    expect(words.locale, const Locale('en'));
++  });
++
++  test("PB7 a build is ignored with json: the loaded plan is the file's", () {
++    var built = 0;
++    final text = slabPlanText();
++    final c = PlanController(
++        kits: [testKit()], json: text, build: (document, words) => built++);
++    addTearDown(c.dispose);
++    // M-PB-10: the factory passing `build` on with json.
++    expect(built, 0);
++    expect(c.save(), text);
++  });
++
++  testWidgets(
++      'PB8 newPlan(build:) fills the new plan, clean, in the locale last '
++      'reported; newPlan() without one is empty', (tester) async {
++    final seen = <KitWords>[];
++    final c = PlanController(kits: [testKit()]);
++    addTearDown(c.dispose);
++    c.reportLocale(const Locale('tr'));
++    // M-PB-11: newPlan not passing `build` on to `_replace`.
++    c.newPlan(build: slabBuild(seen));
++    await tester.pump();
++    expect(slabsOf(c.document), hasLength(1));
++    expect(c.dirty.value, isFalse);
++    expect(c.canUndo.value, isFalse);
++    // M-PB-12: the build's words at English whatever the locale
++    // (`() => const Locale('en')`).
++    expect(seen.single.locale, const Locale('tr'));
++    expect(seen.single.word('tool:test.slab'), 'Döşeme');
++    c.newPlan();
++    await tester.pump();
++    expect(slabsOf(c.document), isEmpty);
++  });
++
++  test(
++      'PB9 a build that throws leaves the empty plan: its steps undone, one '
++      'hookFailed of the plan, clean, nothing to undo or redo', () {
++    final c = PlanController(
++        kits: [testKit()],
++        build: (document, words) {
++          slabBuild([])(document, words);
++          throw StateError('the build broke');
++        });
++    addTearDown(c.dispose);
++    final d = c.document;
++    // M-PB-13: `_runBuild` without its undo loop: the slab stays.
++    expect(slabsOf(d), isEmpty);
++    expect(d.entities.liveCount, 0);
++    expect(d.components.get<PageComponent>(d.rootHandle), isNotNull,
++        reason: "the page is the new plan's, not the build's");
++    // M-PB-14: `_runBuild` without its catch: the constructor throws.
++    expect(problemsOf(c), [('plan', 'build', KitDiagnosticCode.hookFailed)]);
++    expect(c.canUndo.value, isFalse);
++    expect(c.canRedo.value, isFalse);
++    expect(c.dirty.value, isFalse);
++  });
++
++  test(
++      "PB10 a build is the host's construction, not an edit: it fills a "
++      'read-only plan', () {
++    final c = PlanController(
++        kits: [testKit()],
++        permissions: PlanPermissions.readOnly,
++        build: slabBuild([]));
++    addTearDown(c.dispose);
++    // M-PB-15: `_runBuild` calling `build` without `_unrestricted`: the
++    // engine refuses the slab (PermissionDeniedError), the plan is empty
++    // and the build is reported.
++    expect(slabsOf(c.document), hasLength(1));
++    expect(c.diagnostics.value, isEmpty);
++    expect(c.dirty.value, isFalse);
++  });
++
++  test(
++      'PB11 a built plan made with no locale is still unsettled: the first '
++      'locale reported gives it its separator, as if made so', () {
++    final c = PlanController(kits: [testKit()], build: slabBuild([]));
++    addTearDown(c.dispose);
++    final d = c.document;
++    PageComponent page() => d.components.get<PageComponent>(d.rootHandle)!;
++    expect(page().decimalSeparator, DecimalSeparator.point, reason: 'premise');
++    c.reportLocale(const Locale('tr'));
++    // M-PB-16: the build run after the save point and the unsettled
++    // baseline (its call moved from `_open` to the constructor body, after
++    // `_unsettled` is set): the plan is not settled, and it is dirty.
++    expect(page().decimalSeparator, DecimalSeparator.comma);
++    expect(d.commands.canUndo, isFalse);
++    expect(c.dirty.value, isFalse);
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/support/throwing_kit.dart b/packages/jet_cad_2d_plan/test/support/throwing_kit.dart
+index 7c4673ae..74b31526 100644
+--- a/packages/jet_cad_2d_plan/test/support/throwing_kit.dart
++++ b/packages/jet_cad_2d_plan/test/support/throwing_kit.dart
+@@ -34,20 +34,22 @@ const Set<String> boomHooks = {
+   // Spec 3a C1.2: the tool's notice getter, then its value.
+   'notice', 'noticeValue',
+   // The attachment provider: its factory, then attach.
+   'attachCreate', 'attach',
+   // Properties, the section (its builder, then the widget it returns), the
+   // colour target and the title.
+   'read', 'write', 'apply', 'section', 'sectionWidget', 'colourRead',
+   'colourWrite', 'title',
+   // Spec 3a C1.1, C1.7: a text display's read, a length's range, a spec's visible.
+   'display', 'range', 'visible',
++  // The kit's document preparation (spec 3a C1.3).
++  'prepare',
+ };
+ 
+ /// What a failing hook throws: not an `Error`, as a kit's own exception
+ /// would not be.
+ final class BoomFailure implements Exception {
+   const BoomFailure(this.hook);
+ 
+   final String hook;
+ 
+   @override
+@@ -72,20 +74,21 @@ final class ThrowingKit {
+ 
+   void failAll() => failing.addAll(boomHooks);
+ 
+   void check(String hook) {
+     if (failing.contains(hook)) throw BoomFailure(hook);
+   }
+ 
+   late final PlanKit kit = PlanKit(
+     id: 'boom',
+     version: '0.3.0',
++    prepare: (document) => check('prepare'),
+     types: [
+       PlanType<BlockComponent>(
+         id: BlockComponent.componentTypeId,
+         fromJson: (json) {
+           check('fromJson');
+           return BlockComponent.fromJson(json);
+         },
+         parametric: BoomType<BlockComponent>(this),
+         grips: (services) {
+           check('gripsCreate');

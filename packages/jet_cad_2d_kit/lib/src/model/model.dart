@@ -3,9 +3,13 @@
 export 'kit_ids.dart';
 export 'kit_names.dart';
 export 'kit_problem.dart';
+export 'kit_text.dart';
 export 'library_component.dart';
 export 'manifest_component.dart';
+export 'numbered_names.dart';
+export 'plan_words.dart';
 export 'register.dart' show registerKitComponents;
+export 'symbol_box.dart';
 export 'symbol_library.dart';
 export 'symbol_component.dart';
 export 'unit_component.dart';

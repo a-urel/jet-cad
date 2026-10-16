@@ -8,7 +8,6 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
 
 import '../symbols/plan_symbol.dart';
-import '../symbols/symbol_box.dart' show servedTopOfEntry;
 import '../symbols/symbol_placer.dart' show definitionForEntry;
 import 'session.dart';
 import 'tool_settings_store.dart';
@@ -18,6 +17,10 @@ abstract interface class ServicesHost {
   DocumentSession get session;
   CameraController get camera;
   SnapSettings get snap;
+
+  /// The controller's catalog: every loaded kit's types (spec 3a C1.5).
+  ParametricCatalog get catalog;
+
   ToolSettingsStore get toolSettings;
 
   /// The loaded symbol `key@version`, or null.
@@ -106,6 +109,17 @@ final class KitServices implements PlanServices {
 
   @override
   ValueListenable<SymbolsState> get symbolsState => _host.symbolsState;
+
+  /// Spec 3a C1.5: null for E2's frozen objects (the set the system's
+  /// `isFrozen` reads), else the catalog's type id over the current
+  /// document, which is null for a missing kit's object (kept raw) and for
+  /// anything that is no object.
+  @override
+  String? liveTypeIdOf(Handle handle) {
+    final session = _host.session;
+    if (session.frozen.contains(handle)) return null;
+    return _host.catalog.typeIdOf(session.document, handle);
+  }
 }
 
 /// The attachment registry until Task 14: no kind, no attachment.

@@ -215,6 +215,9 @@ final class _Host implements ServicesHost {
   SnapSettings get snap => _c._snap;
 
   @override
+  ParametricCatalog get catalog => _c.catalog;
+
+  @override
   ToolSettingsStore get toolSettings => _c.toolSettings;
 
   @override
@@ -250,6 +253,11 @@ class PlanController extends ChangeNotifier {
   /// [words] are the host's words (spec 2b S4): each kit reads them before
   /// its own, per locale; an id in no known namespace or naming no kit is an
   /// [ArgumentError] naming the first problem (`validateHostWords`).
+  ///
+  /// The empty plan is prepared by every kit (`PlanKit.prepare`, spec 3a
+  /// C1.3); a loaded one never is. [build] (spec 3a C1.9) then fills it
+  /// over the plan's own system, and it opens clean, with nothing to undo;
+  /// [build] is ignored with [json].
   factory PlanController({
     required List<PlanKit> kits,
     String? json,
@@ -261,6 +269,7 @@ class PlanController extends ChangeNotifier {
     double maxScale = kPlanMaxScale,
     PlanPermissions permissions = PlanPermissions.full,
     KitNames words = KitNames.empty,
+    PlanBuild? build,
   }) {
     final set = validateKitSet(kits);
     final wordProblems = validateHostWords(words);
@@ -296,6 +305,8 @@ class PlanController extends ChangeNotifier {
     }
     return PlanController._(set, catalog, document, measurer,
         unsettled: json == null,
+        made: json == null,
+        build: json == null ? build : null,
         loadDiagnostics: diagnostics,
         symbols: symbols,
         thumbnails: thumbnails,
@@ -310,6 +321,8 @@ class PlanController extends ChangeNotifier {
   PlanController._(this.kits, this.catalog, DraftDocument document,
       FlutterTextMeasurer measurer,
       {required bool unsettled,
+      required bool made,
+      required PlanBuild? build,
       required List<Diagnostic> loadDiagnostics,
       required PlanSymbolLoader? symbols,
       required SymbolThumbnails? thumbnails,
@@ -355,9 +368,15 @@ class PlanController extends ChangeNotifier {
     _services = {
       for (final kit in kits.kits)
         kit.id: KitServices(
-            kit, _host, KitNamesWords(_names[kit.id]!, () => _locale.value)),
+            kit,
+            _host,
+            KitNamesWords(_names[kit.id]!, () => _locale.value,
+                // Spec 3a C1.6: the UI language's separator, live.
+                decimalSeparator: () => planStrings.decimalSeparator)),
     };
-    _open(document, measurer, loadDiagnostics);
+    // Spec 3a C1.3: only a document the plan library made is prepared.
+    if (made) _prepare(document);
+    _open(document, measurer, loadDiagnostics, build: build);
     _savedState = document.commands.stateId;
     if (unsettled) _unsettled = (document: document, at: _savedState);
     _placeNominally();
@@ -550,6 +569,11 @@ class PlanController extends ChangeNotifier {
   final ValueNotifier<bool> _canUndo = ValueNotifier(false);
   final ValueNotifier<bool> _canRedo = ValueNotifier(false);
   final ValueNotifier<String> _activeTool = ValueNotifier(planSelectToolId);
+
+  /// The active tool's notice, copied from its guarded listenable (spec 3a
+  /// C1.2), and the listenable it is copied from now.
+  final ValueNotifier<KitText?> _toolNotice = ValueNotifier(null);
+  ValueListenable<KitText?>? _noticeSource;
   Set<String> _missingKits = const {};
 
   late final PlanChangeTracker _tracker = PlanChangeTracker(_emit);
@@ -682,6 +706,7 @@ class PlanController extends ChangeNotifier {
       measurer.clear();
       rethrow;
     }
+    _forgetPreparesAndBuild();
     _replace(next, measurer, unsettled: false, loadDiagnostics: diagnostics);
   }
 
@@ -689,7 +714,8 @@ class PlanController extends ChangeNotifier {
   /// or `,`; any other is an [ArgumentError], and nothing changes); without
   /// one, the separator of the locale last reported, or, with none
   /// reported yet, point and unsettled, as the constructor's plan.
-  void newPlan({String? decimalSeparator}) {
+  /// Every kit prepares it (spec 3a C1.3); [build] fills it (C1.9).
+  void newPlan({String? decimalSeparator, PlanBuild? build}) {
     final DecimalSeparator? given = switch (decimalSeparator) {
       null => null,
       '.' => DecimalSeparator.point,
@@ -702,11 +728,83 @@ class PlanController extends ChangeNotifier {
     final separator = given ??
         (reported == null ? DecimalSeparator.point : _separatorOf(reported));
     final measurer = FlutterTextMeasurer();
-    _replace(
-        newPlanDocument(measurer,
-            register: _registerComponents, decimalSeparator: separator),
-        measurer,
-        unsettled: given == null && reported == null);
+    final made = newPlanDocument(measurer,
+        register: _registerComponents, decimalSeparator: separator);
+    _forgetPreparesAndBuild();
+    _prepare(made);
+    _replace(made, measurer,
+        unsettled: given == null && reported == null, build: build);
+  }
+
+  /// Drops the last plan's failed prepares and build (each a `hookFailed`
+  /// of subject `prepare` or of kit `plan` and subject `build`) and forgets
+  /// them, so the next plan's are reported again, with their own errors:
+  /// they spoke of a document that is being replaced. Not plan-scoped
+  /// codes ([DiagnosticsLog.planScoped] is by code, and a kit's other
+  /// `hookFailed`s are the kit set's) but the log's
+  /// [DiagnosticsLog.removeWhere], for a problem that went away. Run when a
+  /// plan is replaced, before the new one's prepares and build (newPlan,
+  /// load).
+  void _forgetPreparesAndBuild() => _diagnostics.removeWhere((d) =>
+      d.code == KitDiagnosticCode.hookFailed &&
+      (d.subject == 'prepare' || (d.kitId == 'plan' && d.subject == 'build')));
+
+  /// Every loaded kit's `prepare` on [document], a document the plan
+  /// library made (spec 3a C1.3): in load order, with no system installed,
+  /// then the history cleared, so the plan is prepared outside history. A
+  /// prepare that throws is a `hookFailed` diagnostic of its kit (subject
+  /// `prepare`); the later kits still run, and the plan opens. Never on a
+  /// loaded or imported plan: Open adds nothing (today's R-3).
+  void _prepare(DraftDocument document) {
+    for (final kit in kits.kits) {
+      final prepare = kit.prepare;
+      if (prepare == null) continue;
+      try {
+        prepare(document);
+      } catch (error) {
+        _diagnostics.add(KitDiagnostic(
+            kitId: kit.id,
+            subject: 'prepare',
+            code: KitDiagnosticCode.hookFailed,
+            message: 'prepare: $error',
+            error: error));
+      }
+    }
+    document.commands.clearHistory();
+  }
+
+  /// A [PlanBuild]'s words (spec 3a C1.9): every loaded kit's, the host's
+  /// first (spec 2b S4), then each kit's in load order; at the controller's
+  /// locale, read live, with the UI language's separator.
+  late final KitWords _buildWords = KitNamesWords(
+      kits.kits
+          .fold<KitNames>(_hostWords, (names, kit) => names.merge(kit.names)),
+      () => _locale.value,
+      decimalSeparator: () => planStrings.decimalSeparator);
+
+  /// [build] run on [document] over the plan's own system (spec 3a C1.9),
+  /// unrestricted (the host's construction, not an edit), then the history
+  /// cleared: the built plan opens with nothing to undo. A build that
+  /// throws leaves the empty plan: every step still in the history is
+  /// undone, and it is one `hookFailed` (kit `plan`, subject `build`).
+  void _runBuild(DraftDocument document, PlanBuild build) {
+    final commands = document.commands;
+    try {
+      _unrestricted(commands, () => build(document, _buildWords));
+    } catch (error) {
+      _unrestricted(commands, () {
+        while (commands.canUndo) {
+          commands.undo();
+        }
+      });
+      _diagnostics.add(KitDiagnostic(
+          kitId: 'plan',
+          subject: 'build',
+          code: KitDiagnosticCode.hookFailed,
+          message: 'build: $error',
+          error: error));
+    }
+    commands.clearHistory();
   }
 
   /// The kits the plan names or uses that are not loaded (spec P4).
@@ -791,6 +889,7 @@ class PlanController extends ChangeNotifier {
   /// `ArgumentError`, and a kit's hook failure the retry did not cure (one
   /// diagnostic). `StateError` (`PartialMutationError` included, after the
   /// damage is handled) goes on to the caller.
+  /// The rule is [_refusal]'s, which plan.select's drop shares (spec 3a C1.8).
   ///
   /// Drops the pending symbol definitions (spec 2b S2).
   ///
@@ -801,19 +900,32 @@ class PlanController extends ChangeNotifier {
     try {
       document.commands.execute(command);
       return true;
-    } on PlanLocked {
-      lockHint.value = true;
-      return false;
-    } on DanglingReferenceError {
-      return false;
-    } on PermissionDeniedError {
-      return false;
-    } on ArgumentError {
-      return false;
-    } on KitHookFailure catch (failure) {
-      _reportFailure(failure);
-      return false;
+    } catch (error) {
+      if (_refusal(error)) return false;
+      rethrow;
     }
+  }
+
+  /// Whether [error], thrown by an edit of the design, is a refusal: what
+  /// [execute] answers false for, and what cancels plan.select's drop
+  /// (spec 3a C1.8). [PlanLocked] ([lockHint] set), `DanglingReferenceError`,
+  /// `PermissionDeniedError`, `ArgumentError`, and a [KitHookFailure] the
+  /// retry did not cure (one diagnostic). Anything else, a `StateError`
+  /// (`PartialMutationError` included) above all, is the caller's.
+  bool _refusal(Object error) {
+    switch (error) {
+      case PlanLocked():
+        lockHint.value = true;
+        return true;
+      case DanglingReferenceError() ||
+            PermissionDeniedError() ||
+            ArgumentError():
+        return true;
+      case final KitHookFailure failure:
+        _reportFailure(failure);
+        return true;
+    }
+    return false;
   }
 
   void _reportFailure(KitHookFailure failure) => _diagnostics.add(KitDiagnostic(
@@ -841,6 +953,8 @@ class PlanController extends ChangeNotifier {
       toolId: toolId,
       log: _diagnostics,
       lockHint: lockHint,
+      // Spec 3a C1.8 (2): plan.select's drop is refused as execute refuses.
+      refusal: toolId == planSelectToolId ? _refusal : null,
       onFailed: () {
         if (!_disposed) selectTool(planSelectToolId);
       });
@@ -850,6 +964,33 @@ class PlanController extends ChangeNotifier {
   PlanType<Component>? typeOf(Handle object) {
     final typeId = catalog.typeIdOf(document, object);
     return typeId == null ? null : kits.typeOf(typeId);
+  }
+
+  /// The live objects [object] references in [d] (spec 3a C1.10): its
+  /// type's `references`, called on its component as stored (the pair of
+  /// its snapshot whose type id is the type's, so the call keeps the
+  /// type's own `T`), each one a loaded kit's object in [d]. Empty when no
+  /// loaded type names [object] (a missing kit's, an unreadable one's), and
+  /// when `references` throws: the type already failed, and the object is
+  /// frozen for it, with its diagnostic.
+  Set<Handle> _referencesOf(DraftDocument d, Handle object) {
+    final typeId = catalog.typeIdOf(d, object);
+    final type = typeId == null ? null : kits.typeOf(typeId);
+    if (type == null) return const {};
+    for (final (id, component) in d.components.snapshotOf(object).components) {
+      if (id != typeId) continue;
+      try {
+        return {
+          for (final h in type.parametric.references(component))
+            // Defensive: the engine refuses a reference to a non-live
+            // object first (DanglingReferenceError, spec 08 D5).
+            if (catalog.typeIdOf(d, h) != null) h,
+        };
+      } catch (_) {
+        return const {};
+      }
+    }
+    return const {};
   }
 
   // ---------------------------------------------------------------------
@@ -1479,7 +1620,8 @@ class PlanController extends ChangeNotifier {
   // Opening and replacing documents.
 
   void _open(DraftDocument document, FlutterTextMeasurer measurer,
-      List<Diagnostic> loadDiagnostics) {
+      List<Diagnostic> loadDiagnostics,
+      {PlanBuild? build}) {
     _pendingDefinitions.clear();
     _damaged.value = false;
     _disabledTools.clear();
@@ -1527,13 +1669,18 @@ class PlanController extends ChangeNotifier {
         frozen: session.frozen,
         log: _diagnostics,
         lock: lockBroken,
-        damage: _damage);
+        damage: _damage,
+        referencesOf: _referencesOf);
     session.lockExpander
       ..onHookFailure = session.boundary.recover
       ..onPartialMutation = session.boundary.partialMutation
       ..onRefusedEdit = session.boundary.recoverRefused
       ..onRetryFailed = session.boundary.retryFailed;
     session.runKitFactories(kits, _services, _disabledTools);
+    // Spec 3a C1.9: the host's build, over this session's system, before
+    // the views listen, the change tracker takes its baseline and the save
+    // point is taken.
+    if (build != null) _runBuild(document, build);
     session.tools.addListener(_onTools);
     session.history = document.commands.changes.listen((_) {
       if (!_disposed) _onDesignChange();
@@ -1548,6 +1695,7 @@ class PlanController extends ChangeNotifier {
     session.boundary.reportUnreadable(_loadDiagnostics);
     session.boundary.probeLoaded();
     _reportUnofferedKinds();
+    _rebindNotice();
   }
 
   /// What the plan's manifest says against the loaded kits (Task 7).
@@ -1567,9 +1715,12 @@ class PlanController extends ChangeNotifier {
   /// [document] becomes the plan (spec P1 lifetimes): 1. the active tool
   /// cancelled and select armed; the old plan's owed changes reported;
   /// 2. the old document's kit products disposed; 3. the factories run
-  /// over the new document. The old views go after the next frame.
+  /// over the new document, prepared and built when the plan library made
+  /// it. The old views go after the next frame.
   void _replace(DraftDocument document, FlutterTextMeasurer measurer,
-      {required bool unsettled, List<Diagnostic> loadDiagnostics = const []}) {
+      {required bool unsettled,
+      List<Diagnostic> loadDiagnostics = const [],
+      PlanBuild? build}) {
     final old = _session;
     old.tools.activate(old.toolById(planSelectToolId)!);
     old.tools.removeListener(_onTools);
@@ -1578,7 +1729,7 @@ class PlanController extends ChangeNotifier {
     old.selection.removeListener(_onDesignSelection);
     old.disposeKitProducts();
     old.detach();
-    _open(document, measurer, loadDiagnostics);
+    _open(document, measurer, loadDiagnostics, build: build);
     // In service the copy is rebuilt from the new design, the mode kept
     // (today's `_replaceDesign`).
     final service = _service;
@@ -1717,6 +1868,7 @@ class PlanController extends ChangeNotifier {
           log: _diagnostics,
           lock: _lockFromCopy,
           damage: _damageCopy,
+          referencesOf: _referencesOf,
           groups: unitGroups,
           moves: () => permissions.serviceMove);
     } catch (_) {
@@ -1975,8 +2127,39 @@ class PlanController extends ChangeNotifier {
   /// The active tool's id (`plan.select`, a kit's `<kit>.<tool>`).
   ValueListenable<String> get activeTool => _activeTool;
 
+  /// The active tool's notice (spec 3a C1.2), null when it has none: a
+  /// word id and its arguments, for [textOf] when the line is read.
+  ValueListenable<KitText?> get toolNotice => _toolNotice;
+
+  /// [text] in words (spec 3a C1.2, C1.6): the host's word first, then the
+  /// kit's the id names, in the current locale, else English; the id itself
+  /// when no one words it; its placeholders filled.
+  String textOf(KitText text) {
+    final id = text.id;
+    final names =
+        _names[kitOfKey(id.substring(id.indexOf(':') + 1))] ?? _hostWords;
+    return fillText(
+        names.word(_locale.value.languageCode, id) ?? id, text.args);
+  }
+
+  /// Follows the active tool's notice: rebinds when the tool changed,
+  /// then copies its value.
+  void _rebindNotice() {
+    final active = _session.tools.active;
+    final next = active is GuardedTool ? active.notice : null;
+    if (!identical(next, _noticeSource)) {
+      _noticeSource?.removeListener(_copyNotice);
+      _noticeSource = next;
+      next?.addListener(_copyNotice);
+    }
+    _copyNotice();
+  }
+
+  void _copyNotice() => _toolNotice.value = _noticeSource?.value;
+
   void _onTools() {
     _activeTool.value = _session.idOf(_session.tools.active);
+    _rebindNotice();
   }
 
   /// Arms the tool [id] (spec P2), as a palette tap would, and answers
@@ -2591,6 +2774,8 @@ class PlanController extends ChangeNotifier {
         ..dispose();
     }
     final session = _session;
+    _noticeSource?.removeListener(_copyNotice);
+    _noticeSource = null;
     session.tools.removeListener(_onTools);
     session.selection.removeListener(_onDesignSelection);
     session
@@ -2608,6 +2793,7 @@ class PlanController extends ChangeNotifier {
     _canUndo.dispose();
     _canRedo.dispose();
     _activeTool.dispose();
+    _toolNotice.dispose();
     _fill.dispose();
     _locked.dispose();
     _mode.dispose();

@@ -1,6 +1,6 @@
 // A kit's descriptor (spec K5, grown by spec 2a P1): its symbols, its
 // parametric types, its tools, its attachment providers and its words.
-import 'package:jet_cad_2d/jet_cad_2d.dart' show Component;
+import 'package:jet_cad_2d/jet_cad_2d.dart' show Component, DraftDocument;
 import 'package:meta/meta.dart';
 
 import '../model/kit_ids.dart';
@@ -23,6 +23,7 @@ final class PlanKit {
     this.tools = const [],
     this.attachments = const [],
     this.names = KitNames.empty,
+    this.prepare,
   });
 
   /// A kit id (K2): the first segment of the kit's keys, type and tool ids.
@@ -40,6 +41,15 @@ final class PlanKit {
 
   final KitNames names;
 
+  /// Prepares a document the plan library makes (spec 3a C1.3): the
+  /// constructor's plan without json and every `newPlan`, never a loaded or
+  /// imported one, so a plan without what it adds is never changed. Called
+  /// once per new document, in kit load order, before any parametric system
+  /// is installed; the history is cleared after it. It must be idempotent.
+  /// A throw is a `hookFailed` diagnostic and the plan opens. The
+  /// separator's DASHED linetype record is its first user.
+  final void Function(DraftDocument document)? prepare;
+
   /// Every property word id of the kit without its `property:` prefix, in
   /// declaration order: `<type id>.<spec id>` for each type's specs,
   /// `<tool id>.<spec id>` for each tool's settings, and for a choice also
@@ -53,9 +63,11 @@ final class PlanKit {
 
   /// The descriptor's problems: a bad id, an empty version, a word under
   /// another kit's id or in no known namespace (a `category:` or `unit:` word
-  /// names the kit before its `/`); a type or tool id that is not
+  /// names the kit before its `/`), a `text:` word without English; a type
+  /// or tool id that is not
   /// `<this kit's id>.<name>` or is repeated; a word with no stored English
   /// missing from English, for every word a type, tool or property needs.
+  /// A tool's setting that reads an object (spec 3a C1.1).
   /// Empty when sound. Problems across kits are the plan library's.
   List<KitProblem> validate() {
     final problems = <KitProblem>[];
@@ -81,7 +93,7 @@ final class PlanKit {
           case 'category' || 'unit':
             final slash = rest.indexOf('/');
             foreign = slash < 0 || rest.substring(0, slash) != id;
-          case 'symbol' || 'tool' || 'type' || 'property':
+          case 'symbol' || 'tool' || 'type' || 'property' || 'text':
             foreign = !rest.contains('.') || kitOfKey(rest) != id;
             if (!foreign && namespace != 'symbol') needEnglish.add(wordId);
           default:
@@ -125,6 +137,17 @@ final class PlanKit {
           tool.settings != null) {
         for (final p in _specIds(tool.id, tool.settings!.specs)) {
           needEnglish.add('property:$p');
+        }
+      }
+      // Spec 3a C1.1: a tool's settings are bound with no object.
+      for (final spec
+          in tool.settings?.specs ?? const <PropertySpec<Object>>[]) {
+        if (spec.needsObject) {
+          problems.add(KitProblem(
+              KitProblemCode.settingsNeedObject,
+              'the tool "${tool.id}"\'s setting "${spec.id}" reads the object '
+              'it is shown for (a TextDisplay or a range): a tool\'s '
+              'settings have none'));
         }
       }
     }

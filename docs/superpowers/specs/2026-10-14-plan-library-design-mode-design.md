@@ -824,6 +824,52 @@ packages/jet_cad_2d_plan/example/      PlanEditor with no kit
 - Multiple selection in the property specs.
 - Renaming the engine's `Draft*` family (decision 4).
 
+## Amendments
+
+From the 3a spec
+([2026-10-15-architecture-kit-design.md](2026-10-15-architecture-kit-design.md),
+"Amendments to other specs"), each written by the task that lands it.
+
+- **P3, property specs and the section builder** (3a C1.1, C1.7): a spec
+  is bound with the object it is shown for (`PlanObject`: document,
+  handle, world and the kit's words; none for a tool's settings); `TextDisplay` is a read-only
+  line read from the object, omitted when it reads nothing;
+  `LengthProperty.range` bounds a length by the object, inclusive, a null
+  range refusing every value; every spec takes `visible`, evaluated when
+  it is bound, and a hidden field takes no room; an action whose gate the
+  permissions refuse is hidden, not read-only. The escape hatch is
+  `(context, PlanSection<T>)`, the section holding the value, the commit,
+  the words, the object and the kit's services. `PlanKit.validate` refuses
+  a `TextDisplay` or a `range` in a tool's settings (`settingsNeedObject`).
+- **P2, the status line and tool notices** (3a C1.2): a kit's `Tool` may
+  implement `ToolNotice` (a `ValueListenable<KitText?>`); the guard
+  forwards it (`GuardedTool.notice`; a throw is one `hookFailed`, then
+  null); `PlanController.toolNotice` is the active tool's notice and
+  `textOf` puts a `KitText` into words (the host's first, then the kit's,
+  in the current locale). `PlanEditor`'s status line is the tool's label,
+  then ` — n selected` with a selection, then ` — <notice>`, worded when
+  it is read, so a language switch re-words it at once.
+- **P4, a new plan and the kit's `prepare`** (3a C1.3): the constructor's
+  plan without json and `newPlan` are prepared by every loaded kit, in
+  load order, before any system is installed, then the history is
+  cleared, before the save point and the unsettled baseline; a load or an
+  import never is. A prepare that throws is a `hookFailed`, and the plan
+  opens.
+- **P2, the controller's `build`** (3a C1.9): `PlanController(build:)`
+  (ignored with `json`) and `newPlan(build:)` run a `PlanBuild` on the new
+  plan once its system is installed, unrestricted, then clear the history,
+  so the built plan opens clean and still unsettled; its words are every
+  loaded kit's, the host's first. A build that throws leaves the empty
+  plan and is a `hookFailed` of the kit `plan`.
+- **P4, the failure boundary's grips row** (3a C1.8): an `ArgumentError`
+  from a kit grip's `drag` or `preview` refuses that point only (no move
+  for that event, no diagnostic, the grips kept); anything else keeps the
+  row. plan.select's drop is refused as `execute` refuses an edit (its
+  `false`: the drag cancelled, no exception); a `StateError` goes on.
+- **P4, the lock set** (3a C1.10, decision 6): the live objects a frozen
+  object references are locked with it, so they can be neither edited nor
+  deleted, up front or on commit (`PlanLocked`, the hint).
+
 ## Risks
 
 - **The contract is settled against a test kit only.** Sub-project 3's six

@@ -1,0 +1,3169 @@
+# Review package: c52df050..HEAD
+
+## Commits
+a85e5f7e test(integration): WS9 split under the freeze at open (3a Task 27 fix)
+cdd95213 test(integration): the panels and the words over the kit (3a Task 27)
+
+## Files changed
+ .../lib/jet_cad_2d_integration.dart                |   8 +-
+ .../test/l10n/determinism_test.dart                | 230 ++++++++
+ .../test/l10n/leak_test.dart                       | 218 ++++++++
+ .../test/l10n/locale_separator_test.dart           |  52 ++
+ .../test/l10n/numbered_names_test.dart             |  35 ++
+ .../test/l10n/overflow_test.dart                   |  61 +++
+ .../test/l10n/panel_words_test.dart                | 129 +++++
+ .../test/panels/colour_row_test.dart               | 522 ++++++++++++++++++
+ .../test/panels/decimal_separator_test.dart        | 209 ++++++++
+ .../test/panels/selection_page_test.dart           | 231 ++++++++
+ .../test/panels/titles_test.dart                   |  71 +++
+ .../test/panels/wall_section_test.dart             | 596 +++++++++++++++++++++
+ .../test/support/editor_rig.dart                   |   8 +-
+ .../test/support/q0_plan.dart                      |  56 ++
+ .../test/support/recording_plan_strings.dart       | 312 +++++++++++
+ .../test/support/rooms_plan.dart                   |  55 ++
+ .../jet_cad_2d_integration/test/support/units.dart |  13 +
+ .../test/room/decimal_separator_test.dart          | 120 +++++
+ .../test/words/value_words_test.dart               |  39 ++
+ 19 files changed, 2959 insertions(+), 6 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_integration/lib/jet_cad_2d_integration.dart b/packages/jet_cad_2d_integration/lib/jet_cad_2d_integration.dart
+index 00b7a956..bb99adb5 100644
+--- a/packages/jet_cad_2d_integration/lib/jet_cad_2d_integration.dart
++++ b/packages/jet_cad_2d_integration/lib/jet_cad_2d_integration.dart
+@@ -16,19 +16,21 @@ PlanController architectureController(
+         kits: [architectureKit], json: json, permissions: permissions);
+ 
+ /// A controller over the architecture kit whose plan is the sample flat
+ /// (spec C3.7, C1.9): built by the plan library, so it opens clean with
+ /// nothing to undo, its rooms named in the controller's words (English
+ /// until a locale is reported).
+ PlanController sampleFlatController() =>
+     PlanController(kits: [architectureKit], build: buildSampleFlat);
+ 
+ /// [controller]'s `PlanEditor` in an app speaking [locale], with the plan
+-/// library's locales and delegates.
++/// library's locales and delegates; its layer panel unless [layerPanel] is
++/// false (3a Task 27: the 2a composition, the property panel above the
++/// page panel).
+ Widget planEditorApp(PlanController controller,
+-        {Locale locale = const Locale('en')}) =>
++        {Locale locale = const Locale('en'), bool layerPanel = true}) =>
+     MaterialApp(
+       locale: locale,
+       supportedLocales: planSupportedLocales,
+       localizationsDelegates: planLocalizationsDelegates,
+-      home: PlanEditor(controller: controller),
++      home: PlanEditor(controller: controller, layerPanel: layerPanel),
+     );
+diff --git a/packages/jet_cad_2d_integration/test/l10n/determinism_test.dart b/packages/jet_cad_2d_integration/test/l10n/determinism_test.dart
+new file mode 100644
+index 00000000..58a07bb2
+--- /dev/null
++++ b/packages/jet_cad_2d_integration/test/l10n/determinism_test.dart
+@@ -0,0 +1,230 @@
++// ignore_for_file: invalid_use_of_internal_member
++// Spec 14d I-3, M-14d-g (revision 2, V-9): a document's bytes never depend
++// on the UI language. From a loaded plan, the same edits made through the
++// UI in English and in Turkish -- a table placed from the palette, turned
++// through the Rotation field by a fractional angle typed with the
++// language's separator, renumbered through the Number field, a room and a
++// layer named explicitly (review 14d-1 F-4) -- encode to the same bytes.
++//
++// Spec Q0 M-Q0-f: and the plan's text with them. A room is deleted and
++// drawn again with the Room tool, and the Bath diagonal is dragged, so an
++// area and a dimension value are generated afresh in each language; both
++// print the page's `point`, never the UI's comma.
++// Ported from jet_cad_floor_plan/test/l10n/determinism_test.dart (3a Task
++// 27, Appendix A D-24); assertions unchanged but the rulings named: IP-R1
++// (`room-name` is `property-name`) and IP-R4 (the table is the fixture
++// kit's `fx.dining.table.two`, its label field `unit-label`).
++import 'package:flutter/gestures.dart' show PointerDeviceKind, kPrimaryButton;
++import 'package:flutter/material.dart';
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
++    show InteractionLayer, SelectTool, SelectionKey, SymbolGallery;
++import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/canvas_rig.dart';
++import '../support/plans.dart'
++    show dimLines, dimText, labelsOf, planWith, textOf;
++import '../support/units.dart' show diningTableTwo, fxKit;
++
++/// The sample plan, with a layer `Bar` beside its own, over the
++/// architecture kit and the fixture kit's library table (ruling IP-R4).
++(String, Handle) samplePlan() {
++  late Handle bar;
++  final json = planWith((doc) {
++    final zero = doc.tables.layers[ReservedHandles.layerZero]!;
++    bar = doc.handleSeed.next();
++    doc.commands.execute(AddLayerCommand(LayerRecord(
++        handle: bar,
++        name: 'Bar',
++        color: const IndexedColor(5),
++        linetype: zero.linetype,
++        lineweight: zero.lineweight,
++        transparency: zero.transparency,
++        visible: true,
++        locked: false)));
++  }, kits: [
++    architectureKit,
++    fxKit(library: [diningTableTwo])
++  ], first: buildSampleFlat);
++  return (json, bar);
++}
++
++Future<void> commit(WidgetTester tester, String key, String text) async {
++  await tester.tap(find.byKey(Key(key)));
++  await tester.pump();
++  await tester.enterText(find.byKey(Key(key)), text);
++  await tester.testTextInput.receiveAction(TextInputAction.done);
++  await tester.pump();
++  await tester.pump();
++}
++
++/// [doc]'s rooms, ascending.
++List<Handle> roomsOf(DraftDocument doc) =>
++    doc.components.withComponent<RoomParams>().toList()
++      ..sort((a, b) => a.value.compareTo(b.value));
++
++/// The Kitchen's seed in the sample (spec 10 D23), a point in no band.
++final Vector2 kitchenSeed = Vector2(19000, 10000);
++
++/// [json] edited through the UI in [locale]; the design's encoding.
++Future<String> editedIn(
++    WidgetTester tester, (String, Handle) plan, Locale locale) async {
++  final (json, bar) = plan;
++  final c = PlanController(kits: [
++    architectureKit,
++    fxKit(library: [diningTableTwo])
++  ], json: json);
++  await pumpEditor(tester, c, locale: locale);
++  await tester.tap(find.byKey(const Key('tab-symbols')));
++  await tester.pump();
++  expect(await symbolsReady(tester, c), isTrue,
++      reason: 'premise: the libraries loaded');
++  await tester.pump();
++  // The gallery builds its cells lazily, and the kit's furniture comes
++  // first: the fixture kit's table is scrolled into view (a fixture change,
++  // ruling IP-R4: today's dining table sat in the first screen of today's
++  // library).
++  final cell = find.byKey(const Key('symbol-cell-fx.dining.table.two@1'));
++  await tester.scrollUntilVisible(cell, 200,
++      scrollable: find
++          .descendant(
++              of: find.byType(SymbolGallery), matching: find.byType(Scrollable))
++          .first);
++  await tester.ensureVisible(cell);
++  await tester.pump();
++  await tester.tap(cell);
++  await tester.pump();
++  final canvas = tester.getRect(find.byType(InteractionLayer));
++  await tester.tapAt(canvas.center + const Offset(37, -23));
++  await tester.pump();
++  await tester.pump();
++  final placed = c.document.tree.nodes.whereType<InstanceNode>();
++  expect(placed, hasLength(1), reason: 'premise: one table placed');
++  c.activeSelection.replace([SelectionKey.root(placed.single.handle)]);
++  await tester.pump();
++  await commit(
++      tester, 'symbol-rotation', locale.languageCode == 'tr' ? '30,5' : '30.5');
++  await commit(tester, 'unit-label', '7');
++  // A room named explicitly.
++  final doc = c.document;
++  final room = doc.tree.nodes
++      .firstWhere((n) => doc.components.get<RoomParams>(n.handle) != null)
++      .handle;
++  c.activeSelection.replace([SelectionKey.root(room)]);
++  await tester.pump();
++  await tester.pump();
++  await commit(tester, 'property-name', 'Teras');
++  // A layer named explicitly.
++  final name = find.byKey(Key('layer-name-${bar.toHex()}'));
++  await tester.tap(name);
++  await tester.pump(const Duration(milliseconds: 50));
++  await tester.tap(name);
++  await tester.pump();
++  await tester.pump();
++  final field = find.byKey(Key('layer-name-field-${bar.toHex()}'));
++  await tester.enterText(field, 'Salon');
++  await tester.testTextInput.receiveAction(TextInputAction.done);
++  await tester.pump(const Duration(seconds: 1));
++
++  // A room drawn (M-Q0-f): the Kitchen selected, deleted with the Delete
++  // key, and drawn again in its face with the Room tool, then named
++  // explicitly (its numbered name is the language's, L7).
++  final kitchen = roomsOf(doc)[3];
++  expect(doc.components.get<RoomParams>(kitchen)!.name, 'Kitchen',
++      reason: 'premise: the sample\'s fourth room');
++  // Escape leaves the palette's place tool for Select.
++  await tester.sendKeyEvent(LogicalKeyboardKey.escape);
++  await tester.pump();
++  // The canvas holds every plan tool in the guard: the tool inside it
++  // (`toolFor`, @internal, ruling R-P9) is the Flutter layer's SelectTool.
++  expect(c.toolFor(c.activeTool.value), isA<SelectTool>(),
++      reason: 'premise: the keys reach the canvas\'s Select tool');
++  c.activeSelection.replace([SelectionKey.root(kitchen)]);
++  await tester.pump();
++  await tester.pump();
++  await tester.sendKeyEvent(LogicalKeyboardKey.delete);
++  await tester.pump();
++  await tester.pump();
++  expect(doc.components.get<RoomParams>(kitchen), isNull,
++      reason: 'premise: deleted');
++  await tester.sendKeyEvent(LogicalKeyboardKey.keyM);
++  await tester.pump();
++  await tester.tapAt(globalAt(tester, c, kitchenSeed + Vector2(0.37, 0.61)));
++  await tester.pump();
++  await tester.pump();
++  await tester.sendKeyEvent(LogicalKeyboardKey.escape);
++  await tester.pump();
++  final drawn = roomsOf(doc).last;
++  expect(drawn.value, greaterThan(kitchen.value), reason: 'premise: drawn');
++  expect(textOf(doc, labelsOf(doc, drawn)[1]), '13.97 m²',
++      reason: 'premise: its area generated, with the page\'s point');
++  c.activeSelection.replace([SelectionKey.root(drawn)]);
++  await tester.pump();
++  await tester.pump();
++  await commit(tester, 'property-name', 'Ofis');
++
++  // A dimension moved (M-Q0-f): the Bath diagonal clicked a quarter of the
++  // way along and its body dragged, object snap off, so its fixed end
++  // moves and its value is generated afresh.
++  await tester.sendKeyEvent(LogicalKeyboardKey.f3);
++  await tester.pump();
++  final diagonal = (doc.components.withComponent<DimensionParams>().toList()
++        ..sort((a, b) => a.value.compareTo(b.value)))
++      .last;
++  expect(dimText(doc, diagonal), '3.58', reason: 'premise: the diagonal');
++  final (d0, d1) = dimLines(doc, diagonal)[0];
++  final grab = d0 + (d1 - d0) * 0.25;
++  await tester.tapAt(globalAt(tester, c, grab));
++  await tester.pump();
++  await tester.pump(const Duration(milliseconds: 500));
++  expect(c.activeSelection.keys, [SelectionKey.root(diagonal)],
++      reason: 'premise: the click selects the diagonal');
++  final from = globalAt(tester, c, grab);
++  final to = globalAt(tester, c, grab + Vector2(-612.5, 437.5));
++  final gesture = await tester.createGesture(
++      kind: PointerDeviceKind.mouse, buttons: kPrimaryButton);
++  await gesture.down(from);
++  await gesture.moveTo(from + const Offset(12, 7));
++  await gesture.moveTo(to);
++  await gesture.up();
++  await gesture.removePointer();
++  await tester.pump();
++  await tester.pump();
++  final moved = dimText(doc, diagonal);
++  // The drag snaps to the page's grid; the length rounds to 4.68 m.
++  expect(moved, '4.68',
++      reason: 'dragged, its value anew with the page\'s point, never the '
++          'UI\'s comma');
++
++  final out = c.save();
++  await tester.pumpWidget(const SizedBox());
++  c.dispose();
++  return out;
++}
++
++void main() {
++  testWidgets(
++      'DT1 the same UI edits in English and in Turkish encode the same '
++      '(I-3, M-14d-g)', (tester) async {
++    addTearDown(() => tester.binding.setSurfaceSize(null));
++    final plan = samplePlan();
++    final en = await editedIn(tester, plan, const Locale('en'));
++    final tr = await editedIn(tester, plan, const Locale('tr'));
++    expect(en, contains('"7"'), reason: 'premise: renumbered');
++    expect(en, contains('"Teras"'), reason: 'premise: the room named');
++    expect(en, contains('"Salon"'), reason: 'premise: the layer named');
++    expect(en, isNot(contains('"Bar"')), reason: 'premise: renamed');
++    expect(en, contains('0.86162916'), reason: 'premise: turned 30.5 degrees');
++    expect(en, contains('Square dining table, 2 seats'),
++        reason: 'premise: the copy keeps the library\'s English name');
++    expect(en, contains('"Ofis"'), reason: 'premise: the room drawn');
++    expect(en, contains('13.97 m²'), reason: 'premise: its area');
++    expect(en, contains('"4.68"'), reason: 'premise: moved');
++    expect(en, isNot(contains('"3.58"')), reason: 'premise: moved');
++    expect(tr, en);
++  });
++}
+diff --git a/packages/jet_cad_2d_integration/test/l10n/leak_test.dart b/packages/jet_cad_2d_integration/test/l10n/leak_test.dart
+new file mode 100644
+index 00000000..39c964f1
+--- /dev/null
++++ b/packages/jet_cad_2d_integration/test/l10n/leak_test.dart
+@@ -0,0 +1,218 @@
++// ignore_for_file: invalid_use_of_internal_member
++// Spec 14d M-14d-a (revision 2, V-10): the leak test. The planner is
++// pumped in Turkish through a recording language; every panel, tab, dialog
++// and menu is opened in turn; then every Text, tooltip, label and hint on
++// screen must be a word the planner asked the strings for, a symbol's name
++// in the language, document text, or on a short allowlist. A literal never
++// moved into the strings is never recorded, so it fails whatever its
++// language.
++// Ported from jet_cad_floor_plan/test/l10n/leak_test.dart (LK2; LK1 is
++// 2a's) (3a Task 27, Appendix A D-24); assertions unchanged but the
++// rulings named: IP-R4 (the library table is the fixture kit's) and IP-R5
++// (the kit's words come from its `KitNames`, not the plan's strings: the
++// allowlist also takes the kit's Turkish words and its `text:` templates
++// filled). The locale is reported through `reportLocale`, @internal
++// (ruling R-P9).
++import 'package:flutter/foundation.dart' show SynchronousFuture;
++import 'package:flutter/material.dart';
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
++    show InteractionLayer, SelectionKey, SymbolGallery;
++import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++
++import '../support/canvas_rig.dart' show symbolsReady;
++import '../support/recording_plan_strings.dart';
++import '../support/units.dart' show diningTableTwo, fxKit;
++
++class _Recording extends LocalizationsDelegate<PlanStrings> {
++  const _Recording(this.strings);
++  final RecordingPlanStrings strings;
++  @override
++  bool isSupported(Locale locale) => true;
++  @override
++  Future<PlanStrings> load(Locale locale) => SynchronousFuture(strings);
++  @override
++  bool shouldReload(_Recording old) => !identical(old.strings, strings);
++}
++
++/// Text that is no word: numbers and their marks, units, paper names,
++/// formats, shortcut letters, the em dash of an empty row.
++final RegExp _numeric = RegExp(r'^[-+\d\s.,:×·%°]*$');
++const Set<String> _allowed = {
++  '—', 'mm', 'cm', 'm', 'in', 'ft-in', '°', //
++  'A4', 'A3', 'Letter', 'Tabloid', 'PDF', 'PNG', '1:', '0', //
++  '⌘', '⇧',
++};
++final RegExp _letter = RegExp(r'^[A-Z]$');
++
++/// The plan's own text, a number and its unit (a room's area, a
++/// dimension's value): stored, with the page's decimal separator, which a
++/// new plan takes from the UI's language (spec Q0 N1). LK2's sample is
++/// built in Turkish, so it prints `,`.
++final RegExp _planText = RegExp(r'^[-\d.,\s]+ ?(m²|ft²|mm|cm|m|in|ft)$');
++
++/// Every visible string: Text data, rich text, tooltip messages.
++Set<String> visibleTexts(WidgetTester tester) => {
++      for (final t in tester.widgetList<Text>(find.byType(Text)))
++        if (t.data != null) t.data! else t.textSpan?.toPlainText() ?? '',
++      for (final t in tester.widgetList<Tooltip>(find.byType(Tooltip)))
++        if (t.message != null) t.message!,
++    }..remove('');
++
++/// The architecture kit's Turkish words, and its `text:` templates as
++/// patterns (each `{name}` any non-empty run): what the kit hands the plan
++/// (ruling IP-R5). A template that is placeholders alone (`{value}`, the
++/// dimension's notice) is left out: its pattern `^(.+)$` would take every
++/// text, and its filling is a number, which the allowlist's number rules
++/// take already.
++///
++/// The fixture kit has no words: its table's name and its category (the
++/// gallery's header) show as written, as today's library's names and
++/// categories in the language did (ruling IP-R4).
++final List<String> kitWords = [
++  ...architectureKit.names.words['tr']!.values,
++  diningTableTwo.name,
++  diningTableTwo.category,
++];
++final List<RegExp> kitTemplates = [
++  for (final w in architectureKit.names.words['tr']!.values)
++    if (w.contains('{') &&
++        w.replaceAll(RegExp(r'\{[a-z]+\}'), '').trim().isNotEmpty)
++      RegExp(
++          '^${RegExp.escape(w).replaceAll(RegExp(r'\\\{[a-z]+\\\}'), '(.+)')}\$'),
++];
++
++/// [seen]'s texts that are no word the planner asked [recording] for, no
++/// kit word in Turkish, no layer name, nothing on the allowlist.
++List<String> leaksOf(
++    Set<String> seen, RecordingPlanStrings recording, PlanController c) {
++  final layerNames = {
++    for (final r in c.document.tables.layers.records) r.name,
++  };
++  bool allowed(String text) {
++    if (recording.handedOut.contains(text)) return true;
++    if (kitWords.contains(text) || kitTemplates.any((t) => t.hasMatch(text))) {
++      return true;
++    }
++    if (layerNames.contains(text)) return true;
++    if (_allowed.contains(text) || _numeric.hasMatch(text)) return true;
++    if (_planText.hasMatch(text)) return true;
++    if (_letter.hasMatch(text)) return true;
++    // A composed line: the status line's parts, a tooltip's label and its
++    // chord.
++    if (text.contains(' — ')) return text.split(' — ').every(allowed);
++    final chord = RegExp(r'^(.+) \((.+)\)$').firstMatch(text);
++    if (chord != null) {
++      return allowed(chord[1]!) &&
++          chord[2]!.split('+').every(
++              (k) => recording.handedOut.contains(k) || _letter.hasMatch(k));
++    }
++    return false;
++  }
++
++  return [
++    for (final t in seen)
++      if (!allowed(t)) t
++  ]..sort();
++}
++
++Widget recordingApp(RecordingPlanStrings recording, Widget home) => MaterialApp(
++    locale: const Locale('tr'),
++    supportedLocales: planSupportedLocales,
++    localizationsDelegates: [
++      _Recording(recording),
++      ...planLocalizationsDelegates
++          .where((d) => d != PlanLocalizations.delegate),
++    ],
++    home: home);
++
++void main() {
++  testWidgets(
++      'LK2 in Turkish, every object of the sample plan and a library table '
++      'selected in turn, its size menu open: nothing bypasses the strings '
++      '(M-14d-a, review 14d-1 F-1)', (tester) async {
++    final recording = RecordingPlanStrings(const PlanStringsTr());
++    // Built in the reported language (spec C1.9): the rooms' stored names
++    // are the kit's Turkish words.
++    final c = PlanController(kits: [
++      architectureKit,
++      fxKit(library: [diningTableTwo])
++    ]);
++    addTearDown(c.dispose);
++    c.reportLocale(const Locale('tr'), strings: recording);
++    c.newPlan(build: buildSampleFlat);
++    await tester.binding.setSurfaceSize(const Size(1440, 900));
++    addTearDown(() => tester.binding.setSurfaceSize(null));
++    await tester.pumpWidget(
++        recordingApp(recording, Scaffold(body: PlanEditor(controller: c))));
++    await tester.pump();
++
++    // A library table from the palette.
++    await tester.tap(find.byKey(const Key('tab-symbols')));
++    await tester.pump();
++    expect(await symbolsReady(tester, c), isTrue,
++        reason: 'premise: the libraries loaded');
++    await tester.pump();
++    // The gallery builds its cells lazily, and the kit's furniture comes
++    // first: the fixture kit's table is scrolled into view (a fixture
++    // change, ruling IP-R4).
++    final cell = find.byKey(const Key('symbol-cell-fx.dining.table.two@1'));
++    await tester.scrollUntilVisible(cell, 200,
++        scrollable: find
++            .descendant(
++                of: find.byType(SymbolGallery),
++                matching: find.byType(Scrollable))
++            .first);
++    await tester.ensureVisible(cell);
++    await tester.pump();
++    await tester.tap(cell);
++    await tester.pump();
++    final canvas = tester.getRect(find.byType(InteractionLayer));
++    await tester.tapAt(canvas.center + const Offset(43, -29));
++    await tester.pump();
++    await tester.pump();
++    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
++    await tester.pump();
++
++    final seen = <String>{};
++    final doc = c.document;
++    final roots = [
++      for (final n in doc.tree.nodes)
++        if (n.parent == doc.rootHandle) n.handle
++    ];
++    final kinds = <String>{};
++    for (final h in roots) {
++      c.activeSelection.replace([SelectionKey.root(h)]);
++      await tester.pump();
++      await tester.pump();
++      seen.addAll(visibleTexts(tester));
++      for (final k in const [
++        'section-architecture.wall',
++        'section-architecture.opening',
++        'section-architecture.room',
++        'section-architecture.dimension',
++        'symbol-section',
++        'unit-section',
++      ]) {
++        if (find.byKey(Key(k)).evaluate().isNotEmpty) kinds.add(k);
++      }
++      if (find.byKey(const Key('symbol-size-menu')).evaluate().isNotEmpty) {
++        await tester.tap(find.byKey(const Key('symbol-size-menu')));
++        await tester.pumpAndSettle();
++        seen.addAll(visibleTexts(tester));
++        await tester.tapAt(const Offset(5, 5));
++        await tester.pumpAndSettle();
++      }
++    }
++    expect(kinds, hasLength(6), reason: 'premise: every section shown');
++    // A positive control: a literal no one asked for is a leak (the
++    // allowlist does not take every text).
++    expect(leaksOf({'A literal never moved'}, recording, c),
++        ['A literal never moved'],
++        reason: 'premise: the check can fail');
++    expect(leaksOf(seen, recording, c), isEmpty,
++        reason: 'shown but never asked of the strings');
++  });
++}
+diff --git a/packages/jet_cad_2d_integration/test/l10n/locale_separator_test.dart b/packages/jet_cad_2d_integration/test/l10n/locale_separator_test.dart
+new file mode 100644
+index 00000000..415e6bda
+--- /dev/null
++++ b/packages/jet_cad_2d_integration/test/l10n/locale_separator_test.dart
+@@ -0,0 +1,52 @@
++// ignore_for_file: invalid_use_of_internal_member
++// Spec Q0 N2 (M-Q0-e): a loaded plan is never settled. The UI language
++// differs from the page's separator wherever it could leak in (the fixture
++// rule).
++// Ported from jet_cad_floor_plan/test/host/new_plan_separator_test.dart
++// (NS3) through 2a's port (jet_cad_2d_plan/test/controller/
++// locale_separator_test.dart: the view replaced by the report it makes,
++// `reportLocale`) over the decimal separator's plan, with the source's
++// room line restored (3a Task 27, Appendix A D-24); assertions unchanged.
++// `reportLocale` is @internal (ruling R-P9).
++import 'package:flutter/widgets.dart' show Locale;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_integration/jet_cad_2d_integration.dart';
++import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
++
++import '../support/plans.dart' show labelsOf, textOf;
++import '../support/q0_plan.dart';
++
++DecimalSeparator separatorOf(DraftDocument doc) =>
++    doc.components.get<PageComponent>(doc.rootHandle)!.decimalSeparator;
++
++void main() {
++  testWidgets(
++      'NS3 a loaded plan is never settled (N2): by the constructor or by '
++      'load(), a point plan shown in Turkish stays point, its texts with .',
++      (tester) async {
++    final f = q0PlanJson();
++    final json = f.json;
++    final premise = architectureController(json: json);
++    addTearDown(premise.dispose);
++    expect(separatorOf(premise.document), DecimalSeparator.point,
++        reason: 'premise');
++    final byJson = architectureController(json: json);
++    addTearDown(byJson.dispose);
++    byJson.reportLocale(const Locale('tr'));
++    final doc = byJson.document;
++    expect(separatorOf(doc), DecimalSeparator.point);
++    final room = doc.components.withComponent<RoomParams>().single;
++    expect(textOf(doc, labelsOf(doc, room)[1]), '12.37 m²');
++    expect(byJson.save(), json, reason: "the bytes are the file's");
++
++    final byLoad = architectureController();
++    addTearDown(byLoad.dispose);
++    byLoad.load(json);
++    byLoad.reportLocale(const Locale('tr'));
++    expect(separatorOf(byLoad.document), DecimalSeparator.point);
++    expect(byLoad.dirty.value, isFalse);
++    expect(byLoad.save(), json);
++    await tester.pump();
++  });
++}
+diff --git a/packages/jet_cad_2d_integration/test/l10n/numbered_names_test.dart b/packages/jet_cad_2d_integration/test/l10n/numbered_names_test.dart
+new file mode 100644
+index 00000000..f14e8045
+--- /dev/null
++++ b/packages/jet_cad_2d_integration/test/l10n/numbered_names_test.dart
+@@ -0,0 +1,35 @@
++// ignore_for_file: invalid_use_of_internal_member
++// Spec 14d L7: a new layer is named in the language of the moment, its N
++// counted over every built-in language's pattern, as the table folds names
++// (M-14d-k); the sample plan names its rooms in its language.
++// Ported from jet_cad_floor_plan/test/l10n/numbered_names_test.dart (NN3;
++// NN1 and NN2 are 2a's) (3a Task 27, Appendix A D-24); assertions
++// unchanged. The plan builds the sample in the language it was told
++// (`newPlan(build:)`, spec C1.9): the strings become the reported locale,
++// through `reportLocale`, @internal (ruling R-P9).
++import 'package:flutter/widgets.dart' show Locale;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++
++void main() {
++  testWidgets('NN3 the sample plan names its rooms in its language',
++      (tester) async {
++    List<String> roomsOf(Locale locale) {
++      final c = PlanController(kits: [architectureKit]);
++      c.reportLocale(locale);
++      c.newPlan(build: buildSampleFlat);
++      final names = [
++        for (final h in c.document.components.withComponent<RoomParams>())
++          c.document.components.get<RoomParams>(h)!.name
++      ];
++      c.dispose();
++      return names;
++    }
++
++    expect(roomsOf(const Locale('en')), contains('Bedroom 2'));
++    expect(roomsOf(const Locale('tr')),
++        containsAll(['Hol', 'Yatak odası 1', 'Mutfak', 'Yemek odası']));
++    expect(roomsOf(const Locale('de')), contains('Küche'));
++  });
++}
+diff --git a/packages/jet_cad_2d_integration/test/l10n/overflow_test.dart b/packages/jet_cad_2d_integration/test/l10n/overflow_test.dart
+new file mode 100644
+index 00000000..87b43040
+--- /dev/null
++++ b/packages/jet_cad_2d_integration/test/l10n/overflow_test.dart
+@@ -0,0 +1,61 @@
++// Spec 14d R-2, M-14d-c (V-11): German and Turkish words are longer; the
++// shell must not overflow at the top bar's 656 px floor (plan 13) and up,
++// with OSNAP off (its longest words), the Symbols tab, a selected wall's
++// panels and the service bar.
++// Ported from jet_cad_floor_plan/test/l10n/overflow_test.dart (OV-H, each
++// language; OV-de and OV-tr are 2a's) (3a Task 27, Appendix A D-24);
++// assertions unchanged but the rulings named: IP-R4 (the table is the
++// fixture kit's, a unit labelled `1` as today's placer numbered it).
++import 'package:flutter/material.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
++import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/plans.dart' show planWith;
++import '../support/units.dart' show fxKit, labelUnit, placeAt, tableSymbol;
++
++void main() {
++  heightMain();
++}
++
++/// The sample plan with a four-seat table, turned, off the origin.
++String furnishedPlan() => planWith((d) {
++      final h = placeAt(d, tableSymbol(seats: 4), Vector2(1234.5, 2345.25),
++          quarterTurns: 1);
++      labelUnit(d, h, '1');
++    }, kits: [architectureKit, fxKit()], first: buildSampleFlat);
++
++void heightMain() {
++  for (final code in ['en', 'de', 'tr']) {
++    testWidgets(
++        'OV-H-$code at 656 x 700, each root object of the sample plan and a '
++        'table selected in turn: the right panel never overflows (review '
++        '14d-1 F-2)', (tester) async {
++      final c = PlanController(
++          kits: [architectureKit, fxKit()], json: furnishedPlan());
++      addTearDown(c.dispose);
++      await tester.binding.setSurfaceSize(const Size(656, 700));
++      addTearDown(() => tester.binding.setSurfaceSize(null));
++      await tester.pumpWidget(MaterialApp(
++          locale: Locale(code),
++          supportedLocales: planSupportedLocales,
++          localizationsDelegates: planLocalizationsDelegates,
++          home: Scaffold(body: PlanEditor(controller: c))));
++      await tester.pump();
++      final doc = c.document;
++      final roots = [
++        for (final n in doc.tree.nodes)
++          if (n.parent == doc.rootHandle) n.handle
++      ];
++      expect(roots.length, greaterThan(20), reason: 'premise');
++      expect(c.units, isNotEmpty, reason: 'premise');
++      for (final h in roots) {
++        c.activeSelection.replace([SelectionKey.root(h)]);
++        await tester.pump();
++        expect(tester.takeException(), isNull, reason: '$code, $h');
++      }
++    });
++  }
++}
+diff --git a/packages/jet_cad_2d_integration/test/l10n/panel_words_test.dart b/packages/jet_cad_2d_integration/test/l10n/panel_words_test.dart
+new file mode 100644
+index 00000000..1bca1ae1
+--- /dev/null
++++ b/packages/jet_cad_2d_integration/test/l10n/panel_words_test.dart
+@@ -0,0 +1,129 @@
++// Spec 14d L12, L15 (revision 2): the panels speak the host's language and
++// show and read their numbers with its separator; a change of language
++// while mounted shows the fields again in it (M-14d-s). A wall off the
++// origin with a fractional thickness; a page at a fractional scale.
++// Ported from jet_cad_floor_plan/test/l10n/panel_words_test.dart (3a Task
++// 27, Appendix A D-24); assertions unchanged but the rulings named: IP-R1
++// (`wall-thickness` is the field `thickness`) and IP-R6 (the
++// justification is a dropdown showing the chosen word: its menu is opened
++// to show the other two, and closed by choosing `Orta` again, no step).
++import 'package:flutter/material.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
++import 'package:jet_cad_2d_integration/jet_cad_2d_integration.dart';
++import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/canvas_rig.dart' show byKey, field;
++import '../support/plans.dart' show addWall, planWith;
++
++/// A plan with one wall, 112.5 thick, and its page at 1:12.5.
++(String, Handle) wallPlan() {
++  late Handle h;
++  final json = planWith((doc) {
++    h = doc.handleSeed.next();
++    doc.commands.execute(addWall(doc, h, Vector2(-1830.5, 640.25),
++        Vector2(2470.75, 1210.5), 112.5, Justification.centre));
++    final page = doc.components.get<PageComponent>(doc.rootHandle)!;
++    doc.commands.execute(SetComponentCommand<PageComponent>(
++        doc.rootHandle, page.copyWith(scaleDenominator: 12.5)));
++  });
++  return (json, h);
++}
++
++/// The editor over [c] in [locale]: the integration package's app.
++Widget app(PlanController c, Locale locale) => planEditorApp(c, locale: locale);
++
++String fieldText(WidgetTester tester, Finder f) =>
++    tester.widget<TextField>(f).controller!.text;
++
++WallParams wallOf(PlanController c, Handle h) =>
++    c.document.components.get<WallParams>(h)!;
++
++Future<(PlanController, Handle)> pumpWall(
++    WidgetTester tester, Locale locale) async {
++  final (json, h) = wallPlan();
++  final c = architectureController(json: json);
++  addTearDown(c.dispose);
++  await tester.binding.setSurfaceSize(const Size(1440, 900));
++  addTearDown(() => tester.binding.setSurfaceSize(null));
++  await tester.pumpWidget(app(c, locale));
++  await tester.pump();
++  c.activeSelection.replace([SelectionKey.root(h)]);
++  await tester.pump();
++  await tester.pump();
++  return (c, h);
++}
++
++Future<void> typeInto(WidgetTester tester, Finder f, String text) async {
++  await tester.tap(f);
++  await tester.pump();
++  await tester.enterText(f, text);
++  await tester.testTextInput.receiveAction(TextInputAction.done);
++  await tester.pump();
++  await tester.pump();
++}
++
++void main() {
++  testWidgets(
++      'PW1 in Turkish the Wall section, the Page panel and the layers speak '
++      'Turkish; numbers show and read with a comma (L12, L15, M-14d-f)',
++      (tester) async {
++    final (c, h) = await pumpWall(tester, const Locale('tr'));
++    // Ruling IP-R6: the menu shows the three justification words.
++    await tester.tap(field('justification'));
++    await tester.pumpAndSettle();
++    for (final w in [
++      'Duvar',
++      'Kalınlık',
++      'Sol',
++      'Orta',
++      'Sağ',
++      'Sayfa',
++      'Ölçek',
++      'Izgara',
++      'Katmanlar',
++      'Katman'
++    ]) {
++      expect(find.text(w), findsWidgets, reason: w);
++    }
++    await tester.tap(find.text('Orta').last);
++    await tester.pumpAndSettle();
++    expect(fieldText(tester, field('thickness')), '112,5');
++    expect(fieldText(tester, byKey('page-scale')), '12,5');
++    expect(find.textContaining('1:12,5 · '), findsOneWidget, reason: 'zoom');
++
++    await typeInto(tester, field('thickness'), '137,25');
++    expect(wallOf(c, h).thickness, 137.25);
++    expect(fieldText(tester, field('thickness')), '137,25');
++    final depth = c.document.commands.undoDepth;
++    await typeInto(tester, field('thickness'), '1.600');
++    expect(wallOf(c, h).thickness, 137.25, reason: 'a grouping is refused');
++    expect(c.document.commands.undoDepth, depth);
++    await typeInto(tester, field('thickness'), '150.5');
++    expect(wallOf(c, h).thickness, 150.5,
++        reason: 'an English keypad\'s point, once (V-12)');
++  });
++
++  testWidgets(
++      'PW2 in German the Page panel reads a comma; a switch to English while '
++      'mounted shows the fields again with a point (M-14d-s)', (tester) async {
++    final (c, h) = await pumpWall(tester, const Locale('de'));
++    expect(find.text('Dicke'), findsOneWidget);
++    expect(find.text('Maßstab'), findsOneWidget);
++    await typeInto(tester, byKey('page-scale'), '20,5');
++    final page =
++        c.document.components.get<PageComponent>(c.document.rootHandle)!;
++    expect(page.scaleDenominator, 20.5);
++    expect(fieldText(tester, byKey('page-scale')), '20,5');
++
++    await tester.pumpWidget(app(c, const Locale('en')));
++    await tester.pump();
++    expect(find.text('Thickness'), findsOneWidget);
++    expect(fieldText(tester, field('thickness')), '112.5');
++    expect(fieldText(tester, byKey('page-scale')), '20.5');
++    expect(wallOf(c, h).thickness, 112.5, reason: 'nothing committed');
++  });
++}
+diff --git a/packages/jet_cad_2d_integration/test/panels/colour_row_test.dart b/packages/jet_cad_2d_integration/test/panels/colour_row_test.dart
+new file mode 100644
+index 00000000..979b86ec
+--- /dev/null
++++ b/packages/jet_cad_2d_integration/test/panels/colour_row_test.dart
+@@ -0,0 +1,522 @@
++// Plan colours spec PC-8, PC-9 and PC-10: the Selection panel's Colour row.
++// Nine swatches, None and the palette's eight hues, set the colour of every
++// selected room and table in one undo step labelled Colour; read-only while
++// the host refuses `recolor` or the permissions refuse the edit; its words
++// in Turkish; its swatches as the canvas shows the hues.
++//
++// The plan is the two-room rectangle at the corpus far origin, turned 23°,
++// every wall and the separator in its own rotated, translated group; room A
++// sits in a group of its own turned 0.61 rad, room B at the identity. The
++// hues under test are `teal` and `purple`, never the first of the palette,
++// and `magenta`, a name no release knows.
++//
++// CP7 to CP11 (Slice 2, tables) run through `FloorPlanView` on the editor
++// fixture: the startup flat's rooms beside its tables, `1` turned 30 degrees,
++// `2` mirrored at 90, `7` and ` 7 ` sharing a number, `L` on a locked layer.
++// Ported for jet_cad_2d_integration (3a Task 27, Appendix A D-21, D-39): the
++// rooms, the wall and the separator are the architecture kit's; assertions
++// unchanged but ruling IP-R7. The fixture case, CP1-CP5 and CP6b; CP6 and
++// CP7-CP12 stay 2a's and 2b's.
++import 'dart:convert' show jsonEncode;
++import 'dart:ui' as ui;
++
++import 'package:flutter/material.dart';
++import 'package:flutter/rendering.dart';
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
++    show
++        InteractionLayer,
++        SelectionKey,
++        ViewportTransform,
++        darkCanvasTone,
++        kDarkCanvasPaper;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show PlanSwatch;
++import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart'
++    show ArchitectureTools, RoomParams, SeparatorParams, WallParams;
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/canvas_rig.dart';
++import '../support/plans.dart';
++import '../support/rooms_plan.dart';
++
++Finder swatch(String name) => find.byKey(Key('color-swatch-$name'));
++Finder get picker => find.byKey(const Key('color-picker'));
++
++/// The Semantics node of swatch [name] (the nearest above its InkWell that
++/// carries the label).
++Semantics semanticsOf(WidgetTester tester, String name) =>
++    tester.widget<Semantics>(find
++        .ancestor(
++            of: swatch(name),
++            matching: find.byWidgetPredicate(
++                (w) => w is Semantics && w.properties.label != null))
++        .first);
++
++/// The tooltip text of swatch [name].
++String tooltipOf(WidgetTester tester, String name) => tester
++    .widget<Tooltip>(
++        find.ancestor(of: swatch(name), matching: find.byType(Tooltip)).first)
++    .message!;
++
++/// The marked swatch's name, or null for none.
++String? marked(WidgetTester tester) {
++  final hits = <String>[
++    for (final n in ['none', for (final c in PlanSwatch.values) c.name])
++      if (semanticsOf(tester, n).properties.selected ?? false) n,
++  ];
++  expect(hits.length, lessThanOrEqualTo(1), reason: 'at most one mark: $hits');
++  return hits.isEmpty ? null : hits.single;
++}
++
++SelectionKey k(Handle h) => SelectionKey.root(h);
++
++/// The kit's grey tint transparency (kit-internal, R-P1).
++const int kRoomTintTransparency =
++    229; // jet_cad_floor_plan/lib/src/parametric/room.dart:125 (kit-internal)
++
++/// The editor over [Rooms.c], its pixels readable.
++final class Rig {
++  Rig._(this.tester, this.c, this.capture, this.topLeft);
++
++  final WidgetTester tester;
++  final PlanController c;
++  final GlobalKey capture;
++  final Offset topLeft;
++
++  /// Pumps the editor over [r], the camera at 0.07 px/mm (y up) centred on
++  /// the plan's middle, with [r]'s permissions and, when given, [locale]
++  /// (with the plan library's delegates) and [theme].
++  static Future<Rig> pump(WidgetTester tester, Rooms r,
++      {Locale? locale, ThemeData? theme}) async {
++    await tester.binding.setSurfaceSize(const Size(1440, 900));
++    addTearDown(() => tester.binding.setSurfaceSize(null));
++    final capture = GlobalKey();
++    await tester.pumpWidget(RepaintBoundary(
++        key: capture,
++        child: MaterialApp(
++            locale: locale,
++            theme: theme,
++            supportedLocales: planSupportedLocales,
++            localizationsDelegates: planLocalizationsDelegates,
++            home: Scaffold(body: PlanEditor(controller: r.c)))));
++    await tester.pump();
++    final layer = find.byType(InteractionLayer);
++    final size = tester.getSize(layer);
++    final mid = r.plan.at(4800, 2000);
++    const px = 0.07;
++    r.c.camera.value = ViewportTransform(
++        worldToScreenMatrix: Transform2(px, 0, 0, -px,
++            size.width / 2 - px * mid.x + 0.37, size.height / 2 + px * mid.y));
++    await tester.pump();
++    return Rig._(tester, r.c, capture, tester.getTopLeft(layer));
++  }
++
++  Future<void> select(List<Handle> hs) async {
++    c.activeSelection.replace([for (final h in hs) k(h)]);
++    await tester.pump();
++  }
++
++  /// The RGB of the pixel that holds world point [p], as drawn now.
++  Future<List<int>> rgb(Vector2 p) async {
++    final boundary =
++        capture.currentContext!.findRenderObject()! as RenderRepaintBoundary;
++    final (bytes, width) = (await tester.runAsync(() async {
++      final image = await boundary.toImage();
++      final data = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
++      final w = image.width;
++      image.dispose();
++      return (data!, w);
++    }))!;
++    final s = c.camera.value.worldToScreen(p);
++    final o = topLeft + Offset(s.x, s.y);
++    final i = (o.dy.floor() * width + o.dx.floor()) * 4;
++    return [bytes.getUint8(i), bytes.getUint8(i + 1), bytes.getUint8(i + 2)];
++  }
++}
++
++/// [paper] under a tint of [ink] at [alpha] (of 255).
++List<double> over(List<int> paper, int ink, int alpha) => [
++      paper[0] + (((ink >> 16) & 0xFF) - paper[0]) * alpha / 255,
++      paper[1] + (((ink >> 8) & 0xFF) - paper[1]) * alpha / 255,
++      paper[2] + ((ink & 0xFF) - paper[2]) * alpha / 255,
++    ];
++
++void expectRgb(List<int> got, List<double> want, String why) {
++  for (var i = 0; i < 3; i++) {
++    expect(got[i], closeTo(want[i], 3), reason: '$why: channel $i of $got');
++  }
++}
++
++/// [room]'s tint records: its fill and the boundary the fill names, or its
++/// closed POLYLINE.
++List<EntityRecord> tintRecords(DraftDocument doc, Handle room) {
++  final all = kids(doc, room);
++  final fills = [
++    for (final c in all)
++      if (kindOf(doc, c) == EntityKind.fill) c
++  ];
++  if (fills.isNotEmpty) {
++    final boundary = Handle(payloadOf(doc, fills.single).scalars[0].toInt());
++    return [recordOf(doc, fills.single), recordOf(doc, boundary)];
++  }
++  return [
++    for (final c in all)
++      if (kindOf(doc, c) == EntityKind.polyline) recordOf(doc, c),
++  ];
++}
++
++/// Entity [h] whole: its record as saved and its payload's numbers.
++String snapOf(DraftDocument doc, Handle h) {
++  final p = payloadOf(doc, h);
++  return jsonEncode([
++    recordOf(doc, h).toJson(),
++    p.coords.toList(),
++    p.scalars.toList(),
++  ]);
++}
++
++/// Object [h] whole: its group's children, by handle.
++Map<Handle, String> childSnaps(DraftDocument doc, Handle h) =>
++    {for (final c in kids(doc, h)) c: snapOf(doc, c)};
++
++RoomParams roomOf(DraftDocument doc, Handle h) =>
++    doc.components.get<RoomParams>(h)!;
++
++/// Sets [room]'s colour to [name] by a plain component command (the shell's
++/// system must be installed: the tint follows).
++void paint(DraftDocument doc, Handle room, String? name) =>
++    doc.commands.execute(SetComponentCommand<RoomParams>(
++        room, roomOf(doc, room).copyWith(color: name)));
++
++/// A bare-floor point and one inside each room, off its label and every
++/// stroke, in plan millimetres.
++Vector2 bareAt(Rooms r) => r.plan.at(9800, 2000);
++Vector2 insideA(Rooms r) => r.plan.at(800, 3300);
++Vector2 insideB(Rooms r) => r.plan.at(3900, 3300);
++
++/// A coloured room's tint alpha: transparency 204 is 51 of 255.
++const int kColourAlpha = 255 - 204;
++
++void main() {
++  test('the fixture: room A is off the identity, the rooms are uncoloured', () {
++    final r = roomsPlan();
++    final g = r.doc.tree.accumulatedTransform(r.a);
++    expect(g.b, isNot(0));
++    expect(roomOf(r.doc, r.a).color, isNull);
++    expect(roomOf(r.doc, r.b).color, isNull);
++    expect(driftOf(r.doc), isEmpty);
++  });
++
++  testWidgets(
++      'CP1 the Colour row shows for a selection holding a room, marks the '
++      'common colour, and marks nothing for a mix or an unknown name',
++      (tester) async {
++    final r = roomsPlan();
++    final doc = r.doc;
++    final rig = await Rig.pump(tester, r);
++
++    expect(picker, findsNothing, reason: 'nothing selected');
++    await rig.select([r.w]);
++    expect(picker, findsNothing, reason: 'a wall alone');
++    await rig.select([r.sep]);
++    expect(picker, findsNothing, reason: 'a separator alone');
++
++    // While the Wall tool's settings show, even with a room selected.
++    await rig.select([r.a]);
++    expect(picker, findsOneWidget);
++    await tester.sendKeyEvent(LogicalKeyboardKey.keyW);
++    await tester.pump();
++    expect(byKey('settings-${ArchitectureTools.wall}'), findsOneWidget,
++        reason: 'the Wall tool is active');
++    // Activating a tool clears the selection (planner_shell.dart), so the
++    // room is selected again under the active tool: the row's absence is
++    // then the panel's own rule, not an empty selection's.
++    await rig.select([r.a]);
++    expect({...rig.c.activeSelection.keys}, {k(r.a)},
++        reason: 'the room is selected under the Wall tool');
++    expect(byKey('settings-${ArchitectureTools.wall}'), findsOneWidget,
++        reason: 'the Wall tool is still active');
++    expect(picker, findsNothing, reason: 'the Wall tool\'s settings show');
++    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
++    await tester.pump();
++    await rig.select([r.a]);
++
++    expect(picker, findsOneWidget, reason: 'room A');
++    expect(find.byKey(const Key('layer-picker')), findsOneWidget);
++    expect(swatch('none'), findsOneWidget);
++    for (final c in PlanSwatch.values) {
++      expect(swatch(c.name), findsOneWidget, reason: c.name);
++    }
++    expect(marked(tester), 'none', reason: 'an uncoloured room');
++    await rig.select([r.a, r.b]);
++    expect(picker, findsOneWidget, reason: 'rooms A and B');
++    expect(marked(tester), 'none', reason: 'two uncoloured rooms');
++    await rig.select([r.a, r.w]);
++    expect(picker, findsOneWidget, reason: 'room A and a wall');
++    expect(marked(tester), 'none');
++
++    paint(doc, r.a, 'teal');
++    await tester.pump();
++    await rig.select([r.a]);
++    expect(marked(tester), 'teal', reason: 'A is teal');
++    await rig.select([r.a, r.b]);
++    expect(marked(tester), isNull, reason: 'teal and none: mixed');
++    paint(doc, r.b, 'teal');
++    await tester.pump();
++    expect(marked(tester), 'teal', reason: 'both teal');
++    paint(doc, r.b, 'purple');
++    await tester.pump();
++    expect(marked(tester), isNull, reason: 'teal and purple: mixed');
++
++    // A name this release does not know: no swatch is marked (Review Focus
++    // 5), and the stored name is untouched.
++    paint(doc, r.a, 'magenta');
++    await rig.select([r.a]);
++    expect(picker, findsOneWidget);
++    expect(marked(tester), isNull, reason: 'magenta equals no swatch');
++    expect(roomOf(doc, r.a).color, 'magenta');
++  });
++
++  testWidgets(
++      'CP2 a tap on teal with two rooms, a wall and a separator selected: '
++      'one undo step labelled Colour, both rooms teal, the wall and the '
++      'separator untouched; Ctrl+Z repaints the grey in the next frame '
++      '(M-C12, Review Focus 3 and 4)', (tester) async {
++    final r = roomsPlan();
++    final doc = r.doc;
++    final rig = await Rig.pump(tester, r);
++    final labels = <String>[];
++    final sub = doc.commands.changes.listen((c) {
++      if (c is CommandApplied) labels.add(c.label);
++    });
++    addTearDown(sub.cancel);
++
++    await rig.select([r.a, r.b, r.w, r.sep]);
++    expect(picker, findsOneWidget);
++    final wall0 = doc.components.get<WallParams>(r.w);
++    final sep0 = doc.components.get<SeparatorParams>(r.sep);
++    final wallKids0 = childSnaps(doc, r.w);
++    final sepKids0 = childSnaps(doc, r.sep);
++    final depth = doc.commands.undoDepth;
++    final bare = await rig.rgb(bareAt(r));
++    final greyA = await rig.rgb(insideA(r));
++    final greyB = await rig.rgb(insideB(r));
++    expect(greyA, isNot(bare), reason: 'the grey tint shows over the floor');
++    expect(greyB, isNot(bare));
++    final before = canon(doc);
++
++    await tester.tap(swatch('teal'));
++    await tester.pump();
++    await tester.pump();
++    expect(doc.commands.undoDepth, depth + 1, reason: 'one undo step');
++    expect(labels, ['Colour']);
++    expect(roomOf(doc, r.a).color, 'teal');
++    expect(roomOf(doc, r.b).color, 'teal');
++    expect(doc.components.get<WallParams>(r.w), wall0);
++    expect(doc.components.get<SeparatorParams>(r.sep), sep0);
++    expect(childSnaps(doc, r.w), wallKids0, reason: 'the wall, whole');
++    expect(childSnaps(doc, r.sep), sepKids0, reason: 'the separator, whole');
++    for (final room in [r.a, r.b]) {
++      for (final t in tintRecords(doc, room)) {
++        expect(t.color, const TrueColor(0x00897B));
++      }
++    }
++    expect(driftOf(doc), isEmpty);
++    expect(marked(tester), 'teal');
++    expectRgb(await rig.rgb(insideA(r)), over(bare, 0x00897B, kColourAlpha),
++        'A drawn teal');
++    expectRgb(await rig.rgb(insideB(r)), over(bare, 0x00897B, kColourAlpha),
++        'B drawn teal');
++
++    // Ctrl+Z, one pump: the tints are grey again, in the document and on
++    // the canvas (the change reaches the painter in the same frame).
++    await tester.sendKeyDownEvent(LogicalKeyboardKey.control);
++    await tester.sendKeyDownEvent(LogicalKeyboardKey.keyZ);
++    await tester.sendKeyUpEvent(LogicalKeyboardKey.keyZ);
++    await tester.sendKeyUpEvent(LogicalKeyboardKey.control);
++    await tester.pump();
++    expect(doc.commands.undoDepth, depth);
++    expect(canon(doc), before, reason: 'the document is as before');
++    for (final room in [r.a, r.b]) {
++      for (final t in tintRecords(doc, room)) {
++        expect(t.color, const IndexedColor(7));
++        expect(t.transparency, kRoomTintTransparency);
++      }
++    }
++    expect(await rig.rgb(insideA(r)), greyA, reason: 'A repainted grey');
++    expect(await rig.rgb(insideB(r)), greyB, reason: 'B repainted grey');
++    expect(marked(tester), 'none', reason: 'the picker follows the undo');
++  });
++
++  testWidgets(
++      'CP3 a colour chosen twice is no undo step; with A teal and B purple '
++      'a tap on teal changes B only (M-PC9-a, Review Focus 2)', (tester) async {
++    final r = roomsPlan();
++    final doc = r.doc;
++    final rig = await Rig.pump(tester, r);
++
++    await rig.select([r.a, r.b]);
++    await tester.tap(swatch('teal'));
++    await tester.pump();
++    expect(doc.commands.undoDepth, 1);
++    final after = canon(doc);
++    final stateId = doc.commands.stateId;
++    // The same swatch again, and a selection already all teal.
++    await tester.tap(swatch('teal'));
++    await tester.pump();
++    await rig.select([r.a]);
++    await tester.tap(swatch('teal'));
++    await tester.pump();
++    expect(doc.commands.undoDepth, 1, reason: 'no new step');
++    expect(doc.commands.stateId, stateId);
++    expect(canon(doc), after);
++    // Undo takes it all the way back: it was one step.
++    doc.commands.undo();
++    await tester.pump();
++    expect(doc.commands.canUndo, isFalse);
++
++    // A teal, B purple: a tap on teal changes B only.
++    paint(doc, r.a, 'teal');
++    paint(doc, r.b, 'purple');
++    await tester.pump();
++    await rig.select([r.a, r.b]);
++    // Not ported (ruling IP-R7): today's recolorCommand(doc, keys,
++    // FloorPlanColor.teal) is the plan's internal `recolour`; its lines
++    // (the command for the selection sets B alone, and null for A, already
++    // teal, and for a wall) are claimed through the panel below.
++    //   final keys = [k(r.a), k(r.b)];
++    //   final command = recolorCommand(doc, keys, FloorPlanColor.teal)!;
++    //   expect(command, isA<CompoundCommand>());
++    //   final sets = (command as CompoundCommand)
++    //       .children
++    //       .whereType<SetComponentCommand<RoomParams>>()
++    //       .toList();
++    //   expect(sets, hasLength(1), reason: 'one room changes');
++    //   expect(sets.single.handle, r.b);
++    //   expect(sets.single.value, roomOf(doc, r.b).copyWith(color: 'teal'));
++    //   expect(recolorCommand(doc, [k(r.a)], FloorPlanColor.teal), isNull);
++    //   expect(recolorCommand(doc, [k(r.w)], FloorPlanColor.teal), isNull,
++    //       reason: 'a wall is no room');
++
++    final a0 = roomOf(doc, r.a);
++    final depth = doc.commands.undoDepth;
++    await tester.tap(swatch('teal'));
++    await tester.pump();
++    expect(doc.commands.undoDepth, depth + 1);
++    expect(identical(roomOf(doc, r.a), a0), isTrue, reason: 'A not rewritten');
++    expect(roomOf(doc, r.b).color, 'teal');
++
++    // None clears every selected room, and only when one is coloured.
++    await tester.tap(swatch('none'));
++    await tester.pump();
++    expect(roomOf(doc, r.a).color, isNull);
++    expect(roomOf(doc, r.b).color, isNull);
++    expect(doc.commands.undoDepth, depth + 2);
++    await tester.tap(swatch('none'));
++    await tester.pump();
++    expect(doc.commands.undoDepth, depth + 2, reason: 'none, twice');
++  });
++
++  testWidgets(
++      'CP4 read-only: the picker shows, marks, changes nothing, and says '
++      'why (M-C13, M-PC9-b)', (tester) async {
++    // The host refuses recolor.
++    final r = roomsPlan();
++    final doc = r.doc;
++    r.c.permissions = PlanPermissions.full.copyWith(recolor: false);
++    final rig = await Rig.pump(tester, r);
++    const strings = PlanStringsEn();
++    paint(doc, r.a, 'teal');
++    await rig.select([r.a]);
++    expect(picker, findsOneWidget);
++    expect(marked(tester), 'teal');
++    final before = canon(doc);
++    final depth = doc.commands.undoDepth;
++    await tester.tap(swatch('purple'));
++    await tester.pump();
++    await tester.tap(swatch('none'));
++    await tester.pump();
++    expect(canon(doc), before, reason: 'a tap changes nothing');
++    expect(doc.commands.undoDepth, depth);
++    expect(tooltipOf(tester, 'teal'), strings.colorRefused);
++    expect(tooltipOf(tester, 'none'), strings.colorRefused);
++    expect(semanticsOf(tester, 'teal').properties.enabled, isFalse);
++
++    // The permissions refuse it (the host allows it).
++    final r2 = roomsPlan();
++    final rig2 = await Rig.pump(tester, r2);
++    paint(r2.doc, r2.a, 'teal');
++    r2.doc.commands.permissions = DraftPermissions.runtime;
++    await rig2.select([r2.b]);
++    await rig2.select([r2.a]);
++    expect(picker, findsOneWidget);
++    expect(marked(tester), 'teal');
++    final before2 = canon(r2.doc);
++    final depth2 = r2.doc.commands.undoDepth;
++    await tester.tap(swatch('purple'));
++    await tester.pump();
++    expect(canon(r2.doc), before2);
++    expect(r2.doc.commands.undoDepth, depth2);
++    expect(tooltipOf(tester, 'purple'), strings.readOnlyDocument);
++    expect(semanticsOf(tester, 'purple').properties.enabled, isFalse);
++    r2.doc.commands.permissions = DraftPermissions.all;
++    await rig2.select([r2.b]);
++    await rig2.select([r2.a]);
++    await tester.tap(swatch('purple'));
++    await tester.pump();
++    expect(roomOf(r2.doc, r2.a).color, 'purple', reason: 'allowed again');
++
++    // Components allowed, geometry refused: the room edit capability.
++    r2.doc.commands.permissions = const DraftPermissions(
++        transform: true, components: true, geometry: false, structure: true);
++    await rig2.select([r2.b]);
++    await rig2.select([r2.a]);
++    await tester.tap(swatch('teal'));
++    await tester.pump();
++    expect(roomOf(r2.doc, r2.a).color, 'purple');
++    expect(tooltipOf(tester, 'teal'), strings.readOnlyDocument);
++  });
++
++  testWidgets(
++      'CP5 in Turkish the title, the swatches\' tooltips and labels and '
++      'None speak Turkish', (tester) async {
++    final r = roomsPlan();
++    final rig = await Rig.pump(tester, r, locale: const Locale('tr'));
++    await rig.select([r.a]);
++    expect(find.descendant(of: picker, matching: find.text('Renk')),
++        findsOneWidget);
++    expect(tooltipOf(tester, 'teal'), 'Turkuaz');
++    expect(semanticsOf(tester, 'teal').properties.label, 'Turkuaz');
++    expect(tooltipOf(tester, 'none'), 'Yok');
++    expect(semanticsOf(tester, 'none').properties.label, 'Yok');
++    expect(tooltipOf(tester, 'purple'), 'Mor');
++  });
++
++  testWidgets(
++      'CP6b the swatches are the canvas\'s hues: as the document has them on '
++      'a light canvas, re-toned on a dark one (M-PC9-c)', (tester) async {
++    Color fillOf(String name) => ((tester
++            .widget<Container>(find
++                .descendant(of: swatch(name), matching: find.byType(Container))
++                .first)
++            .decoration) as BoxDecoration)
++        .color!;
++    final r = roomsPlan();
++    var rig = await Rig.pump(tester, r, theme: ThemeData.light());
++    await rig.select([r.a]);
++    expect(fillOf('teal').toARGB32(), 0xFF00897B);
++    expect(fillOf('purple').toARGB32(), 0xFF8E24AA);
++
++    final r2 = roomsPlan();
++    rig = await Rig.pump(tester, r2, theme: ThemeData.dark());
++    await rig.select([r2.a]);
++    expect(fillOf('teal').toARGB32(),
++        0xFF000000 | darkCanvasTone(0x00897B, kDarkCanvasPaper));
++    expect(fillOf('purple').toARGB32(),
++        0xFF000000 | darkCanvasTone(0x8E24AA, kDarkCanvasPaper));
++    expect(fillOf('teal').toARGB32(), isNot(0xFF00897B));
++  });
++}
+diff --git a/packages/jet_cad_2d_integration/test/panels/decimal_separator_test.dart b/packages/jet_cad_2d_integration/test/panels/decimal_separator_test.dart
+new file mode 100644
+index 00000000..be41530a
+--- /dev/null
++++ b/packages/jet_cad_2d_integration/test/panels/decimal_separator_test.dart
+@@ -0,0 +1,209 @@
++// Spec Q0 (the plan's decimal separator) T3-T4: a page's separator reaches
++// the stored texts' echoes.
++//
++// - M-Q0-h (`Q0-E1`, `Q0-E2`): through the editor, under an English UI, the
++//   Area and Value rows follow a switch made while their object stays
++//   selected, and the Dimension tool's notice on the status line prints
++//   the page's separator. `Q0-E3` (the Task 2 review's R-1): under a
++//   German UI on a `point` page the three echoes keep the page's `.`, so a
++//   UI separator substituted into any of them is red (under an English UI
++//   such a substitution changes nothing).
++//
++// The fixture follows the spec's fixture rule: a page at cm and 1:20, its
++// origin off zero; a room off the origin, turned, whose area has a nonzero
++// fraction (12.37 m²); a dimension off the origin in a turned group of its
++// own, whose length has a nonzero fraction (345.7 cm); `comma` against
++// `point`; a UI (English, `.`) that differs from the `comma` page.
++// Ported from jet_cad_floor_plan/test/decimal_separator_test.dart (Q0-E1,
++// Q0-E2, Q0-E3, Q0-E3b; Q0-S1 and Q0-S2 run in the kit) for
++// jet_cad_2d_integration (3a Task 27, Appendix A D-32); assertions
++// unchanged but rulings IP-R1 (the rows' keys) and IP-R3 (the notice is a
++// KitText, worded by the controller; the tool's private premises are not
++// ported).
++import 'package:flutter/gestures.dart' show PointerDeviceKind;
++import 'package:flutter/material.dart';
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
++    show InteractionLayer, SelectionKey, ViewportTransform;
++import 'package:jet_cad_2d_integration/jet_cad_2d_integration.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/canvas_rig.dart';
++import '../support/plans.dart';
++import '../support/q0_plan.dart';
++
++String textAt(WidgetTester tester, String key) =>
++    tester.widget<Text>(find.byKey(Key(key))).data!;
++
++Future<void> select(WidgetTester tester, PlanController c, Handle h) async {
++  c.activeSelection.replace([SelectionKey.root(h)]);
++  await tester.pump();
++}
++
++/// Runs [command] and pumps twice: the `DocChange` arrives a microtask
++/// late (10's `RN2` finding), and its rebuild lands in the next frame.
++Future<void> run(WidgetTester tester, void Function() command) async {
++  command();
++  await tester.pump();
++  await tester.pump();
++}
++
++/// Pumps the editor over [c] at a 1440 x 900 window, under an English UI
++/// (the default locale) or, with [german], a German one, and checks the
++/// premise that the UI's separator is `.` or `,`, so a page with the other
++/// one differs from it.
++Future<void> pumpShell(WidgetTester tester, PlanController c,
++    {bool german = false}) async {
++  await pumpPlanEditor(tester, c,
++      locale: german ? const Locale('de') : const Locale('en'));
++  expect(
++      PlanStrings.of(tester.element(find.byType(PlanEditor))).decimalSeparator,
++      german ? ',' : '.',
++      reason: 'premise: the UI language');
++}
++
++/// The fixture as the editor receives it: a plan file, opened with no
++/// history (its controller disposed at tear-down).
++({PlanController c, DraftDocument doc, Handle room, Handle dim}) shellPlan() {
++  final f = q0PlanJson();
++  final c = architectureController(json: f.json);
++  addTearDown(c.dispose);
++  return (c: c, doc: c.document, room: f.room, dim: f.dim);
++}
++
++/// The Dimension tool's notice, through the editor under an English UI or
++/// [german] one: for each of [cases] (a page separator and the text the
++/// notice must read), two clicks and a hover give a 345.7 cm dimension,
++/// and the status line reads `[label] — text`.
++Future<void> noticeCases(WidgetTester tester,
++    {required bool german,
++    required String label,
++    required List<(DecimalSeparator, String)> cases}) async {
++  final f = shellPlan();
++  final doc = f.doc;
++  final c = f.c;
++  await pumpShell(tester, c, german: german);
++  // Two clicks in empty space below the box, 3,457.3 mm apart along
++  // world x, at 0.12 px/mm (the aperture is 10 / 0.12 = 83.3 mm; the pair
++  // spans 415 px of the 896 px canvas). A hover 900.25 above their
++  // midpoint, no Shift: aligned (and horizontal), 3,457.3 mm, 345.7 cm.
++  final p0 = corpus.at(-2000.25, -2500.5);
++  final p1 = p0 + Vector2(3457.3, 0);
++  final q = (p0 + p1) * 0.5 + Vector2(0, 900.25);
++  final size = tester.getSize(find.byType(InteractionLayer));
++  final mid = (p0 + p1) * 0.5;
++  c.camera.value = ViewportTransform(
++      worldToScreenMatrix: Transform2.translation(
++              size.width / 2 - 0.12 * mid.x, size.height / 2 - 0.12 * mid.y)
++          .multiply(Transform2.scale(0.12, 0.12)));
++  await tester.pump();
++  Offset screen(Vector2 w) {
++    final s = c.camera.value.worldToScreen(w);
++    return tester.getTopLeft(find.byType(InteractionLayer)) + Offset(s.x, s.y);
++  }
++
++  await tester.sendKeyEvent(LogicalKeyboardKey.keyI);
++  await tester.pump();
++  // Not ported (ruling IP-R3): final tool = view.tools.active as
++  // DimensionTool; (the tool is the kit's, internal).
++  final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
++  addTearDown(mouse.removePointer);
++  Future<void> hover(Vector2 w) async {
++    await mouse.moveTo(screen(w));
++    await tester.pump();
++  }
++
++  for (final (separator, want) in cases) {
++    if (pageOf(doc).decimalSeparator != separator) {
++      await run(
++          tester, () => doc.commands.execute(separatorTo(doc, separator)));
++    }
++    expect(pageOf(doc).decimalSeparator, separator);
++    await tester.tapAt(screen(p0));
++    await tester.pump();
++    await tester.tapAt(screen(p1));
++    await tester.pump();
++    // Not ported (ruling IP-R3): expect(tool.points, hasLength(2), reason:
++    // '$separator'); the status line below holds only with two points.
++    await hover(q);
++    // Not ported (ruling IP-R3): expect(tool.hoverKind, isNull, reason:
++    // '$separator: premise: free'); an attached end gives another length.
++    expect(c.textOf(c.toolNotice.value!), want, reason: '$separator');
++    expect(status(tester), '$label — $want', reason: '$separator');
++    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
++    await tester.pump();
++  }
++  await mouse.removePointer();
++}
++
++void main() {
++  testWidgets(
++      'Q0-E1 under an English UI the Area and Value rows follow a switch to '
++      'comma made while their object stays selected', (tester) async {
++    final f = shellPlan();
++    final doc = f.doc;
++    await pumpShell(tester, f.c);
++
++    // The room stays selected across the switch, and across its undo.
++    await select(tester, f.c, f.room);
++    expect(textAt(tester, 'property-area'), '12.37 m²');
++    await run(tester,
++        () => doc.commands.execute(separatorTo(doc, DecimalSeparator.comma)));
++    expect(textAt(tester, 'property-area'), '12,37 m²');
++    expect(
++        textAt(tester, 'property-area'), textOf(doc, labelsOf(doc, f.room)[1]));
++    await run(tester, doc.commands.undo);
++    expect(textAt(tester, 'property-area'), '12.37 m²');
++
++    // The dimension likewise.
++    await select(tester, f.c, f.dim);
++    expect(textAt(tester, 'property-value'), '345.7');
++    await run(tester, doc.commands.redo);
++    expect(textAt(tester, 'property-value'), '345,7');
++    expect(textAt(tester, 'property-value'), dimText(doc, f.dim));
++    await run(tester, doc.commands.undo);
++    expect(textAt(tester, 'property-value'), '345.7');
++    await run(tester,
++        () => doc.commands.execute(separatorTo(doc, DecimalSeparator.comma)));
++    expect(textAt(tester, 'property-value'), '345,7');
++  });
++
++  testWidgets(
++      'Q0-E2 under an English UI the Dimension tool\'s notice on the status '
++      'line prints the page\'s separator',
++      (tester) =>
++          noticeCases(tester, german: false, label: 'Dimension', cases: const [
++            (DecimalSeparator.point, '345.7'),
++            (DecimalSeparator.comma, '345,7'),
++          ]));
++
++  testWidgets(
++      'Q0-E3 under a German UI on a point page the Area and Value rows keep '
++      'the page\'s point', (tester) async {
++    final f = shellPlan();
++    final doc = f.doc;
++    expect(pageOf(doc).decimalSeparator, DecimalSeparator.point);
++    await pumpShell(tester, f.c, german: true);
++    await select(tester, f.c, f.room);
++    expect(textAt(tester, 'property-area'), '12.37 m²');
++    await select(tester, f.c, f.dim);
++    expect(textAt(tester, 'property-value'), '345.7');
++    // And a switch to comma, made while the dimension stays selected,
++    // reaches it under this UI too.
++    await run(tester,
++        () => doc.commands.execute(separatorTo(doc, DecimalSeparator.comma)));
++    expect(textAt(tester, 'property-value'), '345,7');
++  });
++
++  testWidgets(
++      'Q0-E3b under a German UI the notice prints the page\'s separator, a '
++      'point included',
++      (tester) =>
++          noticeCases(tester, german: true, label: 'Bemaßung', cases: const [
++            (DecimalSeparator.point, '345.7'),
++            (DecimalSeparator.comma, '345,7'),
++          ]));
++}
+diff --git a/packages/jet_cad_2d_integration/test/panels/selection_page_test.dart b/packages/jet_cad_2d_integration/test/panels/selection_page_test.dart
+new file mode 100644
+index 00000000..ddd32b23
+--- /dev/null
++++ b/packages/jet_cad_2d_integration/test/panels/selection_page_test.dart
+@@ -0,0 +1,231 @@
++// Ported from jet_cad_floor_plan/test/selection_panel_test.dart: SE11, SE12,
++// SE13, SE15, SE16, through 2a's ports (jet_cad_2d_plan/test/panels/
++// selection_panel_test.dart, selection_page_test.dart) with the
++// architecture kit's box and the source's Wall lines restored (3a Task 27,
++// Appendix A D-20); assertions unchanged.
++import 'package:flutter/gestures.dart' show PointerDeviceKind;
++import 'package:flutter/material.dart';
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
++import 'package:jet_cad_2d_integration/jet_cad_2d_integration.dart';
++import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart'
++    show BoxParams;
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/canvas_rig.dart';
++import '../support/editor_rig.dart' show pagePlanJson;
++
++Finder get width => find.byKey(const Key('property-width'));
++Finder get height => find.byKey(const Key('property-height'));
++
++String textOf(WidgetTester tester, Finder f) =>
++    tester.widget<TextField>(f).controller!.text;
++
++Future<void> select(
++    WidgetTester tester, PlanController c, List<Handle> hs) async {
++  c.activeSelection.replace([for (final h in hs) SelectionKey.root(h)]);
++  await tester.pump();
++}
++
++/// `c.document.components.withComponent<BoxParams>()`, ascending: today's
++/// `boxes(view.document)`.
++List<Handle> boxes(PlanController c) =>
++    c.document.components.withComponent<BoxParams>().toList();
++
++/// 2a's box fixture (`panel_kits.dart`'s `boxController`): a 1:20 page
++/// anchored at (7000, 3000), grid snap off, nothing drawn, as a plan file.
++String boxPlanJson() => pagePlanJson(PageComponent(
++    scaleDenominator: 20, originX: 7000, originY: 3000, snapToGrid: false));
++
++/// The architecture kit's controller over [boxPlanJson] in the editor, the
++/// right column the property panel above the page panel (the layer panel
++/// off, as 2a's composition), in a window 1080 high (so the scale field is
++/// on screen), under the drawing camera (`canvas_fixture.dart`'s
++/// `pumpDraw`: turned 0.35, 2 px/mm, centred on (7150, 3110)).
++Future<PlanController> pumpBoxPanel(WidgetTester tester) async {
++  final c = architectureController(json: boxPlanJson());
++  addTearDown(c.dispose);
++  final doc = c.document;
++  doc.commands.execute(SetComponentCommand<PageComponent>(
++      doc.rootHandle,
++      doc.components
++          .get<PageComponent>(doc.rootHandle)!
++          .copyWith(snapToGrid: true)));
++  doc.commands.clearHistory();
++  await pumpEditor(tester, c,
++      window: const Size(1440, 1080),
++      centre: Vector2(7150, 3110),
++      layerPanel: false);
++  return c;
++}
++
++/// Draws two overlapping boxes: B, then BX4's four clicks, then a pump.
++/// Copied from floor_plan/test/support/box_rig.dart:89-96.
++Future<void> drawTwoBoxes(WidgetTester tester, PlanController c) async {
++  await press(tester, LogicalKeyboardKey.keyB);
++  await tester.tapAt(globalOf(tester, c, 7010, 3020));
++  await tester.tapAt(globalOf(tester, c, 7130, 3090));
++  await tester.tapAt(globalOf(tester, c, 7100, 3060));
++  await tester.tapAt(globalOf(tester, c, 7190, 3120));
++  await tester.pump();
++}
++
++/// A fresh composition with SE's two boxes drawn, selection empty.
++Future<PlanController> pumpBoxes(WidgetTester tester) async {
++  final c = await pumpBoxPanel(tester);
++  await drawTwoBoxes(tester, c);
++  await press(tester, LogicalKeyboardKey.keyV);
++  return c;
++}
++
++/// The panel's title, `Box`: a plain Text outside every field's tap region.
++Finder get panelTitle => find.descendant(
++    of: find.byKey(const Key('property-panel')), matching: find.text('Box'));
++
++void main() {
++  Finder pageScale() => find.byKey(const Key('page-scale'));
++
++  /// Selects the first of SE's boxes (120 x 70), types 150 into Width and
++  /// then 90 into Height, with no Enter: both fields are now in the scope's
++  /// focus history, Width before Height. Returns the box.
++  Future<Handle> typeWidthThenHeight(
++      WidgetTester tester, PlanController c) async {
++    final b = boxes(c).first;
++    await select(tester, c, [b]);
++    expect([textOf(tester, width), textOf(tester, height)], ['120', '70']);
++    await tester.tap(width);
++    await tester.pump();
++    await tester.enterText(width, '150');
++    await tester.pump();
++    await tester.tap(height);
++    await tester.pump();
++    await tester.enterText(height, '90');
++    await tester.pump();
++    return b;
++  }
++
++  List<double> sizeOf(PlanController c, Handle b) {
++    final p = c.document.components.get<BoxParams>(b)!;
++    return [p.width, p.height];
++  }
++
++  testWidgets(
++      "SE13 Enter in the page panel's scale after Width then Height commits "
++      'all three and hands focus back to the canvas, past both Selection '
++      'panel fields (fix/post-07 F3)', (tester) async {
++    final c = await pumpBoxes(tester);
++    final doc = c.document;
++    final depth = doc.commands.undoDepth;
++    final b = await typeWidthThenHeight(tester, c);
++    await tester.tap(pageScale());
++    await tester.pump();
++    await tester.enterText(pageScale(), '75');
++    await tester.testTextInput.receiveAction(TextInputAction.done);
++    await tester.pump();
++    expect(sizeOf(c, b), [150, 90]);
++    expect(doc.components.get<PageComponent>(doc.rootHandle)!.scaleDenominator,
++        75);
++    expect(doc.commands.undoDepth, depth + 3);
++    expect(FocusManager.instance.primaryFocus, same(canvasFocus(tester)));
++    await press(tester, LogicalKeyboardKey.keyB);
++    expect(status(tester), 'Box');
++    await pressKey(tester, LogicalKeyboardKey.keyW);
++    expect(status(tester), 'Wall');
++  });
++
++  testWidgets(
++      'SE11 a tap on the panel after Width then Height commits both and '
++      'hands focus back to the canvas, not to Width (fix/post-07 F3, B7)',
++      (tester) async {
++    final c = await pumpBoxes(tester);
++    final depth = c.document.commands.undoDepth;
++    final b = await typeWidthThenHeight(tester, c);
++    await tester.tap(panelTitle);
++    await tester.pump();
++    expect(sizeOf(c, b), [150, 90]);
++    expect(c.document.commands.undoDepth, depth + 2);
++    expect(FocusManager.instance.primaryFocus, same(canvasFocus(tester)));
++    await press(tester, LogicalKeyboardKey.keyB);
++    expect(status(tester), 'Box');
++    await pressKey(tester, LogicalKeyboardKey.keyW);
++    expect(status(tester), 'Wall');
++  });
++
++  testWidgets(
++      'SE12 Enter in Height after Width commits both and hands focus back to '
++      'the canvas, not to Width (fix/post-07 F3)', (tester) async {
++    final c = await pumpBoxes(tester);
++    final depth = c.document.commands.undoDepth;
++    final b = await typeWidthThenHeight(tester, c);
++    await tester.testTextInput.receiveAction(TextInputAction.done);
++    await tester.pump();
++    expect(sizeOf(c, b), [150, 90]);
++    expect(c.document.commands.undoDepth, depth + 2);
++    expect(FocusManager.instance.primaryFocus, same(canvasFocus(tester)));
++    await press(tester, LogicalKeyboardKey.keyB);
++    expect(status(tester), 'Box');
++    await pressKey(tester, LogicalKeyboardKey.keyW);
++    expect(status(tester), 'Wall');
++  });
++
++  testWidgets(
++      "SE15 a tap on the page panel's scale after Width, then a mouse click "
++      "on the panel's title before a frame: the hand-back walks from the "
++      'focused scale, not from Width, and ends on the canvas (fix/post-07 '
++      'F2F3b m1)', (tester) async {
++    final c = await pumpBoxes(tester);
++    final b = boxes(c).first;
++    await select(tester, c, [b]);
++    await tester.tap(width);
++    await tester.pump();
++    final widthNode = tester.widget<TextField>(width).focusNode!;
++    final scaleNode = tester.widget<TextField>(pageScale()).focusNode!;
++    // No frame: Width's tap-outside is still armed from its last build,
++    // and the scale's is not armed yet.
++    await tester.tap(pageScale());
++    expect(FocusManager.instance.primaryFocus, same(scaleNode));
++    expect(widthNode.hasFocus, isFalse);
++    await tester.tapAt(
++        tester.getCenter(find.descendant(
++            of: find.byType(PlanPagePanel), matching: find.text('Page'))),
++        kind: PointerDeviceKind.mouse);
++    await tester.pump();
++    expect(FocusManager.instance.primaryFocus, same(canvasFocus(tester)));
++    await press(tester, LogicalKeyboardKey.keyB);
++    expect(status(tester), 'Box');
++    await pressKey(tester, LogicalKeyboardKey.keyW);
++    expect(status(tester), 'Wall');
++  });
++
++  testWidgets(
++      'SE16 a mouse click on empty paper after Width, then one on the page '
++      "panel's title before a frame: the canvas has the focus, so there is "
++      'nothing to hand back, and the canvas keeps it (fix/post-07 F2F3c m-a)',
++      (tester) async {
++    final c = await pumpBoxes(tester);
++    final b = boxes(c).first;
++    await select(tester, c, [b]);
++    await tester.tap(width);
++    await tester.pump();
++    final widthNode = tester.widget<TextField>(width).focusNode!;
++    expect(widthNode.hasFocus, isTrue);
++    // Empty paper, clear of both boxes; no frame, so Width's tap-outside is
++    // still armed from its last build.
++    await tester.tapAt(globalOf(tester, c, 7150, 3250),
++        kind: PointerDeviceKind.mouse);
++    expect(FocusManager.instance.primaryFocus, same(canvasFocus(tester)));
++    await tester.tapAt(
++        tester.getCenter(find.descendant(
++            of: find.byType(PlanPagePanel), matching: find.text('Page'))),
++        kind: PointerDeviceKind.mouse);
++    await tester.pump();
++    expect(FocusManager.instance.primaryFocus, same(canvasFocus(tester)));
++    await press(tester, LogicalKeyboardKey.keyB);
++    expect(status(tester), 'Box');
++    await pressKey(tester, LogicalKeyboardKey.keyW);
++    expect(status(tester), 'Wall');
++  });
++}
+diff --git a/packages/jet_cad_2d_integration/test/panels/titles_test.dart b/packages/jet_cad_2d_integration/test/panels/titles_test.dart
+new file mode 100644
+index 00000000..038c454e
+--- /dev/null
++++ b/packages/jet_cad_2d_integration/test/panels/titles_test.dart
+@@ -0,0 +1,71 @@
++// 3a Task 27 (Appendix A D-46; spec C1.1, C1.7, C3.3): the property
++// panel over the real kit. An opening's section is titled by its kind
++// (`PlanType.title`), and a door's flips are `ActionProperty`s shown for a
++// door only (`visible`): a tap is one step that flips the one field. Over
++// the sample flat (its doors and windows), at 1440 x 900.
++import 'package:flutter_test/flutter_test.dart';
++import 'package:flutter/material.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
++import 'package:jet_cad_2d_integration/jet_cad_2d_integration.dart';
++import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
++
++import '../support/canvas_rig.dart';
++
++/// The sample's first opening of [kind], by handle.
++Handle firstOf(DraftDocument d, OpeningKind kind) =>
++    (d.components.withComponent<OpeningParams>().toList()
++          ..sort((a, b) => a.value.compareTo(b.value)))
++        .firstWhere((o) => d.components.get<OpeningParams>(o)!.kind == kind);
++
++void main() {
++  testWidgets(
++      'IP-title an opening\'s section is titled by its kind: Door for a '
++      'door, Window for a window (D-46, the title hook)', (tester) async {
++    final c = sampleFlatController();
++    addTearDown(c.dispose);
++    await pumpPlanEditor(tester, c);
++    final title = byKey('section-${ArchitectureTypes.opening}');
++    for (final (kind, word) in const [
++      (OpeningKind.door, 'Door'),
++      (OpeningKind.window, 'Window'),
++    ]) {
++      c.activeSelection.replace([SelectionKey.root(firstOf(c.document, kind))]);
++      await tester.pump();
++      expect(tester.widget<Text>(title).data, word, reason: kind.name);
++    }
++  });
++
++  testWidgets(
++      'IP-door-actions a door shows Flip hinge and Flip swing; a tap flips '
++      'that field alone in one step; a window shows neither (D-46: '
++      'ActionProperty and visible)', (tester) async {
++    final c = sampleFlatController();
++    addTearDown(c.dispose);
++    await pumpPlanEditor(tester, c);
++    final d = c.document;
++    final door = firstOf(d, OpeningKind.door);
++    c.activeSelection.replace([SelectionKey.root(door)]);
++    await tester.pump();
++    final p0 = d.components.get<OpeningParams>(door)!;
++    final depth = d.commands.undoDepth;
++    await tester.tap(field('flip-swing'));
++    await tester.pump();
++    final p1 = d.components.get<OpeningParams>(door)!;
++    expect(p1.swing, isNot(p0.swing), reason: 'the swing flipped');
++    expect(p1.hinge, p0.hinge, reason: 'the hinge kept');
++    expect(d.commands.undoDepth, depth + 1, reason: 'one step');
++    await tester.tap(field('flip-hinge'));
++    await tester.pump();
++    final p2 = d.components.get<OpeningParams>(door)!;
++    expect(p2.hinge, isNot(p1.hinge), reason: 'the hinge flipped');
++    expect(p2.swing, p1.swing, reason: 'the swing kept');
++    final window = firstOf(d, OpeningKind.window);
++    c.activeSelection.replace([SelectionKey.root(window)]);
++    await tester.pump();
++    expect(byKey('section-${ArchitectureTypes.opening}'), findsOneWidget,
++        reason: 'premise: the window\'s section');
++    expect(field('flip-hinge'), findsNothing);
++    expect(field('flip-swing'), findsNothing);
++  });
++}
+diff --git a/packages/jet_cad_2d_integration/test/panels/wall_section_test.dart b/packages/jet_cad_2d_integration/test/panels/wall_section_test.dart
+new file mode 100644
+index 00000000..fb08a42c
+--- /dev/null
++++ b/packages/jet_cad_2d_integration/test/panels/wall_section_test.dart
+@@ -0,0 +1,596 @@
++// ignore_for_file: invalid_use_of_internal_member
++// Spec 07 D11's Wall section. Every wall sits at the far origin in its own
++// rotated group (`groupAt`), the plan is turned 23 degrees, and the camera
++// is rotated.
++// Ported from jet_cad_floor_plan/test/selection_panel_test.dart (WS1-WS11;
++// WS7 (Box) is 2a's) for jet_cad_2d_integration (3a Task 27); assertions
++// unchanged but rulings IP-R1, IP-R2, IP-R8. WS9 is split (the
++// controller's ruling, Task 18's rule): WS9-open and WS9-refused; they
++// read `frozen`, @internal (ruling R-P9).
++import 'dart:convert';
++
++import 'package:flutter/material.dart';
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show Tool;
++import 'package:jet_cad_2d_integration/jet_cad_2d_integration.dart';
++import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show KitDiagnosticCode;
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart'
++    show PlanController, PlanLocked;
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/canvas_rig.dart';
++import '../support/plans.dart' hide textOf;
++import '../support/room_plans.dart' show clickAt, select;
++
++Finder get width => field('width');
++Finder get height => field('height');
++Finder get thickness => field('thickness');
++Finder get wallSection =>
++    sectionFinder(ArchitectureTypes.wall, ArchitectureTools.wall);
++
++String textOf(WidgetTester tester, Finder f) =>
++    tester.widget<TextField>(f).controller!.text;
++
++/// The justification choice's selection (today's segment set: one value).
++Set<Justification> shownJustification(WidgetTester tester) =>
++    {menuOf(tester, 'justification').value! as Justification};
++
++/// The kit's thickness bound (kit-internal, R-P1).
++const double kWallMaxThickness =
++    1e7; // jet_cad_floor_plan/lib/src/parametric/wall.dart:35 (kit-internal)
++
++const Handle wa = Handle(1300), wb = Handle(2600), wc = Handle(3900);
++const Handle bx = Handle(5200);
++
++/// An L at the far origin: A (200, centre) runs into [lCorner] and B (115,
++/// left) runs out of it at 110 degrees, each in its own rotated group.
++final Vector2 lStart = plan(0, 0), lCorner = plan(3000, 0);
++final Vector2 lEnd = polar(lCorner, 23 + 110, 2500);
++
++/// A 1:20 page near the far origin, grid snap on at 10 mm; the L, a free
++/// wall C (150, right) and a box in its own rotated group; no history.
++String panelPlanJson() => planWith((doc) {
++      doc.commands.execute(SetComponentCommand<PageComponent>(
++          doc.rootHandle,
++          PageComponent(
++              scaleDenominator: 20,
++              originX: ox - 2000,
++              originY: oy - 2000,
++              gridStepMm: 10)));
++      doc.commands.execute(
++          addWall(doc, wa, lStart, lCorner, 200, Justification.centre));
++      doc.commands
++          .execute(addWall(doc, wb, lCorner, lEnd, 115, Justification.left));
++      doc.commands.execute(addWall(doc, wc, plan(500, 1500), plan(2500, 1900),
++          150, Justification.right));
++      doc.commands.execute(CompoundCommand([
++        AddNodeCommand(GroupNode(
++            handle: bx,
++            parent: doc.rootHandle,
++            transform: groupAt(bx.value),
++            children: const [])),
++        SetComponentCommand<BoxParams>(bx, const BoxParams(120, 70)),
++      ], label: 'Add box'));
++    });
++
++/// Pumps the editor over [json] (a controller disposed at tear-down), then
++/// sets a rotated, non-reflecting camera centred on the L's corner.
++Future<PlanController> pumpPanel(WidgetTester tester, String json) async {
++  final c = architectureController(json: json);
++  addTearDown(c.dispose);
++  await pumpEditor(tester, c, centre: lCorner, scale: 0.15, turn: 0.35);
++  return c;
++}
++
++/// A primary click at world [p] (the integration rig's `clickAt`).
++Future<void> clickWorld(WidgetTester tester, PlanController c, Vector2 p) =>
++    clickAt(tester, c, p);
++
++/// The brief's malformed plan (ruling IP-R8): [panelPlanJson] with A's
++/// fill naming B's outline, a file the planner refuses to regenerate
++/// (spec 07 D8).
++String malformedPlanJson() {
++  final j = jsonDecode(panelPlanJson()) as Map<String, Object?>;
++  final source = architectureController(json: panelPlanJson());
++  try {
++    final src = source.document;
++    final aFill =
++        kids(src, wa).firstWhere((k) => kindOf(src, k) == EntityKind.fill);
++    final bFill =
++        kids(src, wb).firstWhere((k) => kindOf(src, k) == EntityKind.fill);
++    final bOutline = payloadOf(src, bFill).scalars[0];
++    for (final e in j['entities']! as List) {
++      final entity = e as Map<String, Object?>;
++      if ((entity['record']! as Map)['handle'] == aFill.value) {
++        (entity['geometry']! as Map)['scalars'] = [bOutline];
++      }
++    }
++  } finally {
++    source.dispose();
++  }
++  return jsonEncode(j);
++}
++
++Future<void> enterAndSubmit(
++    WidgetTester tester, Finder field, String text) async {
++  await tester.enterText(field, text);
++  await tester.testTextInput.receiveAction(TextInputAction.done);
++  await tester.pump();
++}
++
++void main() {
++  testWidgets(
++      'WS1 the Wall section shows for exactly one selected wall; hidden for '
++      'none, two, and a box (which shows the Box section)', (tester) async {
++    final view = await pumpPanel(tester, panelPlanJson());
++    expect(wallSection, findsNothing);
++    await select(tester, view, [wb]);
++    expect(wallSection, findsOneWidget);
++    expect(width, findsNothing);
++    expect(textOf(tester, thickness), '115');
++    expect(shownJustification(tester), {Justification.left});
++    await select(tester, view, [wc]);
++    expect(textOf(tester, thickness), '150');
++    expect(shownJustification(tester), {Justification.right});
++    await select(tester, view, [wa, wb]);
++    expect(wallSection, findsNothing);
++    await select(tester, view, [bx]);
++    expect(wallSection, findsNothing);
++    expect(textOf(tester, width), '120');
++    await select(tester, view, []);
++    expect(wallSection, findsNothing);
++    expect(width, findsNothing);
++  });
++
++  testWidgets(
++      'WS2 Enter commits the thickness in one undo step; the joined L '
++      'regenerates, still mitred; undo shows the old value', (tester) async {
++    final view = await pumpPanel(tester, panelPlanJson());
++    final doc = view.document;
++    final pa = doc.components.get<WallParams>(wa)!;
++    final pb = doc.components.get<WallParams>(wb)!;
++    await select(tester, view, [wa]);
++    await enterAndSubmit(tester, thickness, '262.5');
++    expect(doc.commands.undoDepth, 1);
++    expect(doc.components.get<WallParams>(wa), pa.copyWith(thickness: 262.5),
++        reason: 'only the thickness, exactly');
++    expect(doc.components.get<WallParams>(wb), pb);
++    expectMitre(doc, wa, wb);
++    expect(driftOf(doc), isEmpty);
++    expect(textOf(tester, thickness), '262.5');
++    doc.commands.undo();
++    await tester.pump();
++    expect(textOf(tester, thickness), '200');
++    expect(doc.components.get<WallParams>(wa), pa);
++  });
++
++  testWidgets(
++      'WS3 a thickness <= wallJoin.linear or unparseable reverts and commits '
++      'nothing, for a wall and for the tool settings (final review m1)',
++      (tester) async {
++    final view = await pumpPanel(tester, panelPlanJson());
++    final doc = view.document;
++    final pc = doc.components.get<WallParams>(wc)!;
++    await select(tester, view, [wc]);
++    // 1e-12 and wallJoin.linear itself are positive: the model would store
++    // either (C's local outline triangulates), so only the floor refuses.
++    for (final bad in ['0', '-40', '-0', 'abc', '', '1e-12', '0.000001']) {
++      await enterAndSubmit(tester, thickness, bad);
++      expect(textOf(tester, thickness), '150', reason: bad);
++    }
++    expect(doc.commands.undoDepth, 0);
++    expect(doc.components.get<WallParams>(wc), pc);
++    // W itself: Enter handed focus back to the canvas.
++    await pressKey(tester, LogicalKeyboardKey.keyW);
++    expect(status(tester), 'Wall');
++    expect(textOf(tester, thickness), '200');
++    for (final bad in ['0', '-40', '1e-12', '0.000001']) {
++      await enterAndSubmit(tester, thickness, bad);
++      expect(textOf(tester, thickness), '200', reason: bad);
++      // Not ported (ruling IP-R2): expect((view.tools.active as
++      // WallTool).settings.value.thickness, 200, reason: bad);
++    }
++    await clickWorld(tester, view, plan(400, 900));
++    await clickWorld(tester, view, plan(1900, 800));
++    final w = walls(doc).last;
++    expect(w, isNot(wc));
++    expect(doc.components.get<WallParams>(w)!.thickness, 200);
++  });
++
++  testWidgets(
++      "WS4 a justification change on a joined wall moves both walls' "
++      'corners, in one undo step (Review Focus 4)', (tester) async {
++    final view = await pumpPanel(tester, panelPlanJson());
++    final doc = view.document;
++    expectMitre(doc, wa, wb);
++    final ra0 = worldOutline(doc, wa), rb0 = worldOutline(doc, wb);
++    final shared0 = sharedNear(ra0, rb0);
++    final pa = doc.components.get<WallParams>(wa)!;
++    await select(tester, view, [wa]);
++    expect(shownJustification(tester), {Justification.centre});
++    await choose(tester, 'justification', 'left');
++    expect(doc.commands.undoDepth, 1);
++    expect(doc.components.get<WallParams>(wa),
++        pa.copyWith(justification: Justification.left));
++    expect(shownJustification(tester), {Justification.left});
++    // The corners: A's two faces now sit at (200, 0), so both mitre
++    // corners are the oracle meets of the new faces with B's.
++    expectMitre(doc, wa, wb);
++    final ra1 = worldOutline(doc, wa), rb1 = worldOutline(doc, wb);
++    final shared1 = sharedNear(ra1, rb1);
++    for (final p in shared0) {
++      expect(nearestIn(shared1, p), greaterThan(50),
++          reason: 'every shared corner moved');
++    }
++    // B's corners at the joint moved; its two at the far end did not.
++    expect(sharedNear(rb0, rb1), hasLength(2));
++    expect([for (final p in sharedNear(rb0, rb1)) nearestIn(shared0, p)],
++        everyElement(greaterThan(1000)));
++    // A's start is free: its square end moved by the face shift alone.
++    expect(sharedNear(ra0, ra1), isEmpty);
++    expect(driftOf(doc), isEmpty);
++    await choose(tester, 'justification', 'left');
++    expect(doc.commands.undoDepth, 1, reason: 'the same value is no step');
++    doc.commands.undo();
++    await tester.pump();
++    await tester.pump();
++    expect(shownJustification(tester), {Justification.centre});
++    expect(sharedNear(worldOutline(doc, wa), ra0), hasLength(4));
++    expectMitre(doc, wa, wb);
++  });
++
++  testWidgets(
++      'WS5 under runtime the Wall section is read-only: the field and the '
++      'toggle', (tester) async {
++    final view = await pumpPanel(tester, panelPlanJson());
++    final doc = view.document;
++    final pa = doc.components.get<WallParams>(wa)!;
++    doc.commands.permissions = DraftPermissions.runtime;
++    await select(tester, view, [wa]);
++    expect(tester.widget<TextField>(thickness).readOnly, isTrue);
++    expect(menuOf(tester, 'justification').onChanged, isNull);
++    await choose(tester, 'justification', 'right');
++    expect(doc.components.get<WallParams>(wa), pa);
++    expect(doc.commands.undoDepth, 0);
++    doc.commands.permissions = DraftPermissions.all;
++    await select(tester, view, [wb]);
++    expect(tester.widget<TextField>(thickness).readOnly, isFalse);
++  });
++
++  testWidgets(
++      "WS6 with the Wall tool active the section edits the tool's settings "
++      '(no undo step) and the next wall uses them; tool letters typed in '
++      'the field do not switch tools', (tester) async {
++    final view = await pumpPanel(tester, panelPlanJson());
++    final doc = view.document;
++    await pressKey(tester, LogicalKeyboardKey.keyW);
++    expect(status(tester), 'Wall');
++    expect(wallSection, findsOneWidget);
++    expect(textOf(tester, thickness), '200');
++    expect(shownJustification(tester), {Justification.centre});
++    await enterAndSubmit(tester, thickness, '115');
++    await choose(tester, 'justification', 'left');
++    expect(doc.commands.undoDepth, 0, reason: 'settings are not the model');
++    await tester.tap(thickness);
++    await tester.pump();
++    for (final k in [LogicalKeyboardKey.keyV, LogicalKeyboardKey.keyB]) {
++      await pressKey(tester, k);
++      expect(status(tester), 'Wall');
++    }
++    await clickWorld(tester, view, plan(400, 900));
++    await clickWorld(tester, view, plan(1900, 800));
++    await pressKey(tester, LogicalKeyboardKey.enter);
++    final w = walls(doc).last;
++    expect(w, isNot(wc));
++    final p = doc.components.get<WallParams>(w)!;
++    expect([p.thickness, p.justification], [115, Justification.left]);
++    expect(textOf(tester, thickness), '115');
++    expect(shownJustification(tester), {Justification.left});
++    // Ruling IP-R2: today's `PlacementTool` cast and `isPending` are the
++    // guarded tool's `isMidShape` (the guard forwards it).
++    Tool tool() => activeTool(tester);
++
++    // Typed with no Enter, then a click mid-chain: the keystrokes already
++    // reached the settings, so that click's wall has them (review round 1,
++    // I1).
++    await clickWorld(tester, view, plan(1500, -900));
++    await tester.tap(thickness);
++    await tester.pump();
++    await tester.enterText(thickness, '400');
++    await tester.pump();
++    await clickWorld(tester, view, plan(2800, -1000));
++    final w400 = walls(doc).last;
++    expect(w400, isNot(w));
++    expect(doc.components.get<WallParams>(w400)!.thickness, 400);
++    expect(tool().isMidShape, isTrue);
++
++    // Mid-chain, Enter in the field hands focus back to the canvas: Escape
++    // ends the chain with no extra wall, and the letters work again.
++    final count = walls(doc).length;
++    await tester.tap(thickness);
++    await tester.pump();
++    await enterAndSubmit(tester, thickness, '90');
++    expect(tool().isMidShape, isTrue);
++    await pressKey(tester, LogicalKeyboardKey.escape);
++    expect(tool().isMidShape, isFalse);
++    expect(walls(doc), hasLength(count));
++    expect(status(tester), 'Wall');
++    await tester.tap(thickness);
++    await tester.pump();
++    await enterAndSubmit(tester, thickness, '95');
++    await pressKey(tester, LogicalKeyboardKey.keyV);
++    expect(status(tester), 'Select');
++    await pressKey(tester, LogicalKeyboardKey.keyW);
++    expect(status(tester), 'Wall');
++    expect(textOf(tester, thickness), '95');
++
++    // Back to Select: the section follows the selection again.
++    await pressKey(tester, LogicalKeyboardKey.keyV);
++    expect(wallSection, findsNothing);
++    await select(tester, view, [wa]);
++    expect(textOf(tester, thickness), '200');
++  });
++
++  testWidgets(
++      'WS7 (Wall) the commit target is pinned at focus gain: a selection '
++      'change while a field has focus does not redirect its commit (M-07p); '
++      'a pinned wall that dies drops the text', (tester) async {
++    final view = await pumpPanel(tester, panelPlanJson());
++    final doc = view.document;
++    final pa = doc.components.get<WallParams>(wa)!;
++    final pc = doc.components.get<WallParams>(wc)!;
++    await select(tester, view, [wa]);
++    await tester.tap(thickness);
++    await tester.pump();
++    await tester.enterText(thickness, '260');
++    await tester.pump();
++    await select(tester, view, [wc]);
++    expect(textOf(tester, thickness), '260', reason: 'focused: not reloaded');
++    // Blur: a tap outside the field, on the section's title.
++    await tester.tap(wallSection);
++    await tester.pump();
++    expect(doc.components.get<WallParams>(wa), pa.copyWith(thickness: 260));
++    expect(doc.components.get<WallParams>(wc), pc);
++    expect(doc.commands.undoDepth, 1);
++    expect(textOf(tester, thickness), '150', reason: "now C's");
++
++    // Enter after the selection change: the value still lands on A, once,
++    // and the field then shows C (review round 1, I3).
++    await select(tester, view, [wa]);
++    await tester.tap(thickness);
++    await tester.pump();
++    await tester.enterText(thickness, '275');
++    await select(tester, view, [wc]);
++    await tester.testTextInput.receiveAction(TextInputAction.done);
++    await tester.pump();
++    await tester.pump();
++    expect(doc.components.get<WallParams>(wa), pa.copyWith(thickness: 275));
++    expect(doc.components.get<WallParams>(wc), pc);
++    expect(doc.commands.undoDepth, 2);
++    expect(textOf(tester, thickness), '150');
++
++    // The pinned wall dies while another wall is shown, so the field stays
++    // mounted: blurring drops the text (review round 1, I2).
++    const we = Handle(7800);
++    doc.commands.execute(addWall(
++        doc, we, plan(0, -900), plan(1400, -1300), 90, Justification.left));
++    await select(tester, view, [we]);
++    await tester.tap(thickness);
++    await tester.pump();
++    await tester.enterText(thickness, '333');
++    await select(tester, view, [wc]);
++    doc.commands.undo();
++    await tester.pump();
++    expect(doc.tree[we], isNull);
++    expect(wallSection, findsOneWidget);
++    await tester.tap(wallSection);
++    await tester.pump();
++    expect(doc.components.get<WallParams>(wc), pc);
++    expect(doc.commands.canRedo, isTrue, reason: 'nothing was executed');
++    expect(textOf(tester, thickness), '150');
++
++    // The pinned wall dies while the field has focus: the section hides,
++    // the field loses focus, and the text is dropped.
++    const wd = Handle(6500);
++    doc.commands.execute(addWall(
++        doc, wd, plan(0, -900), plan(1400, -1300), 90, Justification.left));
++    await select(tester, view, [wd]);
++    await tester.tap(thickness);
++    await tester.pump();
++    await tester.enterText(thickness, '333');
++    await tester.pump();
++    doc.commands.undo();
++    await tester.pump();
++    expect(doc.tree[wd], isNull);
++    expect(wallSection, findsNothing);
++    expect(doc.commands.canRedo, isTrue, reason: 'nothing was executed');
++    expect(doc.commands.undoDepth, 2);
++    expect([
++      for (final h in walls(doc)) doc.components.get<WallParams>(h)!.thickness
++    ], [
++      275,
++      115,
++      150
++    ]);
++  });
++
++  testWidgets(
++      'WS8 with geometry allowed and components denied, the Wall and Box '
++      'fields are read-only: a commit is a SetComponentCommand (final '
++      'review m4)', (tester) async {
++    final view = await pumpPanel(tester, panelPlanJson());
++    final doc = view.document;
++    final pa = doc.components.get<WallParams>(wa)!;
++    doc.commands.permissions = const DraftPermissions(
++        transform: true, components: false, geometry: true, structure: true);
++    await select(tester, view, [wa]);
++    expect(tester.widget<TextField>(thickness).readOnly, isTrue);
++    expect(menuOf(tester, 'justification').onChanged, isNull);
++    await choose(tester, 'justification', 'right');
++    expect(doc.components.get<WallParams>(wa), pa);
++    await select(tester, view, [bx]);
++    expect(tester.widget<TextField>(width).readOnly, isTrue);
++    expect(tester.widget<TextField>(height).readOnly, isTrue);
++    expect(doc.commands.undoDepth, 0);
++    expect(tester.takeException(), isNull);
++  });
++
++  // Decided: premise impossible under C1.10's freeze at open (Task 18's
++  // rule). Today's WS9 edited the malformed wall A and saw its edit
++  // refused at the commit; the plan freezes and locks A when it opens the
++  // file (a hookFailed diagnostic), and a frozen object shows no section.
++  // WS9-open pins what the plan now does with that file; WS9-refused keeps
++  // the old intent (a refused edit reverts the field, the document
++  // untouched, nothing escapes) on a live wall.
++  testWidgets(
++      'WS9-open a loaded fill naming another wall\'s outline freezes that '
++      'wall at open: a hookFailed diagnostic, no Wall section, a raw edit '
++      'refused (PlanLocked)', (tester) async {
++    final view = await pumpPanel(tester, malformedPlanJson());
++    final doc = view.document;
++    expect(view.frozen, contains(wa));
++    expect(
++        [for (final d in view.diagnostics.value) (d.code, d.kitId, d.subject)],
++        contains((
++          KitDiagnosticCode.hookFailed,
++          'architecture',
++          ArchitectureTypes.wall
++        )));
++    await select(tester, view, [wa]);
++    expect(wallSection, findsNothing);
++    expect(thickness, findsNothing);
++    final pa = doc.components.get<WallParams>(wa)!;
++    final before = canon(doc);
++    expect(
++        () => doc.commands.execute(
++            SetComponentCommand<WallParams>(wa, pa.copyWith(thickness: 250))),
++        throwsA(isA<PlanLocked>()));
++    expect(canon(doc), before);
++    expect(doc.components.get<WallParams>(wa), pa);
++    expect(tester.takeException(), isNull);
++    // Not kept: today's last lines ("C, no neighbour of A's, is sound: its
++    // edit lands", 120 and one step) do not hold here; the plan refuses
++    // C's edit too (PlanLocked, the lock hint set). Reported to the
++    // controller (task-27-report.md, fix report).
++  });
++
++  // Decided: premise impossible under C1.10's freeze at open (Task 18's
++  // rule). The old intent of WS9 on a live wall: the type's `write`
++  // refuses a thickness (ArgumentError, which the panel takes as a silent
++  // refusal), by Enter and by the focus loss; the field reverts to the
++  // stored value, the document and the undo depth unchanged, no exception
++  // escapes; then a valid thickness lands. M-WS9-r: the kit's `_thickness`
++  // refusal removed (wall_plan.dart) turns it red.
++  testWidgets(
++      'WS9-refused an edit the type refuses on a live wall reverts the '
++      'field: no exception escapes Enter or the focus loss, the document '
++      'unchanged; a valid thickness then lands', (tester) async {
++    final view = await pumpPanel(tester, panelPlanJson());
++    final doc = view.document;
++    final pa = doc.components.get<WallParams>(wa)!;
++    final before = enc(doc);
++    await select(tester, view, [wa]);
++    for (final bad in ['0', '-40', '${nextUp(kWallMaxThickness)}']) {
++      await tester.tap(thickness);
++      await tester.pump();
++      await enterAndSubmit(tester, thickness, bad);
++      await tester.pump();
++      expect(tester.takeException(), isNull, reason: bad);
++      expect(textOf(tester, thickness), '200', reason: 'reverted: $bad');
++      expect(doc.components.get<WallParams>(wa), pa, reason: bad);
++      expect(enc(doc), before, reason: bad);
++      expect(doc.commands.undoDepth, 0, reason: bad);
++      // The focus loss alone: typed, then a tap outside.
++      await tester.tap(thickness);
++      await tester.pump();
++      await tester.enterText(thickness, bad);
++      await tester.pump();
++      await tester.tap(wallSection);
++      await tester.pump();
++      expect(tester.takeException(), isNull, reason: bad);
++      expect(textOf(tester, thickness), '200', reason: 'reverted: $bad');
++      expect(enc(doc), before, reason: bad);
++      expect(doc.commands.undoDepth, 0, reason: bad);
++    }
++    await tester.tap(thickness);
++    await tester.pump();
++    await enterAndSubmit(tester, thickness, '250');
++    expect(doc.components.get<WallParams>(wa), pa.copyWith(thickness: 250));
++    expect(doc.commands.undoDepth, 1);
++    expect(textOf(tester, thickness), '250');
++  });
++
++  // 1e100 is the probe's; 1e25 sits under a bound far too high (1e30) and
++  // still collapses this ~1504 mm band.
++  for (final typed in ['1e100', '1e25']) {
++    testWidgets(
++        'WS10 a tool-mode thickness above kWallMaxThickness ($typed) typed '
++        'without Enter never reaches the settings: a diagonal click lands a '
++        'wall at the kept 200, one step, no exception (post-11 (c))',
++        (tester) async {
++      final view = await pumpPanel(tester, panelPlanJson());
++      final doc = view.document;
++      await pressKey(tester, LogicalKeyboardKey.keyW);
++      // Not ported (ruling IP-R2): final tool = view.tools.active as
++      // WallTool;
++      await tester.tap(thickness);
++      await tester.pump();
++      // One keystroke event carrying the whole text: `onChanged` sees it
++      // alone, no prefix of it, so the settings keep the last valid value.
++      await tester.enterText(thickness, typed);
++      await tester.pump();
++      final n0 = walls(doc).length;
++      final seed0 = doc.handleSeed.current.value;
++      // Off-axis (the plan is turned 23 degrees) and at the far origin: the
++      // wall's local direction is not axis-aligned, which the typed value
++      // needs to collapse its band.
++      await clickWorld(tester, view, plan(400, 900));
++      await clickWorld(tester, view, plan(1900, 800));
++      // A throw out of the pointer handler would be reported here.
++      expect(tester.takeException(), isNull);
++      expect(walls(doc), hasLength(n0 + 1));
++      final w = walls(doc).last;
++      expect(doc.components.get<WallParams>(w)!.thickness, 200);
++      expect(doc.commands.undoDepth, 1);
++      // The seed moved by that wall's handles alone: its group and the
++      // children generated under it, nothing a refused attempt consumed.
++      expect([w, ...kids(doc, w)].map((h) => h.value).toSet(),
++          {for (var v = seed0 + 1; v <= doc.handleSeed.current.value; v++) v});
++      // Not ported (ruling IP-R2): expect(tool.settings.value.thickness,
++      // 200);
++      expect(textOf(tester, thickness), '200',
++          reason: 'the focus loss reverts');
++      expect(driftOf(doc), isEmpty);
++    });
++  }
++
++  testWidgets(
++      'WS11 a wall thickness one ulp above kWallMaxThickness is refused on a '
++      'turned wall, by Enter and by focus loss: the field reverts and the '
++      'document is byte-identical (post-11 (c))', (tester) async {
++    final view = await pumpPanel(tester, panelPlanJson());
++    final doc = view.document;
++    final before = enc(doc);
++    final over = nextUp(kWallMaxThickness);
++    expect(double.parse('$over'), over);
++    await select(tester, view, [wa]);
++    await tester.tap(thickness);
++    await tester.pump();
++    await enterAndSubmit(tester, thickness, '$over');
++    expect(tester.takeException(), isNull);
++    expect(textOf(tester, thickness), '200');
++    await tester.tap(thickness);
++    await tester.pump();
++    await tester.enterText(thickness, '$over');
++    await tester.pump();
++    await tester.tap(wallSection);
++    await tester.pump();
++    expect(tester.takeException(), isNull);
++    expect(textOf(tester, thickness), '200');
++    expect(doc.commands.undoDepth, 0);
++    expect(enc(doc), before);
++  });
++}
+diff --git a/packages/jet_cad_2d_integration/test/support/editor_rig.dart b/packages/jet_cad_2d_integration/test/support/editor_rig.dart
+index f59485f5..d316db0d 100644
+--- a/packages/jet_cad_2d_integration/test/support/editor_rig.dart
++++ b/packages/jet_cad_2d_integration/test/support/editor_rig.dart
+@@ -18,31 +18,33 @@ import 'package:jet_cad_2d_integration/jet_cad_2d_integration.dart';
+ import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
+ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ /// Pumps [c]'s editor in [locale] in a [window], 1440 x 900 unless
+ /// given (reset after the test). With [centre], then sets a camera turned
+ /// by [turn] at [scale] px/mm, **non-reflecting** (a reflection's `b == c`
+ /// hides a transposition), with [centre] in the middle of the drawing
+ /// area: the plan library's `pumpDraw` (canvas_fixture.dart:427-443) over
+ /// PlanEditor. [wrap], when given, wraps the app (a capture boundary, Task
+-/// 14's RD1; a key of its own, Task 26).
++/// 14's RD1; a key of its own, Task 26). [layerPanel] false leaves the
++/// editor's layer panel out (Task 27).
+ Future<void> pumpEditor(WidgetTester tester, PlanController c,
+     {Locale locale = const Locale('en'),
+     Size window = const Size(1440, 900),
+     Vector2? centre,
+     double scale = 2,
+     double turn = 0.35,
+-    Widget Function(Widget app)? wrap}) async {
++    Widget Function(Widget app)? wrap,
++    bool layerPanel = true}) async {
+   await tester.binding.setSurfaceSize(window);
+   addTearDown(() => tester.binding.setSurfaceSize(null));
+-  final app = planEditorApp(c, locale: locale);
++  final app = planEditorApp(c, locale: locale, layerPanel: layerPanel);
+   await tester.pumpWidget(wrap == null ? app : wrap(app));
+   await tester.pump();
+   if (centre == null) return;
+   final size = tester.getSize(find.byType(InteractionLayer));
+   final linear =
+       Transform2.rotation(turn).multiply(Transform2.scale(scale, scale));
+   final mid = linear.transformPoint(centre);
+   c.camera.value = ViewportTransform(
+       worldToScreenMatrix: Transform2.translation(
+               size.width / 2 - mid.x, size.height / 2 - mid.y)
+diff --git a/packages/jet_cad_2d_integration/test/support/q0_plan.dart b/packages/jet_cad_2d_integration/test/support/q0_plan.dart
+new file mode 100644
+index 00000000..3eb4f3d1
+--- /dev/null
++++ b/packages/jet_cad_2d_integration/test/support/q0_plan.dart
+@@ -0,0 +1,56 @@
++// The decimal separator's fixture (jet_cad_floor_plan/test/
++// decimal_separator_test.dart:37-80) as a plan file (3a Task 27): a box of
++// four 200 mm walls at the corpus far origin turned 23 degrees, a cm page at
++// 1:20, its origin off zero, grid snap off, the separator point; a room
++// `Kitchen` (12.37 m²) and an aligned dimension in a turned group (345.7).
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
++
++import 'plans.dart';
++
++/// A box of four 200 mm centred walls, centrelines (0, 0)-(4,050, 3,413):
++/// inner faces x 100..3,950, y 100..3,313, 3,850 × 3,213 = 12,370,050 mm²,
++/// 12.37005 m² (0.00495 from the tie 12.375).
++const List<W> q0Walls = [
++  W(0, 0, 4050, 0, 200),
++  W(4050, 0, 4050, 3413, 200),
++  W(4050, 3413, 0, 3413, 200),
++  W(0, 3413, 0, 0, 200),
++];
++
++/// The fixture's page: cm at 1:20, its origin off zero, grid snap off (so a
++/// tool click resolves to its raw point), the separator `point`.
++final PageComponent q0Page = PageComponent(
++    originX: -4180.5,
++    originY: 2645.25,
++    scaleDenominator: 20,
++    displayUnit: DisplayUnit.centimeters,
++    snapToGrid: false);
++
++/// The fixture's plan file, its room and its dimension: [q0Walls] at the
++/// corpus far origin turned 23° ([corpus]), [q0Page], a room `Kitchen`
++/// seeded at plan (1,500.25, 1,700.75), and an aligned dimension in a root
++/// group of its own at plan (600.5, 4,400.25) turned a further 0.4 rad,
++/// from local (−120.5, 40.25) to (3,336.8, 40.25): 3,457.3 mm, 3,457
++/// tenths of a cm (0.2 from the half), 345.7.
++({String json, Handle room, Handle dim}) q0PlanJson() {
++  late Handle room, dim;
++  final json = planWith((d) {
++    final plan = buildPlan(d, q0Walls, place: corpus);
++    attachPage(d, q0Page);
++    room = addRoom(d, plan.at(1500.25, 1700.75), 'Kitchen');
++    dim = addDimension(
++        d, const FixedEnd(-120.5, 40.25), const FixedEnd(3336.8, 40.25),
++        offset: 300.25,
++        at: corpus.m
++            .multiply(Transform2.translation(600.5, 4400.25))
++            .multiply(Transform2.rotation(0.4)));
++  });
++  return (json: json, room: room, dim: dim);
++}
++
++/// [doc]'s page with separator [s], one command, as the Page panel's `_set`
++/// makes it (today's `separatorTo`).
++DraftCommand separatorTo(DraftDocument doc, DecimalSeparator s) =>
++    SetComponentCommand<PageComponent>(
++        doc.rootHandle, pageOf(doc).copyWith(decimalSeparator: s));
+diff --git a/packages/jet_cad_2d_integration/test/support/recording_plan_strings.dart b/packages/jet_cad_2d_integration/test/support/recording_plan_strings.dart
+new file mode 100644
+index 00000000..dc595ed7
+--- /dev/null
++++ b/packages/jet_cad_2d_integration/test/support/recording_plan_strings.dart
+@@ -0,0 +1,312 @@
++// Copied for jet_cad_2d_integration (3a Task 27); regenerate with the plan's copy.
++// Generated from lib/src/l10n/strings.dart (spec 14d L1 as amended,
++// V-10; ported from jet_cad_floor_plan/test/l10n/recording_strings.dart):
++// a language whose every word is recorded as it is handed out, so a test
++// can tell a word the plan library asked for from a literal it did not.
++// Regenerate when a member is added: one override per member, a String
++// getter as `record(inner.x)`, a method returning String as
++// `record(inner.x(...))`, `languageCode` and `decimalSeparator` delegated
++// unrecorded.
++import 'package:jet_cad_2d/jet_cad_2d.dart' show LayerNameProblem;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show PlanSwatch;
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart'
++    show PlanStrings, UnitLabelProblem, UnitLabelWarning;
++
++class RecordingPlanStrings implements PlanStrings {
++  RecordingPlanStrings(this.inner);
++
++  final PlanStrings inner;
++
++  /// Every string handed out.
++  final Set<String> handedOut = {};
++
++  /// Records [s] as handed out and returns it.
++  String record(String s) {
++    handedOut.add(s);
++    return s;
++  }
++
++  @override
++  String get languageCode => inner.languageCode;
++
++  @override
++  String get decimalSeparator => inner.decimalSeparator;
++
++  @override
++  String layerNameProblem(LayerNameProblem problem) =>
++      record(inner.layerNameProblem(problem));
++
++  @override
++  String get toolSelect => record(inner.toolSelect);
++
++  @override
++  String get toolLine => record(inner.toolLine);
++
++  @override
++  String get toolPolyline => record(inner.toolPolyline);
++
++  @override
++  String get toolRectangle => record(inner.toolRectangle);
++
++  @override
++  String get toolCircle => record(inner.toolCircle);
++
++  @override
++  String get toolArc => record(inner.toolArc);
++
++  @override
++  String get toolText => record(inner.toolText);
++
++  @override
++  String get toolSymbol => record(inner.toolSymbol);
++
++  @override
++  String get fill => record(inner.fill);
++
++  @override
++  String get tabTools => record(inner.tabTools);
++
++  @override
++  String get tabSymbols => record(inner.tabSymbols);
++
++  @override
++  String get objectSnapOn => record(inner.objectSnapOn);
++
++  @override
++  String get objectSnapOff => record(inner.objectSnapOff);
++
++  @override
++  String get edited => record(inner.edited);
++
++  @override
++  String get undo => record(inner.undo);
++
++  @override
++  String get redo => record(inner.redo);
++
++  @override
++  String get newDocument => record(inner.newDocument);
++
++  @override
++  String get open => record(inner.open);
++
++  @override
++  String get save => record(inner.save);
++
++  @override
++  String get saveAs => record(inner.saveAs);
++
++  @override
++  String get exportEllipsis => record(inner.exportEllipsis);
++
++  @override
++  String get printEllipsis => record(inner.printEllipsis);
++
++  @override
++  String get controlKey => record(inner.controlKey);
++
++  @override
++  String get shiftKey => record(inner.shiftKey);
++
++  @override
++  String get exportTitle => record(inner.exportTitle);
++
++  @override
++  String get exportAction => record(inner.exportAction);
++
++  @override
++  String get cancel => record(inner.cancel);
++
++  @override
++  String get searchSymbols => record(inner.searchSymbols);
++
++  @override
++  String get clear => record(inner.clear);
++
++  @override
++  String get loadingSymbols => record(inner.loadingSymbols);
++
++  @override
++  String get symbolsFailed => record(inner.symbolsFailed);
++
++  @override
++  String get retry => record(inner.retry);
++
++  @override
++  String selectedCount(int count) => record(inner.selectedCount(count));
++
++  @override
++  String dpi(int dpi) => record(inner.dpi(dpi));
++
++  @override
++  String noSymbolsMatch(String query) => record(inner.noSymbolsMatch(query));
++
++  @override
++  String get name => record(inner.name);
++
++  @override
++  String get size => record(inner.size);
++
++  @override
++  String get rotation => record(inner.rotation);
++
++  @override
++  String get mirror => record(inner.mirror);
++
++  @override
++  String get pageTitle => record(inner.pageTitle);
++
++  @override
++  String get customSize => record(inner.customSize);
++
++  @override
++  String get portrait => record(inner.portrait);
++
++  @override
++  String get landscape => record(inner.landscape);
++
++  @override
++  String get scale => record(inner.scale);
++
++  @override
++  String get grid => record(inner.grid);
++
++  @override
++  String get snapToGrid => record(inner.snapToGrid);
++
++  @override
++  String get pageBreaks => record(inner.pageBreaks);
++
++  @override
++  String get pageDecimalSeparator => record(inner.pageDecimalSeparator);
++
++  @override
++  String get paper => record(inner.paper);
++
++  @override
++  String get layersLocked => record(inner.layersLocked);
++
++  @override
++  String get selectLayerToDelete => record(inner.selectLayerToDelete);
++
++  @override
++  String get layerZeroUndeletable => record(inner.layerZeroUndeletable);
++
++  @override
++  String get currentLayerUndeletable => record(inner.currentLayerUndeletable);
++
++  @override
++  String get layerInUse => record(inner.layerInUse);
++
++  @override
++  String get layers => record(inner.layers);
++
++  @override
++  String get newLayer => record(inner.newLayer);
++
++  @override
++  String get deleteLayer => record(inner.deleteLayer);
++
++  @override
++  String get mixed => record(inner.mixed);
++
++  @override
++  String get readOnlyDocument => record(inner.readOnlyDocument);
++
++  @override
++  String get plainGroupNoLayer => record(inner.plainGroupNoLayer);
++
++  @override
++  String get lockedNoLayer => record(inner.lockedNoLayer);
++
++  @override
++  String get layer => record(inner.layer);
++
++  @override
++  String get color => record(inner.color);
++
++  @override
++  String get colorNone => record(inner.colorNone);
++
++  @override
++  String get colorRefused => record(inner.colorRefused);
++
++  @override
++  String colorName(PlanSwatch swatch) => record(inner.colorName(swatch));
++
++  @override
++  String get moveSelectionToLayer => record(inner.moveSelectionToLayer);
++
++  @override
++  String get hiddenLayerNotCurrent => record(inner.hiddenLayerNotCurrent);
++
++  @override
++  String get currentLayer => record(inner.currentLayer);
++
++  @override
++  String get makeCurrent => record(inner.makeCurrent);
++
++  @override
++  String get currentLayerNotHidden => record(inner.currentLayerNotHidden);
++
++  @override
++  String get hideLayer => record(inner.hideLayer);
++
++  @override
++  String get showLayer => record(inner.showLayer);
++
++  @override
++  String get unlockLayer => record(inner.unlockLayer);
++
++  @override
++  String get lockLayer => record(inner.lockLayer);
++
++  @override
++  String get layerColour => record(inner.layerColour);
++
++  @override
++  String missingLayer(String hex) => record(inner.missingLayer(hex));
++
++  @override
++  String colourName(int aci) => record(inner.colourName(aci));
++
++  @override
++  String layerName(int n) => record(inner.layerName(n));
++
++  @override
++  String get lockedHint => record(inner.lockedHint);
++
++  @override
++  String get sectionFailed => record(inner.sectionFailed);
++
++  @override
++  String get planDamaged => record(inner.planDamaged);
++
++  @override
++  String get merge => record(inner.merge);
++  @override
++  String get split => record(inner.split);
++  @override
++  String get number => record(inner.number);
++  @override
++  String get label => record(inner.label);
++  @override
++  String get capacity => record(inner.capacity);
++  @override
++  String get rotateLeft => record(inner.rotateLeft);
++  @override
++  String get rotateRight => record(inner.rotateRight);
++  @override
++  String labelProblem(UnitLabelProblem problem) =>
++      record(inner.labelProblem(problem));
++  @override
++  String labelUsed(String label) => record(inner.labelUsed(label));
++  @override
++  String labelWarning(UnitLabelWarning warning) =>
++      record(inner.labelWarning(warning));
++  @override
++  String? unitKind(String kind) => switch (inner.unitKind(kind)) {
++        null => null,
++        final w => record(w),
++      };
++}
+diff --git a/packages/jet_cad_2d_integration/test/support/rooms_plan.dart b/packages/jet_cad_2d_integration/test/support/rooms_plan.dart
+new file mode 100644
+index 00000000..356bcff1
+--- /dev/null
++++ b/packages/jet_cad_2d_integration/test/support/rooms_plan.dart
+@@ -0,0 +1,55 @@
++// The colour picker's plan (jet_cad_floor_plan/test/colors/
++// color_picker_test.dart:76-113) as a plan file (3a Task 27): the two-room
++// rectangle at the corpus far origin turned 23 degrees, every wall and the
++// separator in its own rotated group, a separator at x = 6,250.5, room A
++// `Kitchen` in a group turned 0.61 rad and room B `Room 2` at the identity,
++// the page's grid hidden (today's replaced the document's whole page with
++// `PageComponent(gridVisible: false)`; the plan file's page is replaced the
++// same way).
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_integration/jet_cad_2d_integration.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++
++import 'plans.dart';
++
++/// The plan, opened: its controller (disposed at tear-down) and handles.
++typedef Rooms = ({
++  PlanController c,
++  Plan plan,
++  DraftDocument doc,
++  Handle a,
++  Handle b,
++  Handle sep,
++  Handle w
++});
++
++/// The two-room rectangle at [corpusGroups], with a separator at x = 6,250.5
++/// and two rooms, `Kitchen` (A, in a group of its own turned 0.61 rad) and
++/// `Room 2` (B, at the identity). The page's grid is hidden, so a pixel of
++/// bare floor is the surround. Saved and opened: no history.
++Rooms roomsPlan() {
++  late Plan plan;
++  late Handle a, b;
++  final json = planWith((d) {
++    plan = buildPlan(d, twoRoomWalls,
++        seps: const [(6250.5, 100, 6250.5, 3900)], place: corpusGroups);
++    attachPage(d, PageComponent(gridVisible: false));
++    final g =
++        Transform2.translation(plan.at(1400, 1900).x, plan.at(1400, 1900).y)
++            .multiply(Transform2.rotation(0.61));
++    a = addRoom(d, plan.at(1500.25, 2000.5), 'Kitchen', at: g);
++    b = addRoom(d, plan.at(4700.75, 1900.25), 'Room 2');
++  });
++  final c = architectureController(json: json);
++  addTearDown(c.dispose);
++  return (
++    c: c,
++    plan: plan,
++    doc: c.document,
++    a: a,
++    b: b,
++    sep: plan.seps.single,
++    w: plan.walls[4]
++  );
++}
+diff --git a/packages/jet_cad_2d_integration/test/support/units.dart b/packages/jet_cad_2d_integration/test/support/units.dart
+index 42b2212b..2b2a31d1 100644
+--- a/packages/jet_cad_2d_integration/test/support/units.dart
++++ b/packages/jet_cad_2d_integration/test/support/units.dart
+@@ -72,20 +72,33 @@ CatalogSymbol tableSymbol({String key = 'fx.table.two', int seats = 2}) =>
+       shapes: const [
+         CatalogPolyline([(300, 300), (1500, 300), (1500, 1100), (300, 1100)],
+             closed: true),
+         CatalogPolyline([(675, -50), (1125, -50), (1125, 400), (675, 400)],
+             closed: true),
+         CatalogPolyline([(675, 1000), (1125, 1000), (1125, 1450), (675, 1450)],
+             closed: true),
+       ],
+     );
+ 
++/// DT1's and LK2's library table (ruling IP-R4): today's
++/// `dining.table.square.two`'s name, a served two-seat unit of the fixture
++/// kit, its shapes the fixture table's.
++final CatalogSymbol diningTableTwo = CatalogSymbol(
++  key: 'fx.dining.table.two',
++  name: 'Square dining table, 2 seats',
++  category: 'Dining Room',
++  tags: const ['table', 'dining'],
++  unit: tableUnit(2),
++  base: tableSymbol().base,
++  shapes: tableSymbol().shapes,
++);
++
+ /// [s] as a library entry, built by hand (no library rule is checked): its
+ /// leaves ascending by handle in shape order, each a BYBLOCK leaf on layer
+ /// 0; its unit when [CatalogSymbol.unit] is set.
+ SymbolEntry entryOf(CatalogSymbol s) {
+   const definition = Handle(0x0F0);
+   final leaves = <SymbolLeaf>[];
+   var next = 0x100;
+   for (final shape in s.shapes) {
+     final (EntityKind kind, GeometryPayload payload) = switch (shape) {
+       CatalogPolyline(:final points, :final closed) => (
+diff --git a/packages/jet_cad_2d_kit_architecture/test/room/decimal_separator_test.dart b/packages/jet_cad_2d_kit_architecture/test/room/decimal_separator_test.dart
+new file mode 100644
+index 00000000..7321b93a
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/test/room/decimal_separator_test.dart
+@@ -0,0 +1,120 @@
++// Spec Q0 (the plan's decimal separator) T2: a page's separator reaches
++// the stored texts.
++//
++// - M-Q0-a (`Q0-S1`): switching the page to `comma` rewrites the room's
++//   area TEXT and the dimension's value TEXT in one history entry (the two
++//   `pageKey`s, F-3); Undo restores the encoding byte for byte, Redo the
++//   commas.
++//
++// The fixture follows the spec's fixture rule: a page at cm and 1:20, its
++// origin off zero; a room off the origin, turned, whose area has a nonzero
++// fraction (12.37 m²); a dimension off the origin in a turned group of its
++// own, whose length has a nonzero fraction (345.7 cm); `comma` against
++// `point`.
++// Ported from jet_cad_floor_plan/test/decimal_separator_test.dart (Q0-S1,
++// Q0-S2; Q0-E1 to Q0-E3b run in jet_cad_2d_integration) for the
++// architecture kit (3a Task 27, Appendix A D-32); assertions unchanged.
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit_architecture/src/dimension/dimension.dart';
++
++import '../support/dimension_fixture.dart';
++
++/// A box of four 200 mm centred walls, centrelines (0, 0)-(4,050, 3,413):
++/// inner faces x 100..3,950, y 100..3,313, 3,850 × 3,213 = 12,370,050 mm²,
++/// 12.37005 m² (0.00495 from the tie 12.375).
++const List<W> q0Walls = [
++  W(0, 0, 4050, 0, 200),
++  W(4050, 0, 4050, 3413, 200),
++  W(4050, 3413, 0, 3413, 200),
++  W(0, 3413, 0, 0, 200),
++];
++
++/// The fixture's page: cm at 1:20, its origin off zero, grid snap off (so a
++/// tool click resolves to its raw point), the separator `point`.
++final PageComponent q0Page = PageComponent(
++    originX: -4180.5,
++    originY: 2645.25,
++    scaleDenominator: 20,
++    displayUnit: DisplayUnit.centimeters,
++    snapToGrid: false);
++
++/// The fixture: [q0Walls] at the corpus far origin turned 23° ([corpus]),
++/// [q0Page], a room `Kitchen` seeded at plan (1,500.25, 1,700.75), and an
++/// aligned dimension in a root group of its own at plan (600.5, 4,400.25)
++/// turned a further 0.4 rad, from local (−120.5, 40.25) to (3,336.8,
++/// 40.25): 3,457.3 mm, 3,457 tenths of a cm (0.2 from the half), 345.7.
++/// The dimension sits above the box (plan y 4,400 > 3,413 + 100).
++({Plan plan, Handle room, Handle dim}) q0Plan(
++    {TextMeasurer measurer = const InsertionPointMeasurer()}) {
++  final plan = buildPlan(q0Walls, place: corpus, measurer: measurer);
++  attachPage(plan.doc, q0Page);
++  final room = addRoom(plan.doc, plan.at(1500.25, 1700.75), 'Kitchen');
++  final dim = addDimension(
++      plan.doc, const FixedEnd(-120.5, 40.25), const FixedEnd(3336.8, 40.25),
++      offset: 300.25,
++      at: corpus.m
++          .multiply(Transform2.translation(600.5, 4400.25))
++          .multiply(Transform2.rotation(0.4)));
++  return (plan: plan, room: room, dim: dim);
++}
++
++/// [doc]'s page with separator [s], one command, as the Page panel's `_set`
++/// makes it.
++DraftCommand separatorTo(DraftDocument doc, DecimalSeparator s) =>
++    SetComponentCommand<PageComponent>(
++        doc.rootHandle, pageOf(doc).copyWith(decimalSeparator: s));
++
++void main() {
++  test(
++      'Q0-S1 a switch to comma rewrites the area and the dimension value in '
++      'one undo step; Undo restores the bytes, Redo the commas', () {
++    final f = q0Plan();
++    final doc = f.plan.doc;
++    // Premises: the fixture is what it says, and prints with a point.
++    final g = doc.tree.accumulatedTransform(f.dim);
++    expect(g.b, isNot(0), reason: 'premise: the dimension group is turned');
++    expect(pageOf(doc).decimalSeparator, DecimalSeparator.point);
++    expect(labelStrings(doc, f.room), ['Kitchen', '12.37 m²']);
++    expect(dimText(doc, f.dim), '345.7');
++    expect(driftOf(doc), isEmpty);
++    final before = enc(doc);
++    final depth = doc.commands.undoDepth;
++    final roomKids = kids(doc, f.room), dimKids = kids(doc, f.dim);
++
++    doc.commands.execute(separatorTo(doc, DecimalSeparator.comma));
++    expect(doc.commands.undoDepth, depth + 1, reason: 'one history entry');
++    expect(labelStrings(doc, f.room), ['Kitchen', '12,37 m²']);
++    expect(dimText(doc, f.dim), '345,7');
++    expect(kids(doc, f.room), roomKids, reason: 'rewritten in place');
++    expect(kids(doc, f.dim), dimKids, reason: 'rewritten in place');
++    expect(driftOf(doc), isEmpty);
++    final after = enc(doc);
++
++    doc.commands.undo();
++    expect(enc(doc), before, reason: 'Undo restores the bytes');
++    expect(labelStrings(doc, f.room), ['Kitchen', '12.37 m²']);
++    expect(dimText(doc, f.dim), '345.7');
++
++    doc.commands.redo();
++    expect(labelStrings(doc, f.room), ['Kitchen', '12,37 m²']);
++    expect(dimText(doc, f.dim), '345,7');
++    expect(enc(doc), after, reason: 'Redo gives the comma bytes again');
++    expect(driftOf(doc), isEmpty);
++  });
++
++  test(
++      'Q0-S2 at feet-and-inches the stored area prints the page\'s comma '
++      '(F-1: formatArea swaps in every unit; the final review\'s F-3)', () {
++    final f = q0Plan();
++    final doc = f.plan.doc;
++    doc.commands.execute(SetComponentCommand<PageComponent>(
++        doc.rootHandle,
++        pageOf(doc).copyWith(
++            displayUnit: DisplayUnit.feetInches,
++            decimalSeparator: DecimalSeparator.comma)));
++    expect(labelStrings(doc, f.room), ['Kitchen', '133,15 ft²']);
++    doc.commands.undo();
++    expect(labelStrings(doc, f.room), ['Kitchen', '12.37 m²']);
++  });
++}
+diff --git a/packages/jet_cad_2d_kit_architecture/test/words/value_words_test.dart b/packages/jet_cad_2d_kit_architecture/test/words/value_words_test.dart
+new file mode 100644
+index 00000000..77200c90
+--- /dev/null
++++ b/packages/jet_cad_2d_kit_architecture/test/words/value_words_test.dart
+@@ -0,0 +1,39 @@
++// Ported from jet_cad_floor_plan/test/l10n/value_words_test.dart: VW3's
++// Room-notice line (3a Task 27, Appendix A D-24; VW3's other lines are
++// 2a's and 2b's), assertions unchanged. The notice is the kit's text
++// `text:architecture.room-occupied` with `{name}` (spec C1.2, C1.6),
++// worded in each language by `KitWords.text`.
++import 'dart:ui' show Locale;
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
++
++final List<KitWords> languages = [
++  for (final code in ['en', 'de', 'tr'])
++    KitNamesWords(architectureKit.names, () => Locale(code)),
++];
++
++/// [word] in each language: never empty, holding every [parts], and
++/// different in each language (value_words_test.dart:28-39).
++void expectWorded(String Function(KitWords s) word,
++    {List<String> parts = const [], String? english}) {
++  final words = [for (final s in languages) word(s)];
++  for (final (i, w) in words.indexed) {
++    expect(w, isNotEmpty);
++    for (final p in parts) {
++      expect(w, contains(p), reason: '${languages[i].locale}: $w');
++    }
++  }
++  expect(words.toSet(), hasLength(3), reason: '$words');
++  if (english != null) expect(words.first, english);
++}
++
++void main() {
++  test('VW3 the Room notice in each language', () {
++    expectWorded(
++        (s) => s.text('text:architecture.room-occupied', {'name': 'Mutfak'}),
++        parts: ['Mutfak'],
++        english: 'Already a room: Mutfak');
++  });
++}
