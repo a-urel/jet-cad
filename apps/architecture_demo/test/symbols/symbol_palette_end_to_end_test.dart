@@ -16,9 +16,10 @@
 //
 // Decided: premise impossible (the old test passed its own recording
 // thumbnail cache to the app and matched the cell's image to the cache's
-// futures): the app does not inject a cache, so the cell is checked to show
-// an image (a non-null `RawImage` of the size the gallery asked for) once
-// the cache has rendered it.
+// futures): the app does not inject a cache. The controller's own cache is
+// public (`c.thumbnails`), so the cell's image is matched to it instead:
+// the same key (symbol id, the cell's size and pixel ratio, the theme's
+// foreground) answers the cached entry, and the cell's image is a clone of it.
 import 'dart:ui' as ui;
 
 import 'package:flutter/gestures.dart';
@@ -124,6 +125,26 @@ void main() {
     }
     expect(shown, isNotNull, reason: 'the double bed\'s cell shows an image');
     expect(shown!.width, greaterThan(0));
+    // The image is the controller's cache's (T7-M2): asked for under the
+    // key the gallery used -- the symbol's id, the cell's size and pixel
+    // ratio, and the foreground of the theme -- the cache answers the same
+    // entry, whose image `shown` is a clone of. A cell fed by another cache
+    // or by another symbol's picture is not a clone; a request the cache
+    // had not seen would call the builder and throw.
+    final cellImage = tester.widget<RawImage>(
+        find.descendant(of: bedCell, matching: find.byType(RawImage)));
+    final size = Size(cellImage.width!, cellImage.height!);
+    final cache = c.thumbnails;
+    final entries = cache.length;
+    final cached = await tester.runAsync(() => cache.imageFor(
+        key: bedId,
+        document: () => throw StateError('the cell used another key'),
+        logicalSize: size,
+        devicePixelRatio: cellImage.scale,
+        foreground: 0x000000));
+    expect(cache.length, entries, reason: 'a hit: no new entry');
+    expect(shown.isCloneOf(cached!), isTrue,
+        reason: 'the cell shows the controller cache\'s image');
 
     // The tap arms the placement tool, through the editor.
     expect(c.activeTool.value, 'plan.select', reason: 'premise');
