@@ -706,6 +706,7 @@ class PlanController extends ChangeNotifier {
       measurer.clear();
       rethrow;
     }
+    _forgetPreparesAndBuild();
     _replace(next, measurer, unsettled: false, loadDiagnostics: diagnostics);
   }
 
@@ -729,10 +730,24 @@ class PlanController extends ChangeNotifier {
     final measurer = FlutterTextMeasurer();
     final made = newPlanDocument(measurer,
         register: _registerComponents, decimalSeparator: separator);
+    _forgetPreparesAndBuild();
     _prepare(made);
     _replace(made, measurer,
         unsettled: given == null && reported == null, build: build);
   }
+
+  /// Drops the last plan's failed prepares and build (each a `hookFailed`
+  /// of subject `prepare` or of kit `plan` and subject `build`) and forgets
+  /// them, so the next plan's are reported again, with their own errors:
+  /// they spoke of a document that is being replaced. Not plan-scoped
+  /// codes ([DiagnosticsLog.planScoped] is by code, and a kit's other
+  /// `hookFailed`s are the kit set's) but the log's
+  /// [DiagnosticsLog.removeWhere], for a problem that went away. Run when a
+  /// plan is replaced, before the new one's prepares and build (newPlan,
+  /// load).
+  void _forgetPreparesAndBuild() => _diagnostics.removeWhere((d) =>
+      d.code == KitDiagnosticCode.hookFailed &&
+      (d.subject == 'prepare' || (d.kitId == 'plan' && d.subject == 'build')));
 
   /// Every loaded kit's `prepare` on [document], a document the plan
   /// library made (spec 3a C1.3): in load order, with no system installed,

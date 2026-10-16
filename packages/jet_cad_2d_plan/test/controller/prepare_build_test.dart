@@ -290,4 +290,75 @@ void main() {
     expect(d.commands.canUndo, isFalse);
     expect(c.dirty.value, isFalse);
   });
+
+  testWidgets(
+      "PB12 a failed build or prepare is the current plan's: a second "
+      "failure after newPlan is reported with its own error, and a plan "
+      'that builds, prepares or loads clean leaves none (final review M4)',
+      (tester) async {
+    PlanBuild failing(String why) => (document, words) {
+          slabBuild([])(document, words);
+          throw StateError(why);
+        };
+    Object? errorOf(PlanController c, String kitId, String subject) => [
+          for (final d in c.diagnostics.value)
+            if (d.kitId == kitId &&
+                d.subject == subject &&
+                d.code == KitDiagnosticCode.hookFailed)
+              d.error,
+        ].single;
+
+    final boom = ThrowingKit(failing: ['prepare']);
+    final c = PlanController(
+        kits: [testKit(), boom.kit, prepKit()], build: failing('first'));
+    addTearDown(c.dispose);
+    expect(
+        problemsOf(c),
+        [
+          ('boom', 'prepare', KitDiagnosticCode.hookFailed),
+          ('plan', 'build', KitDiagnosticCode.hookFailed),
+        ],
+        reason: 'premise: the first plan failed both');
+    final firstPrepare = errorOf(c, 'boom', 'prepare');
+    expect((errorOf(c, 'plan', 'build')! as StateError).message, 'first');
+
+    // A second failing build and prepare, on a new plan: one each, the
+    // second's. M-PB-17: newPlan without the clear (the first's error
+    // stays, the second is refused as a duplicate).
+    c.newPlan(build: failing('second'));
+    await tester.pump();
+    expect(problemsOf(c), [
+      ('boom', 'prepare', KitDiagnosticCode.hookFailed),
+      ('plan', 'build', KitDiagnosticCode.hookFailed),
+    ]);
+    expect((errorOf(c, 'plan', 'build')! as StateError).message, 'second',
+        reason: "the current plan's build");
+    expect(errorOf(c, 'boom', 'prepare'), isNot(same(firstPrepare)),
+        reason: "the current plan's prepare");
+    expect(slabsOf(c.document), isEmpty, reason: 'premise: build undone');
+
+    // A build and a prepare that succeed after failing ones: none left.
+    boom.failing.clear();
+    c.newPlan(build: slabBuild([]));
+    await tester.pump();
+    expect(slabsOf(c.document), hasLength(1), reason: 'premise: built');
+    expect(prepared(c.document), isTrue, reason: 'premise: prepared');
+    expect(c.diagnostics.value, isEmpty);
+
+    // A load after failing ones: neither ran on the loaded plan, so none.
+    // M-PB-18: load without the clear.
+    final text = planText([testKit(), boom.kit, prepKit()], (d) {
+      addObject<SlabComponent>(
+          d, SlabComponent(width: 1200, height: 700, angle: -1.1),
+          at: Vector2(2300, 1400));
+    });
+    boom.failing.add('prepare');
+    c.newPlan(build: failing('third'));
+    await tester.pump();
+    expect(problemsOf(c), hasLength(2), reason: 'premise: failed again');
+    c.load(text);
+    await tester.pump();
+    expect(slabsOf(c.document), hasLength(1), reason: 'premise: loaded');
+    expect(c.diagnostics.value, isEmpty);
+  });
 }
