@@ -82,6 +82,10 @@ abstract class DemoStrings {
 
   String logRestored(String area, int moved, int dropped);
 
+  /// The groups half of the restored-layout line: the ids of the groups the
+  /// record put back and of those it dropped; empty when there were none.
+  String restoredGroups(List<String> applied, List<String> dropped);
+
   String logMenu(String area, String number);
 
   String logStored(String area, int characters);
@@ -289,6 +293,12 @@ final class _En extends DemoStrings {
   @override
   String logRestored(String area, int moved, int dropped) =>
       '$area: layout restored, $moved moved, $dropped dropped';
+
+  @override
+  String restoredGroups(List<String> applied, List<String> dropped) => [
+        if (applied.isNotEmpty) 'groups ${applied.join(', ')} applied',
+        if (dropped.isNotEmpty) 'groups ${dropped.join(', ')} dropped',
+      ].map((part) => '; $part').join();
 
   @override
   String logMenu(String area, String number) => '$area: menu for $number';
@@ -535,6 +545,12 @@ final class _De extends DemoStrings {
       '$area: Anordnung wiederhergestellt, $moved verschoben, $dropped verworfen';
 
   @override
+  String restoredGroups(List<String> applied, List<String> dropped) => [
+        if (applied.isNotEmpty) 'Gruppen ${applied.join(', ')} angewendet',
+        if (dropped.isNotEmpty) 'Gruppen ${dropped.join(', ')} verworfen',
+      ].map((part) => '; $part').join();
+
+  @override
   String logMenu(String area, String number) => '$area: Menü für $number';
 
   @override
@@ -778,6 +794,12 @@ final class _Tr extends DemoStrings {
   @override
   String logRestored(String area, int moved, int dropped) =>
       '$area: düzen geri yüklendi, $moved taşındı, $dropped atıldı';
+
+  @override
+  String restoredGroups(List<String> applied, List<String> dropped) => [
+        if (applied.isNotEmpty) 'gruplar ${applied.join(', ')} uygulandı',
+        if (dropped.isNotEmpty) 'gruplar ${dropped.join(', ')} atıldı',
+      ].map((part) => '; $part').join();
 
   @override
   String logMenu(String area, String number) => '$area: $number için menü';

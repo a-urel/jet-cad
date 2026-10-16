@@ -1,7 +1,9 @@
-// The demo's side panel: the service options, the table numbers field, the
-// statuses, the tables and groups lines, the zones, the host's choices (the
-// editor's profile) and the log. A view over `DemoHomeState`; the state is
-// the demo's, the actions are its methods.
+// The demo's side panel: Save, Revert, Reset layout and Fit, the POS links,
+// the pointer line, the service options, the table numbers field, the
+// statuses, the tables and groups lines with the numbering warnings, the
+// zones, the badges, the host's choices (the editor's profile, the own bar,
+// the own export dialog, who owns the keys) and the log. A view over
+// `DemoHomeState`; the state is the demo's, the actions are its methods.
 import 'package:flutter/material.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 
@@ -9,6 +11,7 @@ import 'demo_strings.dart';
 import 'editor_profiles.dart';
 import 'groups.dart';
 import 'main.dart';
+import 'pos_links.dart';
 import 'statuses.dart';
 
 class DemoSidePanel extends StatelessWidget {
@@ -28,7 +31,58 @@ class DemoSidePanel extends StatelessWidget {
       padding: const EdgeInsets.all(12),
       children: [
         Text(a.name, style: title),
+        const SizedBox(height: 8),
+        Wrap(spacing: 8, children: [
+          ValueListenableBuilder<bool>(
+            valueListenable: c.dirty,
+            builder: (_, dirty, __) => FilledButton(
+                key: const Key('save'),
+                onPressed: dirty ? home.save : null,
+                child: Text(words.save)),
+          ),
+          OutlinedButton(
+              key: const Key('revert'),
+              onPressed: home.revert,
+              child: Text(words.revert)),
+          if (service)
+            OutlinedButton(
+                key: const Key('reset-layout'),
+                onPressed: home.resetLayout,
+                child: Text(words.resetLayout)),
+          OutlinedButton(
+              key: const Key('fit'),
+              onPressed: c.fitToView,
+              child: Text(words.fit)),
+        ]),
+        // The POS's ids written into the design.
+        if (!service) ...[
+          const SizedBox(height: 8),
+          Wrap(
+              spacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                OutlinedButton(
+                    key: const Key('link-tables'),
+                    onPressed: () => home.link(a),
+                    child: Text(words.linkTables)),
+                Text(words.unlinked(home.unlinkedTables(a).length),
+                    key: const Key('unlinked')),
+              ]),
+        ],
         if (service) ...[
+          // One line, rebuilt alone.
+          const SizedBox(height: 8),
+          ValueListenableBuilder<PointerLine?>(
+            valueListenable: home.pointer,
+            builder: (context, line, _) => Text(
+                key: const Key('pointer-line'),
+                switch (line) {
+                  null => '',
+                  (table: final n?, floor: _) => words.overTable(n),
+                  (table: null, floor: final w?) => words.floorAt(w.dx, w.dy),
+                  (table: null, floor: null) => words.overNoTable,
+                }),
+          ),
           SwitchListTile(
               key: const Key('moves'),
               contentPadding: EdgeInsets.zero,
@@ -85,6 +139,10 @@ class DemoSidePanel extends StatelessWidget {
         const SizedBox(height: 8),
         Text(words.groups, style: title),
         Text(key: const Key('groups'), groupsText(c, words)),
+        for (final (i, w) in c.labelWarnings.indexed)
+          Text(PlanStrings.of(context).labelWarning(w),
+              key: Key('numbering-warning-$i'),
+              style: TextStyle(color: Theme.of(context).colorScheme.error)),
         // Only an area with zones; below the lines the tests read, above the
         // host's choices.
         if (a.zones.isNotEmpty) ...[
@@ -114,6 +172,21 @@ class DemoSidePanel extends StatelessWidget {
               value: a.fadeOthers,
               onChanged: (v) => home.setFadeOthers(a, v)),
         ],
+        // The Salon's badges and its table 7, in the service; below the
+        // zones, above the host's choices.
+        if (a.offersBadges && service) ...[
+          const SizedBox(height: 16),
+          SwitchListTile(
+              key: const Key('badges'),
+              contentPadding: EdgeInsets.zero,
+              title: Text(words.badges),
+              value: a.badges,
+              onChanged: (v) => home.setBadges(a, v)),
+          OutlinedButton(
+              key: const Key('center-7'),
+              onPressed: () => home.centerOnSeven(a),
+              child: Text(words.centerOnTable('7'))),
+        ],
         const SizedBox(height: 16),
         Text(words.hostChoices, style: title),
         if (!service) ...[
@@ -140,6 +213,25 @@ class DemoSidePanel extends StatelessWidget {
             onSelectionChanged: (s) => home.setEditor(s.single),
           ),
         ],
+        if (service)
+          SwitchListTile(
+              key: const Key('own-bar'),
+              contentPadding: EdgeInsets.zero,
+              title: Text(words.ownBar),
+              value: home.ownBar,
+              onChanged: home.setOwnBar),
+        SwitchListTile(
+            key: const Key('own-export-dialog'),
+            contentPadding: EdgeInsets.zero,
+            title: Text(words.ownExportDialog),
+            value: home.ownExportDialog,
+            onChanged: home.setOwnExportDialog),
+        SwitchListTile(
+            key: const Key('plan-keys'),
+            contentPadding: EdgeInsets.zero,
+            title: Text(words.planKeys),
+            value: home.planKeys,
+            onChanged: home.setPlanKeys),
         const SizedBox(height: 16),
         Text(words.log, style: title),
         for (final (i, line) in home.log.indexed)

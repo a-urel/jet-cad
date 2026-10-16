@@ -132,3 +132,21 @@ Future<void> enterService(WidgetTester tester) async {
   await tester.pump();
   await tester.pump();
 }
+
+/// Scrolls the side panel until [key] is in view (it is a lazy list).
+Future<void> reveal(WidgetTester tester, String key) async {
+  await tester.scrollUntilVisible(byKey(key), 100,
+      scrollable: find
+          .descendant(
+              of: byKey('side-panel'), matching: find.byType(Scrollable))
+          .first);
+  await tester.pump();
+}
+
+/// [reveal]s [key] in the side panel, taps it and pumps two frames.
+Future<void> pressInPanel(WidgetTester tester, String key) async {
+  await reveal(tester, key);
+  await tester.tap(byKey(key));
+  await tester.pump();
+  await tester.pump();
+}

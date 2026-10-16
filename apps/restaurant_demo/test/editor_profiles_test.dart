@@ -10,11 +10,8 @@ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 
 import 'support/demo_rig.dart';
 
-Future<void> profile(WidgetTester tester, String key) async {
-  await tester.tap(byKey(key));
-  await tester.pump();
-  await tester.pump();
-}
+Future<void> profile(WidgetTester tester, String key) =>
+    pressInPanel(tester, key);
 
 void main() {
   testWidgets(
@@ -36,13 +33,12 @@ void main() {
           reason: 'a plan only looked at can still be arranged in service');
     }
     await enterService(tester);
-    await tester.tap(byKey('moves'));
-    await tester.pump();
+    await pressInPanel(tester, 'moves');
     for (final c in [salon, teras]) {
       expect(
           c.permissions, PlanPermissions.readOnly.copyWith(serviceMove: false));
     }
-    await tester.tap(byKey('moves'));
+    await pressInPanel(tester, 'moves');
     await tester.tap(byKey('mode-design'));
     await tester.pump();
     await profile(tester, 'editor-full');
