@@ -29,6 +29,9 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  # The smoke run on the real macOS binary (integration_test/smoke_test.dart).
+  integration_test:
+    sdk: flutter
   # The tests drive the editor through the engine's types (Handle, Tool,
   # InteractionLayer, Transform2), the kit's diagnostics and world points
   # (Vector2).
