@@ -31,6 +31,9 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  # POS1, the run on the real macOS binary (integration_test/pos_test.dart).
+  integration_test:
+    sdk: flutter
   # The ported service tests (Tasks 7 and 8) drive the editor through the
   # engine's Flutter types (SelectionKey, Tool, ViewportTransform).
   jet_cad_2d_flutter: ^0.7.2
