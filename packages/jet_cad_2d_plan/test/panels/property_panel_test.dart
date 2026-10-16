@@ -134,6 +134,24 @@ void main() {
     expect(FocusManager.instance.primaryFocus, same(canvas),
         reason: 'the choice hands the focus back');
 
+    // The menu dismissed with Esc: no choice, so nothing is handed back;
+    // the focus stays on the row (the menu's route returns it there), and
+    // the Esc reaches neither the document nor the canvas's tool.
+    // M-P-choice-esc: the row hands back whenever it gains the focus.
+    final row =
+        tester.widget<DropdownButton<Object?>>(byKey('property-finish'));
+    final before = c.document.commands.undoDepth;
+    await tapKey(tester, 'property-finish');
+    expect(FocusManager.instance.primaryFocus, isNot(same(canvas)),
+        reason: 'premise: the open menu has the focus');
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(c.document.components.get<BoxParams>(b)!.finish, BoxFinish.gloss);
+    expect(c.document.commands.undoDepth, before, reason: 'no choice');
+    expect(FocusManager.instance.primaryFocus, same(row.focusNode),
+        reason: 'Esc keeps the focus on the row: nothing handed back');
+    expect(status(tester), 'Select', reason: 'the tool kept');
+
     // A second choice from the same row, then a letter: the canvas's.
     await tapKey(tester, 'property-finish');
     await tapKey(tester, 'property-finish-matte');

@@ -598,4 +598,45 @@ void main() {
     expect(doc.commands.undoDepth, 0);
     expect(enc(doc), before);
   });
+
+  testWidgets(
+      'P-choice-focus-settings a value chosen in a tool\'s settings choice '
+      'row (setting-justification) reaches the settings and hands the '
+      'focus back to the canvas; its letters still work (2a "focus rules '
+      'are today\'s"; M-P-choice-focus)', (tester) async {
+    final view = await pumpPanel(tester, panelPlanJson());
+    await focusCanvas(tester);
+    await pressKey(tester, LogicalKeyboardKey.keyW);
+    expect(status(tester), 'Wall');
+    final canvas = canvasFocus(tester);
+    expect(FocusManager.instance.primaryFocus, same(canvas),
+        reason: 'premise: the canvas has the focus');
+    expect(menuOf(tester, 'justification').value, Justification.centre,
+        reason: 'premise: centred');
+    final depth = view.document.commands.undoDepth;
+
+    await tester.tap(byKey('setting-justification'));
+    await tester.pumpAndSettle();
+    expect(FocusManager.instance.primaryFocus, isNot(same(canvas)),
+        reason: 'premise: the open menu has the focus');
+    await tester.tap(byKey('setting-justification-left').last);
+    await tester.pumpAndSettle();
+    expect(menuOf(tester, 'justification').value, Justification.left);
+    expect(view.document.commands.undoDepth, depth,
+        reason: 'settings: no step');
+    expect(FocusManager.instance.primaryFocus, same(canvas),
+        reason: 'the choice hands the focus back');
+    expect(await pressKey(tester, LogicalKeyboardKey.keyM), isTrue);
+    expect(status(tester), 'Room', reason: "the canvas's letters");
+
+    // The settings kept it: the next wall, two clicks after W, is left.
+    await pressKey(tester, LogicalKeyboardKey.keyW);
+    final before = walls(view.document);
+    await clickWorld(tester, view, plan(400, 900));
+    await clickWorld(tester, view, plan(1900, 800));
+    final w = walls(view.document).where((h) => !before.contains(h)).single;
+    expect(view.document.components.get<WallParams>(w)!.justification,
+        Justification.left,
+        reason: 'the settings have it');
+  });
 }
