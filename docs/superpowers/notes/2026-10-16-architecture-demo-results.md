@@ -35,7 +35,24 @@ never published): `Package has 0 warnings.`
 
 ## Smoke run
 
-Pending: the controller's run.
+The human declined interactive control and chose an automated test instead.
+`apps/architecture_demo/integration_test/smoke_test.dart` runs the real
+`ArchitectureDemoApp` on the macOS binary, with the real printer and a files
+object over a temporary directory (real disk writes): Open sample (10 walls,
+7 rooms, 15 openings, 5 dimensions, 8 furniture fills), one wall drawn by
+pointer events, Save As `smoke.jetplan`, New, Open `smoke.jetplan`; the
+reopened plan's `save()` equals the file's text and holds the drawn wall
+(11 walls). The editor was captured through a `RepaintBoundary`:
+[the screenshot](2026-10-16-architecture-demo-smoke.png) (the sandbox keeps
+the app inside its container, so the PNG was copied out by hand).
+
+```
+cd apps/architecture_demo && flutter test integration_test/smoke_test.dart -d macos
+00:00 +0: smoke: Open sample, draw a wall, Save As, New, Open: the reopened plan is the written file; the editor is captured
+SMOKE_PNG .../dev.jetcad.architectureDemo/Data/tmp/2026-10-16-architecture-demo-smoke.png 248646 bytes
+00:03 +1: (tearDownAll)
+00:03 +1: All tests passed!
+```
 
 ## Audit totals
 
@@ -111,8 +128,7 @@ named mutation in its task report:
 - **`PlanObject.liveTypeIdOf`** is carried to sub-project 4 (the demo does not
   need it; spec "Out of scope").
 - `apps/floor_planner` and the old packages stay until sub-project 4 removes them.
-- Parked minors, **for the final fix wave** (weakenings that must be
-  restored):
+- Parked minors, **closed in the final fix wave** (below; listed as they were parked):
   - T5-M1: the discarded `save()` on exit appends a duplicate diagnostic on a damaged plan.
   - T5-M2: no test for the throwing-save exit path.
   - T7-M1: WE3's position along the second wall (B) is weakened.
@@ -120,3 +136,27 @@ named mutation in its task report:
   - T7-M3: SS7 has no check that no ghost remains after New.
   - T7-M4: SS14-open's anchored id match; SS13-open's old document disposed.
   - Drop the app's own `PlanSymbolLoader` field (equivalent mutant above).
+
+## Final fix wave
+
+Closed: the whole-branch review's I1 (teardown guards in `busyExportDialog`
+and `BusyPagePrinter`), M1 (`openFlow` stops after a picker that answers on
+a dead host), M2 (`exportFlow` the same after the save panel), M3-M5 (one
+`titledDirty` and one `canvasFocused` in `app_rig.dart`; headers on
+`app_fakes.dart` and `export_rig.dart`); the parked T5-M1 (the exit's settle
+`save()` is skipped on a `damaged` plan), T5-M2 (the throwing-save exit path
+pinned), T7-M1..M4 (WE3's position along B, the palette cell as a clone of
+the controller cache's image, SS7's no-ghost check, SS14-open's anchored
+match, SS13-open's disposed document), and the app's own `PlanSymbolLoader`
+field (dropped). The smoke run is automated (above). Not closed: the
+`damagedUnsavable` duplicate on a damaged plan has no red test (no public
+way to damage a plan through the architecture kit); the dialog wrapper's
+`isDisposed` wiring in the host is unreachable by a test (the dialog route
+dies with the navigator).
+
+Gates after the wave: app `flutter test` 176 passed, analyze clean, format 0
+changed; `jet_cad_2d_plan` (`--enable-vmservice`) 1558 passed; `jet_cad_2d_integration`
+(`--enable-vmservice`) 228 passed, both clean on analyze and format; the smoke
+test passed; `flutter build macos` and `flutter build web` built. Commits:
+`4fa37742`, `8295cc76`, `cafa8ff3`, `518e2757`, `492c3719`, `fac57b29`,
+`0ce785fb`, `b6831537`, `17a472b8`, `90f1576b`, `6b695558`, `7277dd24`.
