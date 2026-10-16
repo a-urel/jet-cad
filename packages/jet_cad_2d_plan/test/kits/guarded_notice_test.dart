@@ -87,6 +87,46 @@ void main() {
     expect([for (final d in g.log.entries.value) (d.subject, d.code)],
         [('boom.tool', KitDiagnosticCode.hookFailed)]);
   });
+
+  testWidgets(
+      'TN-guard-listen a notice whose addListener or removeListener throws: '
+      'caught, one diagnostic, then no notice (M-TN-guard-add, '
+      'M-TN-guard-remove)', (tester) async {
+    void hear() {}
+    List<(String?, KitDiagnosticCode)> problems(DiagnosticsLog log) =>
+        [for (final d in log.entries.value) (d.subject, d.code)];
+
+    // addListener throws.
+    final adds = ThrowingKit(failing: ['noticeAdd']);
+    final a = BoomTool(adds);
+    final ga = guarded(a, kitId: 'boom', toolId: 'boom.tool');
+    final na = ga.tool.notice!;
+    a.said.value = const KitText('text:boom.alert', {'n': 2});
+    // M-TN-guard-add: addListener without its try/catch: BoomFailure.
+    na.addListener(hear);
+    na.addListener(hear);
+    expect(na.value, isNull, reason: 'a failed notice is none');
+    await tester.pump();
+    expect(problems(ga.log), [('boom.tool', KitDiagnosticCode.hookFailed)],
+        reason: 'reported once');
+
+    // removeListener throws.
+    final removes = ThrowingKit(failing: ['noticeRemove']);
+    final r = BoomTool(removes);
+    final gr = guarded(r, kitId: 'boom', toolId: 'boom.tool');
+    final nr = gr.tool.notice!;
+    r.said.value = const KitText('text:boom.alert', {'n': 3});
+    nr.addListener(hear);
+    expect(nr.value, const KitText('text:boom.alert', {'n': 3}),
+        reason: 'premise: adding worked');
+    // M-TN-guard-remove: removeListener without its try/catch.
+    nr.removeListener(hear);
+    nr.removeListener(hear);
+    expect(nr.value, isNull, reason: 'a failed notice is none');
+    await tester.pump();
+    expect(problems(gr.log), [('boom.tool', KitDiagnosticCode.hookFailed)],
+        reason: 'reported once');
+  });
 }
 
 /// A kit tool that has no notice.

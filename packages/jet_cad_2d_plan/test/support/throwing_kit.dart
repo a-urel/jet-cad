@@ -31,8 +31,9 @@ const Set<String> boomHooks = {
   // (isMidShape) and its dispose.
   'toolCreate', 'toolDown', 'toolMove', 'toolUp', 'toolExit', 'toolKey',
   'toolCancel', 'toolPaint', 'toolMidShape', 'toolDispose',
-  // Spec 3a C1.2: the tool's notice getter, then its value.
-  'notice', 'noticeValue',
+  // Spec 3a C1.2: the tool's notice getter, then its value; then its
+  // addListener and removeListener (the final wave's C10).
+  'notice', 'noticeValue', 'noticeAdd', 'noticeRemove',
   // The attachment provider: its factory, then attach.
   'attachCreate', 'attach',
   // Properties, the section (its builder, then the widget it returns), the
@@ -556,10 +557,16 @@ final class BoomNotice implements ValueListenable<KitText?> {
   }
 
   @override
-  void addListener(VoidCallback listener) => _said.addListener(listener);
+  void addListener(VoidCallback listener) {
+    kit.check('noticeAdd');
+    _said.addListener(listener);
+  }
 
   @override
-  void removeListener(VoidCallback listener) => _said.removeListener(listener);
+  void removeListener(VoidCallback listener) {
+    kit.check('noticeRemove');
+    _said.removeListener(listener);
+  }
 }
 
 /// The test edge at `y = -2000`, kind `boom-edge`, whose attach can throw.
