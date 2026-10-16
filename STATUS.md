@@ -501,16 +501,18 @@ with 0.7.0 (below).
   [2026-10-16-restaurant-kit-design.md](docs/superpowers/specs/2026-10-16-restaurant-kit-design.md),
   plan [2026-10-16-restaurant-kit.md](docs/superpowers/plans/2026-10-16-restaurant-kit.md),
   parity table with its "Closed (4a)" section and test audit with its
-  "Closed (4a)" section (95 rows, none open; the parity table's one open row
-  is the host guide),
+  "Closed (4a)" section (95 rows, none open; every parity row closed),
   results [2026-10-16-restaurant-kit-results.md](docs/superpowers/notes/2026-10-16-restaurant-kit-results.md),
   on `feat/restaurant-kit` (worktree `.claude/worktrees/restaurant-kit`),
-  **done on the branch, not merged**: Tasks 1-9 and 11 done (the kit +184,
+  **done on the branch, not merged**: all 11 tasks done (the kit +184,
   plan +1579, integration +228, architecture demo +176, restaurant demo +102,
-  POS1 green on macOS, builds macOS/web/iOS simulator/Android debug, both
-  dry-runs 0 warnings). **Task 10 (the host guide, `check_guide` and the
-  host probe on the new API) is still to do**, then the controller's
-  whole-branch review, the ledger archive and the merge menu. The engine
+  tool/ci +131, POS1 green on macOS, builds macOS/web/iOS simulator/Android
+  debug, both dry-runs 0 warnings; the host guide rewritten for
+  `jet_cad_2d_plan` and the kits, every block compiled by the new host probe,
+  the old probe kept as `tool/ci/old_host_probe/` until 4b). No reviewer
+  sessions (the human's rule since 2026-10-16): the controller self-reviewed
+  every task with its own mutation; ledger archived; awaiting the human's
+  merge word. The engine
   packages (`jet_cad_2d`, `jet_cad_2d_flutter`) changed for O1 and join 4b's
   release wave. 4b (the release wave: README pictures, removing the old
   packages and `apps/floor_planner`, CI moves, floors, the publish) follows.
@@ -658,8 +660,8 @@ done on `feat/architecture-demo` and merged at `acb5fa11`, not pushed:
 whole-branch Sonnet review clean after one fix wave, macOS smoke integration
 test green, ledger archived. 4a (the restaurant kit) is done on
 `feat/restaurant-kit`, not merged: exit gate green, POS1 and the builds green;
-resume at Task 10 (the host guide), then the controller's review and the
-merge menu; 4b follows.** (In flight). Where 2b stands, its gaps and rulings: the results note's
+all 11 tasks and the fix wave done, ledger archived; resume at the merge
+menu (the human's word); 4b follows.** (In flight). Where 2b stands, its gaps and rulings: the results note's
 [Spec gaps](docs/superpowers/notes/2026-10-14-plan-library-2b-results.md#spec-gaps-and-interface-problems-found-while-executing)
 section and its "Final fix wave". A14's `selectTool` difference was settled
 by the human (2b spec decision 9: true kept).

@@ -1,0 +1,11 @@
+# Task 4b: O1 fixed in the engine (the human: "Motoru 4a'da düzelt")
+
+Task 4 reproduced O1: a sloped line dragged with plan.select to 30 mm from its own old midpoint lands snapped onto that midpoint (packages/jet_cad_2d_plan/test/tools/drag_self_snap_test.dart, landed with `skip:`). Cause: `SelectTool._resolve` (packages/jet_cad_2d_flutter/.../select_tool.dart:478) calls `resolveDragPoint` (packages/jet_cad_2d/.../drag_snap.dart:72), which runs `SpatialIndex.snapInto` over every object with no way to exclude the dragged ones. Spec R2 "O1, the engine seam" (uncommitted controller edit in docs/superpowers/specs/2026-10-16-restaurant-kit-design.md — include it in your first commit) allows this one engine change; nothing else in the engine.
+
+1. jet_cad_2d: `resolveDragPoint` and `SpatialIndex.snapInto` gain a way to exclude the dragged objects, allocation-free in steady state (an optional predicate `bool Function(Handle)?` or a caller-owned reusable set — match the file's style; no per-call allocation on the frame path). Engine tests: an excluded object's candidate is never returned; a non-excluded one still is. Mutation: ignore the exclusion.
+2. jet_cad_2d_flutter: `SelectTool._resolve` passes the dragged selection as the exclusion. A test beside the select tool's drag tests: drag near the object's own old midpoint, land on the pointer. Mutation: pass no exclusion.
+3. Remove the `skip:` from drag_self_snap_test.dart; it passes unchanged. Mutation: no exclusion → red.
+4. CHANGELOGs of jet_cad_2d and jet_cad_2d_flutter: an "Unreleased" entry naming the new parameter.
+5. Gates (CLAUDE.md): `cd packages/jet_cad_2d && dart test && dart analyze && dart format --output=none --set-exit-if-changed .`; `cd packages/jet_cad_2d_flutter && flutter test && flutter analyze && dart format ...`. Only failures listed in tool/ci/standing_failures.txt are allowed (compare and say so). The invariants packages/jet_cad_2d/test/invariants/query_allocation_test.dart and packages/jet_cad_2d_flutter/test/invariants/paint_allocation_test.dart must pass. Then plan and integration with --enable-vmservice.
+
+Commit `fix(engine): drag snap can exclude the dragged objects` (+ test commits if you like).
