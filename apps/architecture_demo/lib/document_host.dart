@@ -15,11 +15,15 @@
 //   called directly (the tests) therefore reads `dirty` before the settle
 //   that `newPlan` or `load` would do; Task 5's exit request will settle
 //   with a discarded `controller.save()`.
-// * Does `dirty` update synchronously after a command? Yes: the commit path
-//   calls `_refreshFlags` (plan_controller.dart :1935), which sets
-//   `_dirty` from `commands.stateId != _savedState`. There is no change
-//   stream in between, so `_mayDiscard` reads `controller.dirty.value`
-//   directly (the old `differsFromSave`).
+// * Does `dirty` update synchronously after a command? No. `_refreshFlags`
+//   (plan_controller.dart :1935) sets `_dirty` from `commands.stateId !=
+//   _savedState`, but the commit path reaches it through the document's
+//   change stream (:1685, `_onDesignChange`), which delivers a microtask
+//   after the command. A settle's own commit -- a typed panel value -- is
+//   therefore not on `dirty` yet when the editor calls the host back.
+//   `_mayDiscard` yields one microtask before it reads (see there); the
+//   old app read the dispatcher's `differsFromSave` instead, and the save
+//   point is private to the controller.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
@@ -35,6 +39,10 @@ import 'app_strings.dart';
 import 'document_files.dart';
 import 'document_session.dart';
 import 'exit_guard.dart';
+
+/// What a save encoded: the plan's document (to tell a swap during the
+/// write) and its bytes.
+typedef _Encoded = ({Object plan, Uint8List bytes});
 
 /// The answer to the Save / Don't Save / Cancel dialog.
 enum SaveChoice { save, discard, cancel }
@@ -100,9 +108,13 @@ class DocumentHostState extends State<DocumentHost> {
   /// Save runs [saveStep] inside the caller's busy span; a cancelled or
   /// failed save is a no, and a save that succeeded while an edit landed
   /// during the write (dirty again) asks again rather than lose that edit.
-  /// Don't Save: yes. Cancel: no. Dirty is read from the controller, which
-  /// refreshes it synchronously on every command.
+  /// Don't Save: yes. Cancel: no. Dirty is the controller's.
   Future<bool> _mayDiscard() async {
+    // `dirty` lags a command by one microtask (the change stream): the
+    // editor has just settled pending input, and a typed value's commit is
+    // not on it yet. Without this turn a clean-looking plan with a typed,
+    // uncommitted value is replaced without asking.
+    await Future<void>.value();
     while (_controller.dirty.value) {
       switch (await _askToSave()) {
         case SaveChoice.save:
@@ -174,31 +186,31 @@ class DocumentHostState extends State<DocumentHost> {
   /// ([saveAsStep]'s path); on the web a titled plan downloads under its
   /// name without asking.
   Future<bool> saveStep() => _flow(() async {
-        final bytes = await _encode();
-        if (bytes == null) return false;
+        final encoded = await _encode();
+        if (encoded == null) return false;
         final fileName = _session.fileName;
         final location = _session.location;
         if (fileName != null) {
           if (!widget.files.writesInPlace) {
-            return _write(bytes, location ?? fileName, fileName);
+            return _write(encoded, location ?? fileName, fileName);
           }
-          if (location != null) return _write(bytes, location, fileName);
+          if (location != null) return _write(encoded, location, fileName);
         }
-        return _saveAs(bytes);
+        return _saveAs(encoded);
       });
 
   /// Save As: asks where, then writes; false when cancelled or failed.
   Future<bool> saveAsStep() => _flow(() async {
-        final bytes = await _encode();
-        if (bytes == null) return false;
-        return _saveAs(bytes);
+        final encoded = await _encode();
+        if (encoded == null) return false;
+        return _saveAs(encoded);
       });
 
   /// The plan's bytes, read in one synchronous block (`save` settles
   /// pending input first and remembers the state it encoded): the save
   /// point is that state, whatever happens while the write is pending. A
   /// throw shows the save error and answers null.
-  Future<Uint8List?> _encode() async {
+  Future<_Encoded?> _encode() async {
     final String text;
     try {
       text = _controller.save();
@@ -206,10 +218,13 @@ class DocumentHostState extends State<DocumentHost> {
       await _showError((w) => w.couldNotSave(_session.name), e);
       return null;
     }
-    return Uint8List.fromList(utf8.encode(text));
+    return (
+      plan: _controller.document,
+      bytes: Uint8List.fromList(utf8.encode(text))
+    );
   }
 
-  Future<bool> _saveAs(Uint8List bytes) async {
+  Future<bool> _saveAs(_Encoded encoded) async {
     final ({String name, Object location})? place;
     try {
       place = await widget.files.saveLocation('${_session.name}.jetplan');
@@ -218,28 +233,32 @@ class DocumentHostState extends State<DocumentHost> {
       return false;
     }
     if (place == null) return false;
-    return _write(bytes, place.location, place.name);
+    return _write(encoded, place.location, place.name);
   }
 
   /// Writes, then moves the save point to the encoded state and names the
   /// plan after the file; on a failure shows the error and leaves the save
   /// point where it was.
   ///
-  /// No guard that the plan is still the one encoded (the old
-  /// `identical(document, ...)`): busy keeps New, Open sample and Open from
-  /// running during the write (decision 5), so the controller still holds
-  /// the plan `save` encoded, and `markSaved` marks the state `save`
-  /// encoded -- not the current one -- so an edit made during the write
-  /// stays dirty.
-  Future<bool> _write(Uint8List bytes, Object location, String fileName) async {
+  /// `markSaved` marks the state `save` encoded -- not the current one -- so
+  /// an edit made during the write stays dirty. The app's own entry points
+  /// cannot start New, Open sample or Open during the write (decision 5:
+  /// the file callbacks do nothing while busy), but a flow called inside
+  /// this one can (the exit request, the tests): if it replaced the plan, a
+  /// save point and a file name mean nothing for the new one, so neither is
+  /// given (the old `identical(document, ...)` guard, kept).
+  Future<bool> _write(
+      _Encoded encoded, Object location, String fileName) async {
     try {
-      await widget.files.write(location, fileName, bytes);
+      await widget.files.write(location, fileName, encoded.bytes);
     } catch (e) {
       await _showError((w) => w.couldNotSave(fileName), e);
       return false;
     }
-    _controller.markSaved();
-    _session.named(fileName, location);
+    if (identical(_controller.document, encoded.plan)) {
+      _controller.markSaved();
+      _session.named(fileName, location);
+    }
     return true;
   }
 
