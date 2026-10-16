@@ -139,7 +139,9 @@ Their rules hold here unless a section below says otherwise.
   `restaurantNames`, the key constants a host or the demo needs
   (`RestaurantSymbols`), and a synchronous `restaurantSymbolDefinitions()`
   (the built library's definitions by key) for a `PlanBuild` that places
-  tables (a build gets no symbol services).
+  tables (a build gets no symbol services), and `restaurantSymbolEntries()`
+  (symbol, unit, definition and leaves by key; added in Task 2, since a
+  placed table needs its unit as well).
 - **Tests**: the old package's 28 cases per the audit (24 PORT, 1 COVERED,
   1 SPLIT, 2 DROPPED; the PORTs that need two kits land in the demo,
   decision 12), plus
