@@ -2,9 +2,9 @@
 // (FakeDocumentFiles, FakeExitGuard, FakePagePrinter) with the plan 12a
 // semantics unchanged: scripted open and save-location answers, recorded and
 // optionally held writes, an exit guard that records its armings, a printer
-// that records and can hold a job. New in 3b: `PrintCall`, the hold hooks on
-// `open` and `saveLocation` (`holdOpens`, `holdSaveLocations`, the teardown
-// tests of the final fix wave) and `FakePagePrinter.hold` for the busy tests.
+// that records and can hold a job. New in the final fix wave of 3b: the hold
+// hooks on `open` and `saveLocation` (`holdOpens`, `holdSaveLocations`), for
+// the teardown tests.
 import 'dart:async';
 import 'dart:typed_data';
 
