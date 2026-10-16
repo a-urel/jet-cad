@@ -49,6 +49,8 @@ jobs:
             test_flags: --enable-vmservice
           - package: packages/jet_cad_2d_kit_architecture
             tool: flutter
+          - package: packages/jet_cad_2d_kit_restaurant
+            tool: flutter
           - package: packages/jet_cad_2d_integration
             tool: flutter
             # The paint-allocation invariant over the sample flat (spec 3a
@@ -186,6 +188,7 @@ jobs:
           - packages/jet_cad_2d_kit
           - packages/jet_cad_2d_plan
           - packages/jet_cad_2d_kit_architecture
+          - packages/jet_cad_2d_kit_restaurant
           - packages/jet_cad_floor_plan
     steps:
       - uses: actions/checkout@v5
