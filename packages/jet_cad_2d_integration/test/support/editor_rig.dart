@@ -25,17 +25,19 @@ import 'package:vector_math/vector_math_64.dart' show Vector2;
 /// hides a transposition), with [centre] in the middle of the drawing
 /// area: the plan library's `pumpDraw` (canvas_fixture.dart:427-443) over
 /// PlanEditor. [wrap], when given, wraps the app (a capture boundary, Task
-/// 14's RD1; a key of its own, Task 26).
+/// 14's RD1; a key of its own, Task 26). [layerPanel] false leaves the
+/// editor's layer panel out (Task 27).
 Future<void> pumpEditor(WidgetTester tester, PlanController c,
     {Locale locale = const Locale('en'),
     Size window = const Size(1440, 900),
     Vector2? centre,
     double scale = 2,
     double turn = 0.35,
-    Widget Function(Widget app)? wrap}) async {
+    Widget Function(Widget app)? wrap,
+    bool layerPanel = true}) async {
   await tester.binding.setSurfaceSize(window);
   addTearDown(() => tester.binding.setSurfaceSize(null));
-  final app = planEditorApp(c, locale: locale);
+  final app = planEditorApp(c, locale: locale, layerPanel: layerPanel);
   await tester.pumpWidget(wrap == null ? app : wrap(app));
   await tester.pump();
   if (centre == null) return;

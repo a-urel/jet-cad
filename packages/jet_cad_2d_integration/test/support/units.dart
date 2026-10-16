@@ -79,6 +79,19 @@ CatalogSymbol tableSymbol({String key = 'fx.table.two', int seats = 2}) =>
       ],
     );
 
+/// DT1's and LK2's library table (ruling IP-R4): today's
+/// `dining.table.square.two`'s name, a served two-seat unit of the fixture
+/// kit, its shapes the fixture table's.
+final CatalogSymbol diningTableTwo = CatalogSymbol(
+  key: 'fx.dining.table.two',
+  name: 'Square dining table, 2 seats',
+  category: 'Dining Room',
+  tags: const ['table', 'dining'],
+  unit: tableUnit(2),
+  base: tableSymbol().base,
+  shapes: tableSymbol().shapes,
+);
+
 /// [s] as a library entry, built by hand (no library rule is checked): its
 /// leaves ascending by handle in shape order, each a BYBLOCK leaf on layer
 /// 0; its unit when [CatalogSymbol.unit] is set.

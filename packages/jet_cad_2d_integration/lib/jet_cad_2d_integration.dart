@@ -23,12 +23,14 @@ PlanController sampleFlatController() =>
     PlanController(kits: [architectureKit], build: buildSampleFlat);
 
 /// [controller]'s `PlanEditor` in an app speaking [locale], with the plan
-/// library's locales and delegates.
+/// library's locales and delegates; its layer panel unless [layerPanel] is
+/// false (3a Task 27: the 2a composition, the property panel above the
+/// page panel).
 Widget planEditorApp(PlanController controller,
-        {Locale locale = const Locale('en')}) =>
+        {Locale locale = const Locale('en'), bool layerPanel = true}) =>
     MaterialApp(
       locale: locale,
       supportedLocales: planSupportedLocales,
       localizationsDelegates: planLocalizationsDelegates,
-      home: PlanEditor(controller: controller),
+      home: PlanEditor(controller: controller, layerPanel: layerPanel),
     );
