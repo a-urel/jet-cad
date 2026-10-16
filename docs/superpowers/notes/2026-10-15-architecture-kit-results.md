@@ -670,3 +670,92 @@ rig's teardown order), not fixed here; they are the final review's fix
 wave. Of them, the CHANGELOG items (Tasks 17, 21, 24) are written by this
 task. One more for that wave, found here: the ported dimension files and
 `wall_faces_test` carry no 3a port line (Appendix A section above).
+
+## Final fix wave
+
+The final whole-branch review (`7e65905b..945502cb`) found no Critical or
+Important issue. This wave closed its actionable Minors and a curated set of
+the parked ones (`fix-wave-brief.md`, `fix-wave-report.md` in
+`.superpowers/sdd/2026-10-15-architecture-kit/`). Every new pin was proven
+with a named mutation that was run on the committed code, went red and was
+reverted. No ported assertion was weakened or dropped. The figures above
+are unchanged.
+
+Items closed:
+- **A1** (review M3): `RoomInputs` gains a `beginEvent`/`endEvent` bracket.
+  The Room and Separator tools wrap each pointer event in it, so one hover
+  runs one liveness pass. `debugLivenessPasses` pins this (RT-one-pass,
+  ST-one-pass).
+- **A2** (review M4): `newPlan` and `load` now drop the replaced plan's
+  prepare and build `hookFailed` entries (`DiagnosticsLog.removeWhere`).
+  PB12 pins it.
+- **A3**: the room area memo's `stateId` limit after an E3 rebuild is
+  documented.
+- **B1-B9**: doc and comment accuracy.
+- **C1-C7, C9, C10**: the vacuous or unpinned tests named in the brief.
+- **D1**: the rig unmounts the editor before the controller is disposed.
+- **D2**: line-level internal-member ignores. Before the wave there were 19
+  file-level ignores. After it there are 2, in the grip tests, with 7 and
+  14 reads.
+- **D3**: one copy each of `clickAt`, `dragWorld`, `undoKey`, `select` and
+  `addSeparator`. `frameOn` and `pumpEditor` now share `centreCamera`.
+
+Skipped: **C8**. Every word id is namespaced under its own kit, and
+`validateKitSet` refuses a foreign one: a scratch kit carrying
+`tool:test.slab` made the controller throw `KitSetError` with the message
+`foreignWordId: prep: en: "tool:test.slab" is not under the kit "prep"`.
+So two loaded kits' words never conflict, and `kits.reversed` in
+`_buildWords` is an equivalent mutant.
+
+Gates (this run, at `bc8abbc6`, last lines):
+
+| Package | test | analyze | format |
+|---|---|---|---|
+| `jet_cad_2d_kit` | `00:06 +403: All tests passed!` | `No issues found! (ran in 3.0s)` | `Formatted 92 files (0 changed)`, exit 0 |
+| `jet_cad_2d_plan` (`--enable-vmservice`) | `01:55 +1551: All tests passed!` | `No issues found! (ran in 3.5s)` | `Formatted 299 files (0 changed)`, exit 0 |
+| `jet_cad_2d_kit_architecture` | `00:19 +655: All tests passed!` | `No issues found! (ran in 3.1s)` | `Formatted 136 files (0 changed)`, exit 0 |
+| `jet_cad_2d_integration` (`--enable-vmservice`) | `00:55 +227: All tests passed!` | `No issues found! (ran in 3.1s)` | `Formatted 79 files (0 changed)`, exit 0 |
+
+- The plan's invariants, `flutter test --enable-vmservice test/invariants`:
+  `00:09 +15: All tests passed!`
+- IA-alloc, `flutter test --enable-vmservice test/invariants/paint_allocation_test.dart`:
+  `00:00 +1: All tests passed!`
+- `dart run tool/ci/check_kit_deps.dart`: `kit dependencies: 2 package(s)
+  checked, none names the plan library or another kit`, exit 0.
+- The three `dart pub publish --dry-run` runs each exit 0 with `Package has
+  0 warnings.`:
+  - kit: `Total compressed archive size: 121 KB.`
+  - plan: `940 KB`
+  - architecture kit: `539 KB`
+- `git log --name-only --format= 945502cb..HEAD | grep -c analysis_options`
+  prints `0`.
+
+Commits (on `945502cb`, oldest first):
+- `ddc44e76` fix(architecture): one RoomInputs liveness pass per Room and
+  Separator tool event
+- `017480eb` fix(plan): a failed build or prepare is reported again on a
+  later plan
+- `53743d55` docs: comment and doc accuracy (3a final wave A3, B1-B9)
+- `a1114f4c` test(integration): TT7 reads the Room tool's own notice;
+  OT-frozen-host's delete half resets the hint
+- `946b4cac` test(kit): DT-freeze split into four tests, one per freeze step
+- `81f9e247` test(kit): DG-frozen probes the candidate set before any wall
+  is laid out
+- `c39b9d57` test(integration): P-choice-focus gains an Esc step and a
+  tool-settings choice row
+- `2424d954` test(kit): WR9's empty sample diagnostics paired with its ten
+  live walls
+- `d80ff0fa` test(kit): contract words: a foreign kit's text is not held to
+  the locales; fillText fills once
+- `8c8599eb` test(kit): FakePlanServices.dispose releases the camera and the
+  symbols state
+- `5d27b59b` test(plan): the notice guard catches a throwing addListener and
+  removeListener
+- `55aa1bb3` test(integration): the rig unmounts the editor before the
+  controller is disposed
+- `2bb541ee` test(integration): line-level internal-member ignores where a
+  file has few reads
+- `bc8abbc6` test(integration): one copy each of the rig's click, drag, undo
+  and select helpers
+
+This section's commit sits on top of them.
