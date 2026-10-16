@@ -154,6 +154,28 @@ void main() {
   });
 
   test(
+      'LS-fake-dispose dispose releases the camera and the symbols state '
+      '(M-LS-fake-dispose-camera, M-LS-fake-dispose-state)', () {
+    final (:doc, catalog: _) = objectDocument([slabType(), postType()]);
+    addTearDown(doc.dispose);
+    final s = FakePlanServices(document: doc, scale: 0.25);
+    void listener() {}
+    // Premises: live before dispose.
+    s.camera
+      ..addListener(listener)
+      ..removeListener(listener);
+    s.symbolsState
+      ..addListener(listener)
+      ..removeListener(listener);
+    s.dispose();
+    // A disposed ChangeNotifier refuses a listener.
+    expect(() => s.camera.addListener(listener), throwsFlutterError,
+        reason: 'the camera disposed');
+    expect(() => s.symbolsState.addListener(listener), throwsFlutterError,
+        reason: 'the symbols state disposed');
+  });
+
+  test(
       "LS-fake-5 liveTypeIdOf: the catalog's type id; null for a frozen "
       'object, without a catalog, and for anything else', () {
     final (:doc, :catalog) = objectDocument([slabType(), postType()]);
