@@ -684,4 +684,47 @@ void main() {
     expectKept(rig, doc, depth, reason: 'Cancel after the chords');
     expect(files.unscriptedCalls, 0);
   });
+
+  // Not a port (carried from Task 4's re-review): the app torn down while
+  // a flow waits. A dialog left up never answers (its future stays pending
+  // and the flow with it, touching nothing); the live path is the held
+  // Save: the write finishes after the teardown, `_write` skips the
+  // disposed controller, and the flow's loop must not go on to ask or to
+  // replace the plan. Mutation M-RP-teardown: `_askToSave` without its
+  // `mounted` check shows a dialog on a dead context.
+  for (final flow in ['new', 'open-sample', 'open']) {
+    testWidgets(
+        'RP-teardown the app unmounted during the $flow flow\'s held Save: '
+        'the flow ends without asking again or replacing the plan',
+        (tester) async {
+      final rig = await pumpApp(tester);
+      await titledDirty(rig);
+      final c = rig.controller;
+      final files = rig.files;
+      final session = rig.session;
+      final opens = files.openCalls;
+      files.scriptOpen(
+          name: 'other.jetplan', bytes: sampleBytes(), location: '/p/other');
+      files.holdWrites = true;
+      final Future<void> running = switch (flow) {
+        'new' => rig.host.newFlow(),
+        'open-sample' => rig.host.openSampleFlow(),
+        _ => rig.host.openFlow(),
+      };
+      await tester.pump();
+      await answerReplace(tester, 'replace-save');
+      expect(files.heldWrites, hasLength(1), reason: 'premise: write held');
+
+      await tester.pumpWidget(const SizedBox());
+      expect(session.isDisposed, isTrue, reason: 'premise: torn down');
+      expect(() => c.dirty.addListener(() {}), throwsFlutterError,
+          reason: 'premise: controller disposed');
+      files.heldWrites.single.complete();
+      await running;
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+      expect(files.openCalls, opens, reason: 'no picker after the teardown');
+      expect(files.writes, hasLength(1), reason: 'the one write');
+    });
+  }
 }
