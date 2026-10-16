@@ -180,6 +180,9 @@ void main() {
         find.descendant(of: byKey('service-bar'), matching: byKey('bar-area')),
         findsOneWidget);
     expect(textOf(tester, 'bar-area'), 'Salon');
+    expect(tester.getTopLeft(byKey('bar-area')).dx,
+        lessThan(tester.getTopLeft(byKey('service-undo')).dx),
+        reason: 'the name leads the buttons');
     // The planner's Merge, as a reference.
     c.select({'1', '2'});
     await settle(tester);

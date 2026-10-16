@@ -275,9 +275,11 @@ void main() {
     await mouse.moveTo(centreOf(c, '3'));
     await tester.pump();
     expect(textOf(tester, 'pointer-line'), 'over table 3');
+    expect(demo.pointer.value, isNotNull, reason: 'premise: a table heard');
     await press(tester, 'area-1');
+    expect(demo.pointer.value, isNull, reason: 'area switch');
     await press(tester, 'mode-service');
-    expect(textOf(tester, 'pointer-line'), '', reason: 'area switch');
+    expect(textOf(tester, 'pointer-line'), '');
   });
 
   testWidgets(
