@@ -1,7 +1,10 @@
-// The export and print tests' shared moves (ported from the old app's
-// test/support/export_flat.dart, on the architecture kit's sample): the app
-// pumped over the sample opened as `flat`, the screen's camera turned and
-// panned off the sheet, and the readings of a PDF and a PNG.
+// The export and print tests' shared moves. Adapted from the old app's
+// test/support/export_flat.dart: the PDF and PNG readers, the sheet check and
+// the page and text readings follow it, on the architecture kit's sample.
+// New here: `pumpFlat` (the app over the sample opened as `flat`, the
+// screen's camera turned and panned off the sheet), the dialog and wait
+// helpers (`openDialog`, `tapKey2`, `settleUntil`, `settleWrites`) and the
+// toolbar readers (`exportButton`, `printButton`, `on`).
 import 'dart:io';
 import 'dart:typed_data';
 

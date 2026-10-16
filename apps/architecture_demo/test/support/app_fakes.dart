@@ -1,3 +1,10 @@
+// The app tests' fakes. Ported from the old app's test/support
+// (FakeDocumentFiles, FakeExitGuard, FakePagePrinter) with the plan 12a
+// semantics unchanged: scripted open and save-location answers, recorded and
+// optionally held writes, an exit guard that records its armings, a printer
+// that records and can hold a job. New in 3b: `PrintCall`, the hold hooks on
+// `open` and `saveLocation` (`holdOpens`, `holdSaveLocations`, the teardown
+// tests of the final fix wave) and `FakePagePrinter.hold` for the busy tests.
 import 'dart:async';
 import 'dart:typed_data';
 
