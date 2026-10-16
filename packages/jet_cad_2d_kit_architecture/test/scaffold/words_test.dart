@@ -3,13 +3,14 @@
 // text: word keeps English's placeholders and fills them; the kit validates,
 // and conformance (A16) holds German and Turkish complete over every
 // code-side word, the descriptor's and the table's.
+import 'dart:io';
 import 'dart:ui' show Locale;
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:jet_cad_2d_kit/authoring.dart'
-    show Catalog, conformance, encodeLibrary, encodeSnapshot, geometrySnapshot;
+import 'package:jet_cad_2d_kit/authoring.dart' show conformance;
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
 import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
+import 'package:jet_cad_2d_kit_architecture/src/furniture/furniture_catalog.dart';
 import 'package:jet_cad_2d_kit_architecture/src/words/words.dart';
 
 /// The 3a plan's "Word ids" table, written out (55 ids).
@@ -122,10 +123,10 @@ void main() {
   });
 
   test(
-      'SC-conformance the kit validates, and conformance over the empty '
-      'catalog holds German and Turkish complete for every code-side word', () {
+      'SC-conformance the kit validates, and conformance holds German and '
+      'Turkish complete for every code-side word, over the furniture '
+      'catalog, its committed library and snapshot (D-47)', () {
     expect(architectureKit.validate(), isEmpty);
-    const catalog = Catalog(kit: 'architecture', symbols: []);
     final english = architectureNames.words['en']!.keys;
     Set<String> ids(String namespace) => {
           for (final id in english)
@@ -133,10 +134,12 @@ void main() {
               id.substring(namespace.length + 1),
         };
     final problems = conformance(
-      catalog: catalog,
-      committedLibrary: encodeLibrary(catalog),
-      committedSnapshot: encodeSnapshot(geometrySnapshot(catalog)),
-      names: architectureNames,
+      catalog: furnitureCatalog,
+      committedLibrary:
+          File('assets/library/furniture.jetlib').readAsBytesSync(),
+      committedSnapshot:
+          File('assets/library/furniture.snapshot.json').readAsStringSync(),
+      names: architectureKit.names,
       locales: const ['de', 'tr'],
       sameAsEnglish: architectureSameAsEnglish,
       typeIds: {...ids('type'), for (final t in architectureKit.types) t.id},
@@ -144,6 +147,6 @@ void main() {
       propertyIds: {...ids('property'), ...architectureKit.propertyIds},
     );
     // M-SC-3 and M-SC-4 are red here too (wordMissing, placeholderMismatch).
-    expect(problems, isEmpty);
+    expect(problems, isEmpty, reason: problems.join('\n'));
   });
 }
