@@ -101,4 +101,23 @@ void main() {
     expect(codes(problems(sampleNames.merge(texts), same: sampleSameAsEnglish)),
         [KitProblemCode.wordUntranslated, KitProblemCode.wordUntranslated]);
   });
+
+  test(
+      "KW-conf-foreign another kit's text: word in the names is not held to "
+      'the declared locales (M-KW-conf-foreign)', () {
+    // A host's merged names may carry another kit's text in English only
+    // (`text:other.greeting`): it is that kit's to translate.
+    const foreign = KitNames({
+      'en': {'text:other.greeting': 'Hello {name}'},
+    });
+    // M-KW-conf-foreign: the kit test (`kitOfKey(...) == catalog.kit`)
+    // dropped, so every text: word in English is held to the locales.
+    expect(problems(sampleNames.merge(texts).merge(foreign)), isEmpty);
+    // Control: the same text under the sample kit's id is held to them.
+    const own = KitNames({
+      'en': {'text:sample.greeting': 'Hello {name}'},
+    });
+    expect(codes(problems(sampleNames.merge(texts).merge(own))),
+        [KitProblemCode.wordMissing, KitProblemCode.wordMissing]);
+  });
 }

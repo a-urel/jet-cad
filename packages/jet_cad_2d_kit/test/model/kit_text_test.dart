@@ -29,6 +29,17 @@ void main() {
     expect(fillText('No placeholder', {'name': 'x'}), 'No placeholder');
   });
 
+  test(
+      'KW-fill-once an argument whose value holds a placeholder is put in '
+      'as written, not filled again (M-KW-fill-once)', () {
+    // M-KW-fill-once: fillText replacing each argument's `{name}` in turn
+    // over the growing string, so a later argument fills an earlier
+    // argument's text.
+    expect(fillText('{name} seats {n}', {'name': 'Table {n}', 'n': 4}),
+        'Table {n} seats 4');
+    expect(fillText('{a}{b}', {'a': '{b}', 'b': '{a}'}), '{b}{a}');
+  });
+
   test('KW-placeholders the set of names a template holds', () {
     // M-KW-placeholders: placeholdersOf answers an empty set.
     expect(placeholdersOf('{wall} {end} ({side}), {wall}'),
