@@ -9,7 +9,8 @@
 //          busy, Undo and Redo are the library's), DC12 and DC12c (the name
 //          and the dirty mark are a bounded host widget in
 //          `PlanEditorBar.leading`; DC12 keeps 800 px, DC12c's floor moves
-//          to 776 px, re-measured)
+//          to 800 px with Export's button and the name at 144 px, re-measured in
+//          Task 6)
 //   COVERED DC3: packages/jet_cad_2d_plan/test/editor/plan_editor_test.dart
 //          ED-3 (:133, "without them none is offered") and ED-U (:445),
 //          editor/editor_view_test.dart V1 (:28, "the editor has Export and
@@ -61,14 +62,15 @@ const List<String> kIds = [
 ];
 
 /// The buttons left to right in the app's bar: Open sample leads, then the
-/// library's file buttons, Print, then Undo and Redo (Export waits for the
-/// app's `onExport`, Task 6).
+/// library's file buttons, Export and Print (Export has its button since the
+/// app gave `onExport`, Task 6), then Undo and Redo.
 const List<String> kBarOrder = [
   'open-sample',
   'new',
   'open',
   'save',
   'save-as',
+  'export',
   'print',
   'undo',
   'redo',
@@ -244,8 +246,8 @@ void main() {
     // export, print, undo, redo) and :445 (ED-U).
     // Decided: premise impossible (the order: the app's Open sample button
     // is a `PlanEditorBar.leading` widget, left of the library's buttons;
-    // Export has no button until the app's `onExport`, Task 6; Print is the
-    // library's and was added after the old test).
+    // Export and Print are the library's and came after the old test; the
+    // step between two buttons is read between Export and Print).
     final rig = await pumpApp(tester);
     final c = rig.controller;
     final doc = c.document;
@@ -261,7 +263,7 @@ void main() {
     final gap = tester.getTopLeft(button('undo')).dx -
         tester.getTopRight(button('print')).dx;
     final step = tester.getTopLeft(button('print')).dx -
-        tester.getTopRight(button('save-as')).dx;
+        tester.getTopRight(button('export')).dx;
     expect(gap, greaterThanOrEqualTo(step + 12), reason: 'the group gap');
 
     expect(states(tester), {...all(true), 'undo': false, 'redo': false},
@@ -817,7 +819,7 @@ void main() {
     // Intent half: COVERED, checked: packages/jet_cad_2d_plan/test/editor/
     // editor_words_test.dart:190 (the OV-$code cases: "no overflow from 704 px
     // down to 656 px", the library bar without host widgets).
-    // The width is the old 800 px: the name is bounded at 160 px.
+    // The width is the old 800 px: the name is bounded at 144 px.
     final rig = await pumpApp(tester, size: const Size(800, 600));
     final c = rig.controller;
     const long = 'the ground floor of the house by the lake, third revision, '
@@ -837,7 +839,7 @@ void main() {
         find.descendant(of: f, matching: find.byType(RichText)));
     expect(paragraph(name).didExceedMaxLines, isTrue,
         reason: 'cut, not wrapped');
-    expect(tester.getRect(name).width, 160, reason: 'bounded at 160');
+    expect(tester.getRect(name).width, 144, reason: 'bounded at 144');
     final bar = tester.getRect(find.byKey(const Key('chrome-top')));
     expect(
         tester.getRect(name).right,
@@ -869,14 +871,15 @@ void main() {
   });
 
   testWidgets(
-      'DC12c from 1000 px down to 776 px wide a titled long name and a '
+      'DC12c from 1000 px down to 800 px wide a titled long name and a '
       'long status line do not overflow the top bar, and OSNAP and the zoom '
       'stay on screen (spec 12a D7, S-27)', (tester) async {
-    // Decided: premise impossible (the range). The floor is 776 px, measured
-    // on this layout: the 160 px name, the 40 px Open sample button, the
-    // library's toolbar and its gap, OSNAP and the zoom, and the bar's
-    // padding, with nothing left for the status; at 775 px the bar overflows
-    // by 1 px. The old range was 704 px down to 656 px: the host widgets
+    // Decided: premise impossible (the range). The floor is 800 px, measured
+    // on this layout: the 144 px name, the 40 px Open sample button, the
+    // library's toolbar (Export's button in it, since Task 6) and its gap,
+    // OSNAP and the zoom, and the bar's padding, with nothing left for the
+    // status; at 799 px the bar overflows by 1 px. (Task 4b measured 776 px
+    // with a 160 px name and no Export button.) The old range was 704 px down to 656 px: the host widgets
     // (the name and Open sample) add 200 px to the 576 px the library's bar
     // needs by itself, so 656 px would leave the name 40 px.
     final rig = await pumpApp(tester, size: const Size(1000, 600));
@@ -893,7 +896,7 @@ void main() {
     expect(tester.takeException(), isNull);
     final name = find.byKey(const Key('document-name'));
     final status = find.byKey(const Key('status-text'));
-    for (var width = 1000; width >= 776; width--) {
+    for (var width = 1000; width >= 800; width--) {
       await tester.binding.setSurfaceSize(Size(width.toDouble(), 600));
       await tester.pump();
       expect(tester.takeException(), isNull, reason: '$width px');

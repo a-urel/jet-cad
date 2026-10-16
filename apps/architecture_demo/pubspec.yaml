@@ -39,3 +39,11 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  # The bare family the documents name, from the plan library's bytes (a
+  # package font path is resolved under the package's lib/), so no platform
+  # -- the web's engine fetches Google's Roboto when the manifest has none --
+  # draws text in another face.
+  fonts:
+    - family: Roboto
+      fonts:
+        - asset: packages/jet_cad_2d_plan/fonts/Roboto-Regular.ttf

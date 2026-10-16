@@ -37,6 +37,7 @@ import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart'
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 
 import 'app_strings.dart';
+import 'busy_wrappers.dart';
 import 'document_files.dart';
 import 'document_session.dart';
 import 'exit_guard.dart';
@@ -85,6 +86,14 @@ class DocumentHostState extends State<DocumentHost> {
 
   late final AppLifecycleListener _exitListener;
   late final ExitGuard _exitGuard;
+
+  /// The printer the editor gets: busy around the platform's print job.
+  /// Made once, not per build.
+  late final PagePrinter _printer =
+      BusyPagePrinter(_session.busy, widget.printer);
+
+  /// The export dialog the editor gets: busy while it is up. Made once.
+  late final PlanExportDialog _exportDialog = busyExportDialog(_session.busy);
 
   /// Runs [body] as a flow: busy for its whole span when no flow is running
   /// yet, cleared however it ends; inside another flow, busy is the outer
@@ -156,6 +165,42 @@ class DocumentHostState extends State<DocumentHost> {
     });
     return mayExit ? AppExitResponse.exit : AppExitResponse.cancel;
   }
+
+  /// The editor's export hand-over (`PlanEditor.onExport`), as a flow: asks
+  /// where, then writes the bytes under the file kind of `export.name`'s
+  /// extension (`pdf` or `png`, the only ones the library's built-in
+  /// exporters make; any other is an [ArgumentError] shown as the export
+  /// failing). A cancelled panel writes nothing. A throw shows the error.
+  ///
+  /// The sequence, from the library's `EditorPageFlows.export`: the library
+  /// takes its own one-flow guard (Export and Print refuse a second press);
+  /// the dialog runs inside [busyExportDialog]'s busy span, which ends when
+  /// it answers; the library then makes the bytes -- the app is NOT busy
+  /// for that stretch, there is no hook; then it calls this with the guard
+  /// still held, and the busy span of this flow covers the panel and the
+  /// write. A New, Open or Save started during the byte-making is not held:
+  /// New and Open replace the plan, which the library sees (the document
+  /// is no longer the one it exported) and drops the export; Save writes
+  /// its own file. The document is never moved off its save point by an
+  /// export.
+  Future<void> exportFlow(PlanExport export) => _flow(() async {
+        try {
+          final dot = export.name.lastIndexOf('.');
+          final kind = switch (dot < 0 ? '' : export.name.substring(dot + 1)) {
+            'pdf' => FileKind.pdf,
+            'png' => FileKind.png,
+            final other => throw ArgumentError.value(
+                export.name, 'name', 'has no exportable extension: "$other"'),
+          };
+          final place =
+              await widget.files.saveLocation(export.name, kind: kind);
+          if (place == null) return;
+          await widget.files
+              .write(place.location, place.name, export.bytes, kind: kind);
+        } catch (e) {
+          await _showError((w) => w.exportFailed, e);
+        }
+      });
 
   void _armExitGuard() => _exitGuard.armed = _controller.dirty.value;
 
@@ -358,7 +403,11 @@ class DocumentHostState extends State<DocumentHost> {
             onOpen: _idle(openFlow),
             onSave: _idle(saveStep),
             onSaveAs: _idle(saveAsStep),
-            printer: widget.printer,
+            onExport: (export) => unawaited(exportFlow(export)),
+            onExportDialog: _exportDialog,
+            printer: _printer,
+            onPageFlowError: (e) =>
+                unawaited(_showError((w) => w.pageFlowFailed, e)),
             exportName: _session.name,
             bar: PlanEditorBar(leading: [
               _DocumentTitle(session: _session, controller: _controller),
@@ -370,8 +419,9 @@ class DocumentHostState extends State<DocumentHost> {
 }
 
 /// The plan's name, with `• ` in front and an `Edited` tooltip while it is
-/// dirty, cut with an ellipsis at 160 px: with the Open sample button and the
-/// library's bar that leaves the top bar fitting 800 px.
+/// dirty, cut with an ellipsis at 144 px: with the Open sample button and
+/// the library's bar, Export's button included (it was 160 px before the app
+/// gave `onExport`), that leaves the top bar fitting 800 px.
 class _DocumentTitle extends StatelessWidget {
   const _DocumentTitle({required this.session, required this.controller});
 
@@ -380,7 +430,7 @@ class _DocumentTitle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 160),
+        constraints: const BoxConstraints(maxWidth: 144),
         child: ListenableBuilder(
           listenable: Listenable.merge([session, controller.dirty]),
           builder: (context, _) {
