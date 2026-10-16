@@ -116,7 +116,11 @@ Their rules hold here unless a section below says otherwise.
 - **The catalog**: the 69 symbols of `packages/jet_cad_restaurant_symbols`
   in six categories, ported to the contract's authoring toolkit
   (`CatalogSymbol`, `CatalogShape`, the shared chair helpers). Keys stay
-  `restaurant.*` at version 1. Each symbol's geometry equals the old
+  `restaurant.*` at version 1, except eight one-segment keys renamed to
+  meet the contract's key rule (kit id and two or more segments; ruled in
+  Task 1, never published): `cashier.desk`, `buffet.counter`,
+  `highchair.child`, `parasol.round`, `heater.patio`, `partition.screen`,
+  `stage.platform`, `piano.grand`. Each symbol's geometry equals the old
   one's: a test compares every key's shapes with the old catalog's (the
   old package stays in the workspace until 4b, so the test reads it from
   a committed fixture exported once, not by import: the kit may not name
