@@ -136,11 +136,10 @@ void main() {
         DemoHomeState.kStatuses['Bill']!.color);
   });
 
-  for (final (code, ordered, host) in [
-    // Turkish "Ordered" is 15 graphemes; German has no demo status that long,
-    // so the host's own text (what a POS may send) stands in.
-    ('tr', 'Sipariş verildi', 'Sipariş verildi'),
-    ('de', 'Bestellt', 'Zahlung ausstehend'),
+  for (final (code, host) in [
+    // A host's caption (what a POS may send) longer than 12 graphemes.
+    ('tr', 'Sipariş verildi'),
+    ('de', 'Zahlung ausstehend'),
   ]) {
     testWidgets(
         'ST-caption-$code a caption longer than 12 graphemes is cut and the '
@@ -148,14 +147,6 @@ void main() {
       final demo = await pumpDemo(tester, locale: Locale(code));
       final c = demo.area.controller;
       await enterService(tester);
-      c.select({'1'});
-      await tester.pump();
-      await tester.tap(byKey('status-ordered'));
-      await tester.pump();
-      // The demo's own flow: the name in the language, within 12.
-      final own = c.unitStatuses.value['1']!.caption!;
-      expect(own, ordered.characters.take(12).toString());
-      expect(own.characters.length, lessThanOrEqualTo(12));
       // A host's caption of any length: cut by the plan, never longer.
       c.setUnitStatus({
         '1': UnitStatus(color: const Color(0x99E53935), caption: host),

@@ -10,12 +10,11 @@ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 import 'area.dart';
 import 'demo_strings.dart';
 
-/// The statuses by name; Free is no status. Ordered and Bill carry their
-/// name as the caption: in German and Turkish the caption is longer than
-/// the 12 graphemes the plan keeps ("Sipariş verildi"), and is cut.
+/// The statuses by name, as the old demo's; Free is no status. Only Bill
+/// carries its name as the caption.
 final Map<String, UnitStatus?> kStatuses = {
   'Free': null,
-  'Ordered': UnitStatus(color: const Color(0x99FFB300), caption: 'Ordered'),
+  'Ordered': UnitStatus(color: const Color(0x99FFB300)),
   'Eating': UnitStatus(color: const Color(0x9943A047)),
   'Bill': UnitStatus(color: const Color(0x99E53935), caption: 'Bill'),
 };
