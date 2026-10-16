@@ -1,4 +1,3 @@
-// ignore_for_file: invalid_use_of_internal_member
 // Spec Q0 N2 (M-Q0-e): a loaded plan is never settled. The UI language
 // differs from the page's separator wherever it could leak in (the fixture
 // rule).
@@ -33,6 +32,7 @@ void main() {
         reason: 'premise');
     final byJson = architectureController(json: json);
     addTearDown(byJson.dispose);
+    // ignore: invalid_use_of_internal_member
     byJson.reportLocale(const Locale('tr'));
     final doc = byJson.document;
     expect(separatorOf(doc), DecimalSeparator.point);
@@ -43,6 +43,7 @@ void main() {
     final byLoad = architectureController();
     addTearDown(byLoad.dispose);
     byLoad.load(json);
+    // ignore: invalid_use_of_internal_member
     byLoad.reportLocale(const Locale('tr'));
     expect(separatorOf(byLoad.document), DecimalSeparator.point);
     expect(byLoad.dirty.value, isFalse);

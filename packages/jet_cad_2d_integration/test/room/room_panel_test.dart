@@ -1,4 +1,3 @@
-// ignore_for_file: invalid_use_of_internal_member
 // Spec 10 D21: the Selection panel's Room section. A free-text Name field,
 // committed on Enter and on its own focus loss (decision 8, R-23), trimmed,
 // an empty name reverting (R-24), one `SetComponentCommand<RoomParams>` per
@@ -271,6 +270,7 @@ void main() {
       expect(fieldText(tester), typed, reason: '$key typed');
     }
     expect(typed, hasLength(letters.length));
+    // ignore: invalid_use_of_internal_member
     expect(r.p.c.fill.value, isFalse, reason: 'F toggled no fill');
     await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pump();
@@ -429,7 +429,9 @@ void main() {
     addTearDown(c.dispose);
     final doc = c.document;
     await pumpEditor(tester, c);
+    // ignore: invalid_use_of_internal_member
     expect(c.frozen, contains(src.a), reason: 'frozen at open');
+    // ignore: invalid_use_of_internal_member
     expect(c.frozen, isNot(contains(src.b)));
     final a0 = doc.components.get<RoomParams>(src.a)!;
     final before = canon(doc);

@@ -1,5 +1,4 @@
 // Ported from jet_cad_floor_plan/test/opening_tool_test.dart (spec 3a C6, C7, R15-2..R15-5).
-// ignore_for_file: invalid_use_of_internal_member
 // Spec 08 D14: the Door (D), Window (N) and Gap (G) tools in PlanEditor:
 // OT1 (shell) and OT1 (rv9-guardDNG). The cases that drive the tool
 // directly, and OT1 (shell)'s preview line (R15-2), run in the kit. Every

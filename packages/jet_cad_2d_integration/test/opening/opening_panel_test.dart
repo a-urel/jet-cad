@@ -3,7 +3,6 @@
 // camera is rotated, no opening is central, and the door's own group is off
 // the identity.
 // Ported (spec 3a C6, C7); over architectureController in PlanEditor.
-// ignore_for_file: invalid_use_of_internal_member
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
@@ -200,6 +199,7 @@ void main() {
         d1.copyWith(width: 870, hinge: HingeEnd.end, swing: SwingSide.left));
     await press(tester, LogicalKeyboardKey.keyV);
     await press(tester, LogicalKeyboardKey.escape);
+    // ignore: invalid_use_of_internal_member
     expect(c.selection.keys, isEmpty, reason: 'Escape reached the canvas');
   });
 
@@ -252,6 +252,7 @@ void main() {
     await enterAndSubmit(tester, position, '1740');
     expect(paramsOf(doc, p.door).position, 1740);
     await press(tester, LogicalKeyboardKey.escape);
+    // ignore: invalid_use_of_internal_member
     expect(c.selection.keys, isEmpty);
     expect(section, findsNothing);
   });

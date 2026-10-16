@@ -5,7 +5,6 @@
 // support/opening_fixture.dart), copied: they never call the kit's
 // geometry. The kit's own test support is not importable; the wall fixture
 // is Task 12's and the editor rig Task 9's, re-exported (R-P14).
-// ignore_for_file: invalid_use_of_internal_member
 import 'dart:convert';
 import 'dart:math' as math;
 
@@ -92,6 +91,7 @@ PlanController openingController(String text) {
 }
 
 /// [c]'s camera, today's `view.camera`.
+// ignore: invalid_use_of_internal_member
 CameraController cameraOf(PlanController c) => c.toolContext.camera;
 
 Future<void> tapWorld(WidgetTester tester, PlanController c, Vector2 p,
@@ -126,12 +126,14 @@ Future<void> undoKey(WidgetTester tester) async {
 /// Today's `view.selection.replace`, then a frame.
 Future<void> select(
     WidgetTester tester, PlanController c, List<Handle> hs) async {
+  // ignore: invalid_use_of_internal_member
   c.selection.replace([for (final h in hs) SelectionKey.root(h)]);
   await tester.pump();
 }
 
 /// The shown object grips of [h] (today's `view.grips!.grips`).
 List<Grip> objectGripsOf(PlanController c, Handle h) => [
+      // ignore: invalid_use_of_internal_member
       for (final r in c.grips.grips)
         if (r.object && r.key == SelectionKey.root(h)) r.grip,
     ];
@@ -179,11 +181,13 @@ OpeningParams paramsOf(DraftDocument doc, Handle h) =>
 /// The unwrapped tool [toolId] of [c]'s document (today's palette entry's
 /// tool), as the Flutter layer's placement tool: its resolved hover point.
 PlacementTool placementOf(PlanController c, String toolId) =>
+    // ignore: invalid_use_of_internal_member
     c.toolFor(toolId)! as PlacementTool;
 
 /// The tool [toolId]'s settings as the plan holds them, through their
 /// `toString`, today's `'OpeningSettings($width)'` (R15-3).
 String settingsText(PlanController c, String toolId) =>
+    // ignore: invalid_use_of_internal_member
     '${c.servicesOf('architecture').settingsOf<Object>(toolId)}';
 
 /// A tool's settings section (R15-4) and its width field.

@@ -1,7 +1,6 @@
 // Ported from jet_cad_floor_plan/test/opening_symbol_test.dart (spec 3a C6, C7):
 // OR8 over architectureController in PlanEditor; OG7, OG10 and OR7 run in
 // the kit.
-// ignore_for_file: invalid_use_of_internal_member
 // Spec 08 D10-D12: the openings' symbols, through the real ParametricSystem
 // (and, for OR8, the shell's select tool). Every wall is at the far origin
 // in its own rotated group (`groupAt`), no host is axis-aligned, no opening
@@ -87,9 +86,11 @@ void main() {
     Future<void> clickGapEnd(String when) async {
       await tester.tapAt(globalAt(tester, c, gapEnd));
       await tester.pump();
+      // ignore: invalid_use_of_internal_member
       expect(c.selection.keys, [SelectionKey.root(hG)], reason: when);
       await tester.tapAt(globalAt(tester, c, oracleAt(f, 3645, 400)));
       await tester.pump();
+      // ignore: invalid_use_of_internal_member
       expect(c.selection.keys, isEmpty, reason: '$when: cleared');
     }
 
@@ -133,6 +134,7 @@ void main() {
     await gesture.up();
     await gesture.removePointer();
     await tester.pump();
+    // ignore: invalid_use_of_internal_member
     expect(c.selection.keys, [SelectionKey.root(hG)]);
   });
 }

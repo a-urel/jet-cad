@@ -1,4 +1,3 @@
-// ignore_for_file: invalid_use_of_internal_member
 // Spec 14d L7: a new layer is named in the language of the moment, its N
 // counted over every built-in language's pattern, as the table folds names
 // (M-14d-k); the sample plan names its rooms in its language.
@@ -17,6 +16,7 @@ void main() {
       (tester) async {
     List<String> roomsOf(Locale locale) {
       final c = PlanController(kits: [architectureKit]);
+      // ignore: invalid_use_of_internal_member
       c.reportLocale(locale);
       c.newPlan(build: buildSampleFlat);
       final names = [

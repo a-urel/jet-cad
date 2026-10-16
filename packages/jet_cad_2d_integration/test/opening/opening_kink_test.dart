@@ -1,7 +1,6 @@
 // Ported from jet_cad_floor_plan/test/opening_kink_test.dart (spec 3a C6, C7):
 // KJ3 (Task 15), KJ4 and KJ5 over architectureController in PlanEditor;
 // KJ1, KJ1 (1e-6°), KJ2 and KJ6 run in the kit.
-// ignore_for_file: invalid_use_of_internal_member
 // The final review's I1 (spec 08 D8 and D9, as amended by the final fix
 // wave): an opening clamped against the end of a wall whose joint is kinked
 // a little. There the end cap runs from the right face out to a lobe, back
@@ -103,6 +102,7 @@ void main() {
     final f = oracleFrameOf(doc, hA);
     // Select the window: a click on its midline, off its centre.
     await tapWorld(tester, c, oracleAt(f, 1400, 0));
+    // ignore: invalid_use_of_internal_member
     expect(c.selection.keys, [SelectionKey.root(hO)]);
     final g = objectGripsOf(c, hO).single;
     await dragWorld(tester, c, Vector2(g.x, g.y), oracleAt(f, 2990, 30));
@@ -138,6 +138,7 @@ void main() {
     // Select B: a click in the middle of its band, 40% along it.
     final bn = Vector2(-b.d.y, b.d.x);
     await tapWorld(tester, c, b.s + (b.e - b.s) * 0.4 + bn * -75);
+    // ignore: invalid_use_of_internal_member
     expect(c.selection.keys, [SelectionKey.root(hB)]);
     final e = plan(3000, 0);
     final target = gridOf(doc, polar(e, 23 + 2, 1800));

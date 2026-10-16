@@ -1,5 +1,3 @@
-// ignore_for_file: invalid_use_of_internal_member
-
 // Spec 11 D14: the Selection panel's Dimension section. Shown for exactly
 // one selected dimension (10 D21's rule): its value, read-only, as its TEXT
 // child reads (decision 13), or `—` for a broken dimension; a switch
@@ -497,7 +495,9 @@ void main() {
     addTearDown(c.dispose);
     await pumpPlan(tester, c);
     final doc = c.document;
+    // ignore: invalid_use_of_internal_member
     expect(c.frozen, contains(d), reason: 'frozen at open');
+    // ignore: invalid_use_of_internal_member
     expect(c.frozen, isNot(contains(a)));
     final p0 = paramsOf(doc, d);
     final before = canon(doc);

@@ -1,4 +1,3 @@
-// ignore_for_file: invalid_use_of_internal_member
 // Spec 14d M-14d-a (revision 2, V-10): the leak test. The planner is
 // pumped in Turkish through a recording language; every panel, tab, dialog
 // and menu is opened in turn; then every Text, tooltip, label and hint on
@@ -141,6 +140,7 @@ void main() {
       fxKit(library: [diningTableTwo])
     ]);
     addTearDown(c.dispose);
+    // ignore: invalid_use_of_internal_member
     c.reportLocale(const Locale('tr'), strings: recording);
     c.newPlan(build: buildSampleFlat);
     await tester.binding.setSurfaceSize(const Size(1440, 900));

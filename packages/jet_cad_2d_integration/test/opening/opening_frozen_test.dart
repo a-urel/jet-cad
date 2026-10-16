@@ -3,7 +3,6 @@
 // its host wall then cannot be edited or deleted (PlanLocked, the lock
 // hint), so it never regenerates uncut beside the frozen door or leaves the
 // door naming a dead handle. A wall whose door is live edits as usual.
-// ignore_for_file: invalid_use_of_internal_member
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
@@ -89,6 +88,7 @@ void main() {
     addTearDown(c.dispose);
     await pumpEditor(tester, c, centre: plan(2500, 1200), scale: 0.15);
     final doc = c.document;
+    // ignore: invalid_use_of_internal_member
     expect(c.frozen, {door}, reason: 'premise: the door alone, on load');
     expect([for (final d in c.diagnostics.value) d.code],
         contains(KitDiagnosticCode.hookFailed));
@@ -107,6 +107,7 @@ void main() {
     expect(canon(doc), before);
     expect(doc.commands.undoDepth, 0);
 
+    // ignore: invalid_use_of_internal_member
     c.selection.replace([SelectionKey.root(a)]);
     await tester.pump();
     // The edit above set the hint: reset, so the delete must set it again

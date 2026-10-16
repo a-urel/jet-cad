@@ -1,4 +1,3 @@
-// ignore_for_file: invalid_use_of_internal_member
 // Ported from jet_cad_floor_plan/test/dimension_shell_test.dart (3a Task 26, spec C6); assertions unchanged.
 //
 // Spec 11 D19, D18 and D11 through the shell, on the sample plan (D17; the
@@ -576,6 +575,7 @@ void main() {
     // plan.line included, in its guard (spec P4, `_guardTool`), so the
     // InteractionLayer's tool is the guard; R-P9's `toolFor` reads the
     // tool inside it.
+    // ignore: invalid_use_of_internal_member
     final tool = c.toolFor(c.activeTool.value)!;
     expect(tool, isA<LineTool>(), reason: 'the Line tool, a PlacementTool');
     tool as PlacementTool;

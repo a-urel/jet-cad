@@ -1,4 +1,3 @@
-// ignore_for_file: invalid_use_of_internal_member
 // Ported from jet_cad_floor_plan/test/room_paint_test.dart (3a Task 26, spec C6); assertions unchanged.
 //
 // Spec 10 D9, D3 and D24 in the shell, on the sample plan (D23): the
@@ -573,6 +572,7 @@ void main() {
       await tester.pump();
       await shot.tap(anchorOf(doc, room) + Vector2(0, 0.7 * 125));
       expect(controller.activeSelection.keys, {k(room)});
+      // ignore: invalid_use_of_internal_member
       final c = controller.outlines.debugWorldSegmentsOf(k(room))!;
       return [for (var i = 0; i < c.length; i += 2) Vector2(c[i], c[i + 1])];
     }

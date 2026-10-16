@@ -1,4 +1,3 @@
-// ignore_for_file: invalid_use_of_internal_member
 // R-16's room line of the controller's framing tests (3a Task 28, D-38;
 // rulings R-P9, R-P18, IA-R6): CZ1 (jet_cad_floor_plan/test/host/
 // controller_test.dart:559-586), ported whole over the zone fixture with
@@ -108,7 +107,9 @@ void main() {
     expect(three.e.abs(), greaterThan(30000), reason: 'premise: off origin');
     expect(c.fitToUnits({'3'}), isTrue);
     expectCamera(
-        c.framingFor(zoneSize), frameTables(boundOf(d, {'3'}), zoneSize));
+        // ignore: invalid_use_of_internal_member
+        c.framingFor(zoneSize),
+        frameTables(boundOf(d, {'3'}), zoneSize));
 
     final label = labelOf(d, '7');
     expect(d.entities.read(d.entities.slotOf(label)!).text, ' 7 ',
@@ -122,6 +123,7 @@ void main() {
     }
     c.camera.value = zoneCamera();
     expect(c.fitToUnits({'7'}), isTrue);
+    // ignore: invalid_use_of_internal_member
     expectCamera(c.framingFor(zoneSize), frameTables(seven, zoneSize));
   });
 }

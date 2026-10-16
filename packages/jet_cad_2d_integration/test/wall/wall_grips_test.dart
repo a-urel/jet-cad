@@ -8,7 +8,6 @@
 // the corner drag here; their adapters, band cache, attach, room inputs and
 // grips run in the kit as EG9-k, EG10-k.
 // WG-refuse-short is new (Review Focus 3's kit half, R-P15).
-// ignore_for_file: invalid_use_of_internal_member
 import 'package:flutter/foundation.dart' show Key;
 import 'package:flutter/gestures.dart' show PointerDeviceKind, kPrimaryButton;
 import 'package:flutter_test/flutter_test.dart';
@@ -31,6 +30,7 @@ String gripPlan(void Function(DraftDocument doc) build) =>
 /// The shown grips of wall [h], as (index, x, y): the controller's grip
 /// cache (wall_grips_test.dart:127-131's `gripsOf(view, h)`).
 List<(int, double, double)> gripsOf(PlanController c, Handle h) => [
+      // ignore: invalid_use_of_internal_member
       for (final r in c.grips.grips)
         if (r.key == SelectionKey.root(h)) (r.grip.index, r.grip.x, r.grip.y),
     ];
@@ -187,6 +187,7 @@ void main() {
     final w = worldWallOf(doc, wb);
     expect(gripsOf(ctrl, wb), [(0, w.s.x, w.s.y), (1, w.e.x, w.e.y)],
         reason: 'bitwise where WorldWall puts them');
+    // ignore: invalid_use_of_internal_member
     expect(ctrl.grips.grips.every((r) => r.object), isTrue);
     final local = doc.components.get<WallParams>(wb)!;
     expect((local.start - w.s).length, greaterThan(1000),

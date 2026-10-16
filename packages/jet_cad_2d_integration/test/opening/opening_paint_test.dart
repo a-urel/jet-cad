@@ -1,6 +1,5 @@
 // Ported from jet_cad_floor_plan/test/opening_paint_test.dart (spec 3a C6, C7):
 // RD1 over architectureController in PlanEditor.
-// ignore_for_file: invalid_use_of_internal_member
 // Spec 08 D12: draw order stays ascending handle value, and a fitting
 // symbol is never covered by its host's pieces, even by a piece added after
 // it. 07's WP5 method (`wall_paint_test.dart`): the shell rendered in

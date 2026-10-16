@@ -1,4 +1,3 @@
-// ignore_for_file: invalid_use_of_internal_member
 // Spec 07 D11's Wall section. Every wall sits at the far origin in its own
 // rotated group (`groupAt`), the plan is turned 23 degrees, and the camera
 // is rotated.
@@ -454,6 +453,7 @@ void main() {
       'the toggle, no exception escapes; the box still edits', (tester) async {
     final view = await pumpPanel(tester, malformedPlanJson());
     final doc = view.document;
+    // ignore: invalid_use_of_internal_member
     expect(view.frozen, contains(wa));
     expect(view.locked.value, {wa}, reason: 'the lock set is A alone');
     expect(
