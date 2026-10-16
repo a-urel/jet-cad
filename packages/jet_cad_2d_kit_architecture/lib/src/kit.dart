@@ -4,8 +4,10 @@
 // window, gap, room, separator, dimension; planner_shell.dart:546-601).
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
 
+import 'attach/wall_face_provider.dart';
 import 'box/box_plan.dart';
 import 'dimension/dimension_plan.dart';
+import 'furniture/furniture_source.dart';
 import 'opening/opening_plan.dart';
 import 'room/room_plan.dart';
 import 'separator/separator_plan.dart';
@@ -36,6 +38,8 @@ final PlanKit architectureKit = PlanKit(
     separatorPlanTool,
     dimensionPlanTool,
   ],
+  symbols: [furnitureSource],
+  attachments: [wallFaceProvider],
   names: architectureNames,
   prepare: ensureDashedLinetype,
 );
