@@ -1,7 +1,14 @@
 // Ported from jet_cad_floor_plan/test/wall_regen_test.dart (3a Task 11).
 import 'dart:convert';
 import 'dart:math' as math;
+import 'dart:ui' show Locale;
 
+import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
+    show FlutterTextMeasurer;
+import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart'
+    show KitNamesWords, registerKitComponents;
+import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart'
+    show architectureKit, buildSampleFlat;
 import 'package:jet_cad_2d_kit_architecture/src/box/box.dart';
 import 'package:jet_cad_2d_kit_architecture/src/wall/wall.dart';
 import 'package:jet_cad_2d_kit_architecture/src/wall/wall_geometry.dart';
@@ -492,8 +499,20 @@ void main() {
       expect(isSimpleCcw(worldOutline(doc, h)), isTrue);
     }
 
-    // The sample plan's line (wall_regen_test.dart:497-501) returns with
-    // buildSampleFlat in Task 25 (ruling R11-1).
+    final measurer = FlutterTextMeasurer();
+    addTearDown(measurer.clear);
+    final sample = DraftDocument.empty(measurer: measurer);
+    PageComponent.register(sample.components);
+    registerKitComponents(sample.components);
+    testCatalog().registerComponents(sample.components);
+    sample.header.units = DrawingUnits.millimeters;
+    architectureKit.prepare!(sample);
+    final system = installParametric(sample);
+    addTearDown(system.dispose);
+    buildSampleFlat(
+        sample, KitNamesWords(architectureKit.names, () => const Locale('en')));
+    sample.commands.clearHistory();
+    expect(diagnosticsOf(sample), isEmpty);
     final clean = wallDoc();
     addL(clean);
     expect(diagnosticsOf(clean), isEmpty);

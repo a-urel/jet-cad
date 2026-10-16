@@ -1,7 +1,7 @@
 /// Fixtures for the tests that run the architecture kit inside the plan
 /// library's widgets (spec 3a C6), built over both packages' public
 /// libraries only, as a host builds them. Not published. Later tasks add
-/// their fixtures here (Task 25: `sampleFlatController`).
+/// their fixtures here.
 library;
 
 import 'package:flutter/material.dart';
@@ -14,6 +14,13 @@ PlanController architectureController(
         {String? json, PlanPermissions permissions = PlanPermissions.full}) =>
     PlanController(
         kits: [architectureKit], json: json, permissions: permissions);
+
+/// A controller over the architecture kit whose plan is the sample flat
+/// (spec C3.7, C1.9): built by the plan library, so it opens clean with
+/// nothing to undo, its rooms named in the controller's words (English
+/// until a locale is reported).
+PlanController sampleFlatController() =>
+    PlanController(kits: [architectureKit], build: buildSampleFlat);
 
 /// [controller]'s `PlanEditor` in an app speaking [locale], with the plan
 /// library's locales and delegates.

@@ -13,5 +13,6 @@ export 'src/opening/opening.dart'
     show HingeEnd, OpeningKind, OpeningParams, SwingSide;
 export 'src/separator/separator.dart' show SeparatorParams;
 export 'src/room/room.dart' show RoomParams;
+export 'src/sample/sample_flat.dart' show buildSampleFlat;
 export 'src/dimension/dimension.dart'
     show AttachedEnd, DimEnd, DimKind, DimensionParams, FixedEnd, WallSide;
