@@ -1,6 +1,6 @@
 # jet-cad — project status
 
-**Last updated:** 2026-10-15. **`main` carries release 0.7.0** (tag
+**Last updated:** 2026-10-16. **`main` carries release 0.7.0** (tag
 `v0.7.0` → `0fa649e`, after `v0.6.0` →
 `3bf64a7`, `v0.5.1` → `3f8f7ad`, `v0.5.0` → `2fbb9c0`, `v0.4.0` → `8367010`, `v0.3.0` → `1b0c37a`, `v0.2.0` → `7355c00` and `v0.1.0` → `22206f5`) and everything since; the three packages are on pub.dev at 0.7.2 (published 2026-10-13); the kit architecture is in flight (below). The history of every plan
 before this point — its records, reviews and resume points — is in
@@ -455,6 +455,22 @@ with 0.7.0 (below).
   `apps/architecture_demo` runs on the new packages (the end of
   sub-project 3) and to have everything tested after sub-project 4.
 
+  **3a, the architecture kit** (`jet_cad_2d_kit_architecture` 0.1.0 and the
+  unpublished `jet_cad_2d_integration`; the contract's 3a amendments): spec
+  [2026-10-15-architecture-kit-design.md](docs/superpowers/specs/2026-10-15-architecture-kit-design.md)
+  (rev 2, approved), plan
+  [2026-10-15-architecture-kit.md](docs/superpowers/plans/2026-10-15-architecture-kit.md)
+  (29 tasks), results
+  [2026-10-15-architecture-kit-results.md](docs/superpowers/notes/2026-10-15-architecture-kit-results.md),
+  on `feat/architecture-kit` (worktree `.claude/worktrees/architecture-kit`).
+  Every task done and reviewed, the exit gate passed at `20d592d9`; the
+  whole-branch review, its fix wave and the ledger's archive are next. Not
+  merged, not pushed. The results note's "For the human" lists four open
+  items (a C1.5/C1.10 spec question, a `PlanServices` liveness-revision
+  proposal, a possible 2a snap defect, a one-frame re-word lag). 3b
+  (`apps/architecture_demo`) follows from its own spec; the human is told
+  when the demo runs on the new packages.
+
 - **The packages' READMEs, screenshots and funding links** (the human,
   2026-10-13), on `feat/package-readmes`, cut by hand from `main` at
   `51125b6`; **merged into `main` at `5c244b1`** on the human's *"merge
@@ -591,7 +607,10 @@ in design mode) is merged at `4130ebc` and 2b (the service mode) at
 `fix/plan-library-2b-followups` (from `2b1f7a0e`) and merged at `de6abda9`,
 not pushed; the record and what is left for the human:
 [2026-10-15-plan-library-2b-followups.md](docs/superpowers/notes/2026-10-15-plan-library-2b-followups.md).
-Next: sub-project 3 (the architecture kit).** (In flight). Where 2b stands, its gaps and rulings: the results note's
+3a (the architecture kit) passed its exit gate on `feat/architecture-kit`
+at `20d592d9`; next: the whole-branch Opus review and its fix wave, then
+the ledger archived and the merge on the human's word; then 3b's
+brainstorm.** (In flight). Where 2b stands, its gaps and rulings: the results note's
 [Spec gaps](docs/superpowers/notes/2026-10-14-plan-library-2b-results.md#spec-gaps-and-interface-problems-found-while-executing)
 section and its "Final fix wave". A14's `selectTool` difference was settled
 by the human (2b spec decision 9: true kept).

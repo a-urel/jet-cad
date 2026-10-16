@@ -517,3 +517,10 @@ by this wave; these rules make sure nothing in it blocks it.
   [2026-10-14-plan-library-design-mode-design.md](2026-10-14-plan-library-design-mode-design.md))
   and 2b (the service mode). A6's "sub-project 3's spec fixes the names"
   reads "2b's spec".
+- **2026-10-15, sub-project 3 split** (the human: *"3a kit, 3b demo"*;
+  [2026-10-15-architecture-kit-design.md](2026-10-15-architecture-kit-design.md),
+  decision 1): sub-project 3 is carried by two specs, 3a (the contract's
+  amendments, `jet_cad_2d_kit_architecture` and `jet_cad_2d_integration`)
+  and 3b (`apps/architecture_demo`). A13's "the demos" and A11's
+  `apps/floor_planner` → `apps/architecture_demo` are 3b's for the
+  architecture demo; `apps/restaurant_demo` stays sub-project 4's.

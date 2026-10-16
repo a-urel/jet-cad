@@ -1,18 +1,29 @@
 ## 0.1.0 (unreleased)
 
-The architecture kit of jet_cad_2d plans (sub-project 3a).
+The architecture kit for the jet_cad_2d plan library, moved from
+`jet_cad_floor_plan` unchanged in behaviour (sub-project 3a).
 
 - `architectureKit`: the kit's descriptor (id `architecture`), its type and
-  tool ids (`ArchitectureTypes`, `ArchitectureTools`), its words in
-  English, German and Turkish, and its `prepare`, which gives a plan the
-  plan library makes the separators' DASHED linetype.
-- The box (`architecture.box`, `BoxParams`): a rectangle whose outline
-  loses what lies inside an overlapping box; its width and height in the
-  property panel; the Box tool (B).
-- The wall (`architecture.wall`, `WallParams`, `Justification`): mitred
-  joints, Ts and nodes; its two end grips, which move joined ends too; its
-  thickness and justification in the property panel; the Wall tool (W),
-  whose settings the panel edits while it is active.
-- The room separator (`architecture.separator`, `SeparatorParams`): drawn
-  DASHED, an input to rooms, left out of PDF and PNG exports; its two end
-  grips and the Separator tool (S) trim an end to the wall face it enters.
+  tool ids (`ArchitectureTypes`, `ArchitectureTools`), and its `prepare`,
+  which gives a plan the plan library makes the separators' DASHED
+  linetype.
+- Six types: boxes (`BoxParams`), walls (`WallParams`, `Justification`:
+  mitred joints, Ts and nodes, cut by their openings), openings
+  (`OpeningParams`, `OpeningKind`, `HingeEnd`, `SwingSide`: doors,
+  windows, gaps), room separators (`SeparatorParams`: drawn DASHED, left
+  out of PDF and PNG exports), rooms (`RoomParams`: traced from walls and
+  separators, tinted, named and measured) and dimensions
+  (`DimensionParams`, `DimKind`, `DimEnd`, `AttachedEnd`, `FixedEnd`,
+  `WallSide`: attached to wall faces or fixed); their grips, properties
+  and section words.
+- Eight tools: Box (B), Wall (W), Door (D), Window (N), Gap (G), Room (M),
+  Separator (S), Dimension (I); the Room tool's "already a room" and the
+  Dimension tool's value as status-line notices.
+- The furniture library (41 symbols, six size families, the 30
+  wall-attached ones marked `attachTo: ['wall-face']`) and the wall-face
+  attachment provider.
+- A frozen object is absent from the kit's scans: the shared caches (the
+  wall bands, the room inputs, the wall faces) and the tools' and grips'
+  memos re-check liveness when read, since a freeze changes no document.
+- `buildSampleFlat`, a sample flat for a host's `PlanController(build:)`.
+- Words in English, German and Turkish.

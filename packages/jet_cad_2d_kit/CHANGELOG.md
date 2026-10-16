@@ -35,3 +35,21 @@
   the contract does not name without an English word.
   `UnitLabelling.assigned`: the label comes from a kit's type, the property
   panel or the host.
+- Sub-project 3a (the architecture kit's contract amendments): the symbol
+  box family (`SymbolBox`, `isOrthonormal`, `boxOfLeaves`, `boxOfEntry`,
+  `servedTopOfEntry`, `boxOfDefinition`, `footprintOf`) and
+  `placementTransform`, moved from the plan library; the object a property
+  or section is shown for (`PlanObject`, `DocumentPlanObject`, which carry
+  the kit's words), a read-only `TextDisplay`, `LengthProperty.range`,
+  `PropertySpec.visible` and `PropertyField.visible`; the one-context
+  section builder (`PlanSection`); `PlanType.fieldsOf`, `commitField` and
+  `sectionFor` take a `DraftDocument`, and `fieldsOf` and `commitField`
+  the kit's words; `PlanWords` (`word`, `maybe`, `text`,
+  `decimalSeparator`), which `KitWords` implements, and
+  `KitNamesWords(decimalSeparator:)`; words with parameters (`KitText`,
+  `fillText`, `placeholdersOf`, the `text:` namespace in `validate`,
+  `validateHostWords` and conformance's placeholder check) and
+  `numberedNameIndex`; `ToolNotice`; `PlanKit.prepare` and `PlanBuild`;
+  `PlanServices.liveTypeIdOf`; `KitProblemCode.settingsNeedObject` and
+  `placeholderMismatch`; `package:jet_cad_2d_kit/testing.dart` with
+  `FakePlanServices`.

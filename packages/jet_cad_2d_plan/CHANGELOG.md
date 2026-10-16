@@ -73,3 +73,16 @@ The service mode (sub-project 2b).
 - While the plan is in service the design document is read-only: a
   `PlanCanvas` or a kit tool still mounted cannot edit it. Leaving service
   gives it the permissions' engine permissions again.
+- Sub-project 3a: a kit tool's notice on the status line, put into words
+  when read (`PlanController.toolNotice`, `textOf`); a plan built in code
+  (`PlanController(build:)`, `newPlan(build:)`) and every kit's `prepare`
+  run on a plan the library makes, never on one it loads or imports; the
+  property panel's `TextDisplay` row, hidden fields and the object view;
+  the words' decimal separator from the UI language; numbered names over
+  the contract's `numberedNameIndex`; a grip refusal during a drag
+  (`ArgumentError`) gives no move and no diagnostic, and plan.select's
+  drop is refused by the rule `execute` uses (no edit, no exception; a
+  `StateError` still escapes); a frozen object's live references locked;
+  a choice row hands the focus back to the canvas once a choice is made;
+  `PlanShortcuts` remounted on the same controller: the last one mounted
+  speaks for its keys; the symbol box family now the contract's.
