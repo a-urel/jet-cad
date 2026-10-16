@@ -103,6 +103,19 @@ int ringsOf(PlacementTool tool, ToolContext ctx) {
   return spy.rings;
 }
 
+/// A Dimension tool over [plan]'s document and services whose frozen set
+/// grows in place, as the plan's does (a freeze emits no document change):
+/// DT-freeze's rig.
+(DimensionTool, ToolContext, Set<Handle>) freezeRigOf(Plan plan) {
+  final frozen = <Handle>{};
+  final s = FakePlanServices(
+      document: plan.doc, catalog: testCatalog(), frozen: frozen);
+  addTearDown(s.dispose);
+  final tool = dimensionPlanTool.create(s) as DimensionTool;
+  addTearDown(tool.dispose);
+  return (tool, contextOf(plan.doc), frozen);
+}
+
 void main() {
   test(
       'DT-notice the notice is text:architecture.dimension-value with the '
@@ -205,96 +218,94 @@ void main() {
   });
 
   test(
-      'DT-freeze the hover memo re-checks the plan\'s live types: a wall, a '
-      'neighbour or an opening frozen after a hover (no document change) '
-      'rings nothing at the very next hover or click (FREEZE RULE; M-DT8)', () {
-    // A tool over services whose frozen set grows in place, as the plan's
-    // does (a freeze emits no document change).
-    (DimensionTool, ToolContext, Set<Handle>) rigOf(Plan plan) {
-      final frozen = <Handle>{};
-      final s = FakePlanServices(
-          document: plan.doc, catalog: testCatalog(), frozen: frozen);
-      addTearDown(s.dispose);
-      final tool = dimensionPlanTool.create(s) as DimensionTool;
-      addTearDown(tool.dispose);
-      return (tool, contextOf(plan.doc), frozen);
-    }
-
-    // -- The wall itself, read first by a hover at the memoised point. A.1
+      'DT-freeze-wall the hover memo re-checks the plan\'s live '
+      'types: a wall frozen after a hover (no document change) rings '
+      'nothing at the very next hover at the memoised point (FREEZE '
+      'RULE; M-DT8)', () {
+    // The wall itself, read first by a hover at the memoised point. A.1
     // and B.0's right corners meet at the L's outer corner (4,100, −100);
     // a hover 5 mm off snaps onto it (the aperture is 33.3 mm).
-    {
-      final plan = lPlan();
-      final [a, _] = plan.walls;
-      final (tool, ctx, frozen) = rigOf(plan);
-      final corner = plan.at(4100, -100), near = plan.at(4103, -104);
-      hover(tool, ctx, near);
-      expect((tool.hoverPoint - corner).length, lessThan(dimAttach.linear),
-          reason: 'premise: onto the corner');
-      expect(ringsOf(tool, ctx), 1, reason: 'premise: the corner attaches');
-      hover(tool, ctx, near);
-      expect(ringsOf(tool, ctx), 1, reason: 'control: no freeze, a ring');
-      final depth = plan.doc.commands.undoDepth;
-      frozen.add(a);
-      expect(plan.doc.commands.undoDepth, depth, reason: 'premise');
-      hover(tool, ctx, near);
-      expect((tool.hoverPoint - corner).length, lessThan(dimAttach.linear),
-          reason: 'premise: the index still snaps onto the corner');
-      // Fresh: A is no wall; B alone has a free start whose right corner
-      // is (4,100, 0), 100 mm off.
-      expect(ringsOf(tool, ctx), 0, reason: 'A frozen: the hover');
-    }
+    final plan = lPlan();
+    final [a, _] = plan.walls;
+    final (tool, ctx, frozen) = freezeRigOf(plan);
+    final corner = plan.at(4100, -100), near = plan.at(4103, -104);
+    hover(tool, ctx, near);
+    expect((tool.hoverPoint - corner).length, lessThan(dimAttach.linear),
+        reason: 'premise: onto the corner');
+    expect(ringsOf(tool, ctx), 1, reason: 'premise: the corner attaches');
+    hover(tool, ctx, near);
+    expect(ringsOf(tool, ctx), 1, reason: 'control: no freeze, a ring');
+    final depth = plan.doc.commands.undoDepth;
+    frozen.add(a);
+    expect(plan.doc.commands.undoDepth, depth, reason: 'premise');
+    hover(tool, ctx, near);
+    expect((tool.hoverPoint - corner).length, lessThan(dimAttach.linear),
+        reason: 'premise: the index still snaps onto the corner');
+    // Fresh: A is no wall; B alone has a free start whose right corner
+    // is (4,100, 0), 100 mm off.
+    expect(ringsOf(tool, ctx), 0, reason: 'A frozen: the hover');
+  });
 
-    // -- A neighbour, read first through B's memoised six points: a hover
+  test(
+      'DT-freeze-neighbour the hover memo re-checks the plan\'s live '
+      'types: a neighbour frozen after a hover rings nothing through '
+      'the memoised six points of the wall beside it (FREEZE RULE; '
+      'M-DT8)', () {
+    // A neighbour, read first through B's memoised six points: a hover
     // at B's inner corner (3,900, 100) lays B out among A; A freezes; a
     // hover at the outer corner, a point the memo never searched, finds B
     // through its stored children and must not read B's joined points.
-    {
-      final plan = lPlan();
-      final [a, _] = plan.walls;
-      final (tool, ctx, frozen) = rigOf(plan);
-      hover(tool, ctx, plan.at(3903, 104));
-      expect(ringsOf(tool, ctx), 1, reason: 'premise: B laid out among A');
-      frozen.add(a);
-      hover(tool, ctx, plan.at(4103, -104));
-      expect((tool.hoverPoint - plan.at(4100, -100)).length,
-          lessThan(dimAttach.linear),
-          reason: 'premise: onto the outer corner');
-      expect(ringsOf(tool, ctx), 0, reason: 'A frozen: B\'s points afresh');
-    }
+    final plan = lPlan();
+    final [a, _] = plan.walls;
+    final (tool, ctx, frozen) = freezeRigOf(plan);
+    hover(tool, ctx, plan.at(3903, 104));
+    expect(ringsOf(tool, ctx), 1, reason: 'premise: B laid out among A');
+    frozen.add(a);
+    hover(tool, ctx, plan.at(4103, -104));
+    expect((tool.hoverPoint - plan.at(4100, -100)).length,
+        lessThan(dimAttach.linear),
+        reason: 'premise: onto the outer corner');
+    expect(ringsOf(tool, ctx), 0, reason: 'A frozen: B\'s points afresh');
+  });
 
-    // -- The click as first reader: a hover memoises the corner; A
+  test(
+      'DT-freeze-click the hover memo re-checks the plan\'s live '
+      'types: a wall frozen after a hover rings nothing at a click '
+      'with no move before it, the click the first reader (FREEZE '
+      'RULE; M-DT8)', () {
+    // The click as first reader: a hover memoises the corner; A
     // freezes; a press there with no move before it places the point,
     // whose ring is read from the memo.
-    {
-      final plan = lPlan();
-      final [a, _] = plan.walls;
-      final (tool, ctx, frozen) = rigOf(plan);
-      final near = plan.at(4103, -104);
-      hover(tool, ctx, near);
-      expect(ringsOf(tool, ctx), 1, reason: 'premise: the hover rings');
-      frozen.add(a);
-      tool.onPointerDown(eventAt(near, buttons: kPrimaryButton), ctx);
-      expect(tool.points, hasLength(1), reason: 'premise: placed');
-      expect(ringsOf(tool, ctx), 0, reason: 'A frozen: the click');
-    }
+    final plan = lPlan();
+    final [a, _] = plan.walls;
+    final (tool, ctx, frozen) = freezeRigOf(plan);
+    final near = plan.at(4103, -104);
+    hover(tool, ctx, near);
+    expect(ringsOf(tool, ctx), 1, reason: 'premise: the hover rings');
+    frozen.add(a);
+    tool.onPointerDown(eventAt(near, buttons: kPrimaryButton), ctx);
+    expect(tool.points, hasLength(1), reason: 'premise: placed');
+    expect(ringsOf(tool, ctx), 0, reason: 'A frozen: the click');
+  });
 
-    // -- An opening: spike C5's T with a flush door on the stem; the
+  test(
+      'DT-freeze-opening the hover memo re-checks the plan\'s live '
+      'types: an opening frozen after a hover rings nothing at the '
+      'jamb only its host gave (FREEZE RULE; M-DT8)', () {
+    // An opening: spike C5's T with a flush door on the stem; the
     // stem's jamb corner S/0/left (2,450, 100) attaches only through the
     // door's host (the plan's Ruling 11-7). The door freezes.
-    {
-      final plan = flushT(corpusGroups);
-      final door = plan.openings.single;
-      final (tool, ctx, frozen) = rigOf(plan);
-      final near = plan.at(2453, 104);
-      hover(tool, ctx, near);
-      expect((tool.hoverPoint - plan.at(2450, 100)).length,
-          lessThan(dimAttach.linear),
-          reason: 'premise: onto the jamb');
-      expect(ringsOf(tool, ctx), 1, reason: 'premise: the jamb attaches');
-      frozen.add(door);
-      hover(tool, ctx, near);
-      expect(ringsOf(tool, ctx), 0, reason: 'the door frozen: no host');
-    }
+    final plan = flushT(corpusGroups);
+    final door = plan.openings.single;
+    final (tool, ctx, frozen) = freezeRigOf(plan);
+    final near = plan.at(2453, 104);
+    hover(tool, ctx, near);
+    expect((tool.hoverPoint - plan.at(2450, 100)).length,
+        lessThan(dimAttach.linear),
+        reason: 'premise: onto the jamb');
+    expect(ringsOf(tool, ctx), 1, reason: 'premise: the jamb attaches');
+    frozen.add(door);
+    hover(tool, ctx, near);
+    expect(ringsOf(tool, ctx), 0, reason: 'the door frozen: no host');
   });
 }
