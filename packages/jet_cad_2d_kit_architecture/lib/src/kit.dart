@@ -34,6 +34,7 @@ final PlanKit architectureKit = PlanKit(
     gapPlanTool,
     roomPlanTool,
     separatorPlanTool,
+    dimensionPlanTool,
   ],
   names: architectureNames,
   prepare: ensureDashedLinetype,

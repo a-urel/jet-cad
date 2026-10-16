@@ -6,10 +6,17 @@
 // dimension_fixture.dart (:366-403) and room_diagnostics_test.dart's
 // `staleFile`. The rig's helpers and the integration package's own copies
 // of the room and wall fixtures (the plan model, `kids`, `canon`,
-// `deleteObject`, ...) are imported, not copied again (R-P14).
+// `deleteObject`, ...) are imported, not copied again (R-P14): the sample
+// plan's walls, openings, separator, column and seeds, `addRoom` and
+// `clickAt` (a primary tap at a world point) are room_plans.dart's (Task
+// 22).
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
+import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
+    show InteractionLayer, ViewportTransform;
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
 import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
@@ -26,10 +33,17 @@ export '../support/room_plans.dart'
         Placement,
         S,
         W,
+        addRoom,
+        clickAt,
         corpusGroups,
         deleteObject,
         groupFor,
         origin,
+        sampleColumn,
+        sampleOpenings,
+        sampleSeeds,
+        sampleSeparator,
+        sampleWalls,
         select;
 export '../support/wall_fixture.dart'
     show addWallLocal, canon, driftOf, enc, kids, kindOf, payloadOf;
@@ -191,3 +205,36 @@ Future<void> pumpPlan(WidgetTester tester, PlanController c,
     pumpEditor(tester, c, locale: locale);
 
 Finder byKey(String k) => find.byKey(Key(k));
+
+/// Every live dimension of [doc], ascending (today's `liveObjectsOf`,
+/// asked of the kit's types).
+List<Handle> dims(DraftDocument doc) => [
+      for (final h in doc.components.withComponent<DimensionParams>())
+        if (kitCatalog().typeIdOf(doc, h) == ArchitectureTypes.dimension) h,
+    ];
+
+/// The active tool's notice in words, or null (spec C1.2).
+String? noticeText(PlanController c) {
+  final notice = c.toolNotice.value;
+  return notice == null ? null : c.textOf(notice);
+}
+
+/// [c]'s camera at [pxPerMm], centred on world [at] (y down, as today's
+/// `centreOn`, dimension_tool_test.dart:162-171).
+Future<void> centreOn(
+    WidgetTester tester, PlanController c, Vector2 at, double pxPerMm) async {
+  final size = tester.getSize(find.byType(InteractionLayer));
+  c.camera.value = ViewportTransform(
+      worldToScreenMatrix: Transform2.translation(
+              size.width / 2 - pxPerMm * at.x, size.height / 2 - pxPerMm * at.y)
+          .multiply(Transform2.scale(pxPerMm, pxPerMm)));
+  await tester.pump();
+}
+
+/// Plan vector ([x], [y]) turned by [place]'s rotation
+/// (dimension_tool_test.dart:119-124).
+Vector2 turnedBy(Placement place, double x, double y) {
+  final rad = place.deg * math.pi / 180;
+  return Vector2(x * math.cos(rad) - y * math.sin(rad),
+      x * math.sin(rad) + y * math.cos(rad));
+}

@@ -16,6 +16,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart' show visibleForTesting;
+import 'package:flutter/material.dart' show Icons;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
 
@@ -23,6 +24,7 @@ import '../ids.dart';
 import '../live.dart';
 import 'dimension.dart';
 import 'dimension_grips.dart';
+import 'dimension_tool.dart';
 
 /// The dimension's plan type (Shared interfaces, spec C3.6).
 final PlanType<DimensionParams> dimensionPlanType = PlanType<DimensionParams>(
@@ -45,6 +47,22 @@ final PlanType<DimensionParams> dimensionPlanType = PlanType<DimensionParams>(
     TextDisplay<DimensionParams>(
         id: 'end-2', read: (p, o) => dimensionEndLine(p.b, o.words)),
   ],
+);
+
+/// The Dimension tool (Shared interfaces, spec C3.6): letter I (today's,
+/// `planner_shell.dart:595-601`), no settings, three clicks per dimension
+/// (spec 11 D12). Its commit adds a group, its parameters and its layer:
+/// `structure`, `components`, `geometry` (`dimension_tool.dart:311-315`).
+final PlanTool dimensionPlanTool = PlanTool(
+  id: ArchitectureTools.dimension,
+  icon: Icons.straighten,
+  letter: 'I',
+  needs: const {
+    Capability.structure,
+    Capability.components,
+    Capability.geometry,
+  },
+  create: (s) => DimensionTool(live: liveTypesOf(s)),
 );
 
 /// Every scan [dimensionValueOf] made of a document's entities. Tests read
