@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d_integration/jet_cad_2d_integration.dart';
+import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show ToolNotice;
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../support/room_plans.dart';
@@ -89,9 +90,19 @@ void main() {
     expect(status(tester), 'Room', reason: 'cleared on leaving the face');
     await hover(19000.5, 10500.25);
     expect(status(tester), 'Room — Already a room: Kitchen');
+    // The Room tool's own notice (R-P9): the controller's is Select's once
+    // Esc deactivates the tool, null whatever the Room tool holds.
+    final room =
+        // ignore: invalid_use_of_internal_member
+        plan.c.toolFor('architecture.room')! as ToolNotice;
+    expect(room.notice.value?.id, 'text:architecture.room-occupied',
+        reason: 'premise: the tool holds its notice');
     await press(tester, LogicalKeyboardKey.escape);
     expect(status(tester), 'Select', reason: 'cleared on deactivation');
     expect(plan.c.toolNotice.value, isNull);
+    // M-TT7: RoomTool.cancel without `_setOccupied(null)`.
+    expect(room.notice.value, isNull,
+        reason: "the tool's own notice cleared on deactivation");
     await press(tester, LogicalKeyboardKey.keyM);
     expect(status(tester), 'Room');
   });

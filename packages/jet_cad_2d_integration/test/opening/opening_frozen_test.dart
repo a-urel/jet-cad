@@ -109,7 +109,15 @@ void main() {
 
     c.selection.replace([SelectionKey.root(a)]);
     await tester.pump();
+    // The edit above set the hint: reset, so the delete must set it again
+    // (the plan's frozen_references_test FL-delete: the selection's gate
+    // refuses a locked object before any command, the hint set by the
+    // select tool's delete command itself, refused as locked).
+    c.lockHint.value = false;
     expect(c.deleteSelection(), isFalse, reason: 'a delete of it');
+    expect(c.execute(deleteLikeSelectTool(doc, a)), isFalse,
+        reason: "the select tool's delete command");
+    expect(c.lockHint.value, isTrue, reason: 'the delete shows the hint');
     expect(doc.tree[a], isNotNull);
     expect(canon(doc), before);
 
