@@ -6,19 +6,12 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 
-Future<ArchitectureDemoAppState> pumpApp(WidgetTester tester) async {
-  await tester.binding.setSurfaceSize(const Size(1400, 900));
-  addTearDown(() => tester.binding.setSurfaceSize(null));
-  await tester.pumpWidget(const ArchitectureDemoApp());
-  await tester.pump();
-  return tester
-      .state<ArchitectureDemoAppState>(find.byType(ArchitectureDemoApp));
-}
+import 'support/app_rig.dart';
 
 void main() {
   testWidgets('AS1 the app pumps: one editor, the kit\'s Symbols tab, clean',
       (tester) async {
-    final app = await pumpApp(tester);
+    final app = (await pumpApp(tester)).app;
     expect(find.byType(PlanEditor), findsOneWidget);
     expect(find.text('Symbols'), findsWidgets);
     expect(app.controller.dirty.value, isFalse);
@@ -30,7 +23,7 @@ void main() {
   ]) {
     testWidgets('CH-consume ${modifier.keyLabel}+S over a dialog is handled',
         (tester) async {
-      final app = await pumpApp(tester);
+      final app = (await pumpApp(tester)).app;
       final navigator = tester.state<NavigatorState>(find.byType(Navigator));
       showDialog<void>(
           context: navigator.context,

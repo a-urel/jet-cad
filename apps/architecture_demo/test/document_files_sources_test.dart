@@ -1,5 +1,4 @@
 // Ported from apps/floor_planner/test/document_files_sources_test.dart (audit docs/superpowers/specs/2026-10-16-architecture-demo-test-audit.md, section "document_files_sources_test.dart").
-// DS3 is not here: see the note in the file body (moved to Task 4).
 // Spec 13 D8, plan 13 Task 8 (review finding 1): the platform files cannot
 // run here (the io side needs the macOS panel, the web side a browser), so
 // their use of the file kind is pinned by their source, as the render
@@ -28,9 +27,15 @@ void main() {
         reason: 'no fixed English group');
   });
 
-  // DS3 (the app names the panels' types through its strings: main.dart
-  // pins createFiles(askName:, typeLabel:)) moves to Task 4: main.dart gets
-  // the files seam, the session and the host there.
+  test(
+      'DS3 the app names the panels\' types through its strings (spec 14d '
+      'L16, review 14d-1 F-5)', () {
+    final main = File('lib/main.dart').readAsStringSync();
+    expect(main,
+        contains('createFiles(askName: _askName, typeLabel: _typeLabel)'));
+    expect(main, contains('this.createFiles = createDocumentFiles'),
+        reason: 'the platform\'s files by default');
+  });
 
   test('DS2 the web save names the file and types the blob by the kind', () {
     expect(web, contains('fileNameFor(await askName(suggestedName), kind)'));
