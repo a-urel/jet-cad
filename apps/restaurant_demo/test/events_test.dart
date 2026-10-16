@@ -1,133 +1,31 @@
-// PENDING (Task 8 of the restaurant-kit plan): the old events_test.dart, moved aside
-// unported because it cannot compile on the new API yet. Task 8 ports it per
-// docs/superpowers/specs/2026-10-16-restaurant-kit-test-audit.md and deletes
-// this file; Task 11 checks test/_pending/ is empty. Not run, not analysed: the .txt suffix keeps it out of the analyzer (the old packages are no longer deps); the name does
-// not end in _test.dart. Task 7/8 renames it back while porting. No case is dropped.
-
-// Host embedding API spec E-1 to E-9 in the demo (Slice 2): "Link tables"
-// writes the POS's ids into the design (`setTablesData`, one undo step),
-// "Unlinked: n" counts the POS's ids no visible table carries (E-8); in the
-// service a double tap logs the table and its id, a drag logs the moved
-// numbers, and the mouse over a table or the floor, or a tap on the floor,
-// feeds one pointer line, not the log; `designChanges` logs the tables
-// added and removed and a replaced plan. On the Salon sample, its fitted
-// camera neither the identity nor at the origin. Screen points come from
-// the public `tableDetails` and `worldToGlobal`; double taps are driven by
-// gestures with explicit stamps, the fake clock pumped differently from
-// them (flutter_test stamps every synthetic event `Duration.zero`).
-// The tests reach the design's document for fixture edits the demo's UI
-// does not offer (a renumbering, a hidden layer, an unnumbered table).
-// ignore_for_file: invalid_use_of_internal_member
+// Ported from the old apps/restaurant_demo/test/events_test.dart (the
+// restaurant-kit test audit, section 7, docs/superpowers/specs/
+// 2026-10-16-restaurant-kit-test-audit.md), with D14 and D8 of demo_test:
+// "Link tables" writes the POS's ids into the design (`setUnitsData`, one
+// undo step), "Unlinked: n" counts the POS's ids no visible table carries;
+// in the service a double tap logs the table and its id, a drag logs the
+// moved numbers, and the mouse over a table or the floor, or a tap on the
+// floor, feeds one pointer line, not the log; `unitChanges` logs the tables
+// added and removed and a replaced plan. On the Salon sample, whose fitted
+// camera is neither the identity nor at the origin. Screen points come from
+// the public `unitDetails` and `worldToGlobal`; double taps are driven by
+// gestures with explicit stamps, the fake clock pumped differently from them
+// (flutter_test stamps every synthetic event `Duration.zero`).
+//
+// Fixtures the demo's UI does not offer are raw commands on the controller's
+// document (a renumbering, a hidden layer, an unnumbered table), and the
+// plan Revert goes back to is `stored = save()` (a Save needs an edit).
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show LogicalKeyboardKey, rootBundle;
+import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
-import 'package:jet_cad_2d/jet_cad_2d.dart';
-import 'package:jet_cad_floor_plan/editor.dart';
-import 'package:jet_cad_floor_plan/jet_cad_floor_plan.dart'
-    show FloorPlanController, FloorPlanTableDetail;
-import 'package:jet_cad_restaurant_symbols/jet_cad_restaurant_symbols.dart';
-import 'package:restaurant_demo/main.dart';
-import 'package:vector_math/vector_math_64.dart' show Vector2;
+import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 
-Finder byKey(String k) => find.byKey(Key(k));
+import 'support/demo_rig.dart';
 
-/// The demo on its sample plans, at 1600 x 1000, in the Salon's design.
-Future<DemoHomeState> pumpSamples(WidgetTester tester, {Locale? locale}) async {
-  final plans = (await tester.runAsync(() => loadSamplePlans(rootBundle)))!;
-  await tester.binding.setSurfaceSize(const Size(1600, 1000));
-  addTearDown(() => tester.binding.setSurfaceSize(null));
-  await tester.pumpWidget(RestaurantDemo(plans: plans, locale: locale));
-  await tester.pump();
-  await tester.pump();
-  return tester.state<DemoHomeState>(find.byType(DemoHome));
-}
-
-Future<void> settle(WidgetTester tester) async {
-  await tester.pump();
-  await tester.pump();
-}
-
-Future<void> press(WidgetTester tester, String key) async {
-  await tester.tap(byKey(key));
-  await settle(tester);
-}
-
-/// The detail of the one table numbered [n] in [c]'s current mode.
-FloorPlanTableDetail detailOf(FloorPlanController c, String n) =>
-    c.tableDetails.singleWhere((d) => d.table.number == n);
-
-/// Table [n]'s centre on the screen, through the public API.
-Offset centreOf(FloorPlanController c, String n) =>
-    c.worldToGlobal(detailOf(c, n).center!)!;
-
-String textOf(WidgetTester tester, String key) =>
-    tester.widget<Text>(byKey(key)).data!;
-
-/// A floor point of the Salon, world millimetres: between the top row
-/// (1 to 3, from y 1625) and the middle one (4 and 5, up to y 0), left of
-/// 6 and 7 (from x 2975): on no table's box, off the origin.
-const Offset kFloor = Offset(-3210, 810);
-
-Duration ms(int n) => Duration(milliseconds: n);
-
-/// A mouse click whose down is stamped [down], the up 40 ms later.
-Future<void> click(WidgetTester tester, Offset at, Duration down) async {
-  final g = await tester.createGesture(kind: PointerDeviceKind.mouse);
-  await g.down(at, timeStamp: down);
-  await g.up(timeStamp: down + ms(40));
-  await g.removePointer();
-}
-
-/// A mouse drag from [from] by [by], in three moves.
-Future<void> drag(WidgetTester tester, Offset from, Offset by) async {
-  final g = await tester.createGesture(kind: PointerDeviceKind.mouse);
-  await g.down(from, timeStamp: ms(5000));
-  for (var i = 1; i <= 3; i++) {
-    await g.moveTo(from + by * (i / 3), timeStamp: ms(5000 + 20 * i));
-  }
-  await g.up(timeStamp: ms(5100));
-  await g.removePointer();
-}
-
-/// The restaurant library's entries, as a host's library decodes them.
-List<SymbolEntry> restaurantEntries() => SymbolLibrary.decode(
-        Uint8List.fromList(utf8.encode(DraftDocumentCodec.encodeToString(
-            buildSymbolLibrary(restaurantCatalog)))))
-    .entries;
-
-/// Renames table [from] to [to] in [c]'s design.
-void rename(FloorPlanController c, String from, String to) {
-  final doc = c.activeDocument;
-  final label = TableSurvey.of(doc).withNumber(from).single.label!;
-  doc.commands.execute(SetEntityTextCommand(label, to, kTableLabelTag));
-}
-
-/// Puts table [n] of [c]'s design on a new hidden layer.
-void hide(FloorPlanController c, String n) {
-  final doc = c.activeDocument;
-  final zero = doc.tables.layers[ReservedHandles.layerZero]!;
-  final hidden = doc.handleSeed.next();
-  doc.commands.execute(AddLayerCommand(LayerRecord(
-      handle: hidden,
-      name: 'Hidden',
-      color: const IndexedColor(3),
-      linetype: zero.linetype,
-      lineweight: zero.lineweight,
-      transparency: zero.transparency,
-      visible: false,
-      locked: false)));
-  doc.commands.execute(SetInstanceLayerCommand(
-      TableSurvey.of(doc).withNumber(n).single.instance, hidden));
-}
-
-Map<String, Map<String, String>> dataByNumber(FloorPlanController c) => {
-      for (final d in c.tableDetails)
-        if (d.data.isNotEmpty) d.table.number ?? '—': d.data,
-    };
+Offset centreOf(PlanController c, String n) => unitScreen(c, n);
 
 void main() {
   testWidgets(
@@ -135,20 +33,20 @@ void main() {
       '<area>-<number> beside its data, in one undo step; a shared number '
       'is left out; Unlinked counts the POS ids no visible table carries',
       (tester) async {
-    final demo = await pumpSamples(tester);
+    final demo = await pumpDemo(tester);
     final c = demo.area.controller;
     // Table 2 renumbered 1 (two 1s), 11 on a hidden layer, 5 linked by the
     // POS already, 6 carrying a key of its own.
-    rename(c, '2', '1');
-    hide(c, '11');
-    expect(c.setTableData('5', {'zeta': 'z', 'id': 'pos-55'}), isTrue);
-    expect(c.setTableData('6', {'alpha': 'Masa 6.ğ'}), isTrue);
+    relabel(c, {'2': '1'});
+    putOnLayer(c, '11', 'Hidden', visible: false);
+    expect(c.setUnitData('5', {'zeta': 'z', 'id': 'pos-55'}), isTrue);
+    expect(c.setUnitData('6', {'alpha': 'Masa 6.ğ'}), isTrue);
     await settle(tester);
     expect(textOf(tester, 'unlinked'), 'Unlinked: 11');
-    final depth = c.activeDocument.commands.undoDepth;
+    final depth = c.document.commands.undoDepth;
 
     await press(tester, 'link-tables');
-    expect(dataByNumber(c), {
+    expect(dataByLabel(c), {
       '3': {'id': 'salon-3'},
       '4': {'id': 'salon-4'},
       '5': {'id': 'pos-55', 'zeta': 'z'},
@@ -160,8 +58,7 @@ void main() {
       '11': {'id': 'salon-11'},
     });
     expect(demo.log.first, 'Salon: linked 8 tables');
-    expect(c.activeDocument.commands.undoDepth, depth + 1,
-        reason: 'one undo step');
+    expect(c.document.commands.undoDepth, depth + 1, reason: 'one undo step');
     // salon-1: two tables share 1; salon-2: no table 2; salon-5: 5 carries
     // the POS's own id; salon-11: 11 is not drawn.
     expect(demo.unlinkedTables(demo.area),
@@ -170,12 +67,12 @@ void main() {
 
     await press(tester, 'link-tables');
     expect(demo.log.first, 'Salon: linked 0 tables');
-    expect(c.activeDocument.commands.undoDepth, depth + 1,
+    expect(c.document.commands.undoDepth, depth + 1,
         reason: 'nothing to link is no step');
 
     c.undo();
     await settle(tester);
-    expect(dataByNumber(c), {
+    expect(dataByLabel(c), {
       '5': {'id': 'pos-55', 'zeta': 'z'},
       '6': {'alpha': 'Masa 6.ğ'},
     });
@@ -185,12 +82,12 @@ void main() {
   testWidgets(
       'DE2 the Teras links as teras-<n>; Link tables and Unlinked show in '
       'the design only', (tester) async {
-    final demo = await pumpSamples(tester);
+    final demo = await pumpDemo(tester);
     await press(tester, 'area-1');
     expect(demo.area.name, 'Teras');
     expect(textOf(tester, 'unlinked'), 'Unlinked: 6');
     await press(tester, 'link-tables');
-    expect(dataByNumber(demo.area.controller), {
+    expect(dataByLabel(demo.area.controller), {
       for (var n = 1; n <= 6; n++) '$n': {'id': 'teras-$n'},
     });
     expect(textOf(tester, 'unlinked'), 'Unlinked: 0');
@@ -203,34 +100,57 @@ void main() {
   testWidgets(
       'DE3 a saved plan declares schema 10 and keeps its ids across Save and '
       'Revert', (tester) async {
-    final demo = await pumpSamples(tester);
+    final demo = await pumpDemo(tester);
     final c = demo.area.controller;
     await press(tester, 'link-tables');
     await press(tester, 'save');
     final stored = demo.area.stored!;
     expect((jsonDecode(stored) as Map<String, Object?>)['schemaVersion'], 10);
-    expect(stored, contains('"jetcad.table_data"'));
-    final linked = dataByNumber(c);
+    expect(stored, contains('"jetcad.unit_data"'));
+    final linked = dataByLabel(c);
     expect(linked, hasLength(11), reason: 'premise: every table linked');
 
-    expect(c.setTableData('7', {}), isTrue);
-    expect(c.setTableData('3', {'id': 'other'}), isTrue);
+    expect(c.setUnitData('7', {}), isTrue);
+    expect(c.setUnitData('3', {'id': 'other'}), isTrue);
     await settle(tester);
-    expect(dataByNumber(c), isNot(linked), reason: 'premise: edited');
+    expect(dataByLabel(c), isNot(linked), reason: 'premise: edited');
     await press(tester, 'revert');
-    expect(dataByNumber(c), linked);
-    expect(c.designJson(), stored, reason: 'byte for byte');
+    expect(dataByLabel(c), linked);
+    expect(c.save(), stored, reason: 'byte for byte');
     expect(c.dirty.value, isFalse);
+  });
+
+  testWidgets(
+      'D14 in the service, a tap and a drag are logged by number; once per '
+      'drag (review T4-3)', (tester) async {
+    final demo = await pumpDemo(tester);
+    final c = demo.area.controller;
+    await enterService(tester);
+    await tester.tapAt(unitScreen(c, '2'));
+    await tester.pump();
+    // The newest line first: the selection, then the tap that made it.
+    expect(demo.log.first, 'Salon: tapped 2');
+    expect(demo.log[1], 'Salon: selected {2}');
+    final g = await tester.startGesture(unitScreen(c, '1'));
+    await g.moveBy(const Offset(40, 0));
+    await g.moveBy(const Offset(40, 0));
+    await g.up();
+    await tester.pump();
+    expect(demo.log.where((l) => l == 'Salon: layout changed'), hasLength(1),
+        reason: 'once per drag');
+    expect(demo.log, isNot(contains('Salon: tapped 1')),
+        reason: 'a drag is no tap');
+    expect(c.serviceEdited, isTrue);
   });
 
   testWidgets(
       'DE4 a double click on table 7 logs it with its id, after both taps; '
       'timed from the stamps, not the clock; an unlinked table logs no id',
       (tester) async {
-    final demo = await pumpSamples(tester);
+    final demo = await pumpDemo(tester);
     final c = demo.area.controller;
     await press(tester, 'link-tables');
-    expect(c.setTableData('3', {'zeta': 'z'}), isTrue);
+    expect(c.setUnitData('3', {'zeta': 'z'}), isTrue);
     await press(tester, 'mode-service');
     final seven = centreOf(c, '7');
 
@@ -245,7 +165,7 @@ void main() {
       'Salon: tapped 7',
       'Salon: selected {7}',
     ]);
-    expect(c.selectedTables.value, {'7'}, reason: 'a click still selects');
+    expect(c.selectedUnits.value, {'7'}, reason: 'a click still selects');
 
     // 301 ms apart by the stamps, no time by the clock: two taps.
     final three = centreOf(c, '3');
@@ -269,15 +189,13 @@ void main() {
   testWidgets(
       'DE5 a drag logs the moved numbers once, after the layout line; Undo '
       'logs no move; an unnumbered table moves as —', (tester) async {
-    final demo = await pumpSamples(tester);
+    final demo = await pumpDemo(tester);
     final c = demo.area.controller;
-    final doc = c.activeDocument;
-    final stool = restaurantEntries().firstWhere(
-        (e) => e.key == 'restaurant.bar.stool',
-        orElse: () => throw StateError('no stool'));
-    doc.commands.execute(
-        placeSymbol(doc, stool, at: Vector2(-6400, -3100), numbered: false));
+    // The stool 11 loses its number.
+    relabel(c, {'11': ''});
     await settle(tester);
+    expect(c.unitDetails.where((d) => d.unit.label == null), hasLength(1),
+        reason: 'premise: one unnumbered table');
     await press(tester, 'mode-service');
     c.select({'7', '3'});
     await tester.pump();
@@ -291,7 +209,7 @@ void main() {
     expect(demo.log.where((l) => l.startsWith('Salon: moved')), hasLength(1));
 
     final unnumbered =
-        c.tableDetails.singleWhere((d) => d.table.number == null).center!;
+        c.unitDetails.singleWhere((d) => d.unit.label == null).center!;
     await drag(tester, c.worldToGlobal(unnumbered)!, const Offset(-50, 30));
     await tester.pump();
     expect(demo.log.first, 'Salon: moved {—}');
@@ -301,7 +219,7 @@ void main() {
       'DE6 the pointer line: over a table, over no table, a floor tap\'s '
       'point in metres; never the log; cleared by a reset, a mode switch '
       'and an area switch', (tester) async {
-    final demo = await pumpSamples(tester);
+    final demo = await pumpDemo(tester);
     final c = demo.area.controller;
     await press(tester, 'mode-service');
     expect(textOf(tester, 'pointer-line'), '');
@@ -309,7 +227,7 @@ void main() {
     final floor = c.worldToGlobal(kFloor)!;
     final canvas = c.canvasRect.value!;
     expect(canvas.contains(floor), isTrue, reason: 'premise: on the canvas');
-    expect(c.tableAt(floor - canvas.topLeft), isNull,
+    expect(c.unitAt(floor - canvas.topLeft), isNull,
         reason: 'premise: on no table');
 
     final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
@@ -333,7 +251,7 @@ void main() {
     await mouse.up(timeStamp: ms(1040));
     await tester.pump();
     expect(textOf(tester, 'pointer-line'), 'floor at −3.2, 0.8 m');
-    expect(c.selectedTables.value, isEmpty,
+    expect(c.selectedUnits.value, isEmpty,
         reason: 'a floor tap still clears the selection');
 
     await mouse.moveTo(centreOf(c, '7'));
@@ -363,16 +281,13 @@ void main() {
   });
 
   testWidgets(
-      'DE7 designChanges: a table added and removed is logged, undo too; a '
+      'DE7 unitChanges: a table added and removed is logged, undo too; a '
       'renumbering is not; a Revert logs the replaced plan, and in the '
       'service the kept layout goes back after it', (tester) async {
-    final demo = await pumpSamples(tester);
+    final demo = await pumpDemo(tester);
     final c = demo.area.controller;
-    final doc = c.activeDocument;
-    final stool =
-        restaurantEntries().firstWhere((e) => e.key == 'restaurant.bar.stool');
-    doc.commands.execute(
-        placeSymbol(doc, stool, at: Vector2(-6400, -3100), numbered: false));
+    demo.area.stored = c.save();
+    placeStool(c, 1025, 1750, label: '');
     await settle(tester);
     expect(demo.log.first, 'Salon: table — added');
 
@@ -381,7 +296,7 @@ void main() {
     await tester.sendKeyDownEvent(LogicalKeyboardKey.delete);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.delete);
     await settle(tester);
-    expect(c.tables.map((t) => t.number), isNot(contains('3')),
+    expect(c.units.map((u) => u.label), isNot(contains('3')),
         reason: 'premise: deleted');
     expect(demo.log.first, 'Salon: table 3 removed');
     c.undo();
@@ -389,7 +304,7 @@ void main() {
     expect(demo.log.first, 'Salon: table 3 added');
 
     final log = [...demo.log];
-    rename(c, '4', '14');
+    expect(c.setUnitLabel('4', '14'), isTrue);
     await settle(tester);
     expect(demo.log, log, reason: 'a changed table is not logged');
 
@@ -413,8 +328,9 @@ void main() {
   });
 
   testWidgets('DE8 the new words in German and Turkish', (tester) async {
-    final demo = await pumpSamples(tester, locale: const Locale('de'));
+    final demo = await pumpDemo(tester, locale: const Locale('de'));
     final c = demo.area.controller;
+    demo.area.stored = c.save();
     expect(find.text('Tische verknüpfen'), findsOneWidget);
     expect(textOf(tester, 'unlinked'), 'Nicht verknüpft: 11');
     await press(tester, 'link-tables');
@@ -443,7 +359,7 @@ void main() {
     await press(tester, 'revert');
     expect(demo.log[1], 'Salon: Plan ersetzt');
 
-    // The stored sample carries no ids: Revert unlinked the tables.
+    // The stored plan carries no ids: Revert unlinked the tables.
     await press(tester, 'lang-tr');
     await press(tester, 'mode-design');
     expect(find.text('Masaları bağla'), findsOneWidget);
@@ -474,8 +390,9 @@ void main() {
       'DE9 final review F-5: Revert in the design after the service kept a '
       'layout logs the replaced plan and restores nothing then; entering '
       'the service puts the kept move back', (tester) async {
-    final demo = await pumpSamples(tester);
+    final demo = await pumpDemo(tester);
     final c = demo.area.controller;
+    demo.area.stored = c.save();
     await press(tester, 'mode-service');
     await drag(tester, centreOf(c, '1'), const Offset(50, 0));
     await tester.pump();
@@ -498,16 +415,16 @@ void main() {
       'DE10 final review F-3: a double tap on a number two tables carry '
       'logs no id, on either table, though both are linked; a number on one '
       'table still logs its id', (tester) async {
-    final demo = await pumpSamples(tester);
+    final demo = await pumpDemo(tester);
     final c = demo.area.controller;
     await press(tester, 'link-tables');
     // After the link: 2 renumbered 1, so two linked tables carry 1.
-    rename(c, '2', '1');
+    relabel(c, {'2': '1'});
     await settle(tester);
     await press(tester, 'mode-service');
     final ones = [
-      for (final d in c.tableDetails)
-        if (d.table.number == '1') d,
+      for (final d in c.unitDetails)
+        if (d.unit.label == '1') d,
     ];
     expect(ones.map((d) => d.data['id']), ['salon-1', 'salon-2'],
         reason: 'premise: two linked tables numbered 1');
@@ -527,5 +444,24 @@ void main() {
     await tester.pump();
     expect(demo.log.first, 'Salon: table 7 opened (id salon-7)');
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('D8 an export is logged with its name and size', (tester) async {
+    final demo = await pumpDemo(tester);
+    await press(tester, 'toolbar-export');
+    await tester.tap(byKey('export-format-plan.png'));
+    await tester.pump();
+    await tester.tap(byKey('export-dpi-96'));
+    await tester.pump();
+    await tester.tap(byKey('export-ok'));
+    await tester.pump();
+    bool exported() =>
+        demo.log.isNotEmpty && demo.log.first.contains('exported');
+    await waitFor(tester, exported);
+    expect(demo.log.first, startsWith('Salon: exported salon.png, '));
+    expect(demo.log.first, endsWith(' bytes'));
+    expect(demo.lastExport!.mimeType, 'image/png');
+    expect(
+        demo.log.first, contains(', ${demo.lastExport!.bytes.length} bytes'));
   });
 }

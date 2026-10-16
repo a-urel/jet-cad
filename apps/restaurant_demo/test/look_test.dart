@@ -1,49 +1,33 @@
-// PENDING (Task 8 of the restaurant-kit plan): the old look_test.dart, moved aside
-// unported because it cannot compile on the new API yet. Task 8 ports it per
-// docs/superpowers/specs/2026-10-16-restaurant-kit-test-audit.md and deletes
-// this file; Task 11 checks test/_pending/ is empty. Not run, not analysed: the .txt suffix keeps it out of the analyzer (the old packages are no longer deps); the name does
-// not end in _test.dart. Task 7/8 renames it back while porting. No case is dropped.
-
-// Host embedding API spec T-1, T-2, F-4 in the demo: the app bar's
-// Standard / POS look. The POS look is a `FloorPlanTheme` in each of the
-// app's themes (lib/demo_theme.dart), a local `Theme` with a hand-built
-// `ColorScheme` around the view, and one field of the view's own
-// (`selectionWidth: 3`), merged over the extension. Read back on the
-// Salon sample, whose fitted camera is neither the identity nor at the
-// origin, in both modes, under a light and a dark platform, in pixels
-// where the demo can see them (the bar, the surround, the selection, the
-// fill, the caption's size) and in the theme the view resolves where it
-// cannot (the caption's weight and family). Standard again gives back
-// today's pixels, byte for byte. Expected colours are the theme's own
-// tokens or composited here, never read from the planner.
+// Ported from the old apps/restaurant_demo/test/look_test.dart (the
+// restaurant-kit test audit, section 8, docs/superpowers/specs/
+// 2026-10-16-restaurant-kit-test-audit.md): the app bar's Standard / POS
+// look. The POS look is a `PlanTheme` in each of the app's themes
+// (lib/demo_theme.dart), a local `Theme` with a hand-built `ColorScheme`
+// around the view, and one field of the view's own (`selectionWidth: 3`),
+// merged over the extension. Read back on the Salon sample, whose fitted
+// camera is neither the identity nor at the origin, in both modes, under a
+// light and a dark platform, in pixels where the demo can see them (the bar,
+// the surround, the selection, the fill, the caption's size) and in the theme
+// the view resolves where it cannot (the caption's weight and family).
+// Standard again gives back today's pixels, byte for byte. Expected colours
+// are the theme's own tokens or composited here, never read from the
+// planner.
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show RenderRepaintBoundary;
-import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
     show PaperPalette, SelectionOverlayPainter;
-import 'package:jet_cad_floor_plan/jet_cad_floor_plan.dart';
+import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 import 'package:restaurant_demo/demo_theme.dart';
-import 'package:restaurant_demo/main.dart';
+import 'package:restaurant_demo/statuses.dart' show kStatuses;
 
-Finder byKey(String k) => find.byKey(Key(k));
-
-/// The demo on the sample plans, at 1600 x 1000.
-Future<DemoHomeState> pumpSamples(WidgetTester tester) async {
-  final plans = (await tester.runAsync(() => loadSamplePlans(rootBundle)))!;
-  await tester.binding.setSurfaceSize(const Size(1600, 1000));
-  addTearDown(() => tester.binding.setSurfaceSize(null));
-  await tester.pumpWidget(RestaurantDemo(plans: plans));
-  await tester.pump();
-  await tester.pump();
-  return tester.state<DemoHomeState>(find.byType(DemoHome));
-}
+import 'support/demo_rig.dart';
 
 /// Past the app's theme animation (200 ms) and the view's re-measure.
-Future<void> settle(WidgetTester tester) async {
+Future<void> settleTheme(WidgetTester tester) async {
   await tester.pump();
   await tester.pump(const Duration(milliseconds: 300));
   await tester.pump(const Duration(milliseconds: 300));
@@ -120,9 +104,8 @@ int over(Color colour, double alpha, int paper) {
 
 /// Table [number]'s bounding box on the screen, from its world corners
 /// through the public `worldToGlobal`.
-Rect screenBox(FloorPlanController c, String number) {
-  final d = c.tableDetails.singleWhere((d) => d.table.number == number);
-  final points = [for (final p in d.corners) c.worldToGlobal(p)!];
+Rect screenBox(PlanController c, String number) {
+  final points = unitCorners(c, number);
   var box = Rect.fromPoints(points[0], points[1]);
   for (final p in points.skip(2)) {
     box = box.expandToInclude(Rect.fromPoints(p, p));
@@ -138,7 +121,7 @@ SelectionOverlayPainter overlay(WidgetTester tester) => tester
 
 /// A pixel of the drawing area's surround: its bottom-left corner, clear of
 /// the page at the sample's fit.
-Offset surround(FloorPlanController c) {
+Offset surround(PlanController c) {
   final r = c.canvasRect.value!;
   return Offset(r.left + 3, r.bottom - 3);
 }
@@ -152,14 +135,14 @@ Offset barBackground(WidgetTester tester) {
 /// The look's controls and what the view resolved, by the public API: the
 /// ambient extension and colour scheme at the view's element, and the
 /// view's own `theme:`.
-({FloorPlanTheme? ambient, ColorScheme scheme, FloorPlanTheme? view}) seen(
+({PlanTheme? ambient, ColorScheme scheme, PlanTheme? view}) seen(
     WidgetTester tester) {
-  final view = find.byType(FloorPlanView);
+  final view = find.byType(PlanEditor);
   final theme = Theme.of(tester.element(view));
   return (
-    ambient: theme.extension<FloorPlanTheme>(),
+    ambient: theme.extension<PlanTheme>(),
     scheme: theme.colorScheme,
-    view: tester.widget<FloorPlanView>(view).theme,
+    view: tester.widget<PlanEditor>(view).theme,
   );
 }
 
@@ -185,10 +168,10 @@ void main() {
         tester.platformDispatcher.platformBrightnessTestValue = Brightness.dark;
         addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
       }
-      final demo = await pumpSamples(tester);
+      final demo = await pumpDemo(tester);
       final c = demo.area.controller;
       final light = brightness == Brightness.light;
-      final pos = posFloorPlanTheme(brightness);
+      final pos = posPlanTheme(brightness);
       final posScheme = posColorScheme(brightness);
       // The Salon's page is White: under the dark theme it is shown on the
       // dark canvas (14d K1), whose selection is the dark set's.
@@ -199,18 +182,12 @@ void main() {
 
       // Bill on 2 through the demo's own button, 7 selected.
       await tester.tap(byKey('mode-service'));
-      await settle(tester);
+      await settleTheme(tester);
       c.select({'2'});
       await tester.pump();
-      await tester.scrollUntilVisible(byKey('status-bill'), 100,
-          scrollable: find
-              .descendant(
-                  of: byKey('side-panel'), matching: find.byType(Scrollable))
-              .first);
-      await tester.tap(byKey('status-bill'));
-      await tester.pump();
+      await pressInPanel(tester, 'status-bill');
       c.select({'7'});
-      await settle(tester);
+      await settleTheme(tester);
 
       final standardSeen = seen(tester);
       expect(standardSeen.ambient, isNull, reason: 'Standard: no extension');
@@ -225,7 +202,7 @@ void main() {
         final box7 = screenBox(c, '7').inflate(6);
         return (
           shot: shot,
-          view: tester.getRect(find.byType(FloorPlanView)),
+          view: tester.getRect(find.byType(PlanEditor)),
           selectionPixels:
               shot.count(box7, (p) => distance(p, rgbOf(selection)) <= 3),
         );
@@ -246,7 +223,7 @@ void main() {
       expect(standardService.selectionPixels, greaterThan(200),
           reason: 'premise: 7 is outlined in the standard colour');
       final box2 = screenBox(c, '2');
-      final billFill = DemoHomeState.kStatuses['Bill']!.color;
+      final billFill = kStatuses['Bill']!.color;
       if (light) {
         expect(
             standardService.shot
@@ -257,7 +234,7 @@ void main() {
 
       // Standard, the design.
       await tester.tap(byKey('mode-design'));
-      await settle(tester);
+      await settleTheme(tester);
       final standardDesign =
           await check('Standard design', standardSet.selection);
       expect(hex(standardDesign.shot.rgbAtOffset(surround(c))),
@@ -267,12 +244,12 @@ void main() {
 
       // POS, the design.
       await tester.tap(byKey('look-pos'));
-      await settle(tester);
+      await settleTheme(tester);
       final posSeen = seen(tester);
       expect(posSeen.ambient, pos,
           reason: 'the extension of the app\'s $name theme, carried into '
               'the local Theme');
-      expect(posSeen.view, const FloorPlanTheme(selectionWidth: 3));
+      expect(posSeen.view, const PlanTheme(selectionWidth: 3));
       expect(posSeen.scheme, posScheme, reason: 'the local Theme\'s scheme');
       expect(posSeen.ambient!.selectionWidth, isNull,
           reason: 'premise: the width is the view\'s alone (the merge)');
@@ -296,7 +273,7 @@ void main() {
 
       // POS, the service.
       await tester.tap(byKey('mode-service'));
-      await settle(tester);
+      await settleTheme(tester);
       expect(tester.getSize(byKey('service-bar')).height, 52);
       expect(
           c.canvasRect.value!.top, tester.getRect(byKey('service-bar')).bottom,
@@ -339,9 +316,9 @@ void main() {
       // modes. (Switched in the service, the bar's 8 px go and the plan
       // moves up with the canvas, as on any host layout change: S-10.)
       await tester.tap(byKey('mode-design'));
-      await settle(tester);
+      await settleTheme(tester);
       await tester.tap(byKey('look-standard'));
-      await settle(tester);
+      await settleTheme(tester);
       expect(seen(tester).ambient, isNull);
       expect(seen(tester).view, isNull);
       final againDesign =
@@ -351,7 +328,7 @@ void main() {
           standardDesign.shot.region(standardDesign.view),
           reason: 'design: today\'s pixels again');
       await tester.tap(byKey('mode-service'));
-      await settle(tester);
+      await settleTheme(tester);
       expect(tester.getSize(byKey('service-bar')).height, 44);
       final againService =
           await check('Standard again, service', standardSet.selection);
@@ -364,15 +341,15 @@ void main() {
       // ink grows from 11 to 12 px glyphs (the test font draws each glyph
       // a full em; its weight is the resolved style's, above).
       final centre =
-          c.tableDetails.singleWhere((d) => d.table.number == '2').center!;
-      c.centerOn(centre, scale: c.camera.value.scale * 3);
-      await settle(tester);
+          c.unitDetails.singleWhere((d) => d.unit.label == '2').center!;
+      c.centerOn(centre, scale: c.cameraValue.value.scale * 3);
+      await settleTheme(tester);
       bool ink(int p) => light
           ? [16, 8, 0].every((s) => ((p >> s) & 0xFF) < 120)
           : [16, 8, 0].every((s) => ((p >> s) & 0xFF) > 200);
       final standardInk = (await shoot(tester)).count(screenBox(c, '2'), ink);
       await tester.tap(byKey('look-pos'));
-      await settle(tester);
+      await settleTheme(tester);
       final posInk = (await shoot(tester)).count(screenBox(c, '2'), ink);
       // 4 glyphs of 12 x 12 against 4 of 11 x 11: 92 pixels more.
       expect(posInk - standardInk, greaterThanOrEqualTo(80),
@@ -381,23 +358,23 @@ void main() {
   }
 
   testWidgets('DL3 the look switch in German and Turkish', (tester) async {
-    await pumpSamples(tester);
+    await pumpDemo(tester);
     expect(find.text('Standard'), findsOneWidget);
     expect(find.text('POS'), findsOneWidget);
     expect(find.byTooltip('Look'), findsOneWidget);
     await tester.tap(byKey('lang-de'));
-    await settle(tester);
+    await settleTheme(tester);
     expect(find.text('Standard'), findsOneWidget);
     expect(find.text('Kasse'), findsOneWidget);
     expect(find.byTooltip('Aussehen'), findsOneWidget);
     await tester.tap(byKey('lang-tr'));
-    await settle(tester);
+    await settleTheme(tester);
     expect(find.text('Standart'), findsOneWidget);
     expect(find.text('Kasa'), findsOneWidget);
     expect(find.byTooltip('Görünüm'), findsOneWidget);
     await tester.tap(byKey('look-pos'));
-    await settle(tester);
-    expect(seen(tester).ambient, kPosFloorPlanLight,
+    await settleTheme(tester);
+    expect(seen(tester).ambient, kPosPlanLight,
         reason: 'the switch works in any language');
   });
 }

@@ -16,7 +16,8 @@ final class Area {
   final PlanController controller;
 
   /// The plan last saved (`controller.save()`), in memory; null until a
-  /// Save. Revert reloads it, or makes a new plan when there is none.
+  /// Save (a save settles the plan's decimal separator, so none is taken at
+  /// the start). Revert reloads it, or makes a new plan when there is none.
   String? stored;
 
   /// The service layout last seen (`controller.serviceJson()`), kept on

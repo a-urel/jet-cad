@@ -14,6 +14,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show kUnitLabelTag;
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 import 'package:restaurant_demo/main.dart';
+import 'package:restaurant_demo/samples/place_tables.dart';
 
 Finder byKey(String k) => find.byKey(Key(k));
 
@@ -21,10 +22,12 @@ Finder byKey(String k) => find.byKey(Key(k));
 Future<DemoHomeState> pumpDemo(WidgetTester tester,
     {Size size = const Size(1600, 1000),
     Locale? locale,
-    math.Random? random}) async {
+    math.Random? random,
+    PagePrinter? printer}) async {
   await tester.binding.setSurfaceSize(size);
   addTearDown(() => tester.binding.setSurfaceSize(null));
-  await tester.pumpWidget(RestaurantDemo(locale: locale, random: random));
+  await tester.pumpWidget(
+      RestaurantDemo(locale: locale, random: random, printer: printer));
   await tester.pump();
   await tester.pump();
   return tester.state<DemoHomeState>(find.byType(DemoHome));
@@ -133,8 +136,11 @@ Future<void> enterService(WidgetTester tester) async {
   await tester.pump();
 }
 
-/// Scrolls the side panel until [key] is in view (it is a lazy list).
+/// Scrolls the side panel until [key] is in view (it is a lazy list): from
+/// the top, so a key above the current offset is found too.
 Future<void> reveal(WidgetTester tester, String key) async {
+  await tester.drag(byKey('side-panel'), const Offset(0, 100000));
+  await tester.pump();
   await tester.scrollUntilVisible(byKey(key), 100,
       scrollable: find
           .descendant(
@@ -150,3 +156,86 @@ Future<void> pressInPanel(WidgetTester tester, String key) async {
   await tester.pump();
   await tester.pump();
 }
+
+/// Two frames: the controller's streams and the view's listeners settle.
+Future<void> settle(WidgetTester tester) async {
+  await tester.pump();
+  await tester.pump();
+}
+
+/// Taps the widget keyed [key] and settles.
+Future<void> press(WidgetTester tester, String key) async {
+  await tester.tap(byKey(key));
+  await settle(tester);
+}
+
+/// The text of the `Text` keyed [key].
+String textOf(WidgetTester tester, String key) =>
+    tester.widget<Text>(byKey(key)).data!;
+
+/// The sorted tables line of the side panel.
+String tablesText(WidgetTester tester) => textOf(tester, 'tables');
+
+Duration ms(int n) => Duration(milliseconds: n);
+
+/// A floor point of the Salon, world millimetres: between the top row
+/// (1 to 3, from y 1625) and the middle one (4 and 5, up to y 0), left of
+/// 6 and 7 (from x 2975): on no table's box, off the origin.
+const Offset kFloor = Offset(-3210, 810);
+
+/// A mouse click whose down is stamped [down], the up 40 ms later.
+Future<void> click(WidgetTester tester, Offset at, Duration down) async {
+  final g = await tester.createGesture(kind: PointerDeviceKind.mouse);
+  await g.down(at, timeStamp: down);
+  await g.up(timeStamp: down + ms(40));
+  await g.removePointer();
+}
+
+/// A mouse drag from [from] by [by], in three moves.
+Future<void> drag(WidgetTester tester, Offset from, Offset by) async {
+  final g = await tester.createGesture(kind: PointerDeviceKind.mouse);
+  await g.down(from, timeStamp: ms(5000));
+  for (var i = 1; i <= 3; i++) {
+    await g.moveTo(from + by * (i / 3), timeStamp: ms(5000 + 20 * i));
+  }
+  await g.up(timeStamp: ms(5100));
+  await g.removePointer();
+}
+
+/// A service move of the unit labelled [label] in [c]'s service copy, by a
+/// raw command (a gesture would do it too: this one needs no geometry).
+void serviceMove(PlanController c, String label,
+    {double dx = 400, double dy = -300}) {
+  final doc = c.activeDocument;
+  final node = doc.tree[unitInstance(c, label)!]! as InstanceNode;
+  doc.commands.execute(CompoundCommand([
+    TransformNodeCommand(
+        node.handle, Transform2.translation(dx, dy).multiply(node.transform))
+  ], label: 'Move'));
+}
+
+/// Pumps, letting the real clock run, until [done] or about 8 s.
+Future<void> waitFor(WidgetTester tester, bool Function() done) async {
+  for (var i = 0; i < 400 && !done(); i++) {
+    await tester
+        .runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+    await tester.pump();
+  }
+}
+
+/// Places a bar stool into [c]'s design [x] mm right and [y] mm up of the
+/// sheet's lower-left corner, its label [label] (an empty one leaves it
+/// unnumbered): the sample's placer, then the label set by a raw command.
+Handle placeStool(PlanController c, double x, double y,
+    {required String label}) {
+  final instance = TablePlacer(c.document).place('restaurant.bar.stool', x, y);
+  c.document.commands.execute(
+      SetEntityTextCommand(labelEntity(c, instance), label, kUnitLabelTag));
+  return instance;
+}
+
+/// Every unit's data that has any, by label (a missing label reads `—`).
+Map<String, Map<String, String>> dataByLabel(PlanController c) => {
+      for (final d in c.unitDetails)
+        if (d.data.isNotEmpty) d.unit.label ?? '—': d.data,
+    };
