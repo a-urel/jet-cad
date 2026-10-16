@@ -3,14 +3,18 @@
 // selection_panel.dart:1373-1386) as property specs: the name, trimmed and
 // never empty, and the area as drawn, a TextDisplay over the object (spec
 // 3a C1.1). The colour row's room half (colors/color_picker.dart:17-57) is
-// the type's colour target. Task 19 adds the Room tool.
+// the type's colour target. The Room tool is [roomPlanTool].
+import 'package:flutter/material.dart' show Icons;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
 import 'package:meta/meta.dart' show visibleForTesting;
 
 import '../ids.dart';
+import '../live.dart';
 import 'room.dart';
 import 'room_grips.dart';
+import 'room_inputs.dart';
+import 'room_tool.dart';
 
 /// The room type (spec 3a C3.5).
 ///
@@ -89,3 +93,21 @@ String roomAreaText(PlanObject object) {
   _areaMemo[doc] = (room: room, state: state, text: text);
   return text;
 }
+
+/// The Room tool (spec 3a C3.5): M. One click inside a face commits one
+/// room, named with the next free numbered name, in one undo step
+/// (structure, components and geometry: today's commit); its notice is
+/// "already a room" (spec 3a C1.2). Its inputs are the kit's shared
+/// RoomInputs, its live rule the plan's.
+final PlanTool roomPlanTool = PlanTool(
+  id: ArchitectureTools.room,
+  icon: Icons.meeting_room_outlined,
+  letter: 'M',
+  needs: const {
+    Capability.structure,
+    Capability.components,
+    Capability.geometry,
+  },
+  create: (s) =>
+      RoomTool(roomInputsOf(s), words: s.words, live: liveTypesOf(s)),
+);

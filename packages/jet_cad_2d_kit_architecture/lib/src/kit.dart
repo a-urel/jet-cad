@@ -30,6 +30,7 @@ final PlanKit architectureKit = PlanKit(
     doorPlanTool,
     windowPlanTool,
     gapPlanTool,
+    roomPlanTool,
     separatorPlanTool,
   ],
   names: architectureNames,
