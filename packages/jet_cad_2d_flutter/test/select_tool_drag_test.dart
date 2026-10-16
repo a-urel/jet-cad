@@ -247,25 +247,33 @@ void main() {
   });
 
   test(
-      'a drag back to the press pixel, or snapped back onto its base, adds '
-      'nothing (M-03p)', () {
+      'a drag back to the press pixel adds nothing (M-03p, first half, '
+      'unchanged)', () {
     final s = gripScene();
-    // Since 4a O1 the dragged line no longer snaps to its own endpoint, so
-    // another, unselected line ends where the dragged one starts: that is
-    // the snap the base and the target both land on.
-    addEntity(s.document, s.document.rootHandle, EntityKind.line,
-        [7010, 3020, 6900, 3000], []);
-    final depth0 = s.document.commands.undoDepth;
     final rig = gripRig(s.document, objectSnap: true);
     rig.selection.replace([k(s.line)]);
     final from = screenOf(rig.camera, bodyX, bodyY);
     pressAndMove(rig, from, from + const Offset(40, 0));
     rig.tool.onPointerMove(pointerAt(rig.camera, from), rig.context);
     release(rig, from);
-    expect(rig.document.commands.undoDepth, depth0,
+    expect(rig.document.commands.undoDepth, 0,
         reason: 'the same pixel under the same camera is a bit-identical '
             'world point, so Δ == 0');
+  });
 
+  // Decided: premise impossible (M-03p's second half released the dragged
+  // line onto its OWN endpoint; since 4a O1 the target never snaps to the
+  // dragged object's geometry). The intent, a target snapped back onto the
+  // base, is kept with another, unselected line ending where the dragged
+  // one starts; the base still snaps (to either endpoint, the same point).
+  test('a target snapped back onto its base adds nothing (M-03p, second half)',
+      () {
+    final s = gripScene();
+    addEntity(s.document, s.document.rootHandle, EntityKind.line,
+        [7010, 3020, 6900, 3000], []);
+    final depth0 = s.document.commands.undoDepth;
+    final rig = gripRig(s.document, objectSnap: true);
+    rig.selection.replace([k(s.line)]);
     // 8 world units along the line from its start: 8.8 px, outside the grip
     // (7 px), inside the aperture (10 px). The base snaps onto the endpoint,
     // and a release 3 px from the endpoint snaps the target onto it too.
@@ -276,6 +284,29 @@ void main() {
     release(rig, screenOf(rig.camera, 7010, 3020) + const Offset(3, 0));
     expect(rig.document.commands.undoDepth, depth0,
         reason: 'target == base: Δ is exactly zero');
+  });
+
+  test(
+      'a line grabbed near its own endpoint lands that endpoint exactly on '
+      'another line\'s endpoint: the base keeps the own-geometry snap (4a O1)',
+      () {
+    final s = gripScene();
+    addEntity(s.document, s.document.rootHandle, EntityKind.line,
+        [7300, 3200, 7400, 3250], []);
+    final rig = gripRig(s.document, objectSnap: true);
+    rig.selection.replace([k(s.line)]);
+    final along = Vector2(7010, 3020) + Vector2(120, 40).normalized() * 8.0;
+    final nearEnd = screenOf(rig.camera, along.x, along.y);
+    // 3 px from the other line's start: its endpoint is the only snap.
+    final to = screenOf(rig.camera, 7300, 3200) + const Offset(3, 0);
+    pressAndMove(rig, nearEnd, to);
+    expect(rig.tool.dragKind, DragKind.move);
+    final t = rig.tool.selectionPreviewTransform!;
+    // Mutation: the exclusion also applied to the base -> the base stays the
+    // raw press point and the vector is off by the 8 mm offset.
+    expect(t.e, closeTo(7300 - 7010, 1e-9));
+    expect(t.f, closeTo(3200 - 3020, 1e-9));
+    rig.tool.cancel(rig.context);
   });
 
   test('with grid snap on, on-grid geometry stays on the grid (M-03s)', () {

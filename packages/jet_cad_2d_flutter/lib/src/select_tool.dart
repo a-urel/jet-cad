@@ -421,7 +421,6 @@ class SelectTool extends Tool {
   /// chain as the target but without ortho. With grid snap on, a move from
   /// on-grid geometry is then a lattice vector (M-03s).
   void _moveBase(ToolContext ctx, GripDrag drag) {
-    _exclude = drag.handles;
     _resolve(ctx, _pressWorld, null);
     drag.base.setFrom(_dragPoint.point);
   }
