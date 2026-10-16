@@ -188,6 +188,12 @@ class PlanPagePanelState extends State<PlanPagePanel> {
   /// The panel sits in a [PlanShortcutGuard], as the property panel and
   /// a layer's rename field do: the scale field keeps its keys (spec P2,
   /// "Text fields keep their keys") wherever a host puts the panel.
+  /// A segment label that stays on one line: the segment is narrower than
+  /// "Landscape" or "Querformat" beside the selected-check icon, so the
+  /// text shrinks to its segment instead of breaking mid-word (spec R2 O2).
+  Widget _oneLine(String text, Key key) => FittedBox(
+      fit: BoxFit.scaleDown, child: Text(text, key: key, maxLines: 1));
+
   @override
   Widget build(BuildContext context) => PlanShortcutGuard(
       controller: widget.controller,
@@ -250,12 +256,12 @@ class PlanPagePanelState extends State<PlanPagePanel> {
                   segments: [
                     ButtonSegment(
                         value: PageOrientation.portrait,
-                        label: Text(_strings.portrait,
-                            key: const Key('page-orientation-portrait'))),
+                        label: _oneLine(_strings.portrait,
+                            const Key('page-orientation-portrait'))),
                     ButtonSegment(
                         value: PageOrientation.landscape,
-                        label: Text(_strings.landscape,
-                            key: const Key('page-orientation-landscape'))),
+                        label: _oneLine(_strings.landscape,
+                            const Key('page-orientation-landscape'))),
                   ],
                   selected: {page.orientation},
                   onSelectionChanged: !editable
