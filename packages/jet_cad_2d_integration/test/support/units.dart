@@ -26,11 +26,27 @@ import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 const String fxKitId = 'fx';
 
-/// The fixtures' kit: no type, no tool; with [library], a symbol library
-/// of those symbols (the Symbols tab offers them).
+/// The fixture kit's words (ruling IP-R4; 3a Task 27's review): its
+/// library table's name and category in German and Turkish, today's
+/// furniture words for `dining.table.square.two` and `Dining Room`. English
+/// is the library's stored name.
+const KitNames fxNames = KitNames({
+  'de': {
+    'symbol:fx.dining.table.two': 'Quadratischer Esstisch, 2 Plätze',
+    'category:fx/Dining Room': 'Esszimmer',
+  },
+  'tr': {
+    'symbol:fx.dining.table.two': 'Kare yemek masası, 2 kişilik',
+    'category:fx/Dining Room': 'Yemek odası',
+  },
+});
+
+/// The fixtures' kit: no type, no tool, [fxNames]; with [library], a
+/// symbol library of those symbols (the Symbols tab offers them).
 PlanKit fxKit({List<CatalogSymbol> library = const []}) => PlanKit(
       id: fxKitId,
       version: '1.0.0',
+      names: fxNames,
       symbols: [
         if (library.isNotEmpty)
           SymbolLibrarySource(

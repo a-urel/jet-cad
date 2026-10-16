@@ -8,7 +8,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
-import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
 import 'package:jet_cad_2d_integration/jet_cad_2d_integration.dart';
 import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart'
     show BoxParams;
@@ -17,18 +16,13 @@ import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../support/canvas_rig.dart';
 import '../support/editor_rig.dart' show pagePlanJson;
+import '../support/room_plans.dart' show select;
 
 Finder get width => find.byKey(const Key('property-width'));
 Finder get height => find.byKey(const Key('property-height'));
 
 String textOf(WidgetTester tester, Finder f) =>
     tester.widget<TextField>(f).controller!.text;
-
-Future<void> select(
-    WidgetTester tester, PlanController c, List<Handle> hs) async {
-  c.activeSelection.replace([for (final h in hs) SelectionKey.root(h)]);
-  await tester.pump();
-}
 
 /// `c.document.components.withComponent<BoxParams>()`, ascending: today's
 /// `boxes(view.document)`.

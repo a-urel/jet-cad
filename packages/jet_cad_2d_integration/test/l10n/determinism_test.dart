@@ -1,4 +1,3 @@
-// ignore_for_file: invalid_use_of_internal_member
 // Spec 14d I-3, M-14d-g (revision 2, V-9): a document's bytes never depend
 // on the UI language. From a loaded plan, the same edits made through the
 // UI in English and in Turkish -- a table placed from the palette, turned
@@ -28,7 +27,11 @@ import 'package:vector_math/vector_math_64.dart' show Vector2;
 import '../support/canvas_rig.dart';
 import '../support/plans.dart'
     show dimLines, dimText, labelsOf, planWith, textOf;
-import '../support/units.dart' show diningTableTwo, fxKit;
+import '../support/units.dart' show diningTableTwo, fxKit, fxNames;
+
+/// The library table's Turkish name, as the Turkish UI shows it.
+final String kTurkishTable =
+    fxNames.words['tr']!['symbol:fx.dining.table.two']!;
 
 /// The sample plan, with a layer `Bar` beside its own, over the
 /// architecture kit and the fixture kit's library table (ruling IP-R4).
@@ -106,6 +109,11 @@ Future<String> editedIn(
   expect(placed, hasLength(1), reason: 'premise: one table placed');
   c.activeSelection.replace([SelectionKey.root(placed.single.handle)]);
   await tester.pump();
+  // The UI shows the table's name in its language (the fixture kit's
+  // words, ruling IP-R4); the copy stores the library's English one.
+  expect(tester.widget<Text>(find.byKey(const Key('symbol-name'))).data,
+      locale.languageCode == 'tr' ? kTurkishTable : diningTableTwo.name,
+      reason: 'premise: the name shown in the UI\'s language');
   await commit(
       tester, 'symbol-rotation', locale.languageCode == 'tr' ? '30,5' : '30.5');
   await commit(tester, 'unit-label', '7');
@@ -141,6 +149,7 @@ Future<String> editedIn(
   await tester.pump();
   // The canvas holds every plan tool in the guard: the tool inside it
   // (`toolFor`, @internal, ruling R-P9) is the Flutter layer's SelectTool.
+  // ignore: invalid_use_of_internal_member
   expect(c.toolFor(c.activeTool.value), isA<SelectTool>(),
       reason: 'premise: the keys reach the canvas\'s Select tool');
   c.activeSelection.replace([SelectionKey.root(kitchen)]);
@@ -225,6 +234,8 @@ void main() {
     expect(en, contains('13.97 m²'), reason: 'premise: its area');
     expect(en, contains('"4.68"'), reason: 'premise: moved');
     expect(en, isNot(contains('"3.58"')), reason: 'premise: moved');
+    expect(tr, isNot(contains(kTurkishTable)),
+        reason: 'the stored name is the library\'s, never the one shown');
     expect(tr, en);
   });
 }

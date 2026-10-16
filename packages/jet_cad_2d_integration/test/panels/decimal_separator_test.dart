@@ -26,7 +26,7 @@ import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
-    show InteractionLayer, SelectionKey, ViewportTransform;
+    show InteractionLayer, ViewportTransform;
 import 'package:jet_cad_2d_integration/jet_cad_2d_integration.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
@@ -34,14 +34,10 @@ import 'package:vector_math/vector_math_64.dart' show Vector2;
 import '../support/canvas_rig.dart';
 import '../support/plans.dart';
 import '../support/q0_plan.dart';
+import '../support/room_plans.dart' show select;
 
 String textAt(WidgetTester tester, String key) =>
     tester.widget<Text>(find.byKey(Key(key))).data!;
-
-Future<void> select(WidgetTester tester, PlanController c, Handle h) async {
-  c.activeSelection.replace([SelectionKey.root(h)]);
-  await tester.pump();
-}
 
 /// Runs [command] and pumps twice: the `DocChange` arrives a microtask
 /// late (10's `RN2` finding), and its rebuild lands in the next frame.
@@ -148,7 +144,7 @@ void main() {
     await pumpShell(tester, f.c);
 
     // The room stays selected across the switch, and across its undo.
-    await select(tester, f.c, f.room);
+    await select(tester, f.c, [f.room]);
     expect(textAt(tester, 'property-area'), '12.37 m²');
     await run(tester,
         () => doc.commands.execute(separatorTo(doc, DecimalSeparator.comma)));
@@ -159,7 +155,7 @@ void main() {
     expect(textAt(tester, 'property-area'), '12.37 m²');
 
     // The dimension likewise.
-    await select(tester, f.c, f.dim);
+    await select(tester, f.c, [f.dim]);
     expect(textAt(tester, 'property-value'), '345.7');
     await run(tester, doc.commands.redo);
     expect(textAt(tester, 'property-value'), '345,7');
@@ -187,9 +183,9 @@ void main() {
     final doc = f.doc;
     expect(pageOf(doc).decimalSeparator, DecimalSeparator.point);
     await pumpShell(tester, f.c, german: true);
-    await select(tester, f.c, f.room);
+    await select(tester, f.c, [f.room]);
     expect(textAt(tester, 'property-area'), '12.37 m²');
-    await select(tester, f.c, f.dim);
+    await select(tester, f.c, [f.dim]);
     expect(textAt(tester, 'property-value'), '345.7');
     // And a switch to comma, made while the dimension stays selected,
     // reaches it under this UI too.

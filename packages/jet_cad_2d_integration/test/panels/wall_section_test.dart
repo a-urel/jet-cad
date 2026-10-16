@@ -4,9 +4,9 @@
 // is rotated.
 // Ported from jet_cad_floor_plan/test/selection_panel_test.dart (WS1-WS11;
 // WS7 (Box) is 2a's) for jet_cad_2d_integration (3a Task 27); assertions
-// unchanged but rulings IP-R1, IP-R2, IP-R8. WS9 is split (the
-// controller's ruling, Task 18's rule): WS9-open and WS9-refused; they
-// read `frozen`, @internal (ruling R-P9).
+// unchanged but rulings IP-R1, IP-R2, IP-R8. WS9 becomes WS9-open (the
+// controller's ruling, Task 18's rule); it reads `frozen`, @internal
+// (ruling R-P9).
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -439,19 +439,23 @@ void main() {
   });
 
   // Decided: premise impossible under C1.10's freeze at open (Task 18's
-  // rule). Today's WS9 edited the malformed wall A and saw its edit
-  // refused at the commit; the plan freezes and locks A when it opens the
+  // rule). Today's WS9 edited the malformed wall A and saw the document
+  // refuse it at the commit; the plan freezes and locks A when it opens the
   // file (a hookFailed diagnostic), and a frozen object shows no section.
-  // WS9-open pins what the plan now does with that file; WS9-refused keeps
-  // the old intent (a refused edit reverts the field, the document
-  // untouched, nothing escapes) on a live wall.
+  // The old intent (a refusal the document makes: `execute` answers false,
+  // the field reverts, the toggle keeps its value, nothing escapes) holds
+  // on the live walls C and B, which the lock refuses: A's fill names B's
+  // outline, so B regenerating without the frozen A (C1.5) would rewrite
+  // that fill, owned by the locked A; C's edit reaches B through the bands.
   testWidgets(
       'WS9-open a loaded fill naming another wall\'s outline freezes that '
-      'wall at open: a hookFailed diagnostic, no Wall section, a raw edit '
-      'refused (PlanLocked)', (tester) async {
+      'wall at open (a hookFailed diagnostic, no Wall section, a raw edit '
+      'refused); an edit of C or B the lock refuses reverts the field and '
+      'the toggle, no exception escapes; the box still edits', (tester) async {
     final view = await pumpPanel(tester, malformedPlanJson());
     final doc = view.document;
     expect(view.frozen, contains(wa));
+    expect(view.locked.value, {wa}, reason: 'the lock set is A alone');
     expect(
         [for (final d in view.diagnostics.value) (d.code, d.kitId, d.subject)],
         contains((
@@ -463,6 +467,8 @@ void main() {
     expect(wallSection, findsNothing);
     expect(thickness, findsNothing);
     final pa = doc.components.get<WallParams>(wa)!;
+    final pb = doc.components.get<WallParams>(wb)!;
+    final pc = doc.components.get<WallParams>(wc)!;
     final before = canon(doc);
     expect(
         () => doc.commands.execute(
@@ -471,56 +477,55 @@ void main() {
     expect(canon(doc), before);
     expect(doc.components.get<WallParams>(wa), pa);
     expect(tester.takeException(), isNull);
-    // Not kept: today's last lines ("C, no neighbour of A's, is sound: its
-    // edit lands", 120 and one step) do not hold here; the plan refuses
-    // C's edit too (PlanLocked, the lock hint set). Reported to the
-    // controller (task-27-report.md, fix report).
-  });
 
-  // Decided: premise impossible under C1.10's freeze at open (Task 18's
-  // rule). The old intent of WS9 on a live wall: the type's `write`
-  // refuses a thickness (ArgumentError, which the panel takes as a silent
-  // refusal), by Enter and by the focus loss; the field reverts to the
-  // stored value, the document and the undo depth unchanged, no exception
-  // escapes; then a valid thickness lands. M-WS9-r: the kit's `_thickness`
-  // refusal removed (wall_plan.dart) turns it red.
-  testWidgets(
-      'WS9-refused an edit the type refuses on a live wall reverts the '
-      'field: no exception escapes Enter or the focus loss, the document '
-      'unchanged; a valid thickness then lands', (tester) async {
-    final view = await pumpPanel(tester, panelPlanJson());
-    final doc = view.document;
-    final pa = doc.components.get<WallParams>(wa)!;
-    final before = enc(doc);
-    await select(tester, view, [wa]);
-    for (final bad in ['0', '-40', '${nextUp(kWallMaxThickness)}']) {
-      await tester.tap(thickness);
-      await tester.pump();
-      await enterAndSubmit(tester, thickness, bad);
-      await tester.pump();
-      expect(tester.takeException(), isNull, reason: bad);
-      expect(textOf(tester, thickness), '200', reason: 'reverted: $bad');
-      expect(doc.components.get<WallParams>(wa), pa, reason: bad);
-      expect(enc(doc), before, reason: bad);
-      expect(doc.commands.undoDepth, 0, reason: bad);
-      // The focus loss alone: typed, then a tap outside.
-      await tester.tap(thickness);
-      await tester.pump();
-      await tester.enterText(thickness, bad);
-      await tester.pump();
-      await tester.tap(wallSection);
-      await tester.pump();
-      expect(tester.takeException(), isNull, reason: bad);
-      expect(textOf(tester, thickness), '200', reason: 'reverted: $bad');
-      expect(enc(doc), before, reason: bad);
-      expect(doc.commands.undoDepth, 0, reason: bad);
-    }
+    // C through the panel: Enter, the lock refuses it.
+    await select(tester, view, [wc]);
     await tester.tap(thickness);
     await tester.pump();
     await enterAndSubmit(tester, thickness, '250');
-    expect(doc.components.get<WallParams>(wa), pa.copyWith(thickness: 250));
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    expect(textOf(tester, thickness), '150', reason: 'reverted');
+    expect(doc.components.get<WallParams>(wc), pc);
+    expect(canon(doc), before);
+    expect(doc.commands.undoDepth, 0);
+    // The focus loss alone: typed, then a tap outside.
+    await tester.tap(thickness);
+    await tester.pump();
+    await tester.enterText(thickness, '260');
+    await tester.pump();
+    await tester.tap(wallSection);
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    expect(textOf(tester, thickness), '150');
+    expect(canon(doc), before);
+    // The justification toggle: refused alike, and it keeps showing C's.
+    await choose(tester, 'justification', 'left');
+    expect(tester.takeException(), isNull);
+    expect(shownJustification(tester), {Justification.right});
+    expect(doc.components.get<WallParams>(wc), pc);
+    expect(canon(doc), before);
+    expect(doc.commands.undoDepth, 0);
+
+    // B, A's neighbour, likewise.
+    await select(tester, view, [wb]);
+    await tester.tap(thickness);
+    await tester.pump();
+    await enterAndSubmit(tester, thickness, '130');
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    expect(textOf(tester, thickness), '115', reason: 'reverted');
+    expect(doc.components.get<WallParams>(wb), pb);
+    expect(canon(doc), before);
+    expect(doc.commands.undoDepth, 0);
+
+    // The control: the box, outside the lock's reach, edits.
+    await select(tester, view, [bx]);
+    await tester.tap(width);
+    await tester.pump();
+    await enterAndSubmit(tester, width, '150');
+    expect(doc.components.get<BoxParams>(bx), const BoxParams(150, 70));
     expect(doc.commands.undoDepth, 1);
-    expect(textOf(tester, thickness), '250');
   });
 
   // 1e100 is the probe's; 1e25 sits under a bound far too high (1e30) and

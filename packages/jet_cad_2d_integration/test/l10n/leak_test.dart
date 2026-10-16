@@ -24,7 +24,7 @@ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 
 import '../support/canvas_rig.dart' show symbolsReady;
 import '../support/recording_plan_strings.dart';
-import '../support/units.dart' show diningTableTwo, fxKit;
+import '../support/units.dart' show diningTableTwo, fxKit, fxNames;
 
 class _Recording extends LocalizationsDelegate<PlanStrings> {
   const _Recording(this.strings);
@@ -68,13 +68,13 @@ Set<String> visibleTexts(WidgetTester tester) => {
 /// text, and its filling is a number, which the allowlist's number rules
 /// take already.
 ///
-/// The fixture kit has no words: its table's name and its category (the
-/// gallery's header) show as written, as today's library's names and
-/// categories in the language did (ruling IP-R4).
+/// And the fixture kit's Turkish words (ruling IP-R4): its table's name
+/// and category, as today's allowlist took the library's names and
+/// categories in the language. The English ones are not allowed: shown in
+/// Turkish, they would be a leak.
 final List<String> kitWords = [
   ...architectureKit.names.words['tr']!.values,
-  diningTableTwo.name,
-  diningTableTwo.category,
+  ...fxNames.words['tr']!.values,
 ];
 final List<RegExp> kitTemplates = [
   for (final w in architectureKit.names.words['tr']!.values)
