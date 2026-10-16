@@ -9,3 +9,8 @@ contract's authoring toolkit.
   version 1, each with the geometry of the old catalog.
 - `restaurantSymbolSource`, the library as a symbol source; `RestaurantSymbols`,
   its keys; `restaurantSymbolDefinitions()`, its definitions by `key@1`.
+- `restaurantKit`, the `PlanKit` (id `restaurant`): one symbol source, no
+  types, tools or attachments.
+- 25 units: every seated symbol is a numbered `table` unit whose capacity is
+  its seat count.
+- `restaurantNames`: every symbol and category in German and Turkish.

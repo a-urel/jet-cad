@@ -29,6 +29,7 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   lints: ^6.1.0
+  vector_math: ^2.2.0
 
 flutter:
   assets:

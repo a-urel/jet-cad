@@ -7,6 +7,8 @@ import 'dart:math' as math;
 
 import 'package:jet_cad_2d_kit/authoring.dart';
 
+import 'units.dart';
+
 /// The palette category of this file's symbols.
 const String boothsAndLounge = 'Booths and Lounge';
 
@@ -30,13 +32,14 @@ List<CatalogShape> _benchH(double x, double edgeY, double len,
 
 /// A booth: a [w] x [h] top between two benches as long as the top.
 CatalogSymbol _booth(String key, String name, double w, double h,
-    {required List<String> tags}) {
+    {required int seats, required List<String> tags}) {
   const oy = _benchDepth - chairTuck; // 500: the lower bench starts at 0
   return CatalogSymbol(
     key: key,
     name: name,
     category: boothsAndLounge,
     tags: tags,
+    unit: tableUnit(seats),
     base: (w / 2, oy + h / 2),
     shapes: [
       rect(0, oy, w, h),
@@ -51,7 +54,7 @@ CatalogSymbol _booth(String key, String name, double w, double h,
 /// [chairs] chairs in front (below), spaced evenly.
 CatalogSymbol _banquette(
     String key, String name, double w, double h, int chairs,
-    {required List<String> tags}) {
+    {required int seats, required List<String> tags}) {
   const c = chairSize / 2 - chairTuck;
   const oy = chairSize - chairTuck; // 350: the chairs start at 0
   return CatalogSymbol(
@@ -59,6 +62,7 @@ CatalogSymbol _banquette(
     name: name,
     category: boothsAndLounge,
     tags: tags,
+    unit: tableUnit(seats),
     base: (w / 2, oy + h / 2),
     shapes: [
       rect(0, oy, w, h),
@@ -73,11 +77,11 @@ CatalogSymbol _banquette(
 /// Booths and Lounge, in palette order.
 final List<CatalogSymbol> boothsCatalog = [
   _booth('restaurant.booth.two', 'Booth, 2 seats', 700, 700,
-      tags: const ['booth', 'table', 'two']),
+      seats: 2, tags: const ['booth', 'table', 'two']),
   _booth('restaurant.booth.four', 'Booth, 4 seats', 1200, 700,
-      tags: const ['booth', 'table', 'four']),
+      seats: 4, tags: const ['booth', 'table', 'four']),
   _booth('restaurant.booth.six', 'Booth, 6 seats', 1800, 750,
-      tags: const ['booth', 'table', 'six']),
+      seats: 6, tags: const ['booth', 'table', 'six']),
   // A 1200 x 800 top; an L bench on its left and top sides; one chair on
   // its right. The top's lower-left corner is at (500, 0): the left bench
   // runs from x 0 to 600, 100 under the top's left edge.
@@ -85,6 +89,7 @@ final List<CatalogSymbol> boothsCatalog = [
     key: 'restaurant.booth.corner',
     name: 'Corner booth, 5 seats',
     category: boothsAndLounge,
+    unit: tableUnit(5),
     tags: const ['booth', 'corner', 'table', 'five'],
     base: (1100, 400),
     shapes: [
@@ -108,11 +113,12 @@ final List<CatalogSymbol> boothsCatalog = [
   ),
   // A Ø 1200 top in a half-ring bench open at the bottom: the ring from
   // radius 500 (100 under the top's edge) to 1100, its back arc at 950.
-  const CatalogSymbol(
+  CatalogSymbol(
     key: 'restaurant.booth.round',
     name: 'Round booth, 6 seats',
     category: boothsAndLounge,
-    tags: ['booth', 'round', 'table', 'six'],
+    unit: tableUnit(6),
+    tags: const ['booth', 'round', 'table', 'six'],
     base: (1100, 600),
     shapes: [
       CatalogCircle((1100, 600), 600),
@@ -125,15 +131,16 @@ final List<CatalogSymbol> boothsCatalog = [
     ],
   ),
   _banquette('restaurant.banquette.two', 'Banquette, 2 seats', 700, 700, 1,
-      tags: const ['banquette', 'table', 'two']),
+      seats: 2, tags: const ['banquette', 'table', 'two']),
   _banquette('restaurant.banquette.four', 'Banquette, 4 seats', 1400, 700, 2,
-      tags: const ['banquette', 'table', 'four']),
+      seats: 4, tags: const ['banquette', 'table', 'four']),
   // A 1000 x 600 low table; a three-seat sofa (2000 x 850) above it, 300
   // clear; an armchair (850 x 850) to its right, 300 clear.
   CatalogSymbol(
     key: 'restaurant.lounge.four',
     name: 'Lounge set, 4 seats',
     category: boothsAndLounge,
+    unit: tableUnit(4),
     tags: const ['lounge', 'sofa', 'table', 'four'],
     base: (1000, 300),
     shapes: [
@@ -154,6 +161,7 @@ final List<CatalogSymbol> boothsCatalog = [
     key: 'restaurant.lounge.two',
     name: 'Lounge set, 2 seats',
     category: boothsAndLounge,
+    unit: tableUnit(2),
     tags: const ['lounge', 'armchair', 'table', 'two'],
     base: (1300, 375),
     shapes: [

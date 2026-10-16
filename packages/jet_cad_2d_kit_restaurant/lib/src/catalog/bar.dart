@@ -4,6 +4,8 @@
 // Pure Dart: no Flutter, no dart:io.
 import 'package:jet_cad_2d_kit/authoring.dart';
 
+import 'units.dart';
+
 /// The palette category of this file's symbols.
 const String bar = 'Bar';
 
@@ -20,6 +22,7 @@ CatalogSymbol _highTable(String key, String name, double d, int stools,
     name: name,
     category: bar,
     tags: tags,
+    unit: tableUnit(stools),
     base: (o, o),
     shapes: [
       CatalogCircle((o, o), r),
@@ -35,6 +38,7 @@ final List<CatalogSymbol> barCatalog = [
     key: 'restaurant.bar.stool',
     name: 'Bar stool',
     category: bar,
+    unit: tableUnit(1),
     tags: const ['stool', 'bar', 'seat'],
     base: (stoolRadius, stoolRadius),
     shapes: stoolAt(stoolRadius, stoolRadius),
@@ -48,6 +52,7 @@ final List<CatalogSymbol> barCatalog = [
     key: 'restaurant.bar.table.ledge',
     name: 'Bar ledge, 4 stools',
     category: bar,
+    unit: tableUnit(4),
     tags: const ['ledge', 'bar', 'table', 'four'],
     base: (1000, 2 * stoolRadius - stoolTuck + 200),
     shapes: [
