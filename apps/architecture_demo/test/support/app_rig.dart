@@ -112,6 +112,17 @@ Future<void> chord(WidgetTester tester, LogicalKeyboardKey modifier,
   await tester.pump();
 }
 
+/// Presses [key] with [modifier]; whether the key-down was handled (the
+/// result of the key event, as the old app's `chordHandled`).
+Future<bool> chordHandled(WidgetTester tester, LogicalKeyboardKey modifier,
+    LogicalKeyboardKey key) async {
+  await tester.sendKeyDownEvent(modifier);
+  final handled = await tester.sendKeyEvent(key);
+  await tester.sendKeyUpEvent(modifier);
+  await tester.pump();
+  return handled;
+}
+
 /// Cmd+Z: the editor's undo binding.
 Future<void> undoKey(WidgetTester tester) =>
     chord(tester, LogicalKeyboardKey.meta, LogicalKeyboardKey.keyZ);

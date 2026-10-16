@@ -13,11 +13,10 @@
 //      save panel and the write (the N6-write test).
 import 'dart:async';
 import 'dart:typed_data';
+import 'dart:ui' show AppExitResponse;
 
 import 'package:architecture_demo/busy_wrappers.dart';
 import 'package:flutter/material.dart';
-import 'dart:ui' show AppExitResponse;
-
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';

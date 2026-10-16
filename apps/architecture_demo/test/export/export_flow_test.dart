@@ -19,6 +19,12 @@
 // `<name>.png`), X-1 (the initial choice), EF4 (export/export_font_test.dart:
 // 38, the default font).
 //
+// Decided: premise impossible (EX1's instance placement, colour and
+// lineweight overrides, the separator, `fontLoads == 1`): the sample has no
+// rotated instance with overrides, and the app injects no font cache; those
+// are covered by jet_cad_2d_flutter `export/export_pdf_test.dart`, PF13 and
+// SP-export-pdf. The text and placement checks below stand in for them.
+//
 // Decided: premise impossible (spec decision 5): the old tests asserted the
 // buttons *disabled* while a flow runs. `PlanEditor` has no host hook to grey
 // them, so the -open forms assert that the callback or the dialog does
@@ -63,7 +69,10 @@ void main() {
       final content = parsePdf(w.bytes);
       expect(content.mediaBox[2], closeTo(297 * ptPerMm, 1e-3));
       expect(content.mediaBox[3], closeTo(210 * ptPerMm, 1e-3));
-      expect(content.textRuns, isNotEmpty, reason: 'the sample\'s labels');
+      expect([for (final t in content.textRuns) t.string],
+          unorderedEquals(liveTexts(rig.controller)),
+          reason: 'the plan\'s labels, each once, in the embedded font');
+      expectInsideSheet(content);
       final reference = await referenceExport(tester, rig.controller);
       expect(operatorsOf(content), operatorsOf(reference),
           reason: 'the bytes are the export command\'s');
@@ -295,7 +304,8 @@ void main() {
         final rig = await pumpFlat(tester, printer: printer);
         await openDialog(tester);
         for (final key in [LogicalKeyboardKey.keyP, LogicalKeyboardKey.keyE]) {
-          await chord(tester, modifier, key);
+          expect(await chordHandled(tester, modifier, key), isTrue,
+              reason: '$label+${key.keyLabel} handled');
           await tester.pump();
         }
         expect(tester.takeException(), isNull);

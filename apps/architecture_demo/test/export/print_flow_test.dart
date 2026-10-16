@@ -18,6 +18,9 @@
 // the guard is free), PF7 (:217, the library's print and export hold each
 // other).
 //
+// Decided: premise impossible (PR1's `fontLoads == 1`): the app injects no
+// font cache.
+//
 // Decided: premise impossible (spec decision 5): the old tests asserted the
 // buttons *disabled* while a flow runs; the -open forms assert the callback
 // or the printer does nothing while the app is busy. The separator the old PR1
@@ -69,7 +72,10 @@ void main() {
       expect(printed.mediaBox, reference.mediaBox);
       expect(printed.mediaBox[2], closeTo(call.format.width, 1e-3));
       expect(printed.mediaBox[3], closeTo(call.format.height, 1e-3));
-      expect(printed.textRuns, isNotEmpty, reason: 'premise: text embedded');
+      expect([for (final t in printed.textRuns) t.string],
+          unorderedEquals(liveTexts(rig.controller)),
+          reason: 'the plan\'s labels, in the embedded font');
+      expectInsideSheet(printed);
     });
 
     testWidgets(

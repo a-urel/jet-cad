@@ -114,8 +114,11 @@ void main() {
       // The path resolves under the package's lib/.
       expect(
           File('../../packages/jet_cad_2d_plan/lib/fonts/Roboto-Regular.ttf')
-              .existsSync(),
-          isTrue);
+              .readAsBytesSync(),
+          orderedEquals(File(
+                  '../../packages/jet_cad_2d_flutter/test/golden/fonts/Roboto-Regular.ttf')
+              .readAsBytesSync()),
+          reason: 'the declared asset is the vendored face, byte for byte');
     });
   });
 }

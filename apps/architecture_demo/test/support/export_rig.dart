@@ -7,7 +7,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:jet_cad_2d/jet_cad_2d.dart' show PageComponent;
+import 'package:jet_cad_2d/jet_cad_2d.dart' show EntityKind, PageComponent;
 import 'package:jet_cad_2d_flutter/export_testing.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 
@@ -101,3 +101,30 @@ Future<PdfContent> referenceExport(
 /// `page` notifier is internal).
 PageComponent? pageOf(PlanController c) =>
     c.document.components.get<PageComponent>(c.document.rootHandle);
+
+/// The strings of [c]'s live TEXT entities, read from the document apart from
+/// the exporter: what the PDF's text runs must be.
+List<String> liveTexts(PlanController c) {
+  final e = c.document.entities;
+  return [
+    for (final slot in e.liveSlots)
+      if (e.kindAt(slot) == EntityKind.text) e.textAt(slot),
+  ];
+}
+
+/// Every vertex of every path of [content] lies on the sheet (its MediaBox,
+/// 1 pt of slack): an export that followed the turned screen, or forgot the
+/// page's origin, would put drawing elsewhere.
+void expectInsideSheet(PdfContent content) {
+  final w = content.mediaBox[2], h = content.mediaBox[3];
+  var outside = 0;
+  for (final p in content.paths) {
+    for (final s in p.subpaths) {
+      for (final v in s.vertices) {
+        if (v.x < -1 || v.y < -1 || v.x > w + 1 || v.y > h + 1) outside++;
+      }
+    }
+  }
+  expect(content.paths, isNotEmpty);
+  expect(outside, 0, reason: 'vertices outside the sheet');
+}

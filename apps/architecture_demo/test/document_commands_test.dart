@@ -9,8 +9,8 @@
 //          busy, Undo and Redo are the library's), DC12 and DC12c (the name
 //          and the dirty mark are a bounded host widget in
 //          `PlanEditorBar.leading`; DC12 keeps 800 px, DC12c's floor moves
-//          to 800 px with Export's button and the name at 144 px, re-measured in
-//          Task 6)
+//          to 800 px with Export's button and the
+//          name at 144 px, re-measured in Task 6)
 //   COVERED DC3: packages/jet_cad_2d_plan/test/editor/plan_editor_test.dart
 //          ED-3 (:133, "without them none is offered") and ED-U (:445),
 //          editor/editor_view_test.dart V1 (:28, "the editor has Export and
@@ -879,7 +879,8 @@ void main() {
     // library's toolbar (Export's button in it, since Task 6) and its gap,
     // OSNAP and the zoom, and the bar's padding, with nothing left for the
     // status; at 799 px the bar overflows by 1 px. (Task 4b measured 776 px
-    // with a 160 px name and no Export button.) The old range was 704 px down to 656 px: the host widgets
+    // with a 160 px name and no Export button.) The old range was 704 px down
+    // to 656 px: the host widgets
     // (the name and Open sample) add 200 px to the 576 px the library's bar
     // needs by itself, so 656 px would leave the name 40 px.
     final rig = await pumpApp(tester, size: const Size(1000, 600));
