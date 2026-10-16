@@ -4,6 +4,8 @@
 // wall-face provider asked through the contract, as plan.symbol and
 // plan.select ask it.
 import 'dart:io';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart' show Key, TextInputAction;
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
@@ -13,12 +15,12 @@ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
 import 'package:jet_cad_2d_kit/testing.dart';
 import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
-    show InteractionLayer, ViewportTransform;
+    show InteractionLayer, PaperPalette, ViewportTransform;
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart'
     show PlanController, PlanSymbol;
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
-import 'canvas_rig.dart' show press;
+import 'canvas_rig.dart' show activeTool, globalAt, press, worldAt;
 import 'plans.dart';
 
 /// The attach capture in pixels (plan.symbol's `kAttachPixels`,
@@ -213,4 +215,102 @@ Future<void> redoKey(WidgetTester tester) async {
   await tester.sendKeyUpEvent(LogicalKeyboardKey.shift);
   await tester.sendKeyUpEvent(LogicalKeyboardKey.meta);
   await tester.pump();
+}
+
+// Shared reads of the attachment tests (3a Task 28 review).
+
+/// The document's instances, in tree order.
+List<InstanceNode> instancesOf(DraftDocument doc) =>
+    doc.tree.nodes.whereType<InstanceNode>().toList();
+
+/// [t]'s six numbers, for exact comparison.
+List<double> partsOf(Transform2 t) => [t.a, t.b, t.c, t.d, t.e, t.f];
+
+/// The raw world point the canvas reads for a pointer resting at world
+/// [p] (the screen round trip, as the tool receives it).
+Vector2 rawWorldAt(WidgetTester tester, PlanController c, Vector2 p) =>
+    worldAt(tester, c, globalAt(tester, c, p));
+
+/// The provider's answer for [e] at the raw world point [raw] on [c]'s
+/// camera (IA-R1), its free placement the raw point's (the query's
+/// `current` is read only under `mayRotate: false`).
+Attachment? answerAt(PlanController c, PlanSymbol e, Vector2 raw) => attachOf(
+    c.document,
+    e.entry,
+    raw,
+    placementTransform(at: raw, basePoint: e.entry.definition.basePoint),
+    c.camera.value.scale);
+
+/// A canvas that records every call (today's `RecordingCanvas`,
+/// symbol_place_tool_test.dart:265-275) and the last matrix handed to
+/// `transform`.
+final class RecordingCanvas implements ui.Canvas {
+  final List<Invocation> calls = [];
+  Float64List? matrix;
+
+  Iterable<Invocation> named(String name) =>
+      calls.where((c) => c.memberName == Symbol(name));
+
+  @override
+  void transform(Float64List matrix4) {
+    matrix = Float64List.fromList(matrix4);
+    calls.add(Invocation.method(#transform, [matrix4]));
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) {
+    calls.add(invocation);
+    return null;
+  }
+}
+
+/// What the active tool's screen overlay draws now (`Tool.paintOverlay`,
+/// the call the canvas's `SelectionOverlayPainter` makes,
+/// selection_overlay.dart:219), recorded with no pointer event: for
+/// plan.symbol, the resting ghost's marker.
+RecordingCanvas overlayOf(WidgetTester tester, PlanController c) {
+  final canvas = RecordingCanvas();
+  activeTool(tester).paintOverlay(canvas, c.camera.value,
+      tester.getSize(find.byType(InteractionLayer)), PaperPalette.light);
+  return canvas;
+}
+
+/// The resting ghost's attachment marker on the canvas (today's
+/// `ghostAttachment!.q` through the camera), read with no pointer event:
+/// the centre of the hourglass plan.symbol's overlay draws there (its four
+/// lines, the attachment's nearest glyph, plan_symbol_tool.dart:465-472).
+/// Null when the overlay draws no hourglass: a free ghost (its snap or
+/// grid marker) or a hidden one (nothing).
+ui.Offset? restingMarker(WidgetTester tester, PlanController c) {
+  final lines = overlayOf(tester, c).named('drawLine').toList();
+  if (lines.length != 4) return null;
+  final ends = [
+    for (final l in lines) ...[
+      l.positionalArguments[0] as ui.Offset,
+      l.positionalArguments[1] as ui.Offset,
+    ]
+  ];
+  // The hourglass: its top edge horizontal, then a diagonal.
+  if (ends[0].dy != ends[1].dy || ends[2].dx == ends[3].dx) return null;
+  return ui.Offset(ends.map((o) => o.dx).reduce((a, b) => a + b) / 8,
+      ends.map((o) => o.dy).reduce((a, b) => a + b) / 8);
+}
+
+/// The resting ghost's placement (today's `ghostPlacement`), read with no
+/// pointer event: the matrix plan.symbol's world overlay draws the ghost
+/// under (`Tool.paintWorldOverlay` at the rebase origin 0, so its
+/// translation is the placement's own, symbol_ghost.dart:94-97). Null when
+/// the ghost is not drawn.
+Transform2? restingPlacement(WidgetTester tester, PlanController c) {
+  final canvas = RecordingCanvas();
+  activeTool(tester).paintWorldOverlay(
+      canvas, Vector2.zero(), c.camera.value.scale, PaperPalette.light);
+  final m = canvas.matrix;
+  return m == null ? null : Transform2(m[0], m[1], m[4], m[5], m[12], m[13]);
+}
+
+/// [w] on [c]'s canvas, in the drawing area's own pixels.
+ui.Offset screenAt(PlanController c, Vector2 w) {
+  final s = c.camera.value.worldToScreen(w);
+  return ui.Offset(s.x, s.y);
 }

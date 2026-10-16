@@ -42,14 +42,9 @@ import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../support/attach_plans.dart';
 import '../support/canvas_rig.dart'
-    show activeTool, globalAt, pumpPlanEditor, symbolsReady, worldAt;
+    show activeTool, globalAt, pumpPlanEditor, symbolsReady;
 import '../support/plans.dart' show polar, walls;
 import '../support/room_plans.dart' show undoKey;
-
-List<InstanceNode> instancesOf(DraftDocument doc) =>
-    doc.tree.nodes.whereType<InstanceNode>().toList();
-
-List<double> partsOf(Transform2 t) => [t.a, t.b, t.c, t.d, t.e, t.f];
 
 /// A mouse that hovers at world [hover], then presses there, moves and
 /// releases at world [release]. Returns the raw world points of the hover
@@ -76,8 +71,8 @@ Future<({Vector2 hoverRaw, Vector2 releaseRaw})> hoverPressRelease(
   await mouse.removePointer();
   await tester.pump();
   return (
-    hoverRaw: worldAt(tester, c, globalAt(tester, c, hover)),
-    releaseRaw: worldAt(tester, c, globalAt(tester, c, release)),
+    hoverRaw: rawWorldAt(tester, c, hover),
+    releaseRaw: rawWorldAt(tester, c, release),
   );
 }
 
@@ -151,18 +146,6 @@ void expectFlush(
 /// justified) runs 3000 out of it at 120°: a left turn, so the left faces
 /// are inside.
 final Vector2 corner = farAt(-321.75, 987.5);
-
-/// The provider's answer for [e] at the raw world point [raw] on [c]'s
-/// camera (IA-R1), its free placement the raw point's.
-Attachment? answerAt(PlanController c, PlanSymbol e, Vector2 raw) {
-  final scale = c.camera.value.scale;
-  return attachOf(
-      c.document,
-      e.entry,
-      raw,
-      placementTransform(at: raw, basePoint: e.entry.definition.basePoint),
-      scale);
-}
 
 void main() {
   testWidgets(
@@ -262,7 +245,7 @@ void main() {
         in [(360.0, 110.0), (970.0, 90.0), (1445.0, 130.0)].indexed) {
       // The answer over the document as the release finds it: the placed
       // instances are its neighbours.
-      final raw = worldAt(tester, c, globalAt(tester, c, onRun(inside, u, s)));
+      final raw = rawWorldAt(tester, c, onRun(inside, u, s));
       final want = answerAt(c, unit, raw)!;
       final at = await hoverPressRelease(
           tester, c, onRun(inside, u, s), onRun(inside, u, s));

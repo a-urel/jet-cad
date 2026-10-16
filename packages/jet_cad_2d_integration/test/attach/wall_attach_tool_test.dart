@@ -14,11 +14,17 @@
 // cases, and the rig parts they use. The plan's plan.symbol is internal, so
 // each case is driven on the canvas: `c.armSymbol`, a mouse click, the keys
 // R, M and Shift+R, F3. A ghost read (`ghostPlacement`, `ghostAttachment`,
-// `ghostAt`, `quarterTurns`) at a pointer is the instance one click commits
-// there (2a's AT-9 pins that the release uses the ghost's attachment),
-// read and then undone, so the document, the undo depth and the instance
-// count stay the source's; an attached ghost is a commit equal to the
-// provider's answer, a free one a commit equal to the free placement. The
+// `ghostAt`, `quarterTurns`) that follows a pointer event is the instance
+// one click commits at that pointer (2a's AT-9 pins that the release uses
+// the ghost's attachment), read and then undone, so the document, the undo
+// depth and the instance count stay the source's; an attached ghost is a
+// commit equal to the provider's answer, a free one a commit equal to the
+// free placement. A click re-resolves the ghost, so a read that must see
+// what a key, a camera change or a re-arm did with NO pointer event is
+// read from the resting ghost's own drawing instead (review fix 1):
+// `restingPlacement` (the matrix the tool's world overlay draws the ghost
+// under) and `restingMarker` (the hourglass its screen overlay draws at the
+// attachment's marker), with the mouse resting on the canvas. The
 // oracle is the kit's provider through the contract (IA-R1): `want.q` is
 // `want.marker`, `want.run` the marker on that face's line. The symbols
 // are the kit's furniture (C7 classes 1 and 2: `architecture.*`, the tag
@@ -36,7 +42,7 @@ import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
-    show InteractionLayer;
+    show InteractionLayer, kSnapMarkerPixels;
 import 'package:jet_cad_2d_integration/jet_cad_2d_integration.dart';
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
 import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
@@ -46,7 +52,6 @@ import 'package:vector_math/vector_math_64.dart' show Vector2;
 import '../support/attach_plans.dart' hide attachOf;
 import '../support/attach_plans.dart' as support show attachOf;
 import '../support/canvas_rig.dart';
-import '../support/editor_fixture.dart' show drag;
 import '../support/plans.dart' show polar, worldEndsOf;
 
 /// The camera's pixels per mm: the aperture is 200 mm.
@@ -88,8 +93,6 @@ const List<(double, Justification, FaceSide)> attachCases = [
   (-112.5, Justification.right, FaceSide.right),
 ];
 
-List<double> partsOf(Transform2 t) => [t.a, t.b, t.c, t.d, t.e, t.f];
-
 /// The box's four corners under [t].
 List<Vector2> footprint(SymbolBox b, Transform2 t) => [
       for (final (x, y) in [
@@ -105,6 +108,12 @@ List<Vector2> footprint(SymbolBox b, Transform2 t) => [
 /// is off this camera's canvas): 2 m into the room at 0.37 along [r].
 Vector2 away(FaceLine r) => onRun(r, r.length * 0.37, 2000);
 
+/// The one mouse of a test: a second mouse on the same device trips the
+/// mouse tracker, so every hover, click and drag goes through this one,
+/// which stays on the canvas (the ghost rests) until the next rig or the
+/// test's end.
+TestGesture? _mouse;
+
 /// Today's `Rig(walls: [...])` over the editor: the walls in their groups,
 /// the rig's page (its 25 mm grid off every round number) and its line
 /// `e0`, the camera on the wall at [scale], the canvas focused.
@@ -113,6 +122,8 @@ final class Rig {
 
   static Future<Rig> mount(WidgetTester tester,
       {required List<SceneWall> walls, bool objectSnap = true}) async {
+    await _mouse?.removePointer();
+    _mouse = null;
     final plan = attachPlan(walls, extra: (d) {
       d.commands.execute(SetComponentCommand<PageComponent>(
           d.rootHandle,
@@ -204,11 +215,54 @@ final class Rig {
           k,
           mirrored: mirrored);
 
+  /// The mouse moved to rest at global [g] (a hover).
+  Future<void> restAt(Offset g) async {
+    final m = _mouse;
+    if (m == null) {
+      final added = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await added.addPointer(location: g - const Offset(3, 3));
+      _mouse = added;
+      addTearDown(() async {
+        await _mouse?.removePointer();
+        _mouse = null;
+      });
+    }
+    await _mouse!.moveTo(g);
+    await tester.pump();
+  }
+
+  /// The mouse resting at world [p]: today's `rig.hover(p)`.
+  Future<void> rest(Vector2 p) => restAt(globalAt(tester, c, p));
+
+  /// A press and a release of the resting mouse at global [g].
+  Future<void> clickAt(Offset g) async {
+    await restAt(g);
+    await _mouse!.down(g);
+    await tester.pump();
+    await _mouse!.up();
+    await tester.pump();
+  }
+
+  /// A press at world [from], eight moves, a release at world [to]: today's
+  /// `rig.down(from); rig.up(to)` with the pointer moving between.
+  Future<void> drag(Vector2 from, Vector2 to) async {
+    final a = globalAt(tester, c, from), b = globalAt(tester, c, to);
+    await restAt(a);
+    await _mouse!.down(a);
+    await tester.pump();
+    for (var i = 1; i <= 8; i++) {
+      await _mouse!.moveTo(Offset.lerp(a, b, i / 8)!);
+      await tester.pump();
+    }
+    await _mouse!.up();
+    await tester.pump();
+  }
+
   /// A click at global [g]: the placement one click commits there, read and
   /// undone (IA-R4: today's ghost read at that pointer).
   Future<Transform2> ghostAtGlobal(Offset g) async {
     final n = instances.length, depth = document.commands.undoDepth;
-    await mouseClick(tester, g);
+    await clickAt(g);
     expect(instances, hasLength(n + 1),
         reason: 'premise: the click placed one instance');
     final t = instances.last.transform;
@@ -223,7 +277,22 @@ final class Rig {
       ghostAtGlobal(globalAt(tester, c, p));
 
   /// A placement at [p]: today's `rig.down(p); rig.up(p)`.
-  Future<void> click(Vector2 p) => mouseClick(tester, globalAt(tester, c, p));
+  Future<void> click(Vector2 p) => clickAt(globalAt(tester, c, p));
+
+  /// The resting ghost's placement, read with no pointer event (today's
+  /// `rig.tool.ghostPlacement!`).
+  Transform2 resting() {
+    final t = restingPlacement(tester, c);
+    expect(t, isNotNull, reason: 'premise: the ghost is drawn');
+    return t!;
+  }
+
+  /// The resting ghost's marker on the canvas, null when free (today's
+  /// `rig.tool.ghostAttachment` through the camera).
+  Offset? marker() => restingMarker(tester, c);
+
+  /// [w] on the canvas.
+  Offset screen(Vector2 w) => screenAt(c, w);
 
   /// Where an instance put its symbol's base point: its `at`.
   Vector2 placedAt(InstanceNode n) => n.transform
@@ -305,8 +374,7 @@ void main() {
               partsOf(
                   rig.freeOf(toilet, away(run), turns: 1, mirrored: mirrored)),
               reason: '$why: free');
-          await drag(tester, globalAt(tester, rig.c, away(run)),
-              globalAt(tester, rig.c, p));
+          await rig.drag(away(run), p);
           expect(
               partsOf(rig.instances.single.transform), partsOf(want.transform),
               reason: '$why: the instance');
@@ -390,12 +458,16 @@ void main() {
         final toilet = armable(rig.c, 'bath.toilet');
         await rig.arm(toilet);
         final p = nearFace(rig.runOn(side));
-        final p0 = await rig.ghostAt(p);
+        await rig.rest(p);
+        final p0 = rig.resting();
         expect(partsOf(p0), partsOf(rig.attachOf(toilet, p)!.transform));
+        // The ghost's commit at the pointer is the same (IA-R4).
+        expect(partsOf(await rig.ghostAt(p)), partsOf(p0));
         await rig.key(LogicalKeyboardKey.keyM);
         // Not ported (ruling IA-R4): expect(rig.notifications, [false],
         // reason: '$deg°: one repaint').
-        final p1 = await rig.ghostAt(p);
+        // Read with no pointer event: the key itself re-asked the faces.
+        final p1 = rig.resting();
         final want = rig.attachOf(toilet, p, mirrored: true)!;
         expect(partsOf(p1), partsOf(want.transform), reason: '$deg°');
         expect(p0.a * p0.d - p0.b * p0.c, greaterThan(0));
@@ -412,8 +484,7 @@ void main() {
         expect(partsOf(rig.instances.single.transform), partsOf(want.transform),
             reason: '$deg°: placed mirrored');
         await rig.key(LogicalKeyboardKey.keyM);
-        expect(partsOf(await rig.ghostAt(p)), partsOf(p0),
-            reason: '$deg°: M again');
+        expect(partsOf(rig.resting()), partsOf(p0), reason: '$deg°: M again');
       }
     });
 
@@ -428,29 +499,33 @@ void main() {
       final run = rig.runOn(FaceSide.right);
       final p = nearFace(run);
       final pA = away(run);
-      final p0 = partsOf(await rig.ghostAt(p));
+      await rig.rest(p);
+      final p0 = partsOf(rig.resting());
       await rig.key(LogicalKeyboardKey.keyR);
-      // `rig.tool.quarterTurns` read off the face, where the count applies.
+      // `rig.tool.quarterTurns` (1): read off the face, where the count
+      // applies, as the commit there (IA-R4).
+      expect(partsOf(rig.resting()), p0, reason: 'R');
       expect(partsOf(await rig.ghostAt(pA)),
           partsOf(rig.freeOf(toilet, pA, turns: 1)),
           reason: 'quarterTurns 1');
-      expect(partsOf(await rig.ghostAt(p)), p0, reason: 'R');
+      await rig.rest(p);
       await rig.key(LogicalKeyboardKey.keyR);
       await rig.key(LogicalKeyboardKey.keyR);
       await rig.shiftR();
+      expect(partsOf(rig.resting()), p0, reason: 'R, R, Shift+R');
       expect(partsOf(await rig.ghostAt(pA)),
           partsOf(rig.freeOf(toilet, pA, turns: 2)),
           reason: 'quarterTurns 2');
-      expect(partsOf(await rig.ghostAt(p)), p0, reason: 'R, R, Shift+R');
       await rig.click(p);
       expect(partsOf(rig.instances.single.transform), p0,
           reason: 'placed unturned');
       // Off the face: the two quarter turns apply.
+      await rig.rest(pA);
+      expect(rig.marker(), isNull);
+      expect(partsOf(rig.resting()), partsOf(rig.freeOf(toilet, pA, turns: 2)));
       await rig.click(pA);
-      final free = rig.instances.last;
-      expect(
-          partsOf(free.transform), partsOf(rig.freeOf(toilet, pA, turns: 2)));
-      expectAt(rig.placedAt(free), gridOf(rig.worldOf(pA)), 'free at the grid');
+      expectAt(rig.placedAt(rig.instances.last), gridOf(rig.worldOf(pA)),
+          'free at the grid');
     });
 
     testWidgets(
@@ -461,17 +536,44 @@ void main() {
       final toilet = armable(rig.c, 'bath.toilet');
       await rig.arm(toilet);
       final p = nearFace(rig.runOn(FaceSide.left));
+      await rig.rest(p);
+      // `rig.tool.ghostAttachment!.q`: the provider's marker, the ghost the
+      // resting pointer shows being that attachment.
       final want = rig.attachOf(toilet, p)!;
-      final placed = await rig.ghostAt(p);
-      expect(partsOf(placed), partsOf(want.transform),
-          reason: 'premise: the click committed the answer');
-      // The committed marker: the back-centre the answer stands on q.
-      final q = placed.transformPoint(boxOfEntry(toilet.entry)!.backCentre);
-      expect(q.distanceTo(want.marker), lessThan(1e-6));
-      // Not ported (ruling IA-R4): the paintOverlay lines (:1572-1604): the
-      // RecordingCanvas, `canvas.named('drawRect')` isEmpty, the hourglass's
-      // four drawLine calls, their centre on q and the glyph's corners.
+      expect(partsOf(rig.resting()), partsOf(want.transform),
+          reason: 'premise: attached');
+      final q = want.marker;
+      // `rig.tool.paintOverlay(canvas, ...)`: the canvas's own call
+      // (`Tool.paintOverlay`, through the plan's guard) on the drawing
+      // area's size.
+      final canvas = overlayOf(tester, rig.c);
+      expect(canvas.named('drawRect'), isEmpty);
+      final lines = canvas.named('drawLine').toList();
+      expect(lines, hasLength(4), reason: 'the hourglass');
+      final ends = [
+        for (final l in lines) ...[
+          l.positionalArguments[0] as Offset,
+          l.positionalArguments[1] as Offset
+        ]
+      ];
+      final cx = ends.map((o) => o.dx).reduce((a, b) => a + b) / 8;
+      final cy = ends.map((o) => o.dy).reduce((a, b) => a + b) / 8;
       final sq = rig.c.camera.value.worldToScreen(q);
+      expect(cx, closeTo(sq.x, 1e-9));
+      expect(cy, closeTo(sq.y, 1e-9));
+      // The glyph: top and bottom edges, then the two diagonals.
+      const h = kSnapMarkerPixels / 2;
+      for (final (o, dx, dy) in [
+        (ends[0], -h, -h),
+        (ends[1], h, -h),
+        (ends[3], -h, h),
+        (ends[4], -h, h),
+        (ends[5], h, h),
+        (ends[7], -h, -h),
+      ]) {
+        expect(o.dx, closeTo(sq.x + dx, 1e-9));
+        expect(o.dy, closeTo(sq.y + dy, 1e-9));
+      }
       for (final w in [rig.worldOf(p), gridOf(rig.worldOf(p))]) {
         final sw = rig.c.camera.value.worldToScreen(w);
         expect(sw.distanceTo(sq), greaterThan(5),
@@ -490,8 +592,9 @@ void main() {
       // 400 mm off the face: outside 320 mm, inside 640 mm.
       final p = onRun(run, run.length * 0.37, 400);
       final g = globalAt(tester, rig.c, p);
-      expect(
-          partsOf(await rig.ghostAtGlobal(g)), partsOf(rig.freeOf(toilet, p)),
+      await rig.restAt(g);
+      expect(rig.marker(), isNull, reason: 'premise: too far');
+      expect(partsOf(rig.resting()), partsOf(rig.freeOf(toilet, p)),
           reason: 'premise: too far');
       final s = g - tester.getTopLeft(find.byType(InteractionLayer));
       // Not ported (ruling IA-R4): rig.notifications.clear() and
@@ -502,15 +605,21 @@ void main() {
       expect(k, closeTo(scale / 2, 1e-15));
       final w = rig.c.camera.value.screenToWorld(Vector2(s.dx, s.dy));
       final want = rig.attachAt(toilet, w, k: k)!;
-      expect(partsOf(await rig.ghostAtGlobal(g)), partsOf(want.transform));
+      // Read with no pointer event: the camera change alone re-resolved.
+      final m = rig.marker();
+      expect(m, isNotNull);
+      expect((m! - rig.screen(want.marker)).distance, lessThan(1e-6));
+      expect(partsOf(rig.resting()), partsOf(want.transform));
       // And back out: free again.
       rig.c.camera.zoomAt(s, 2);
       await tester.pump();
+      expect(rig.marker(), isNull);
       final back = rig.c.camera.value.screenToWorld(Vector2(s.dx, s.dy));
-      expect(
-          partsOf(await rig.ghostAtGlobal(g)),
-          partsOf(placementTransform(
-              at: gridOf(back), basePoint: toilet.entry.definition.basePoint)));
+      final free = placementTransform(
+          at: gridOf(back), basePoint: toilet.entry.definition.basePoint);
+      expect(partsOf(rig.resting()), partsOf(free));
+      // The commit at the same pointer agrees (IA-R4).
+      expect(partsOf(await rig.ghostAtGlobal(g)), partsOf(free));
     });
 
     testWidgets(
@@ -522,32 +631,34 @@ void main() {
       final island = armable(rig.c, 'kitchen.island');
       await rig.arm(island);
       final p = nearFace(rig.runOn(FaceSide.right));
-      expect(partsOf(await rig.ghostAt(p)), partsOf(rig.freeOf(island, p)),
-          reason: 'the island: free');
+      await rig.rest(p);
+      expect(rig.marker(), isNull, reason: 'the island: free');
+      final w = rig.worldOf(p);
+      // Each re-arm read with no pointer event: the re-arm re-resolved.
       await rig.arm(toilet);
-      expect(partsOf(await rig.ghostAt(p)),
-          partsOf(rig.attachOf(toilet, p)!.transform),
+      final want = rig.attachAt(toilet, w)!;
+      final m = rig.marker();
+      expect(m, isNotNull, reason: 'the toilet');
+      expect((m! - rig.screen(want.marker)).distance, lessThan(1e-6),
           reason: 'the toilet');
+      expect(partsOf(rig.resting()), partsOf(want.transform));
       await rig.arm(island);
-      expect(partsOf(await rig.ghostAt(p)), partsOf(rig.freeOf(island, p)),
-          reason: 'the island again');
-      // Hidden (the pointer gone from the canvas), a re-arm still drops the
-      // tagged entry's attachment: what the island places is its own.
+      expect(rig.marker(), isNull, reason: 'the island again');
+      expect(partsOf(rig.resting()), partsOf(rig.freeOf(island, p)));
+      // Hidden (no context to re-resolve with), a re-arm still drops the
+      // tagged entry's attachment: the stored placement is the new entry's.
       await rig.arm(toilet);
-      expect(partsOf(await rig.ghostAt(p)),
-          partsOf(rig.attachOf(toilet, p)!.transform),
-          reason: 'premise: the toilet attached');
-      final exit = await tester.createGesture(kind: PointerDeviceKind.mouse);
-      await exit.addPointer(location: globalAt(tester, rig.c, p));
-      await tester.pump();
-      await exit.moveTo(tester.getTopLeft(find.byType(InteractionLayer)) -
+      expect(rig.marker(), isNotNull);
+      await rig.restAt(tester.getTopLeft(find.byType(InteractionLayer)) -
           const Offset(4, 4));
-      await tester.pump();
-      await exit.removePointer();
-      await tester.pump();
+      expect(restingPlacement(tester, rig.c), isNull,
+          reason: 'premise: the ghost hidden');
       await rig.arm(island);
-      expect(partsOf(await rig.ghostAt(p)), partsOf(rig.freeOf(island, p)),
-          reason: 'hidden re-arm');
+      // Not ported (IA-R4: the read needs a pointer event, which
+      // re-resolves): expect(rig.tool.ghostAttachment, isNull, reason:
+      // 'hidden re-arm') and expect(partsOf(rig.tool.ghostPlacement!),
+      // partsOf(rig.freeOf(island)), reason: 'hidden re-arm'). A hidden
+      // ghost draws nothing, and bringing the pointer back re-resolves.
     });
 
     testWidgets(
@@ -570,7 +681,8 @@ void main() {
       await rig.key(LogicalKeyboardKey.keyM);
       await rig.key(LogicalKeyboardKey.keyR);
       // Not ported (IA-R4: the kit's bands are the plan's services' own,
-      // no public read): final gen = bands.generation.
+      // no public read): final gen = bands.generation. The kit pins the
+      // before-delivery path (D-06's stateId) in wall_face_provider_test.dart.
       // 250 mm: outside the edge capture (10 px), inside the attach capture
       // (16 px): attached, not snapped.
       final beyond = await rig.ghostAt(onRun(run, 1000 + 600 + 250, 150));
@@ -609,7 +721,13 @@ void main() {
       // Not ported (IA-R4: no public read of the kit's bands): final gen =
       // rig.bands!.generation.
       await rig.click(p);
-      expect(rig.attachOf(toilet, p), isNotNull, reason: 'premise');
+      // `rig.tool.ghostAttachment` isNotNull, read on the resting ghost.
+      final want = rig.attachOf(toilet, p);
+      expect(want, isNotNull, reason: 'premise');
+      final m = rig.marker();
+      expect(m, isNotNull, reason: 'premise');
+      expect((m! - rig.screen(want!.marker)).distance, lessThan(1e-6),
+          reason: 'premise');
       expect(rig.document.handleSeed.current, seed);
       expect(rig.instances, isEmpty);
       // Not ported (as above): expect(rig.bands!.generation, gen, reason:

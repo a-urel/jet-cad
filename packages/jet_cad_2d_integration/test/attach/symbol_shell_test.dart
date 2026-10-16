@@ -26,15 +26,9 @@ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../support/attach_plans.dart';
-import '../support/canvas_rig.dart'
-    show globalAt, pumpPlanEditor, symbolsReady, worldAt;
+import '../support/canvas_rig.dart' show globalAt, pumpPlanEditor, symbolsReady;
 import '../support/plans.dart' show polar, walls;
 import '../support/room_plans.dart' show undoKey;
-
-List<InstanceNode> instancesOf(DraftDocument doc) =>
-    doc.tree.nodes.whereType<InstanceNode>().toList();
-
-List<double> partsOf(Transform2 t) => [t.a, t.b, t.c, t.d, t.e, t.f];
 
 /// Today's `addAttachWall`: a wall at 30°, 3600 long and 150 thick,
 /// justified left, in its own rotated group near (1e5, −7e4) (no tool
@@ -53,18 +47,6 @@ Future<(PlanController, Handle, FaceLine)> addAttachWall(
   final h = plan.walls.single;
   return (c, h, faceLineOf(c.document, h, left: true));
 }
-
-/// The raw world point the layer computes for a pointer at world [p].
-Vector2 rawAt(WidgetTester tester, PlanController c, Vector2 p) =>
-    worldAt(tester, c, globalAt(tester, c, p));
-
-/// The provider's answer for [e] at the raw point [raw] (IA-R1).
-Attachment? answerAt(PlanController c, PlanSymbol e, Vector2 raw) => attachOf(
-    c.document,
-    e.entry,
-    raw,
-    placementTransform(at: raw, basePoint: e.entry.definition.basePoint),
-    c.camera.value.scale);
 
 void main() {
   group('the wall attachment (spec 09c D6)', () {
@@ -92,7 +74,7 @@ void main() {
       }
 
       final p1 = onRun(run, 1000, 120);
-      final want1 = answerAt(c, unit, rawAt(tester, c, p1))!;
+      final want1 = answerAt(c, unit, rawWorldAt(tester, c, p1))!;
       await click(p1);
       final first = instancesOf(doc).single;
       expect(partsOf(first.transform), partsOf(want1.transform));
@@ -101,7 +83,7 @@ void main() {
       // 60 mm (inside the 100 mm edge capture) right of the first's side.
       final p2 = onRun(run, 1000 + 600 + 60, 90);
       // The answer the release finds: the first unit its neighbour.
-      final want2 = answerAt(c, unit, rawAt(tester, c, p2));
+      final want2 = answerAt(c, unit, rawWorldAt(tester, c, p2));
       await click(p2);
       final second = instancesOf(doc).last;
       expect(instancesOf(doc), hasLength(2));
@@ -172,7 +154,7 @@ void main() {
         // `tool.ghostVisible` and `tool.ghostAttachment != null` (IA-R4):
         // the placement a click at the resting pointer commits, undone.
         final depth = doc.commands.undoDepth;
-        final want = answerAt(c, toilet, rawAt(tester, c, p));
+        final want = answerAt(c, toilet, rawWorldAt(tester, c, p));
         await mouse.down(globalAt(tester, c, p));
         await tester.pump();
         await mouse.up();

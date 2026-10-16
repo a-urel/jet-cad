@@ -19,15 +19,26 @@
 // tool is the canvas's (`activeTool`, the rig's), plan.select's a
 // `SelectTool` in the plan's guard: its id read through the controller.
 // R-3's ghost reads (`tool.ghostAttachment`, `tool.ghostPlacement`, a
-// private tool's) are the instance a click at the resting pointer commits,
-// read and undone (IA-R4); its "with no pointer event" is the click's own
-// event (the gate change's re-resolve is 2a's AT tests').
+// private tool's) are read from the resting ghost's own drawing, with no
+// pointer event (IA-R4, review fix 1): `restingMarker` (the hourglass the
+// tool's screen overlay draws at the attachment's marker) and
+// `restingPlacement` (the matrix its world overlay draws the ghost under);
+// the commit a click at the resting pointer makes, read and undone, is
+// checked after them.
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
+import '../support/attach_plans.dart'
+    show
+        answerAt,
+        armable,
+        rawWorldAt,
+        restingMarker,
+        restingPlacement,
+        screenAt;
 import '../support/canvas_rig.dart' show byKey, pressKey;
 import '../support/editor_fixture.dart' show mountEditor, screenOf;
 import 'editor_tools_review_test.dart'
@@ -200,24 +211,33 @@ void main() {
     await tester.enterText(byKey('symbol-search'), 'base unit 600');
     await tester.pump();
     await arm(tester, 'kitchen.base.600');
-    final g = await hover(tester, c, Vector2(25730, 16200));
-    // `tool.ghostAttachment` / `tool.ghostPlacement` (IA-R4): the
-    // placement a click at the resting pointer commits, read and undone.
-    Future<Transform2> ghost() => ghostAt(tester, c, g, Vector2(25730, 16200));
-    var p = await ghost();
-    expect(isFree(p, Vector2(25730, 16200)), isFalse, reason: 'premise');
-    expect(p.a, closeTo(0, 1e-9), reason: 'premise');
+    final at = Vector2(25730, 16200);
+    final g = await hover(tester, c, at);
+    // The provider's answer at the resting pointer, under full (IA-R1).
+    final want =
+        answerAt(c, armable(c, 'kitchen.base.600'), rawWorldAt(tester, c, at))!;
+    // `tool.ghostAttachment` / `tool.ghostPlacement`, read on the resting
+    // ghost with no pointer event.
+    void expectAttached(String why) {
+      final m = restingMarker(tester, c);
+      expect(m, isNotNull, reason: why);
+      expect((m! - screenAt(c, want.marker)).distance, lessThan(1e-6),
+          reason: why);
+    }
+
+    expectAttached('premise');
+    expect(restingPlacement(tester, c)!.a, closeTo(0, 1e-9), reason: 'premise');
     c.permissions = PlanPermissions.full.copyWith(rotate: false);
     await tester.pump();
-    p = await ghost();
-    expect(isFree(p, Vector2(25730, 16200)), isTrue,
-        reason: 'ghostAttachment isNull');
-    expect(linearOf(p), unturned);
+    expect(restingMarker(tester, c), isNull, reason: 'ghostAttachment isNull');
+    expect(linearOf(restingPlacement(tester, c)!), unturned);
     c.permissions = PlanPermissions.full;
     await tester.pump();
-    p = await ghost();
-    expect(isFree(p, Vector2(25730, 16200)), isFalse,
-        reason: 'ghostAttachment isNotNull');
+    expectAttached('ghostAttachment isNotNull');
+    expect(restingPlacement(tester, c)!.a, closeTo(0, 1e-9));
+    // The commit at the resting pointer is the attached one (IA-R4).
+    final p = await ghostAt(tester, c, g, at);
+    expect(isFree(p, at), isFalse, reason: 'committed attached');
     expect(p.a, closeTo(0, 1e-9));
     await g.removePointer();
   });

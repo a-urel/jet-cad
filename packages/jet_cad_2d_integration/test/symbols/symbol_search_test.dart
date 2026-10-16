@@ -274,7 +274,13 @@ void main() {
     final lib = furniture;
     for (final query in ['', ' ', ' \t\n  ']) {
       final all = await searchSymbols(tester, query);
-      expect(ids(all), entries.map((e) => e.id).toList(), reason: '"$query"');
+      // Library order: the asset's, not the loaded symbols' (review fix 2).
+      expect(
+          ids(all),
+          lib.entries
+              .map((e) => '${e.symbol.key}@${e.symbol.version}')
+              .toList(),
+          reason: '"$query"');
       expect(categoriesOf(all), lib.categories, reason: '"$query"');
       for (final g in all) {
         expect(

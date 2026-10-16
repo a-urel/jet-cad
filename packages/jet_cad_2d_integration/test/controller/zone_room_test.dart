@@ -21,11 +21,10 @@ import '../support/units.dart' show fxKit, unitsLabelled;
 import '../support/zone_plan.dart';
 
 /// The floor a framing shows round its units, per side, and the least span
-/// it shows per axis, in millimetres; the default zoom bounds (copied from
-/// jet_cad_2d_plan/lib/src/units/unit_fit.dart:15-19 and
-/// lib/src/controller/camera_bounds.dart:13-14).
+/// it shows per axis, in millimetres (copied from
+/// jet_cad_2d_plan/lib/src/units/unit_fit.dart:15-19; the default zoom
+/// bounds `kPlanMinScale`, `kPlanMaxScale` are the plan barrel's).
 const double kUnitFitMarginMm = 500, kUnitFitMinSpanMm = 3000;
-const double kPlanMinScale = 0.001, kPlanMaxScale = 100.0;
 
 /// The camera that frames [box], a non-empty world bound of units, in a
 /// drawing area of [viewport] (zone spec Z3): the plan's `frameUnits`,

@@ -152,8 +152,6 @@ Future<void> moveBy(WidgetTester tester, Scene s, Transform2 delta) async {
   await drag(tester, from, to);
 }
 
-List<double> partsOf(Transform2 t) => [t.a, t.b, t.c, t.d, t.e, t.f];
-
 /// The plain move `delta · before` (the resolver's null), within 1e-9.
 void expectPlain(
     Transform2 got, Transform2 delta, Transform2 before, String reason) {

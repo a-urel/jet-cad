@@ -3,15 +3,23 @@
 // the architecture kit loaded, over the sample flat (spec C6, Tests "The
 // non-negotiables"). The harness is jet_cad_2d_plan/test/invariants/
 // canvas_paint_allocation_test.dart's CV-alloc (3a Task 28): ten rebuilt
-// frames of PlanCanvas, the camera moving one pixel, 50 root entities
-// selected so the overlay draws outlines and grips; the same canvas state,
-// painter, sink and Paint, and a capacity that holds still.
+// frames of PlanCanvas, the camera moving between the fit and the fit
+// turned 0.2 rad about the canvas's centre, 50 root entities and the placed
+// furniture selected so the overlay draws outlines and grips; the same
+// canvas state, painter, sink and Paint, and a capacity that holds still.
+// The kit's furniture is placed first (armed and clicked, as a user places
+// it: five `architecture.*` symbols, the base unit twice, so one definition
+// is drawn by two instances), so the instance paint path is measured with
+// the kit loaded (review fix 3).
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:jet_cad_2d_integration/jet_cad_2d_integration.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+import 'package:vector_math/vector_math_64.dart' show Vector2;
+
+import '../support/canvas_rig.dart' show globalAt, mouseClick, symbolsReady;
 
 void main() {
   testWidgets(
@@ -24,21 +32,57 @@ void main() {
     await tester.pumpWidget(
         MaterialApp(home: Scaffold(body: PlanCanvas(controller: c))));
     await tester.pump();
+    expect(await symbolsReady(tester, c), isTrue,
+        reason: 'premise: the furniture library loaded');
 
     final doc = c.document;
+    final size = tester.getSize(find.byType(InteractionLayer));
+    final a = ViewportTransform.fit(doc.extents, size);
+    c.camera.value = a;
+    await tester.pump();
+    final placed = <Handle>[];
+    for (final (key, x, y) in const [
+      ('architecture.bed.double', 15300.5, 11200.25),
+      ('architecture.sofa.three', 18400.75, 14100.5),
+      ('architecture.bath.toilet', 21250.25, 10300.75),
+      ('architecture.kitchen.base.600', 23800.5, 12600.25),
+      ('architecture.kitchen.base.600', 24600.25, 12600.75),
+      ('architecture.dining.table.round', 19700.5, 11900.5),
+    ]) {
+      final before = {
+        for (final n in doc.tree.nodes.whereType<InstanceNode>()) n.handle
+      };
+      expect(c.armSymbol(c.symbols.singleWhere((s) => s.component.key == key)),
+          isTrue);
+      await tester.pump();
+      await mouseClick(tester, globalAt(tester, c, Vector2(x, y)));
+      final added = [
+        for (final n in doc.tree.nodes.whereType<InstanceNode>())
+          if (!before.contains(n.handle)) n.handle
+      ];
+      expect(added, hasLength(1), reason: 'premise: $key placed');
+      placed.add(added.single);
+    }
+    expect(c.selectTool('plan.select'), isTrue);
+    await tester.pump();
+
     final roots = [
       for (final slot in doc.entities.liveSlots)
         if (doc.entities.ownerAt(slot) == doc.rootHandle)
           doc.entities.handleAt(slot),
     ].take(50).toList();
     expect(roots, hasLength(50), reason: 'premise: root entities to select');
-    c.activeSelection.replace([for (final h in roots) SelectionKey.root(h)]);
+    c.activeSelection.replace([
+      for (final h in [...roots, ...placed]) SelectionKey.root(h)
+    ]);
 
-    final size = tester.getSize(find.byType(InteractionLayer));
-    final a = ViewportTransform.fit(doc.extents, size);
+    // Turned about the canvas's centre, not only panned.
     final b = ViewportTransform(
-        worldToScreenMatrix:
-            Transform2.translation(1, -1).multiply(a.worldToScreenMatrix));
+        worldToScreenMatrix: Transform2.translation(
+                size.width / 2, size.height / 2)
+            .multiply(Transform2.rotation(0.2))
+            .multiply(Transform2.translation(-size.width / 2, -size.height / 2))
+            .multiply(a.worldToScreenMatrix));
     Future<void> frames(int n) async {
       for (var i = 0; i < n; i++) {
         c.camera.value = i.isEven ? a : b;

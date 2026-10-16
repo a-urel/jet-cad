@@ -47,7 +47,7 @@ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../support/canvas_rig.dart'
-    show globalAt, gripsOf, indexOf, press, pumpEditor;
+    show globalAt, gripsOf, indexOf, press, pumpEditor, worldAt;
 import '../support/plans.dart'
     show dimLines, dimText, driftOf, kids, pageOf, walls;
 
@@ -106,13 +106,6 @@ Future<void> pinCamera(
           size.width / 2 - pxPerMm * at.x + 0.37,
           size.height / 2 + pxPerMm * at.y + 0.61));
   await tester.pump();
-}
-
-/// The world point the canvas reads at global [g] (the layer's inverse
-/// camera).
-Vector2 worldAt(WidgetTester tester, PlanController c, Offset g) {
-  final local = g - tester.getTopLeft(find.byType(InteractionLayer));
-  return c.camera.value.screenToWorld(Vector2(local.dx, local.dy));
 }
 
 /// The select tool's pick radius on [c]'s camera, world mm.
