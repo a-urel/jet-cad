@@ -27,6 +27,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
+import 'dart:ui' show AppExitResponse;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
@@ -67,7 +68,7 @@ class DocumentHost extends StatefulWidget {
   final DocumentSession session;
   final DocumentFiles files;
 
-  /// The exit guard the host will arm while the plan is dirty (Task 5); the
+  /// The exit guard the host arms exactly while the plan is dirty; the
   /// platform's when null.
   final ExitGuard? exitGuard;
 
@@ -81,6 +82,9 @@ class DocumentHost extends StatefulWidget {
 class DocumentHostState extends State<DocumentHost> {
   PlanController get _controller => widget.controller;
   DocumentSession get _session => widget.session;
+
+  late final AppLifecycleListener _exitListener;
+  late final ExitGuard _exitGuard;
 
   /// Runs [body] as a flow: busy for its whole span when no flow is running
   /// yet, cleared however it ends; inside another flow, busy is the outer
@@ -128,6 +132,32 @@ class DocumentHostState extends State<DocumentHost> {
     }
     return true;
   }
+
+  /// The app's exit request, in this order: a flow in progress -- a
+  /// dialog, a panel, a write in flight -- cancels, with no second dialog;
+  /// else pending input is settled, so a typed value makes the plan dirty
+  /// rather than being lost; then a clean plan exits and a dirty one asks
+  /// as [_mayDiscard] does. A shape part-way does not block the exit and is
+  /// dropped.
+  ///
+  /// The settle is a discarded `controller.save()` (`settlePendingInput` is
+  /// `@internal`); `_mayDiscard` then yields one microtask before it reads
+  /// `dirty`. A save that throws is not an exit blocker here: the plan is
+  /// then asked about as it stands, and Save shows the error.
+  Future<AppExitResponse> _onExitRequested() async {
+    if (_session.busy.value) return AppExitResponse.cancel;
+    final mayExit = await _flow(() async {
+      try {
+        _controller.save();
+      } catch (_) {
+        // Settled as far as it could; the dialog's Save reports the error.
+      }
+      return _mayDiscard();
+    });
+    return mayExit ? AppExitResponse.exit : AppExitResponse.cancel;
+  }
+
+  void _armExitGuard() => _exitGuard.armed = _controller.dirty.value;
 
   Future<SaveChoice> _askToSave() async {
     if (!mounted) return SaveChoice.cancel;
@@ -288,6 +318,23 @@ class DocumentHostState extends State<DocumentHost> {
         ],
       ),
     );
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _exitListener = AppLifecycleListener(onExitRequested: _onExitRequested);
+    _exitGuard = widget.exitGuard ?? createExitGuard();
+    _armExitGuard();
+    _controller.dirty.addListener(_armExitGuard);
+  }
+
+  @override
+  void dispose() {
+    _controller.dirty.removeListener(_armExitGuard);
+    _exitGuard.dispose();
+    _exitListener.dispose();
+    super.dispose();
   }
 
   @override
