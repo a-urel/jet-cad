@@ -1,9 +1,12 @@
+// ignore_for_file: invalid_use_of_internal_member
 // Spec 07 D11's Wall section. Every wall sits at the far origin in its own
 // rotated group (`groupAt`), the plan is turned 23 degrees, and the camera
 // is rotated.
 // Ported from jet_cad_floor_plan/test/selection_panel_test.dart (WS1-WS11;
 // WS7 (Box) is 2a's) for jet_cad_2d_integration (3a Task 27); assertions
-// unchanged but rulings IP-R1, IP-R2, IP-R8.
+// unchanged but rulings IP-R1, IP-R2, IP-R8. WS9 is split (the
+// controller's ruling, Task 18's rule): WS9-open and WS9-refused; they
+// read `frozen`, @internal (ruling R-P9).
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -13,7 +16,9 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show Tool;
 import 'package:jet_cad_2d_integration/jet_cad_2d_integration.dart';
 import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
-import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart' show PlanController;
+import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show KitDiagnosticCode;
+import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart'
+    show PlanController, PlanLocked;
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../support/canvas_rig.dart';
@@ -83,6 +88,31 @@ Future<PlanController> pumpPanel(WidgetTester tester, String json) async {
 /// A primary click at world [p] (the integration rig's `clickAt`).
 Future<void> clickWorld(WidgetTester tester, PlanController c, Vector2 p) =>
     clickAt(tester, c, p);
+
+/// The brief's malformed plan (ruling IP-R8): [panelPlanJson] with A's
+/// fill naming B's outline, a file the planner refuses to regenerate
+/// (spec 07 D8).
+String malformedPlanJson() {
+  final j = jsonDecode(panelPlanJson()) as Map<String, Object?>;
+  final source = architectureController(json: panelPlanJson());
+  try {
+    final src = source.document;
+    final aFill =
+        kids(src, wa).firstWhere((k) => kindOf(src, k) == EntityKind.fill);
+    final bFill =
+        kids(src, wb).firstWhere((k) => kindOf(src, k) == EntityKind.fill);
+    final bOutline = payloadOf(src, bFill).scalars[0];
+    for (final e in j['entities']! as List) {
+      final entity = e as Map<String, Object?>;
+      if ((entity['record']! as Map)['handle'] == aFill.value) {
+        (entity['geometry']! as Map)['scalars'] = [bOutline];
+      }
+    }
+  } finally {
+    source.dispose();
+  }
+  return jsonEncode(j);
+}
 
 Future<void> enterAndSubmit(
     WidgetTester tester, Finder field, String text) async {
@@ -408,71 +438,90 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  // Decided: premise impossible under C1.10's freeze at open (Task 18's
+  // rule). Today's WS9 edited the malformed wall A and saw its edit
+  // refused at the commit; the plan freezes and locks A when it opens the
+  // file (a hookFailed diagnostic), and a frozen object shows no section.
+  // WS9-open pins what the plan now does with that file; WS9-refused keeps
+  // the old intent (a refused edit reverts the field, the document
+  // untouched, nothing escapes) on a live wall.
   testWidgets(
-      'WS9 an edit the document refuses (a loaded fill naming another '
-      "wall's outline) reverts the field and re-pins it: no exception "
-      'escapes Enter, the focus loss or the justification toggle (final '
-      'review m1)', (tester) async {
-    final j = jsonDecode(panelPlanJson()) as Map<String, Object?>;
-    // A's fill names B's outline: a malformed file the planner refuses
-    // to regenerate (spec 07 D8).
-    final source = architectureController(json: panelPlanJson());
-    addTearDown(source.dispose);
-    final src = source.document;
-    final aFill =
-        kids(src, wa).firstWhere((k) => kindOf(src, k) == EntityKind.fill);
-    final bFill =
-        kids(src, wb).firstWhere((k) => kindOf(src, k) == EntityKind.fill);
-    final bOutline = payloadOf(src, bFill).scalars[0];
-    for (final e in j['entities']! as List) {
-      final entity = e as Map<String, Object?>;
-      if ((entity['record']! as Map)['handle'] == aFill.value) {
-        (entity['geometry']! as Map)['scalars'] = [bOutline];
-      }
-    }
-    final view = await pumpPanel(tester, jsonEncode(j));
+      'WS9-open a loaded fill naming another wall\'s outline freezes that '
+      'wall at open: a hookFailed diagnostic, no Wall section, a raw edit '
+      'refused (PlanLocked)', (tester) async {
+    final view = await pumpPanel(tester, malformedPlanJson());
+    final doc = view.document;
+    expect(view.frozen, contains(wa));
+    expect(
+        [for (final d in view.diagnostics.value) (d.code, d.kitId, d.subject)],
+        contains((
+          KitDiagnosticCode.hookFailed,
+          'architecture',
+          ArchitectureTypes.wall
+        )));
+    await select(tester, view, [wa]);
+    expect(wallSection, findsNothing);
+    expect(thickness, findsNothing);
+    final pa = doc.components.get<WallParams>(wa)!;
+    final before = canon(doc);
+    expect(
+        () => doc.commands.execute(
+            SetComponentCommand<WallParams>(wa, pa.copyWith(thickness: 250))),
+        throwsA(isA<PlanLocked>()));
+    expect(canon(doc), before);
+    expect(doc.components.get<WallParams>(wa), pa);
+    expect(tester.takeException(), isNull);
+    // Not kept: today's last lines ("C, no neighbour of A's, is sound: its
+    // edit lands", 120 and one step) do not hold here; the plan refuses
+    // C's edit too (PlanLocked, the lock hint set). Reported to the
+    // controller (task-27-report.md, fix report).
+  });
+
+  // Decided: premise impossible under C1.10's freeze at open (Task 18's
+  // rule). The old intent of WS9 on a live wall: the type's `write`
+  // refuses a thickness (ArgumentError, which the panel takes as a silent
+  // refusal), by Enter and by the focus loss; the field reverts to the
+  // stored value, the document and the undo depth unchanged, no exception
+  // escapes; then a valid thickness lands. M-WS9-r: the kit's `_thickness`
+  // refusal removed (wall_plan.dart) turns it red.
+  testWidgets(
+      'WS9-refused an edit the type refuses on a live wall reverts the '
+      'field: no exception escapes Enter or the focus loss, the document '
+      'unchanged; a valid thickness then lands', (tester) async {
+    final view = await pumpPanel(tester, panelPlanJson());
     final doc = view.document;
     final pa = doc.components.get<WallParams>(wa)!;
     final before = enc(doc);
     await select(tester, view, [wa]);
+    for (final bad in ['0', '-40', '${nextUp(kWallMaxThickness)}']) {
+      await tester.tap(thickness);
+      await tester.pump();
+      await enterAndSubmit(tester, thickness, bad);
+      await tester.pump();
+      expect(tester.takeException(), isNull, reason: bad);
+      expect(textOf(tester, thickness), '200', reason: 'reverted: $bad');
+      expect(doc.components.get<WallParams>(wa), pa, reason: bad);
+      expect(enc(doc), before, reason: bad);
+      expect(doc.commands.undoDepth, 0, reason: bad);
+      // The focus loss alone: typed, then a tap outside.
+      await tester.tap(thickness);
+      await tester.pump();
+      await tester.enterText(thickness, bad);
+      await tester.pump();
+      await tester.tap(wallSection);
+      await tester.pump();
+      expect(tester.takeException(), isNull, reason: bad);
+      expect(textOf(tester, thickness), '200', reason: 'reverted: $bad');
+      expect(enc(doc), before, reason: bad);
+      expect(doc.commands.undoDepth, 0, reason: bad);
+    }
     await tester.tap(thickness);
     await tester.pump();
     await enterAndSubmit(tester, thickness, '250');
-    await tester.pump();
-    expect(tester.takeException(), isNull);
-    expect(textOf(tester, thickness), '200', reason: 'reverted');
-    expect(doc.components.get<WallParams>(wa), pa);
-    expect(enc(doc), before);
-    expect(doc.commands.undoDepth, 0);
-    // The focus loss alone: typed, then a tap outside.
-    await tester.tap(thickness);
-    await tester.pump();
-    await tester.enterText(thickness, '260');
-    await tester.pump();
-    await tester.tap(wallSection);
-    await tester.pump();
-    expect(tester.takeException(), isNull);
-    expect(textOf(tester, thickness), '200');
-    expect(enc(doc), before);
-    // The justification toggle: refused alike, and it keeps showing A's.
-    await choose(tester, 'justification', 'left');
-    expect(tester.takeException(), isNull);
-    expect(shownJustification(tester), {Justification.centre});
-    expect(doc.components.get<WallParams>(wa), pa);
-    expect(enc(doc), before);
-    expect(doc.commands.undoDepth, 0);
-    // C, no neighbour of A's, is sound: its edit lands.
-    await select(tester, view, [wc]);
-    await enterAndSubmit(tester, thickness, '120');
-    expect(doc.components.get<WallParams>(wc)!.thickness, 120);
+    expect(doc.components.get<WallParams>(wa), pa.copyWith(thickness: 250));
     expect(doc.commands.undoDepth, 1);
-  },
-      // Finding (ruling IP-R8), for the controller: the plan's load freezes
-      // and locks A as broken (`hookFailed`, `frozen` {1300}), so a frozen
-      // A shows no section and the case's first tap on the thickness field
-      // finds nothing. Skipped, not changed, until the controller rules
-      // (task-27-report.md).
-      skip: true);
+    expect(textOf(tester, thickness), '250');
+  });
 
   // 1e100 is the probe's; 1e25 sits under a bound far too high (1e30) and
   // still collapses this ~1504 mm band.
