@@ -49,14 +49,28 @@ The invariants on their own:
   `00:00 +0: IA-alloc a rebuilt steady-state PlanCanvas frame over the sample flat allocates O(1) per flush, the kit loaded (M-IA-alloc)`
   then `00:00 +1: All tests passed!`
 
-The cost prints of the kit's suite (printed, not asserted; this run, the
-whole kit suite in parallel, so the numbers run higher than the reports'
-single-file runs):
-- `WT12 n=600: median per hover 80.38 us (whole pointer move), band scan alone 77.66 us`
-- `OT4 n=600: median per hover over no wall 76.20 us (whole pointer move), host scan alone 73.72 us; over a wall, with the preview, 89.60 us`
-- `TT6 600 walls, a courtyard among 600 free walls: median per Unbounded hover 153.2 us; ...`; `TT6 636 walls, outside a connected 636-wall plan: median per Unbounded hover 176.9 us; ...`
-- `TL8 612 walls, 0.3 px/mm: median per move over the band path 104.0 us idle, ...; budget 1000 us per move (D12; printed, not asserted)`
-- `GE5b 612 walls: end-grip preview along a face line: first 2595 us, median 112 us, ...`
+The kit's cost prints (printed, not asserted). **This run**: each test run
+on its own in `packages/jet_cad_2d_kit_architecture` (`flutter test <file>
+--plain-name <id>`, each `+1: All tests passed!`), the full lines
+transcribed in `task-29-report.md`'s fix report 1:
+- `WT12 n=600: median per hover 75.06 us (whole pointer move), band scan alone 73.22 us`
+- `OT4 n=600: median per hover over no wall 96.84 us (whole pointer move), host scan alone 92.32 us; over a wall, with the preview, 106.02 us`
+- `GE5b 612 walls: end-grip preview along a face line: first 7199 us, median 109 us, worst 7199 us, over 1 ms 1/61 (printed, not asserted)`
+- `TT6 600 walls, a courtyard among 600 free walls: median per Unbounded hover 143.8 us; the first, which builds the contours, 12519 us`
+- `TT6 636 walls, outside a connected 636-wall plan: median per Unbounded hover 155.4 us; the first, which builds the contours, 7524 us`
+- `TL8 612 walls, 0.3 px/mm: median per move over the band path 116.0 us idle, 111.0 us with two points placed (the preview rebuilt each move); on the face line 1481 us, on the centreline 124 us; a Shift slide along a face line 95.0 us per move (worst 190 us); budget 1000 us per move (D12; printed, not asserted)`
+
+**Reports** (the same prints when the task ran them; timing varies between
+runs and machines' load, so the numbers differ):
+- Task 12 (fix report): `WT12 n=600: median per hover 38.04 us (whole pointer move), band scan alone 35.86 us`; without the liveness check `... 4.16 us ..., band scan alone 1.88 us`.
+- Task 15: `OT4 n=600: median per hover over no wall 43.68 us (whole pointer move), host scan alone 41.64 us; over a wall, with the preview, 50.52 us`.
+- Task 21: GE5b "a median of 102 us per preview among 612 walls".
+- Task 19: TT6 median per Unbounded hover 137.5 us (600 free walls) and 147.5 us (connected 636-wall plan); today's line 19.2 us and 12.3 us.
+- Task 22: TL8 band path idle 104-116 µs with the check, 44 µs without, today's 38 µs; Shift slide 96 µs.
+
+This run's TL8 prints a face-line move of 1481 us, over D12's 1,000 µs
+budget; the line is printed, not asserted, and Task 22's report quotes no
+face-line figure. Recorded for the final review.
 
 ### Tools
 
@@ -99,25 +113,31 @@ As CI's `ci-tools` job runs them:
 
 ### Dry runs
 
-At the head above, before this task's CHANGELOG lines (this run):
-- `cd packages/jet_cad_2d_kit && dart pub publish --dry-run`: exit 0, `Package has 0 warnings.`
-- `cd packages/jet_cad_2d_plan && dart pub publish --dry-run`: exit 0, `Package has 0 warnings.`
+At the head above, before this task's CHANGELOG lines (this run): the
+three `dart pub publish --dry-run` (kit, plan, architecture kit) each exit
+0 with `Package has 0 warnings.` (Task 29's report, Step 5).
+
+At `13fb4933` (this task's first commit; this run, fix round 1, every
+printed line transcribed in `task-29-report.md`'s fix report 1):
+- `cd packages/jet_cad_2d_kit && dart pub publish --dry-run`: exit 0,
+  `Total compressed archive size: 120 KB.`, `Package has 0 warnings.`
+- `cd packages/jet_cad_2d_plan && dart pub publish --dry-run`: exit 0,
+  `Total compressed archive size: 938 KB.`, `Package has 0 warnings.`
 - `cd packages/jet_cad_2d_kit_architecture && dart pub publish --dry-run`:
-  exit 0, `Package has 0 warnings.`, `Total compressed archive size: 536 KB.`
+  exit 0, `Total compressed archive size: 536 KB.`, `Package has 0 warnings.`
   The printed list holds `CHANGELOG.md (1 KB)`, `LICENSE (11 KB)`,
   `README.md (<1 KB)`, `assets/library/furniture.jetlib (65 KB)` (and
   `furniture.snapshot.json (17 KB)`), `example/main.dart (1 KB)`,
   `lib/jet_cad_2d_kit_architecture.dart (<1 KB)` and `pubspec.yaml (<1 KB)`,
-  besides `analysis_options.yaml`, `lib/src/...`, `test/...` and
+  besides `analysis_options.yaml (<1 KB)`, `lib/src/...`, `test/...` and
   `tool/generate_furniture_library.dart (1 KB)`.
 - `cmp LICENSE packages/jet_cad_2d_kit_architecture/LICENSE`: prints nothing, exit 0.
 
 After this task's CHANGELOG lines, before its commit (this run): each of
 the three exits 65 with `Package has 1 warning.`, the one warning being
 `* 1 checked-in file is modified in git.` / `Modified files:` /
-`CHANGELOG.md`, the uncommitted edit itself; no other issue. The run after
-the commit is in Task 29's report (`task-29-report.md`), as this note is
-part of that commit.
+`CHANGELOG.md`, the uncommitted edit itself; no other issue (Task 29's
+report, Step 5).
 
 `jet_cad_2d_integration` is `publish_to: none`, not dry-run.
 
@@ -322,7 +342,7 @@ PF1; `host/editor_tools_test` T4-c, T4-d, T4-h, T4-i;
 `widget_theme_test` (7); `symbols/symbol_component_test` SC7-SC12;
 `package_assets_test` PA4.
 
-### Lines dropped, the human's word
+### Lines dropped, decided by the controller (delegated)
 
 Every line below is decided; none is pending. The plan's 19 rows were
 accepted by the controller under the human's delegation before execution
@@ -341,7 +361,7 @@ From the plan (decided before execution, by the controller, delegated):
 8. Task 21, PN1, PN2 (DM-R2): the `bruteCandidates` premises (kit internals).
 9. Task 22, TL5 status line (DT-R3): canvas width `== 896` → `greaterThan(4690 * 0.12)`.
 10. Task 23: the pre-09c group (4) and "the 14 new symbols ... == 27" (decision 9); the seating group's two seat-count tests (decision 7).
-11. Task 8, SE10, SE10b, SE11: dropped on the human's word (decision 7).
+11. Task 8, SE10, SE10b, SE11: dropped by the spec's decision 7 (the human's, taken in the brainstorm).
 12. Task 26, SL1 (IT-R13): `:345-349`, `:359`, `:427` (`oracleFailures`), kit internals.
 13. Task 27, WS3, WS10 (IP-R2): the `WallTool.settings` reads.
 14. Task 27, `decimal_separator` notice cases (IP-R3): `tool.points` hasLength 2, `tool.hoverKind` isNull.
@@ -588,7 +608,7 @@ Checked by `grep` in this run:
 Written by this task from the code (each name checked with `grep` over the
 package's `lib`): `jet_cad_2d_kit` (one bullet appended under `## 0.1.0`:
 the contract's 3a surface, `PlanWords` and the words on `PlanObject`,
-`fieldsOf`, `commitField` included); `jet_cad_2d_plan` (one bullet appended
+`fieldsOf`, `commitField` included); `jet_cad_2d_plan` (ten "Sub-project 3a" bullets appended
 under `## 0.8.0 (unreleased)`: a grip drop is refused by the rule `execute`
 uses, not through `execute`; the choice row's focus hand-back; the
 shortcuts' remount); `jet_cad_2d_kit_architecture` (the `## 0.1.0
