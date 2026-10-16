@@ -94,11 +94,17 @@ final class PlanPageFlows {
   final UnitIndex Function()? _units;
 
   final ValueNotifier<bool> _ready = ValueNotifier(true);
+  final ValueNotifier<bool> _busy = ValueNotifier(false);
   bool _disposed = false;
 
   /// False while an export or a print runs, for this controller and every
   /// view of it.
   ValueListenable<bool> get ready => _ready;
+
+  /// True while an export or a print runs (the opposite of [ready]): from
+  /// its start, the dialog included, to its end, error and cancel included
+  /// (spec 4a O3).
+  ValueListenable<bool> get busy => _busy;
 
   /// The export dialog's last answer: the next dialog's initial.
   PlanExportAnswer dialogAnswer = PlanExportAnswer.initial;
@@ -109,12 +115,15 @@ final class PlanPageFlows {
   bool acquire() {
     if (_disposed || !_ready.value) return false;
     _ready.value = false;
+    _busy.value = true;
     return true;
   }
 
   /// Gives the guard back, unless the flows are disposed.
   void release() {
-    if (!_disposed) _ready.value = true;
+    if (_disposed) return;
+    _busy.value = false;
+    _ready.value = true;
   }
 
   PlanExporter exporterOf(String id) {
@@ -307,5 +316,6 @@ final class PlanPageFlows {
   void dispose() {
     _disposed = true;
     _ready.dispose();
+    _busy.dispose();
   }
 }

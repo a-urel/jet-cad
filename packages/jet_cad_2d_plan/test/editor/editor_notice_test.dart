@@ -64,11 +64,11 @@ void main() {
     await tester.pump();
     expect(status(tester), 'Mark — Already marked: Mark 1');
     await tester.pumpWidget(app(c, const Locale('tr')));
-    await tester.pump();
+    // Spec 4a O4: in the frame the locale changes in, with no pump after
+    // (the 3a test pumped a second frame: the one-frame lag).
     // M-TN-relocale: the editor words the notice once and keeps the text.
     expect(status(tester), 'İşaret — Zaten işaretli: Mark 1');
     await tester.pumpWidget(app(c, const Locale('en')));
-    await tester.pump();
     expect(status(tester), 'Mark — Already marked: Mark 1');
   });
 }

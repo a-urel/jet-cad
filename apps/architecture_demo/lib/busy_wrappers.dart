@@ -17,9 +17,10 @@ import 'package:pdf/pdf.dart' show PdfPageFormat;
 /// export starts during another flow ("the callback does nothing while
 /// busy"). Busy is cleared when the dialog answers or throws.
 ///
-/// The busy span ends there. What follows -- the library makes the bytes,
-/// then calls `onExport` -- is not busy until the host's export write
-/// starts (see `DocumentHostState.exportFlow`).
+/// This span ends when the dialog answers. What follows -- the library
+/// makes the bytes, then calls `onExport` -- is covered by
+/// `PlanController.pageFlowBusy`, which the host reads with this busy (spec
+/// 4a O3; see `DocumentHostState`).
 ///
 /// [isDisposed] tells that the session is gone (the app torn down with the
 /// dialog up): the clear is then skipped, as `DocumentHostState._flow` does.

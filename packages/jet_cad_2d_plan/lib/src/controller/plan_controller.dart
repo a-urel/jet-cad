@@ -446,6 +446,13 @@ class PlanController extends ChangeNotifier {
   @internal
   late final PlanPageFlows pageFlows;
 
+  /// True from the start of an export or a print to its end: the dialog,
+  /// the bytes and the host's `onExport` included, an error or a cancel
+  /// too. It covers the editor's flows and the controller's own [export]
+  /// and [print]. A host that must not start another flow in the middle of
+  /// one (a New, an exit) reads it.
+  ValueListenable<bool> get pageFlowBusy => pageFlows.busy;
+
   /// `plan.pdf`, `plan.png`, then the host's exporters, in order.
   List<PlanExporter> get exporters => pageFlows.exporters;
 
@@ -572,7 +579,7 @@ class PlanController extends ChangeNotifier {
   @internal
   ValueListenable<bool> get snapping => _snapping;
 
-  final ValueNotifier<Locale> _locale = ValueNotifier(const Locale('en'));
+  final _AdoptingLocale _locale = _AdoptingLocale(const Locale('en'));
   final DiagnosticsLog _diagnostics = DiagnosticsLog();
   final ValueNotifier<SymbolsState> _symbolsState =
       ValueNotifier(SymbolsState.ready);
@@ -2367,6 +2374,15 @@ class PlanController extends ChangeNotifier {
   /// read it live.
   ValueListenable<Locale> get locale => _locale;
 
+  /// A widget's locale taken in at once, inside its build, with no
+  /// notification: the words read it live, so a notice built in the same
+  /// frame is worded in the new language. The report that follows the frame
+  /// ([reportLocale]) tells the listeners.
+  @internal
+  void adoptLocale(Locale locale) {
+    if (!_disposed) _locale.adopt(locale);
+  }
+
   bool get _untouched {
     final u = _unsettled;
     if (u == null || !identical(u.document, document)) return false;
@@ -2836,4 +2852,29 @@ class PlanController extends ChangeNotifier {
     unawaited(_unitOut.close());
     super.dispose();
   }
+}
+
+/// The locale: [adopt] changes the value with no notification (inside a
+/// build); setting [value] notifies when the value differs from the last one
+/// told, so a locale adopted and then reported notifies once.
+final class _AdoptingLocale extends ChangeNotifier
+    implements ValueListenable<Locale> {
+  _AdoptingLocale(Locale initial)
+      : _value = initial,
+        _told = initial;
+
+  Locale _value;
+  Locale _told;
+
+  @override
+  Locale get value => _value;
+
+  set value(Locale next) {
+    _value = next;
+    if (next == _told) return;
+    _told = next;
+    notifyListeners();
+  }
+
+  void adopt(Locale next) => _value = next;
 }

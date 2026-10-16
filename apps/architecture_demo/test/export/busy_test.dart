@@ -6,9 +6,9 @@
 // The sequence of an export, from the library's `EditorPageFlows.export`:
 //   1. the dialog runs inside `busyExportDialog`: busy for as long as it is up;
 //   2. its answer ends that busy span; the library then makes the bytes (PDF
-//      and PNG are async) with ITS OWN guard held and the app not busy: the
-//      app has no hook for that stretch (the N6-gap test pins what happens
-//      to a flow started there);
+//      and PNG are async) with ITS OWN guard held; the app is busy through
+//      `PlanController.pageFlowBusy` (spec 4a O3: the N6-closed test pins
+//      that a flow started there does nothing);
 //   3. the library calls `onExport` -> `exportFlow`: busy again, for the
 //      save panel and the write (the N6-write test).
 import 'dart:async';
@@ -133,11 +133,13 @@ void main() {
   });
 
   testWidgets(
-      'N6-gap between the dialog closing and the write starting the app is '
-      'NOT busy (the library is making the bytes): a New started there '
-      'replaces the plan, and the library drops the export -- nothing is '
-      'asked, nothing written, busy ends false', (tester) async {
+      'N6-closed between the dialog closing and the write starting the app '
+      'is busy (the library is making the bytes, pageFlowBusy): New and an '
+      'exit request do nothing, and the export then reaches its save panel '
+      'and writes', (tester) async {
     final rig = await pumpFlat(tester);
+    final files = rig.files
+      ..scriptSaveLocation(name: 'flat.png', location: '/out/flat.png');
     final doc = rig.controller.document;
     await openDialog(tester);
     await tapKey2(tester, 'export-format-plan.png');
@@ -147,21 +149,31 @@ void main() {
     await tester.pump();
     expect(find.byKey(const Key('export-dialog')), findsNothing,
         reason: 'premise: the dialog has closed');
-    expect(rig.files.saveLocationCalls, isEmpty,
+    expect(files.saveLocationCalls, isEmpty,
         reason: 'premise: the bytes are still being made');
     expect(rig.session.busy.value, isFalse,
-        reason: 'the gap: no hook in the library, the app is not busy');
+        reason: 'premise: the session flows are not running');
+    expect(rig.controller.pageFlowBusy.value, isTrue,
+        reason: 'premise: the library is');
     await pressNew(tester);
-    expect(identical(rig.controller.document, doc), isFalse,
-        reason: 'New ran: the plan is replaced');
-    // EX3-open's 300 dpi export needs about a second of real time to reach
-    // its save panel; wait twice that.
+    expect(identical(rig.controller.document, doc), isTrue,
+        reason: 'New did nothing');
+    expect(find.byKey(const Key('replace-dialog')), findsNothing);
+    final exit = tester.binding.handleRequestAppExit();
+    await tester.pump();
+    expect(await exit, AppExitResponse.cancel, reason: 'the gap is busy');
+    // The 300 dpi export needs about a second of real time to reach its
+    // save panel; wait twice that.
     await tester
         .runAsync(() => Future<void>.delayed(const Duration(seconds: 2)));
     await tester.pump();
-    expect(rig.files.saveLocationCalls, isEmpty);
-    expect(rig.files.writes, isEmpty);
+    await tester.pump();
+    expect(files.saveLocationCalls, ['flat.png'],
+        reason: 'the export was not dropped');
+    expect(files.writes, hasLength(1));
+    expect(identical(rig.controller.document, doc), isTrue);
     expect(rig.session.busy.value, isFalse);
+    expect(rig.controller.pageFlowBusy.value, isFalse);
   });
 
   testWidgets(

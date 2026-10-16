@@ -112,10 +112,16 @@ class DocumentHostState extends State<DocumentHost> {
     }
   }
 
+  /// Whether a flow runs: one of the app's (the session's busy) or the
+  /// library's export or print, from its start to its end
+  /// (`PlanController.pageFlowBusy`, spec 4a O3), which includes the stretch
+  /// between the export dialog closing and the write.
+  bool get _busy => _session.busy.value || _controller.pageFlowBusy.value;
+
   /// A file callback that does nothing while a flow runs (decision 5): the
   /// editor has no hook to grey its buttons out.
   PlanFileCallback _idle(Future<Object?> Function() flow) => () async {
-        if (_session.busy.value) return;
+        if (_busy) return;
         await flow();
       };
 
@@ -162,7 +168,7 @@ class DocumentHostState extends State<DocumentHost> {
   /// save that throws is not an exit blocker here: the plan is then asked
   /// about as it stands, and Save shows the error.
   Future<AppExitResponse> _onExitRequested() async {
-    if (_session.busy.value) return AppExitResponse.cancel;
+    if (_busy) return AppExitResponse.cancel;
     final mayExit = await _flow(() async {
       try {
         if (!_controller.damaged.value) _controller.save();
@@ -183,14 +189,12 @@ class DocumentHostState extends State<DocumentHost> {
   /// The sequence, from the library's `EditorPageFlows.export`: the library
   /// takes its own one-flow guard (Export and Print refuse a second press);
   /// the dialog runs inside [busyExportDialog]'s busy span, which ends when
-  /// it answers; the library then makes the bytes -- the app is NOT busy
-  /// for that stretch, there is no hook; then it calls this with the guard
-  /// still held, and the busy span of this flow covers the panel and the
-  /// write. A New, Open or Save started during the byte-making is not held:
-  /// New and Open replace the plan, which the library sees (the document
-  /// is no longer the one it exported) and drops the export; Save writes
-  /// its own file. The document is never moved off its save point by an
-  /// export.
+  /// it answers; the library then makes the bytes -- the app is busy for
+  /// that stretch too, through `PlanController.pageFlowBusy` (spec 4a O3),
+  /// so a New, Open or Save started there does nothing; then it calls this
+  /// with the guard still held, and the busy span of this flow covers the
+  /// panel and the write. The document is never moved off its save point by
+  /// an export.
   Future<void> exportFlow(PlanExport export) => _flow(() async {
         try {
           final dot = export.name.lastIndexOf('.');

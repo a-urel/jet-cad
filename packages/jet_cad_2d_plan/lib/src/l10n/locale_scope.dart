@@ -27,6 +27,9 @@ abstract final class PlanLocaleScope {
     final next = Localizations.maybeLocaleOf(context) ?? _english;
     // The language class too (a host's own gives its own separator: NS7).
     final strings = PlanStrings.of(context);
+    // Taken in now so the build that follows words a notice in the new
+    // language (spec 4a O4); the listeners hear of it after the frame.
+    controller.adoptLocale(next);
     SchedulerBinding.instance
       ..addPostFrameCallback((_) {
         if (context.mounted && !controller.isDisposed) {
