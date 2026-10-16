@@ -3,6 +3,8 @@ import 'dart:typed_data';
 
 import 'package:architecture_demo/document_files.dart';
 import 'package:architecture_demo/exit_guard.dart';
+import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart' show PagePrinter;
+import 'package:pdf/pdf.dart' show PdfPageFormat;
 
 /// One call to [FakeDocumentFiles.write], as it was made.
 typedef FakeWrite = ({
@@ -149,4 +151,43 @@ class FakeExitGuard implements ExitGuard {
 
   @override
   void dispose() => disposed = true;
+}
+
+/// One call to [FakePagePrinter.print], as it was made.
+class PrintCall {
+  PrintCall(this.pdf, this.name, this.format);
+
+  final Uint8List pdf;
+  final String name;
+  final PdfPageFormat format;
+}
+
+/// A [PagePrinter] for tests (ported from the old app's fake): records every
+/// call's bytes, name and page format; throws [failNext] once when set;
+/// while [hold] is set, keeps each call open (as the system print dialog
+/// does) until the test completes its completer in [held].
+class FakePagePrinter implements PagePrinter {
+  final List<PrintCall> calls = [];
+
+  /// Thrown by the next call, then cleared.
+  Object? failNext;
+
+  /// When true, each call waits on a completer added to [held].
+  bool hold = false;
+
+  /// The open calls' completers, in call order, while [hold] is set.
+  final List<Completer<void>> held = [];
+
+  @override
+  Future<void> print(Uint8List pdf, String name, PdfPageFormat format) async {
+    calls.add(PrintCall(pdf, name, format));
+    final failure = failNext;
+    failNext = null;
+    if (failure != null) throw failure;
+    if (hold) {
+      final open = Completer<void>();
+      held.add(open);
+      await open.future;
+    }
+  }
 }
