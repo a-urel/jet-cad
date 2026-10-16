@@ -248,6 +248,11 @@ as 3a's packages were).
   packages (decision 1).
 - **3a spec, Appendix A.3:** the 3b rows are closed in this spec's
   companion audit.
+- **2026-10-17, N6-gap closed by sub-project 4a (O3):** the library now
+  has a public `PlanController.pageFlowBusy`, true from an export's or a
+  print's start (the dialog included) to its end; the demo's busy is its
+  session flows or `pageFlowBusy`, so the gap between the export dialog and
+  `onExport` is closed and the test reads N6-closed.
 
 ## Revision history
 

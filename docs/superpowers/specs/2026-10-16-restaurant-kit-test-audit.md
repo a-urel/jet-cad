@@ -234,3 +234,159 @@ By destination: KR (kit) 22 + 1 (SC3 premise) + 1 (SNL) = 24 kit-side ports; APP
 16. **Look and strings**: `FloorPlanTheme` -> `PlanTheme` in `demo_theme.dart`; the POS look is unchanged in values. Demo strings (`demo_strings.dart`, ~900 lines) keep their own table; the planner's words now come from `PlanStrings` and the kits.
 17. **Pointer line semantics**: `onUnitHover(null)` is both "over the floor" and "left the canvas"; the demo's "over no table" wording stays for both unless the spec asks otherwise (DE6 asserts only the floor case).
 18. **Version/release**: `apps/restaurant_demo/pubspec.yaml` now depends on `jet_cad_floor_plan: ^0.7.2`; the new graph is `jet_cad_2d_plan` + `jet_cad_2d_kit_architecture` + `jet_cad_2d_kit_restaurant` (workspace). `jet_cad_restaurant_symbols` and `jet_cad_floor_plan` remain only as long as the floor_planner app and CI's host probe (`tool/ci/host_probe`, which copies `restaurant.jetlib`/`names.dart`) need them: decide whether 4a deletes the old package or only stops the demo using it.
+
+## Closed (4a)
+
+Written at the exit gate (Task 11) from the test files by grep. `KR` = `packages/jet_cad_2d_kit_restaurant/test`, `APP` = `apps/restaurant_demo/test`; a line number is the first line of the test's description. All 95 rows are closed.
+
+
+### 1. restaurant_library_test (23)
+
+| case | outcome | where |
+|---|---|---|
+| RL1 committed bytes equal the built library | Ported | KR/library/restaurant_library_test.dart:17 |
+| RL2 building twice gives identical bytes | Ported | KR/library/restaurant_library_test.dart:22 |
+| RL3 pubspec declares the asset; read under the package key; source ... | Ported | KR/restaurant_words_test.dart:48 (source label), KR/library/restaurant_library_test.dart:27 (pubspec) |
+| RL4 69 symbols, every key once in order with its category; six cate... | Ported | KR/library/restaurant_symbols_port_test.dart:358 |
+| RL5 the servable symbols and their seats (M-14s-1) | Ported | KR/library/restaurant_symbols_port_test.dart:377 |
+| RL6 every polyline closed; each symbol its count | Ported | KR/library/restaurant_symbols_port_test.dart:384 |
+| RL7 key lower-case dotted, two tags or more, version 1 | Ported | KR/library/restaurant_symbols_port_test.dart:397 |
+| RL8 every base point off the origin | Ported | KR/library/restaurant_symbols_port_test.dart:410 |
+| RL9 servable draws its served top first; base point = top centre | Ported | KR/library/restaurant_symbols_port_test.dart:419 |
+| RL10 each symbol draws its seats one by one where it says so | Ported | KR/library/restaurant_symbols_port_test.dart:438 |
+| RL11 no chair > 100, no stool > 40 under its top, no two seats overlap | Ported | KR/library/restaurant_symbols_port_test.dart:449 |
+| RL16 every chair faces its top (back line 165 away); 80 chairs seen | Ported | KR/library/restaurant_symbols_port_test.dart:474 |
+| RL12 a booth's benches stay outside the top beyond the 100 tuck | Ported | KR/library/restaurant_symbols_port_test.dart:513 |
+| RL13 each of 69 symbols, quarter-turned and mirrored, validates and... | Ported | KR/library/restaurant_symbols_port_test.dart:540 |
+| RL14 each between 100 and 5000 mm on each axis | Ported | KR/library/restaurant_symbols_port_test.dart:555 |
+| RL15 furniture and restaurant libraries merge without a clash | Split: -open dropped (a key clash is impossible by construction), intent ported | APP/symbols_load_test.dart:22 |
+| RL17 each servable top has its V-6 size and shape | Ported | KR/library/restaurant_symbols_port_test.dart:567 |
+| RL18 first seat around a round top sits straight below it (F-4) | Ported | KR/library/restaurant_symbols_port_test.dart:590 |
+| RL19 the round booth's bench runs 100 under its top (F-2) | Ported | KR/library/restaurant_symbols_port_test.dart:616 |
+| RL20 the corner booth's L bench overlaps its top by 100 per leg (F-2) | Ported | KR/library/restaurant_symbols_port_test.dart:633 |
+| RL21 a lounge set's seats stay clear of its low table (F-2) | Ported | KR/library/restaurant_symbols_port_test.dart:647 |
+| RL22 the walk-in's door opens out of a gap in its wall (F-7) | Ported | KR/library/restaurant_symbols_port_test.dart:673 |
+| RL23 the dessert display's glass bulges 200 in front of it (F-7) | Ported | KR/library/restaurant_symbols_port_test.dart:698 |
+
+### 2. symbol_section_catalog_test (3)
+
+| case | outcome | where |
+|---|---|---|
+| SC1 no servable entry of either library has a size family (R5-3), 3... | Covered | COVERED, checked: packages/jet_cad_2d_kit/test/model/symbol_library_test.dart:398 (V9a), packages/jet_cad_2d_plan/test/panels/symbol_section_test.dart:558 (SW5) and :367 (SS12); the kit pins it too at KR/units_test.dart:72 |
+| SC2 every against-wall entry has its base point on its box's centre... | Dropped | none: the restaurant half is vacuous (no entry carries against-wall); the furniture half is the architecture kit's furniture_library_test |
+| SC3 the real corner booth turned to 37 then mirrored: footprint sta... | Ported | APP/corner_booth_test.dart:46; the base-point pin KR/restaurant_words_test.dart:111 |
+
+### 3. symbol_names_test (2)
+
+| case | outcome | where |
+|---|---|---|
+| SNL (loop: furniture, restaurant) every key and category in de and ... | Ported | KR/restaurant_words_test.dart:79 |
+| SNL the restaurant source carries its names (`source.names same(res... | Dropped, intent covered | COVERED, checked: packages/jet_cad_2d_plan/test/symbols/plan_symbol_loader_test.dart:24 (S-1: each symbol knows its kit and words) |
+
+### 4. demo_test (38)
+
+| case | outcome | where |
+|---|---|---|
+| D1 two empty areas; the toggle switches the view | Ported | APP/service_modes_test.dart:19 |
+| D2 a seeded plan's tables; selection by number | Ported | APP/service_modes_test.dart:40 |
+| D3 service layout kept across Design and back; only Reset layout dr... | Ported | APP/layout_test.dart:39 |
+| D4 Save stores the plan in memory; Revert reloads it | Ported | APP/layout_test.dart:71 |
+| D5 each area keeps its own plan and mode | Ported | APP/service_modes_test.dart:53 |
+| D6 tables follow every edit (review F-1); Save disabled while clean | Ported | APP/layout_test.dart:93 |
+| D7 every numbering warning has its line | Ported | APP/layout_test.dart:108 |
+| D8 an export is logged with its name and size | Ported | APP/events_test.dart:451 |
+| D9 Reset layout shows in the service only and undoes its moves; Fit... | Ported | APP/layout_test.dart:123 |
+| D10 Revert with nothing stored empties the area; Teras keeps its ow... | Ported; Revert rebuilds the sample (fix wave) | APP/layout_test.dart:144 |
+| Dark theme (spec D9): dark platform, demo UI paints without excepti... | Ported | APP/layout_test.dart:180 |
+| D11 two numbers, padded, by Enter: both selected, logged sorted | Ported | APP/service_modes_test.dart:71 |
+| D12 status buttons set the selected tables' statuses; Free clears them | Ported | APP/statuses_test.dart:19 |
+| D13 random statuses seeded, replace the previous ones | Ported | APP/statuses_test.dart:45 |
+| D14 in the service, a tap and a drag are logged by number | Ported | APP/events_test.dart:124 |
+| D15 the demo opens on its sample plans: both assets load, every tab... | Split: -open dropped (no JSON assets), intent ported | APP/sample_plans_test.dart (SP1-SP4 per area, SW1-SW3) |
+| D16 a Revert in the service, and the mode switches, keep the stored... | Ported | APP/layout_test.dart:211 |
+| D17 a right click opens the table's menu; a status chosen there is set | Ported | APP/statuses_test.dart:83 |
+| D18 with Moves off a drag from a table pans and changes no layout | Ported | APP/service_modes_test.dart:82 |
+| D19 language switch: demo, planner and a status caption speak Turki... | Ported | APP/service_modes_test.dart:116 |
+| D20 a locked table's menu acts on that table, never on the selection | Ported | APP/statuses_test.dart:98 |
+| D21 a status caption is worded again when the language changes | Ported | APP/statuses_test.dart:119 |
+| D22 with Long press: menu on, a finger's long press opens the menu,... | Ported | APP/service_modes_test.dart:142 |
+| D23 the Floor drag switch flips the view's floorDrag pan to band an... | Ported | APP/service_modes_test.dart:164 |
+| D16 G6 Merge makes G1, again grows it; member tap logged as the gro... | Ported | APP/groups_test.dart:81 |
+| D17b G6 the next id counts every id's trailing digits | Ported | APP/groups_test.dart:190 |
+| D17 G6 new group is G<largest suffix + 1> after a split; a merge ac... | Ported | APP/groups_test.dart:200 |
+| D18 G6 POS-restored group with a locked and a hidden member grows a... | Ported | APP/groups_test.dart:261 |
+| D20 G6 R-C5-4: a new-group merge leaves what remains of a POS group... | Ported | APP/groups_test.dart:283 |
+| D21 X2 M-TGF-4: groups set under a live selection holding part of a... | Ported | APP/groups_test.dart:308 |
+| D22 X2 M-TGF-6: a group with no selectable member never grows | Ported | APP/groups_test.dart:327 |
+| D23 X2 M-TGF-7: a grow takes a number from another group, which kee... | Ported | APP/groups_test.dart:348 |
+| D24 X2 edge cases from a host: exactly one group's selectable membe... | Ported | APP/groups_test.dart:379 |
+| D19 G6 under a dark platform: merge, a group status, split paint wi... | Ported | APP/groups_test.dart:408 |
+| DQ1 no samples, in German: the shown area's empty plan prints comma... | Ported | APP/layout_test.dart:239 |
+| DQ2 Revert after a switch to German: nothing stored gets a comma pl... | Ported; Revert rebuilds the sample (fix wave) | APP/layout_test.dart:262 |
+| DZ1 M-Z29: zone B frames 6 and 7, not 1; Fade the others focuses {6... | Ported | APP/zones_test.dart:32 |
+| DZ2 the zones' three strings in German and Turkish | Ported | APP/zones_test.dart:117 |
+
+### 5. host_chrome_test (8)
+
+| case | outcome | where |
+|---|---|---|
+| DH1 Tables: no wall tool, no Layer or Page panel, the Symbols tab; ... | Ported | APP/host_chrome_test.dart:91 |
+| DH2 Read only moves and deletes nothing; its bar shows Print, Expor... | Ported | APP/host_chrome_test.dart:137 |
+| DH3 the service bar carries the area's name; Own bar hides it; the ... | Ported | APP/host_chrome_test.dart:172 |
+| DH4 the own export dialog replaces the planner's at Export and its ... | Ported | APP/host_chrome_test.dart:239 |
+| DH5 a print that fails is logged, from the planner's Print and the ... | Ported | APP/host_chrome_test.dart:334 |
+| DH6 the plan's keys off: Delete, Ctrl+Z, Ctrl+Y, Escape are the dem... | Ported | APP/host_chrome_test.dart:355 |
+| DH7 the search field keeps the focus across a mode switch; with the... | Ported | APP/host_chrome_test.dart:414 |
+| DH8 the host choices' words in German and Turkish | Ported | APP/host_chrome_test.dart:472 |
+
+### 6. badges_test (8)
+
+| case | outcome | where |
+|---|---|---|
+| DB1 Badges switch: off by default, one badge per numbered table, wo... | Ported | APP/badges_test.dart:64 |
+| DB2 badges ride with their tables across pan and zoom, built none; ... | Ported | APP/badges_test.dart:128 |
+| DB3 a zone focus fades the other tables' badges; their selection ou... | Ported | APP/badges_test.dart:190 |
+| DB4 Centre on table 7: canvas centre shows 7's centre, zoom kept | Ported | APP/badges_test.dart:222 |
+| DB5 the Teras and the design offer no badges; the switch is kept pe... | Ported | APP/badges_test.dart:250 |
+| DB6 the badges' strings in German and Turkish | Ported | APP/badges_test.dart:276 |
+| DB8 each badge is its own semantics node, named by its table, at it... | Ported | APP/badges_test.dart:300 |
+| DB7 the figures: free tables seat nobody; each status its minutes | Ported | APP/badges_test.dart:313 |
+
+### 7. events_test (10)
+
+| case | outcome | where |
+|---|---|---|
+| DE1 Link tables gives each numbered table without an id `<area>-<n>... | Ported | APP/events_test.dart:32 |
+| DE2 the Teras links as teras-<n>; Link tables and Unlinked in the d... | Ported | APP/events_test.dart:83 |
+| DE3 a saved plan declares schema 10 and keeps its ids across Save a... | Ported | APP/events_test.dart:101 |
+| DE4 a double click on 7 logs it with its id, after both taps; timed... | Ported | APP/events_test.dart:147 |
+| DE5 a drag logs the moved numbers once, after the layout line; Undo... | Ported | APP/events_test.dart:190 |
+| DE6 the pointer line: over a table, over no table, a floor tap's po... | Ported | APP/events_test.dart:219 |
+| DE7 designChanges: a table added and removed is logged, undo too; a... | Ported | APP/events_test.dart:286 |
+| DE8 the new words in German and Turkish | Ported | APP/events_test.dart:332 |
+| DE9 final review F-5: Revert in the design after the service kept a... | Ported | APP/events_test.dart:392 |
+| DE10 final review F-3: a double tap on a number two tables carry lo... | Ported | APP/events_test.dart:417 |
+
+### 8. look_test (2)
+
+| case | outcome | where |
+|---|---|---|
+| DL1/DL2 the POS look under a light/dark platform: extension of the ... | Ported | APP/look_test.dart:159 (one test per platform brightness: DL1, DL2) |
+| DL3 the look switch in German and Turkish | Ported | APP/look_test.dart:360 |
+
+### 9. sample_plans_test (1)
+
+| case | outcome | where |
+|---|---|---|
+| the committed `salon.json`/`teras.json` equal the built ones (loop ... | Split: -open dropped (no committed JSON), intent ported | APP/sample_plans_test.dart (SP1-SP4, SW1-SW3) |
+
+Totals, as the audit's own: 89 ported, 1 covered (SC1), 3 split (RL15, D15 and
+the sample_plans row: each its `-open` dropped, its intent ported), 2 dropped (SC2,
+and SNL's source names, whose intent `plan_symbol_loader_test` S-1 covers) = 95.
+New cases past the audit: POS1 (`integration_test/pos_test.dart`), SW3 and DE11
+(the fix wave, below).
+
+Two ported rows changed meaning after the audit, by a ruling of the fix wave
+(2026-10-17): D10 and DQ2 asserted that Revert with nothing stored empties the
+area; the old demo reverted to its sample, so Revert now rebuilds the area's
+sample (`newPlan(build: sample)`). Their other assertions are unchanged.

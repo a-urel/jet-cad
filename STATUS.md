@@ -1,6 +1,6 @@
 # jet-cad — project status
 
-**Last updated:** 2026-10-16. **`main` carries release 0.7.0** (tag
+**Last updated:** 2026-10-17. **`main` carries release 0.7.0** (tag
 `v0.7.0` → `0fa649e`, after `v0.6.0` →
 `3bf64a7`, `v0.5.1` → `3f8f7ad`, `v0.5.0` → `2fbb9c0`, `v0.4.0` → `8367010`, `v0.3.0` → `1b0c37a`, `v0.2.0` → `7355c00` and `v0.1.0` → `22206f5`) and everything since; the three packages are on pub.dev at 0.7.2 (published 2026-10-13); the kit architecture is in flight (below). The history of every plan
 before this point — its records, reviews and resume points — is in
@@ -495,6 +495,26 @@ with 0.7.0 (below).
   The demo runs on the new packages. The results
   note's "For the human" lists five items.
 
+  **4a, the restaurant kit and a POS-ready plan library**
+  (`packages/jet_cad_2d_kit_restaurant` 0.1.0, the plan library's host gaps
+  H1-H4 and O1-O4, `apps/restaurant_demo` rewritten in place): spec
+  [2026-10-16-restaurant-kit-design.md](docs/superpowers/specs/2026-10-16-restaurant-kit-design.md),
+  plan [2026-10-16-restaurant-kit.md](docs/superpowers/plans/2026-10-16-restaurant-kit.md),
+  parity table with its "Closed (4a)" section and test audit with its
+  "Closed (4a)" section (95 rows, none open; the parity table's one open row
+  is the host guide),
+  results [2026-10-16-restaurant-kit-results.md](docs/superpowers/notes/2026-10-16-restaurant-kit-results.md),
+  on `feat/restaurant-kit` (worktree `.claude/worktrees/restaurant-kit`),
+  **done on the branch, not merged**: Tasks 1-9 and 11 done (the kit +184,
+  plan +1579, integration +228, architecture demo +176, restaurant demo +102,
+  POS1 green on macOS, builds macOS/web/iOS simulator/Android debug, both
+  dry-runs 0 warnings). **Task 10 (the host guide, `check_guide` and the
+  host probe on the new API) is still to do**, then the controller's
+  whole-branch review, the ledger archive and the merge menu. The engine
+  packages (`jet_cad_2d`, `jet_cad_2d_flutter`) changed for O1 and join 4b's
+  release wave. 4b (the release wave: README pictures, removing the old
+  packages and `apps/floor_planner`, CI moves, floors, the publish) follows.
+
 - **The packages' READMEs, screenshots and funding links** (the human,
   2026-10-13), on `feat/package-readmes`, cut by hand from `main` at
   `51125b6`; **merged into `main` at `5c244b1`** on the human's *"merge
@@ -636,7 +656,10 @@ at `d68e79dd`, not pushed: exit gate passed, whole-branch Opus review
 clean after one fix wave, ledger archived. 3b (the architecture demo) is
 done on `feat/architecture-demo` and merged at `acb5fa11`, not pushed:
 whole-branch Sonnet review clean after one fix wave, macOS smoke integration
-test green, ledger archived; next: sub-project 4's brainstorm.** (In flight). Where 2b stands, its gaps and rulings: the results note's
+test green, ledger archived. 4a (the restaurant kit) is done on
+`feat/restaurant-kit`, not merged: exit gate green, POS1 and the builds green;
+resume at Task 10 (the host guide), then the controller's review and the
+merge menu; 4b follows.** (In flight). Where 2b stands, its gaps and rulings: the results note's
 [Spec gaps](docs/superpowers/notes/2026-10-14-plan-library-2b-results.md#spec-gaps-and-interface-problems-found-while-executing)
 section and its "Final fix wave". A14's `selectTool` difference was settled
 by the human (2b spec decision 9: true kept).

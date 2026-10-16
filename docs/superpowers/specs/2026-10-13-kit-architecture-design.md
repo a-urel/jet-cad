@@ -528,3 +528,13 @@ by this wave; these rules make sure nothing in it blocks it.
   [2026-10-16-architecture-demo-design.md](2026-10-16-architecture-demo-design.md)):
   A11's `apps/floor_planner` stays beside `apps/architecture_demo` until
   sub-project 4 removes it with the old packages.
+- **2026-10-17, sub-project 4a done on its branch** (spec
+  [2026-10-16-restaurant-kit-design.md](2026-10-16-restaurant-kit-design.md)):
+  A13's sub-project 4 is split into 4a (the restaurant kit, the plan
+  library's host gaps, the demo, the parity table, the host guide) and 4b
+  (the release wave); A14's five drops are taken on the human's word (old
+  saved plans, the old service layout text, the one-view `StateError`,
+  `symbolSources`, `FloorPlanTool`); the engine seam O1 (an exclusion of the
+  dragged objects from the drag snap, A12) lands in `jet_cad_2d` and
+  `jet_cad_2d_flutter` and joins 4b's release (A10); A11's
+  `apps/restaurant_demo` is rewritten in place on the new packages.

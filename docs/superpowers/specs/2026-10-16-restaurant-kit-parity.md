@@ -207,3 +207,46 @@ The 2b spec S5 (docs/superpowers/specs/2026-10-14-plan-library-service-mode-desi
 8. Group/finders: a restore drops a group whose label names no unit (documented difference) - POS merge state is lost on a relabel.
 9. Restaurant demo itself still on old API (apps/restaurant_demo); needs a port to prove parity.
 10. restaurant_symbols still depends on jet_cad_floor_plan.
+
+## Closed (4a)
+
+Written at the exit gate (Task 11) from the test files by grep, not from
+memory. Every HAVE and RENAMED-ONLY row above kept its test: the ids and
+files named in the test column were each found (136 ids checked; ranges
+such as `TD1-TD13` by both ends; `PF6` lives in
+`editor/editor_bar_test.dart`, `PP-1` in `export/page_printer_test.dart`,
+as the row's later citations say). The ten rows that were PARTIAL or MISSING
+close as follows. `P` = `packages/jet_cad_2d_plan/test`, `KR` =
+`packages/jet_cad_2d_kit_restaurant/test`, `APP` =
+`apps/restaurant_demo/test`.
+
+| row (line above) | how it closed | test or note |
+|---|---|---|
+| `symbolSources` PARTIAL (21) | decision 7: replaced by a host kit (H2) | P `host/host_kit_test.dart` H2 (:38, a host kit's symbol shows in the gallery beside another kit's and places) |
+| `userCamera: false` PARTIAL (31) | R2 H4 | P `service/view/user_camera_test.dart` H4 (:60, pan, pinch and wheel leave the camera, `centerOn` moves it) and its control (:78) |
+| one view per controller PARTIAL (33) | decision 7: the `StateError` is replaced by H3 | P `host/two_views_test.dart` H3 (:56 the canvas placed last drives; :105 three views, also after an unmount) |
+| plans of schema 7-10 MISSING (44) | decision 7: dropped on the human's word | no test by decision (the new format is 1, `kPlanFormat`); the umbrella's A14 amendment records it |
+| old `jet_cad.service_layout` text MISSING (55) | decision 7: dropped on the human's word | P `controller/service_record_controller_test.dart` SR-old-format-refused (:684) pins the refusal |
+| `tools: Set<FloorPlanTool>` PARTIAL (93) and `FloorPlanTool` PARTIAL (141) | R2 H1: `PlanToolIds` is exported | P `host/tool_ids_test.dart` H1 (:8), P `barrel_test.dart` (:91 lists `PlanToolIds`) |
+| new guide / host probe MISSING (127) | **Open until Task 10** (the host guide, the controller's) | `docs/host-guide.md`, `tool/ci/check_guide.dart` and `tool/ci/host_probe` still target the old API; `check_guide` passes on the old guide (56 blocks), the probe builds. The row closes with Task 10 |
+| sample plans MISSING (168) | closed: `buildSalon` and `buildTeras` as `PlanBuild`s | APP `sample_plans_test.dart` SP1-SP4 (per area), SW1-SW3 (the Salon's room, its sheet) |
+| restaurant symbol catalog MISSING (189) | closed: `jet_cad_2d_kit_restaurant` 0.1.0 | KR (184 tests): `library/restaurant_symbols_port_test.dart`, `restaurant_library_test.dart`, `units_test.dart`, `restaurant_words_test.dart`, `catalog_geometry_test.dart` |
+
+§5's ten blockers: 1 closed (the kit and the samples above); 2 the guide
+half stays open with Task 10 (the parity test is this table); 3 decision 7;
+4 H1; 5 decision 7 and H2; 6 H3; 7 H4; 8 the 2b rule stays, pinned by P
+`controller/service_record_controller_test.dart` (:517 a group naming the old
+label drops on restore) and APP `layout_test.dart` LAY-groups, with the
+guide's warning in Task 10; 9 closed (the demo is ported: 102 tests and POS1
+green); 10 `jet_cad_restaurant_symbols` still depends on the old package by
+decision 2 (4b removes both).
+
+The R2 items that are not host-guide rows each have their test: H1-H4 above;
+O1 P `tools/drag_self_snap_test.dart` O1 (:22) with the engine's
+`snap_exclude_test.dart` and `select_tool_drag_test.dart`; O2 P
+`panels/orientation_row_test.dart` O2 (:48, :66); O3 P
+`export/page_flow_busy_test.dart`; O4 P `editor/editor_notice_test.dart`
+(:67, the locale change re-words in its own frame).
+
+Not closed by tests here: the **host guide**, **`check_guide` and the host
+probe moved to the new API**. Both are Task 10's; every other row is closed.
