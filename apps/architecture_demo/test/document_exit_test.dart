@@ -23,7 +23,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart' show SetComponentCommand;
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
 import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
-import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import 'support/app_fakes.dart';
