@@ -19,19 +19,21 @@ import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
-/// Pumps [c]'s editor in [locale] at 1440 x 900 (reset after the test).
-/// With [centre], then sets a camera turned by [turn] at [scale] px/mm,
-/// **non-reflecting** (a reflection's `b == c` hides a transposition),
-/// with [centre] in the middle of the drawing area: the plan library's
-/// `pumpDraw` (canvas_fixture.dart:427-443) over PlanEditor. [wrap], when
-/// given, wraps the app (a capture boundary, Task 14's RD1).
+/// Pumps [c]'s editor in [locale] in a [window], 1440 x 900 unless
+/// given (reset after the test). With [centre], then sets a camera turned
+/// by [turn] at [scale] px/mm, **non-reflecting** (a reflection's `b == c`
+/// hides a transposition), with [centre] in the middle of the drawing
+/// area: the plan library's `pumpDraw` (canvas_fixture.dart:427-443) over
+/// PlanEditor. [wrap], when given, wraps the app (a capture boundary, Task
+/// 14's RD1; a key of its own, Task 26).
 Future<void> pumpEditor(WidgetTester tester, PlanController c,
     {Locale locale = const Locale('en'),
+    Size window = const Size(1440, 900),
     Vector2? centre,
     double scale = 2,
     double turn = 0.35,
     Widget Function(Widget app)? wrap}) async {
-  await tester.binding.setSurfaceSize(const Size(1440, 900));
+  await tester.binding.setSurfaceSize(window);
   addTearDown(() => tester.binding.setSurfaceSize(null));
   final app = planEditorApp(c, locale: locale);
   await tester.pumpWidget(wrap == null ? app : wrap(app));

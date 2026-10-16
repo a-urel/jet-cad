@@ -25,6 +25,7 @@ import 'package:vector_math/vector_math_64.dart' show Vector2;
 import '../support/room_plans.dart';
 import '../support/wall_fixture.dart';
 
+export '../support/canvas_rig.dart' show byKey;
 export '../support/editor_rig.dart'
     show activeTool, kitCatalog, press, pumpEditor, status;
 export '../support/room_plans.dart'
@@ -91,30 +92,38 @@ typedef Built = ({
 });
 
 /// room_fixture.dart:118-163's `buildPlan` on [doc], the plan's own
-/// document inside a `PlanBuild`: [walls], then [seps], then [openings]
-/// (hosted by the walls they index), each object one command, at [place].
-/// Without `installParametric` and `ensureDashedLinetype`: the plan
-/// installed its system and prepared the DASHED record (spec C1.3, C1.9).
+/// document inside a `PlanBuild`: [walls], then [seps], then [wallsAfter]
+/// (walls whose handles come after the separators'), then [openings]
+/// (hosted by the walls they index in `[...walls, ...wallsAfter]`), each
+/// object one command, at [place]. Without `installParametric` and
+/// `ensureDashedLinetype`: the plan installed its system and prepared the
+/// DASHED record (spec C1.3, C1.9).
 Built buildPlanIn(DraftDocument doc, List<W> walls,
     {List<S> seps = const [],
+    List<W> wallsAfter = const [],
     List<O> openings = const [],
     Placement place = origin}) {
   final wh = <Handle>[], sh = <Handle>[], oh = <Handle>[];
   var k = 0;
-  for (final w in walls) {
-    final h = doc.handleSeed.next();
-    final g = place.groups ? groupFor(place, k++) : Transform2.identity();
-    final inv = g.invert();
-    final s = inv.transformPoint(place.at(w.sx, w.sy));
-    final e = inv.transformPoint(place.at(w.ex, w.ey));
-    doc.commands.execute(
-        addWallLocal(doc, h, WallParams(s.x, s.y, e.x, e.y, w.t, w.j), g));
-    wh.add(h);
+  void addWalls(List<W> ws) {
+    for (final w in ws) {
+      final h = doc.handleSeed.next();
+      final g = place.groups ? groupFor(place, k++) : Transform2.identity();
+      final inv = g.invert();
+      final s = inv.transformPoint(place.at(w.sx, w.sy));
+      final e = inv.transformPoint(place.at(w.ex, w.ey));
+      doc.commands.execute(
+          addWallLocal(doc, h, WallParams(s.x, s.y, e.x, e.y, w.t, w.j), g));
+      wh.add(h);
+    }
   }
+
+  addWalls(walls);
   for (final (sx, sy, ex, ey) in seps) {
     sh.add(addSeparator(doc, place.at(sx, sy), place.at(ex, ey),
         at: place.groups ? groupFor(place, k++) : null));
   }
+  addWalls(wallsAfter);
   for (final (i, position, width, kind, swing) in openings) {
     oh.add(addOpening(
         doc, OpeningParams(wh[i], position, width, kind, swing: swing)));
@@ -177,12 +186,32 @@ FixedEnd fixedAt(Vector2 w, [Transform2? at]) {
   return FixedEnd(l.x, l.y);
 }
 
+/// Dimension [h]'s TEXT child: its one TEXT (dimension_fixture.dart:
+/// 395-399).
+Handle dimTextHandle(DraftDocument doc, Handle h) =>
+    kids(doc, h).singleWhere((k) => kindOf(doc, k) == EntityKind.text);
+
 /// Dimension [h]'s value string: its one TEXT child's
-/// (dimension_fixture.dart:396-403).
-String dimText(DraftDocument doc, Handle h) {
-  final text =
-      kids(doc, h).singleWhere((k) => kindOf(doc, k) == EntityKind.text);
-  return doc.entities.textAt(doc.entities.slotOf(text)!);
+/// (dimension_fixture.dart:401-403).
+String dimText(DraftDocument doc, Handle h) =>
+    doc.entities.textAt(doc.entities.slotOf(dimTextHandle(doc, h))!);
+
+/// Dimension [h]'s LINE children, world points, ascending by handle: the
+/// dimension line, the extension lines at `a` and `b`, the slashes at `a`
+/// and `b` (dimension_fixture.dart:405-422).
+List<(Vector2, Vector2)> dimLines(DraftDocument doc, Handle h) {
+  final m = doc.tree.accumulatedTransform(h);
+  return [
+    for (final k in kids(doc, h))
+      if (kindOf(doc, k) == EntityKind.line)
+        () {
+          final c = payloadOf(doc, k).coords;
+          return (
+            m.transformPoint(Vector2(c[0], c[1])),
+            m.transformPoint(Vector2(c[2], c[3])),
+          );
+        }(),
+  ];
 }
 
 /// A saved plan with what [add] adds to a copy of [saved] that has no
@@ -203,8 +232,6 @@ String stalePlan(String saved, void Function(DraftDocument bare) add) {
 Future<void> pumpPlan(WidgetTester tester, PlanController c,
         {Locale locale = const Locale('en')}) =>
     pumpEditor(tester, c, locale: locale);
-
-Finder byKey(String k) => find.byKey(Key(k));
 
 /// Every live dimension of [doc], ascending (today's `liveObjectsOf`,
 /// asked of the kit's types).

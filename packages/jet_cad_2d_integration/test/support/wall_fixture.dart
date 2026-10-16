@@ -99,11 +99,16 @@ Vector2 oracleMeet(Vector2 p1, Vector2 p2, Vector2 q1, Vector2 q2) {
 
 /// [w]'s face line at [offset] along its left normal (start to end), as two
 /// points, from its world coordinates.
-(Vector2, Vector2) face(WorldWall w, double offset) {
-  final dx = w.e.x - w.s.x, dy = w.e.y - w.s.y;
+(Vector2, Vector2) face(WorldWall w, double offset) => faceOf(w.s, w.e, offset);
+
+/// The face line of the wall from [s] to [e] at [offset] along its left
+/// normal, as two points (today's `face`, wall_fixture.dart:96-103, over
+/// the two ends; 3a Task 26 shares it).
+(Vector2, Vector2) faceOf(Vector2 s, Vector2 e, double offset) {
+  final dx = e.x - s.x, dy = e.y - s.y;
   final len = math.sqrt(dx * dx + dy * dy);
   final nx = -dy / len * offset, ny = dx / len * offset;
-  return (Vector2(w.s.x + nx, w.s.y + ny), Vector2(w.e.x + nx, w.e.y + ny));
+  return (Vector2(s.x + nx, s.y + ny), Vector2(e.x + nx, e.y + ny));
 }
 
 /// The perpendicular distance from [p] to the line through [a] and [b].
