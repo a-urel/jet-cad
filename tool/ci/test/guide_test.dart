@@ -18,31 +18,24 @@ void main() {
     );
     expect(
       fencedBlocks(guide, 'yaml'),
-      hasLength(3),
-      reason: 'premise: §1\'s dependency, §2\'s fonts, the symbols\' asset',
+      hasLength(2),
+      reason: 'premise: §1\'s dependencies, §2\'s fonts',
     );
     expect(missingBlocks(guide, dart: dart, yaml: yaml), isEmpty);
   });
 
   test('GD2 a Dart block the probe does not have is named', () {
-    expect(
-      guide,
-      contains('controller.serviceLayoutJson()'),
-      reason: 'premise',
-    );
-    final renamed = guide.replaceFirst(
-      'controller.serviceLayoutJson()',
-      'controller.layoutJson()',
-    );
+    expect(guide, contains('c.serviceJson()'), reason: 'premise');
+    final renamed = guide.replaceFirst('c.serviceJson()', 'c.layoutJson()');
     expect(missingBlocks(renamed, dart: dart, yaml: yaml), [
-      'dart: Future<void> saveLayout() async {',
+      'dart: /// Keeps the service layout on every change of its record, never on a mode',
     ]);
   });
 
   test('GD3 a pubspec line the probe does not have is named', () {
     final moved = guide.replaceFirst(
-      'jet_cad_floor_plan: ^0.7.2',
-      'jet_cad_floor_plan: ^0.7.3',
+      'jet_cad_2d_plan: ^0.8.0',
+      'jet_cad_2d_plan: ^0.8.1',
     );
     expect(moved, isNot(guide), reason: 'premise');
     expect(missingBlocks(moved, dart: dart, yaml: yaml), [
@@ -50,14 +43,43 @@ void main() {
     ]);
   });
 
-  test('GD4 the symbols\' asset line is the probe\'s', () {
-    final moved = guide.replaceFirst(
-      '    - assets/restaurant.jetlib',
-      '    - assets/symbols.jetlib',
-    );
+  test('GD4 the plan library\'s font asset line is the probe\'s', () {
+    final moved = guide.replaceFirst('Roboto-Regular.ttf', 'Roboto.ttf');
     expect(moved, isNot(guide), reason: 'premise');
-    expect(missingBlocks(moved, dart: dart, yaml: yaml), ['yaml: assets:']);
+    expect(missingBlocks(moved, dart: dart, yaml: yaml), ['yaml: flutter:']);
   });
+
+  // Sub-project 4a R4: the guide is on the plan library and the kits, and
+  // the old planner appears only in the section that maps it.
+  test('GD6 no snippet names the old planner\'s packages or barrel', () {
+    for (final block in [
+      ...fencedBlocks(guide, 'dart'),
+      ...fencedBlocks(guide, 'yaml'),
+    ]) {
+      expect(block, isNot(contains('jet_cad_floor_plan')));
+      expect(block, isNot(contains('jet_cad_restaurant_symbols')));
+      expect(block, isNot(contains('FloorPlan')));
+    }
+    expect(dart, isNot(contains('jet_cad_floor_plan')));
+    expect(yaml, isNot(contains('jet_cad_floor_plan')));
+  });
+
+  test(
+    'GD7 the guide says what a relabel does to a group (Review Focus 2)',
+    () {
+      // The prose, with the code blocks cut out: the warning is words.
+      final prose = guide.replaceAll(RegExp(r'```.*?```', dotAll: true), '');
+      expect(prose, contains('does **not**\n> follow a relabel into a group'));
+      expect(prose, contains('`ServiceRestore.droppedGroups`'));
+      expect(
+        fencedBlocks(
+          guide,
+          'dart',
+        ).where((b) => b.contains('bool relabelTables')),
+        hasLength(1),
+      );
+    },
+  );
 
   test('GD5 indentation and line breaks are the formatter\'s', () {
     const source = '''

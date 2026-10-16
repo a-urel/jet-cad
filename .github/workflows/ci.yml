@@ -156,11 +156,11 @@ jobs:
           ../readme_probe/lib
       # The probe is a host of its own (pubspec.yaml.in, sdk ^3.6.0); in the
       # repository it sits inside tool/ci, so its language version is named.
-      - name: Format the host probe at its own language version
+      - name: Format the host probes at their own language version
         working-directory: tool/ci
         run: >-
           dart format --language-version=3.6 --output=none --set-exit-if-changed
-          host_probe/lib
+          host_probe/lib old_host_probe/lib
       - name: The host guide's code is the probe's
         run: dart run tool/ci/check_guide.dart
       - name: The screenshots hold pub.dev's rules
@@ -229,9 +229,14 @@ jobs:
       # and no build hook.
       - name: Resolve, check, analyze and build the probe
         run: tool/ci/host_probe.sh "file://$GITHUB_WORKSPACE" "$(git rev-parse HEAD)"
+      # The old probe, on jet_cad_floor_plan, stays until sub-project 4b
+      # removes that package: the released hosts below are its.
+      - name: Resolve, check and analyze the old probe
+        run: tool/ci/old_host_probe_resolve.sh "file://$GITHUB_WORKSPACE" "$(git rev-parse HEAD)"
       # Host embedding API spec, invariant 1 (P-1): each released host's
-      # code, analysed in the probe just resolved at the commit under test,
-      # still compiles; the probe's own main.dart is put back after each.
+      # code, analysed in the old probe just resolved at the commit under
+      # test, still compiles; the old probe's own main.dart is put back after
+      # each.
       # Every release a host may still pin stays: 0.3.0 is the spec's own,
       # 0.4.0 (the embedding API, 8367010) followed its tag, 0.5.1 is the
       # last release that saves schema 9, and 0.6.0 (plan colours,

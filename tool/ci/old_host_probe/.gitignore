@@ -1,0 +1,9 @@
+# Written by tool/ci/old_host_probe.sh, and by pub and the build.
+/pubspec.yaml
+/pubspec.lock
+/.dart_tool/
+/build/
+/.flutter-plugins-dependencies
+# Copied by tool/ci/old_host_probe.sh from the commit under test (publishing spec D9).
+/assets/restaurant.jetlib
+/lib/restaurant_names.dart

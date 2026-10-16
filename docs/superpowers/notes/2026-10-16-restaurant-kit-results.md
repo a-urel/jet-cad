@@ -11,9 +11,10 @@ last lines copied from those runs.
 **Status of 4a:** the kit, the plan library's host gaps (H1-H4, O1-O4), the
 ported demo, POS1 and the builds are done and green on the branch. **Task 10
 (the host guide, `check_guide` and the host probe moved to the new API) is
-pending** and is the controller's: the parity row "new guide / host probe" is
-the one row still open. The whole-branch review, the ledger archive and the
-merge are the controller's and the human's.
+done** (its report: `.superpowers/sdd/2026-10-16-restaurant-kit/task-10-report.md`);
+the parity row "new guide / host probe" is closed, so no row is open. The
+whole-branch review, the ledger archive and the merge are the controller's and
+the human's.
 
 ## Gates (this run)
 
@@ -48,10 +49,13 @@ CHANGELOG line; they join 4b's release wave (umbrella A10).
 
 `tool/ci/check_kit_deps.dart`: `kit dependencies: 3 package(s) checked, none
 names the plan library or another kit`. `tool/ci/check_guide.dart`:
-`docs/host-guide.md: all 56 code blocks are in the host probe` (the old guide;
-Task 10 moves it). Host probe (`bash tool/ci/host_probe.sh file://$PWD $(git
-rev-parse HEAD)` at `026ad859`): `host probe: no GPU renderer, no build hook;
-build/web is  42M`, exit 0.
+`docs/host-guide.md: all 56 code blocks are in the host probe` at `026ad859`
+(the old guide; Task 10 then moved it: `all 29 code blocks are in the host
+probe` for the new one, see Task 10's report). Host probe (`bash
+tool/ci/host_probe.sh file://$PWD $(git rev-parse HEAD)` at `026ad859`): `host
+probe: no GPU renderer, no build hook; build/web is  42M`, exit 0. After Task
+10 the probe is on the new packages (`jet_cad_2d_plan` and the two kits), the
+old one is `tool/ci/old_host_probe*`.
 
 Dry-runs, never published: `jet_cad_2d_kit_restaurant` (`Total compressed
 archive size: 57 KB.`) and `jet_cad_2d_plan` (`950 KB`): both
@@ -151,10 +155,12 @@ POS1's mutation: the POS id written as `<area>_<n>` instead of `<area>-<n>`
 
 ## Follow-ups and open items
 
-- **Task 10, the host guide** (rewrite, `check_guide` and the host probe on the
-  new API, the groups-across-a-relabel warning, the "From `jet_cad_floor_plan`"
-  section): pending. Until then the parity row "new guide / host probe" is open
-  and `docs/host-guide.md` still describes the old API.
+- **Task 10, the host guide**: done (rewrite, `check_guide` and the host probe
+  on the new API, the groups-across-a-relabel warning with its snippet, the
+  "From `jet_cad_floor_plan`" section). The old guide stays at the tag
+  `v0.7.2`. For 4b: the old probe (`tool/ci/old_host_probe`,
+  `old_host_probe_resolve.sh`, `old_host_probe.sh`) goes with
+  `jet_cad_floor_plan`; the READMEs of the old packages still link the guide.
 - **4b**: the release wave (the engine packages join it), removing the old
   packages and `apps/floor_planner`, the README pictures, the CI moves.
 - `lib/main.dart` is 821 lines after Task 8 added the bars, export, layout,
@@ -178,8 +184,9 @@ POS1's mutation: the POS id written as `<area>_<n>` instead of `<area>-<n>`
    smaller room.
 4. **Revert before any Save** now rebuilds the area's sample (the old demo's
    behaviour), not an empty plan.
-5. **Task 10, the host guide, is still to do**; nothing else is open in the
-   parity or audit tables.
+5. **The host guide is rewritten** (`docs/host-guide.md`, for the plan library
+   and the kits; the POS section is 6); nothing is open in the parity or audit
+   tables.
 6. **The engine packages changed** (O1, drag snap): they are released with 4b,
    not alone.
 7. **Two standing failures per package on this machine** (the engine's

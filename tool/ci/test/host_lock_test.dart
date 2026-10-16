@@ -204,11 +204,11 @@ void main() {
     expect(() => lockPackages(shallow), throwsFormatException);
   });
 
-  group('HL-C the four packages come from the commit under test', () {
+  group('HL-C the old probe\'s four packages come from the commit', () {
     const ref = '2b35b69931d6acdb03c219a38c923a8fd3fdc50c';
 
     test('HL-C1 the green lock: all four from git at the ref', () {
-      expect(notFromCommit(green, ref), isEmpty);
+      expect(notFromCommit(green, ref, packages: oldProbedFromCommit), isEmpty);
       expect(lockEntryFields(green, 'jet_cad_2d'), {
         'source': 'git',
         'resolved-ref': ref,
@@ -217,8 +217,14 @@ void main() {
 
     test('HL-C2 another ref: each of the four named', () {
       const other = '0000000000000000000000000000000000000000';
-      expect(notFromCommit(green, other), hasLength(4));
-      expect(notFromCommit(green, other).first, contains('jet_cad_2d'));
+      expect(
+        notFromCommit(green, other, packages: oldProbedFromCommit),
+        hasLength(4),
+      );
+      expect(
+        notFromCommit(green, other, packages: oldProbedFromCommit).first,
+        contains('jet_cad_2d'),
+      );
     });
 
     // The named mutant of spec D6: one override dropped, so pub took the
@@ -243,7 +249,9 @@ void main() {
         ].join('\n');
         final lock = green.replaceFirst(entry, hostedEntry);
         expect(lock, isNot(green), reason: 'premise');
-        expect(notFromCommit(lock, ref), [contains(name)]);
+        expect(notFromCommit(lock, ref, packages: oldProbedFromCommit), [
+          contains(name),
+        ]);
       });
     }
 
@@ -257,7 +265,9 @@ void main() {
         entry.replaceFirst('source: git', 'source: path'),
       );
       expect(lock, isNot(green), reason: 'premise');
-      expect(notFromCommit(lock, ref), [contains('jet_cad_floor_plan')]);
+      expect(notFromCommit(lock, ref, packages: oldProbedFromCommit), [
+        contains('jet_cad_floor_plan'),
+      ]);
     });
 
     test('HL-C4 a package missing from the lock: named', () {
@@ -265,9 +275,71 @@ void main() {
         '${entryOf(green, 'jet_cad_restaurant_symbols')}\n',
         '',
       );
-      expect(notFromCommit(lock, ref), [
+      expect(notFromCommit(lock, ref, packages: oldProbedFromCommit), [
         contains('jet_cad_restaurant_symbols'),
       ]);
+    });
+  });
+
+  // Sub-project 4a R4: the host probe of the plan library and the kits. Its
+  // lock is a real one (tool/ci/host_probe.sh, run on a commit of the task's
+  // own, whose sha is the ref below), with the path of the clone made the old
+  // fixtures' `/home/user/jet-cad`.
+  group('HL-N the new probe\'s six packages come from the commit', () {
+    final fresh = fixture('host_probe.lock.txt');
+    const ref = '99ab3f2eb2a20bf1207d4679572103c3520df028';
+    const six = [
+      'jet_cad_2d',
+      'jet_cad_2d_flutter',
+      'jet_cad_2d_kit',
+      'jet_cad_2d_kit_architecture',
+      'jet_cad_2d_kit_restaurant',
+      'jet_cad_2d_plan',
+    ];
+
+    test('HL-N1 the probe\'s lock: the six, none forbidden, none old', () {
+      final packages = lockPackages(fresh);
+      expect(packages, containsAll(six));
+      expect(packages, isNot(contains('jet_cad_floor_plan')));
+      expect(packages, isNot(contains('jet_cad_restaurant_symbols')));
+      expect(forbiddenInLock(fresh), isEmpty);
+      expect(probedFromCommit, six, reason: 'the list under test');
+    });
+
+    test('HL-N2 all six from git at the ref; another ref names each', () {
+      expect(notFromCommit(fresh, ref), isEmpty);
+      const other = '0000000000000000000000000000000000000000';
+      expect(notFromCommit(fresh, other), hasLength(6));
+    });
+
+    for (final name in six) {
+      test('HL-N3 $name hosted: named', () {
+        final entry = entryOf(fresh, name);
+        final hostedEntry = [
+          '  $name:',
+          '    dependency: transitive',
+          '    description:',
+          '      name: $name',
+          '      sha256: "0000"',
+          '      url: "https://pub.dev"',
+          '    source: hosted',
+          '    version: "0.7.1"',
+        ].join('\n');
+        final lock = fresh.replaceFirst(entry, hostedEntry);
+        expect(lock, isNot(fresh), reason: 'premise');
+        expect(notFromCommit(lock, ref), [contains(name)]);
+      });
+    }
+
+    test('HL-N4 the old probe\'s lock fails the new list, and the reverse', () {
+      expect(
+        notFromCommit(green, '2b35b69931d6acdb03c219a38c923a8fd3fdc50c'),
+        hasLength(4),
+      );
+      expect(
+        notFromCommit(fresh, ref, packages: oldProbedFromCommit),
+        hasLength(2),
+      );
     });
   });
 }
