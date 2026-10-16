@@ -8,7 +8,7 @@ version: 0.0.1
 resolution: workspace
 
 environment:
-  # The old floor_planner's bounds, for its reasons: printing 5.15 needs
+  # The old floor planner app's bounds, for its reasons: printing 5.15 needs
   # Flutter 3.41 and pdf 3.13 needs Dart 3.12 (Flutter 3.44); the sdk
   # bound sets the language version, kept at 3.5 so the formatter's style
   # matches the copied files.
