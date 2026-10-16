@@ -150,6 +150,14 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
 
   final Map<(_Scope, String), _Field> _fields = {};
 
+  /// Each choice row's focus node, by its key's name. The menu takes the
+  /// focus when it opens (`DropdownButton` asks for it); a choice hands it
+  /// back to the node that had it before -- the canvas -- as Enter does
+  /// for a text field, so the canvas's keys work at once (2a: the focus
+  /// rules are today's, whose segmented buttons never took it). The row
+  /// stays reachable from the keyboard.
+  final Map<String, PanelFieldFocusNode> _choiceFocus = {};
+
   /// The document the subscriptions below belong to.
   DraftDocument? _document;
   StreamSubscription<DocChange>? _changes;
@@ -198,6 +206,9 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
     _detach(_c);
     for (final f in _fields.values) {
       f.dispose();
+    }
+    for (final focus in _choiceFocus.values) {
+      focus.dispose();
     }
     super.dispose();
   }
@@ -728,11 +739,14 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
           onChanged: editable ? (v) => _act(t, id, v) : null,
         );
       case ChoiceProperty(:final values):
+        final focus = _choiceFocus.putIfAbsent(
+            name, () => PanelFieldFocusNode(debugLabel: name));
         return InputDecorator(
           decoration:
               InputDecoration(labelText: label, border: InputBorder.none),
           child: DropdownButton<Object?>(
             key: key,
+            focusNode: focus,
             isExpanded: true,
             value: field.value,
             items: [
@@ -746,7 +760,12 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
                       key: Key('$name-${ChoiceProperty.segmentOf(v)}')),
                 ),
             ],
-            onChanged: editable ? (v) => _act(t, id, v) : null,
+            onChanged: editable
+                ? (v) {
+                    _act(t, id, v);
+                    _handBackAfterChoice(focus);
+                  }
+                : null,
           ),
         );
       case ValueDisplay(:final unit):
@@ -771,6 +790,27 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
               child: Text(label)),
         );
     }
+  }
+
+  /// Hands the focus from choice row [focus] back to the canvas once a
+  /// choice is made. `DropdownButton` took the focus for the row when its
+  /// menu opened, and the menu's route gives it back to the row as it
+  /// closes -- after `onChanged` runs, so the row does not have it yet
+  /// here. So the hand-back waits for the row to gain it, within the
+  /// frame; a row that already has it hands it back at once.
+  void _handBackAfterChoice(PanelFieldFocusNode focus) {
+    if (focus.hasFocus) {
+      focus.handBack();
+      return;
+    }
+    void restored() {
+      focus.removeListener(restored);
+      if (focus.hasFocus) focus.handBack();
+    }
+
+    focus.addListener(restored);
+    WidgetsBinding.instance
+        .addPostFrameCallback((_) => focus.removeListener(restored));
   }
 
   /// Whether [field] of [t] takes a row (spec 3a C1.7): not when its
