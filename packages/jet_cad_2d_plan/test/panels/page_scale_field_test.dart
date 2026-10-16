@@ -53,6 +53,47 @@ void main() {
   });
 
   testWidgets(
+      'SET-1 saving with a text entry open commits the typed text as one '
+      'step and closes the entry (planner_shell.dart:845-865)', (tester) async {
+    final c = await pumpScale(tester);
+    await press(tester, LogicalKeyboardKey.keyT);
+    await tester.tapAt(globalOf(tester, c, 7100, 3050));
+    await tester.pump();
+    await tester.enterText(find.byKey(const Key('text-entry')), 'Kitchen');
+    final depth = c.document.commands.undoDepth;
+    expect(bytes(c), isNot(contains('Kitchen')), reason: 'premise: typed only');
+
+    final saved = c.save();
+    await tester.pump();
+    // M-SET-1: drop the text entry's registerSettle.
+    expect(saved, contains('Kitchen'));
+    expect(c.document.commands.undoDepth, depth + 1, reason: 'one step');
+    expect(find.byKey(const Key('text-entry')), findsNothing);
+    expect((activeTool(c) as TextTool).pending.value, isNull);
+    expect(FocusManager.instance.primaryFocus, same(canvasFocus(tester)),
+        reason: 'the focus is back on the canvas');
+  });
+
+  testWidgets(
+      'SET-2 settling with the focus in the page scale field hands it back '
+      'to the canvas and shows the stored scale', (tester) async {
+    final c = await pumpScale(tester);
+    final shown = scaleText(tester);
+    await tester.tap(scale());
+    await tester.pump();
+    await tester.enterText(scale(), '77');
+    expect(FocusManager.instance.primaryFocus, isNot(same(canvasFocus(tester))),
+        reason: 'premise: the focus is in the field');
+
+    c.settlePendingInput();
+    await tester.pump();
+    // M-SET-2: drop `_scaleFocus.handBack()` from `resyncScale`.
+    expect(FocusManager.instance.primaryFocus, same(canvasFocus(tester)));
+    expect(scaleText(tester), shown);
+    expect(c.document.commands.undoDepth, 0);
+  });
+
+  testWidgets(
       'A14 Escape in the page panel\'s scale field keeps a pending '
       'polyline (spec 05 D9: the guard covers the shell\'s Escape)',
       (tester) async {
