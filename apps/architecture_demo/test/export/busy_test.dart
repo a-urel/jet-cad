@@ -276,4 +276,68 @@ void main() {
       expect(busy.value, isTrue, reason: 'the other flow\'s');
     });
   });
+
+  // Not a port (the final review's I1 and M2): the app torn down with a job
+  // in flight, the job finishing afterwards. Mutations: M-BU-print removes
+  // the `isDisposed` guard from `BusyPagePrinter.print`'s finally;
+  // M-BU-dialog the one from `busyExportDialog`'s; M-EX-teardown removes the
+  // `mounted` check after the save panel in `exportFlow`.
+  testWidgets(
+      'BU-teardown-print the app unmounted while the print job is held: the '
+      'job ends without an error', (tester) async {
+    final printer = FakePagePrinter()..hold = true;
+    final rig = await pumpFlat(tester, printer: printer);
+    await tester.tap(printButton);
+    await settleUntil(tester, () => printer.held.isNotEmpty);
+    expect(printer.held, hasLength(1), reason: 'premise: the job is pending');
+    final session = rig.session;
+
+    await tester.pumpWidget(const SizedBox());
+    expect(session.isDisposed, isTrue, reason: 'premise: torn down');
+    printer.held.single.complete();
+    await tester.pump();
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+      'BU-teardown-dialog the session disposed while the dialog is up: the '
+      'wrapper ends without touching busy', (tester) async {
+    final busy = ValueNotifier(false);
+    var disposed = false;
+    final answer = Completer<PlanExportAnswer?>();
+    await tester.pumpWidget(const SizedBox());
+    final context = tester.element(find.byType(SizedBox));
+    final result = busyExportDialog(busy,
+            dialog: (c, i, e) => answer.future, isDisposed: () => disposed)(
+        context, PlanExportAnswer.initial, const []);
+    expect(busy.value, isTrue, reason: 'premise: busy while up');
+    disposed = true;
+    busy.dispose();
+    answer.complete(null);
+    expect(await result, isNull);
+  });
+
+  testWidgets(
+      'EX-teardown the app unmounted while the save panel is up: the late '
+      'answer writes nothing', (tester) async {
+    final rig = await pumpFlat(tester);
+    final files = rig.files
+      ..holdSaveLocations = true
+      ..scriptSaveLocation(name: 'flat.pdf', location: '/out/flat.pdf');
+    await openDialog(tester);
+    await tapKey2(tester, 'export-ok');
+    await settleUntil(tester, () => files.heldSaveLocations.isNotEmpty);
+    expect(files.heldSaveLocations, hasLength(1),
+        reason: 'premise: the panel is held');
+    final session = rig.session;
+
+    await tester.pumpWidget(const SizedBox());
+    expect(session.isDisposed, isTrue, reason: 'premise: torn down');
+    files.heldSaveLocations.single.complete();
+    await tester.pump();
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    expect(files.writes, isEmpty, reason: 'nothing written after teardown');
+  });
 }

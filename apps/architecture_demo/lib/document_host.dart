@@ -89,11 +89,13 @@ class DocumentHostState extends State<DocumentHost> {
 
   /// The printer the editor gets: busy around the platform's print job.
   /// Made once, not per build.
-  late final PagePrinter _printer =
-      BusyPagePrinter(_session.busy, widget.printer);
+  late final PagePrinter _printer = BusyPagePrinter(
+      _session.busy, widget.printer,
+      isDisposed: () => _session.isDisposed);
 
   /// The export dialog the editor gets: busy while it is up. Made once.
-  late final PlanExportDialog _exportDialog = busyExportDialog(_session.busy);
+  late final PlanExportDialog _exportDialog =
+      busyExportDialog(_session.busy, isDisposed: () => _session.isDisposed);
 
   /// Runs [body] as a flow: busy for its whole span when no flow is running
   /// yet, cleared however it ends; inside another flow, busy is the outer
@@ -194,7 +196,7 @@ class DocumentHostState extends State<DocumentHost> {
           };
           final place =
               await widget.files.saveLocation(export.name, kind: kind);
-          if (place == null) return;
+          if (place == null || !mounted) return;
           await widget.files
               .write(place.location, place.name, export.bytes, kind: kind);
         } catch (e) {
@@ -238,7 +240,7 @@ class DocumentHostState extends State<DocumentHost> {
   Future<void> openFlow() => _flow(() async {
         if (!await _mayDiscard()) return;
         final file = await _pick();
-        if (file == null) return;
+        if (file == null || !mounted) return;
         try {
           _controller.load(utf8.decode(file.bytes));
         } catch (e) {

@@ -60,6 +60,21 @@ class FakeDocumentFiles implements DocumentFiles {
   /// The completers of the held writes, in order.
   final heldWrites = <Completer<void>>[];
 
+  /// When set, each [open] waits on a completer added to [heldOpens] before
+  /// it answers from its script (the picker still up).
+  bool holdOpens = false;
+
+  /// The completers of the held [open] calls, in order.
+  final heldOpens = <Completer<void>>[];
+
+  /// When set, each [saveLocation] waits on a completer added to
+  /// [heldSaveLocations] before it answers from its script (the save panel
+  /// still up).
+  bool holdSaveLocations = false;
+
+  /// The completers of the held [saveLocation] calls, in order.
+  final heldSaveLocations = <Completer<void>>[];
+
   /// Calls that found nothing scripted.
   int unscriptedCalls = 0;
 
@@ -97,6 +112,11 @@ class FakeDocumentFiles implements DocumentFiles {
       unscriptedCalls++;
       throw StateError('FakeDocumentFiles.open: nothing scripted');
     }
+    if (holdOpens) {
+      final held = Completer<void>();
+      heldOpens.add(held);
+      await held.future;
+    }
     return _opens.removeAt(0)();
   }
 
@@ -108,6 +128,11 @@ class FakeDocumentFiles implements DocumentFiles {
     if (_saveLocations.isEmpty) {
       unscriptedCalls++;
       throw StateError('FakeDocumentFiles.saveLocation: nothing scripted');
+    }
+    if (holdSaveLocations) {
+      final held = Completer<void>();
+      heldSaveLocations.add(held);
+      await held.future;
     }
     return _saveLocations.removeAt(0)();
   }

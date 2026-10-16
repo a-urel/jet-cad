@@ -20,15 +20,19 @@ import 'package:pdf/pdf.dart' show PdfPageFormat;
 /// The busy span ends there. What follows -- the library makes the bytes,
 /// then calls `onExport` -- is not busy until the host's export write
 /// starts (see `DocumentHostState.exportFlow`).
+///
+/// [isDisposed] tells that the session is gone (the app torn down with the
+/// dialog up): the clear is then skipped, as `DocumentHostState._flow` does.
 PlanExportDialog busyExportDialog(ValueNotifier<bool> busy,
-        {PlanExportDialog dialog = showPlanExportDialog}) =>
+        {PlanExportDialog dialog = showPlanExportDialog,
+        bool Function()? isDisposed}) =>
     (context, initial, exporters) async {
       if (busy.value) return null;
       busy.value = true;
       try {
         return await dialog(context, initial, exporters);
       } finally {
-        busy.value = false;
+        if (isDisposed == null || !isDisposed()) busy.value = false;
       }
     };
 
@@ -38,10 +42,14 @@ PlanExportDialog busyExportDialog(ValueNotifier<bool> busy,
 /// printed. Busy is cleared when the job ends or throws; a throw reaches
 /// the library, which reports it through `onPageFlowError`.
 final class BusyPagePrinter implements PagePrinter {
-  BusyPagePrinter(this.busy, this.inner);
+  BusyPagePrinter(this.busy, this.inner, {this.isDisposed});
 
   final ValueNotifier<bool> busy;
   final PagePrinter inner;
+
+  /// True once the session is disposed: the job may end after the app was
+  /// torn down, and [busy] is then gone with it.
+  final bool Function()? isDisposed;
 
   @override
   Future<void> print(Uint8List pdf, String name, PdfPageFormat format) async {
@@ -50,7 +58,7 @@ final class BusyPagePrinter implements PagePrinter {
     try {
       await inner.print(pdf, name, format);
     } finally {
-      busy.value = false;
+      if (isDisposed == null || !isDisposed!()) busy.value = false;
     }
   }
 }

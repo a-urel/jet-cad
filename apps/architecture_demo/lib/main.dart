@@ -65,14 +65,10 @@ class ArchitectureDemoApp extends StatefulWidget {
 class ArchitectureDemoAppState extends State<ArchitectureDemoApp> {
   final GlobalKey<NavigatorState> _navigator = GlobalKey<NavigatorState>();
 
-  /// The symbol loader is given to the controller, which never disposes a
-  /// loader it was given, so this state does, after the controller.
-  final PlanSymbolLoader _symbols = PlanSymbolLoader();
-
   /// The app's one controller: New, Open sample and Open replace the plan
   /// inside it, so the editor, its panels and its caches stay.
   late final PlanController _controller =
-      PlanController(kits: [architectureKit], symbols: _symbols);
+      PlanController(kits: [architectureKit]);
 
   @visibleForTesting
   PlanController get controller => _controller;
@@ -108,7 +104,6 @@ class ArchitectureDemoAppState extends State<ArchitectureDemoApp> {
   @override
   void dispose() {
     _controller.dispose();
-    _symbols.dispose();
     _session.dispose();
     super.dispose();
   }

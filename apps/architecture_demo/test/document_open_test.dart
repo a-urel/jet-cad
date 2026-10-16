@@ -343,4 +343,37 @@ void main() {
     expect(c.diagnostics.value.map((d) => d.code),
         contains(KitDiagnosticCode.componentUnreadable));
   });
+
+  // Not a port (the final review's M1): the app torn down while the picker
+  // is up. The picker answers with a valid plan afterwards; the flow must
+  // end there. Mutation M-OP-teardown: without the `mounted` check after the
+  // pick, `load` runs on the disposed controller (its throw is swallowed by
+  // the flow's own catch), which this test sees through the controller's
+  // plan being touched.
+  testWidgets(
+      'OP-teardown the app unmounted while the picker is up: its late answer '
+      'reaches neither the controller nor the session', (tester) async {
+    final rig = await pumpApp(tester);
+    final c = rig.controller;
+    final session = rig.session;
+    final files = rig.files
+      ..holdOpens = true
+      ..scriptOpen(
+          name: 'late.jetplan', bytes: sampleBytes(), location: '/p/late');
+    final before = c.document;
+    final running = rig.host.openFlow();
+    await tester.pump();
+    await tester.pump();
+    expect(files.heldOpens, hasLength(1), reason: 'premise: picker held');
+
+    await tester.pumpWidget(const SizedBox());
+    expect(session.isDisposed, isTrue, reason: 'premise: torn down');
+    files.heldOpens.single.complete();
+    await running;
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    expect(identical(c.document, before), isTrue,
+        reason: 'no load reached the disposed controller');
+    expect(session.fileName, isNull, reason: 'the session was not named');
+  });
 }
