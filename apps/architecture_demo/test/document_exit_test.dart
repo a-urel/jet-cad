@@ -14,13 +14,16 @@
 // typed value is the architecture kit's `property-thickness` field.
 // Library half of EX5: packages/jet_cad_2d_plan/test/controller/
 // plan_controller_test.dart C11.
+import 'dart:convert' show JsonUnsupportedObjectError;
 import 'dart:ui' show AppExitResponse;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
+import 'package:jet_cad_2d/jet_cad_2d.dart' show SetComponentCommand;
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
 import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
+import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import 'support/app_fakes.dart';
@@ -420,5 +423,47 @@ void main() {
     expect(guard.disposed, isFalse);
     await tester.pumpWidget(const SizedBox());
     expect(guard.disposed, isTrue, reason: 'disposed with the host');
+  });
+
+  // Not a port (the final review's T5-M2): the exit's settle is a discarded
+  // `controller.save()`; when it throws the exit goes on by the old order --
+  // the dirty plan is asked about. The throw is a plan no JSON holds: a
+  // wall with a NaN end, set through a command (the kit accepts it, so the
+  // plan is dirty and not damaged). Mutation M-EX-save-throw: the settle's
+  // try/catch removed -- the exit request then throws instead of asking.
+  testWidgets(
+      'EX-save-throws the exit with a plan whose save throws still asks: '
+      'Cancel keeps the plan, Don\'t Save exits', (tester) async {
+    final rig = await pumpApp(tester);
+    final c = rig.controller;
+    c.newPlan(build: buildSampleFlat);
+    await tester.pump();
+    final wall = wallsOf(c).first;
+    final p = c.document.components.get<WallParams>(wall)!;
+    expect(
+        c.execute(SetComponentCommand<WallParams>(
+            wall,
+            WallParams(
+                p.sx, p.sy, double.nan, p.ey, p.thickness, p.justification))),
+        isTrue);
+    await tester.pump();
+    expect(c.dirty.value, isTrue, reason: 'premise: dirty');
+    expect(c.damaged.value, isFalse, reason: 'premise: not damaged');
+    expect(c.save, throwsA(isA<JsonUnsupportedObjectError>()),
+        reason: 'premise: the save throws');
+
+    final first = tester.binding.handleRequestAppExit();
+    await tester.pump();
+    await tester.pump();
+    expect(dialog, findsOneWidget, reason: 'the dirty plan is asked about');
+    await answerReplace(tester, 'replace-cancel');
+    expect(await first, AppExitResponse.cancel);
+    expect(rig.session.busy.value, isFalse);
+
+    final second = tester.binding.handleRequestAppExit();
+    await tester.pump();
+    await tester.pump();
+    await answerReplace(tester, 'replace-discard');
+    expect(await second, AppExitResponse.exit);
   });
 }

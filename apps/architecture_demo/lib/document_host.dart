@@ -152,14 +152,20 @@ class DocumentHostState extends State<DocumentHost> {
   /// dropped.
   ///
   /// The settle is a discarded `controller.save()` (`settlePendingInput` is
-  /// `@internal`); `_mayDiscard` then yields one microtask before it reads
-  /// `dirty`. A save that throws is not an exit blocker here: the plan is
-  /// then asked about as it stands, and Save shows the error.
+  /// `@internal`, and the library has no other public route to it), made
+  /// only while the plan is not `damaged`: on a damaged plan `save()` reads
+  /// the plan back and, when it does not read back, appends a
+  /// `damagedUnsavable` diagnostic -- a second one when the user's Save then
+  /// asks again. A damaged plan is therefore not settled on exit: a typed
+  /// but uncommitted value on it is dropped rather than asked about.
+  /// `_mayDiscard` then yields one microtask before it reads `dirty`. A
+  /// save that throws is not an exit blocker here: the plan is then asked
+  /// about as it stands, and Save shows the error.
   Future<AppExitResponse> _onExitRequested() async {
     if (_session.busy.value) return AppExitResponse.cancel;
     final mayExit = await _flow(() async {
       try {
-        _controller.save();
+        if (!_controller.damaged.value) _controller.save();
       } catch (_) {
         // Settled as far as it could; the dialog's Save reports the error.
       }
