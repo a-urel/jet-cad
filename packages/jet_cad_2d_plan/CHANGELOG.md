@@ -93,3 +93,13 @@ The service mode (sub-project 2b).
 - Sub-project 3a: `PlanShortcuts` remounted on the same controller: the
   last one mounted speaks for its keys.
 - Sub-project 3a: the symbol box family now the contract's.
+- Sub-project 4a: `PlanToolIds` is exported, so
+  `PlanPermissions(tools: {PlanToolIds.select, ...})` needs no id strings.
+- Sub-project 4a: a host's own symbols are a small kit,
+  `PlanKit(id: '<host>', symbols: [...])`, loaded beside any other kit's
+  (pinned, no new API).
+- Sub-project 4a: several `PlanServiceView`s may show one controller; the
+  canvas placed last drives `canvasRect` and the zoom focus, and the one
+  placed before it takes over when it goes (documented and pinned).
+- Sub-project 4a: `userCamera: false` pinned: no pan, pinch or wheel moves
+  the camera; the host's `centerOn` still does.

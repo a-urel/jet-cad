@@ -233,6 +233,16 @@ final class _Host implements ServicesHost {
 
 /// One plan and everything over it (spec P2). A controller is shown in one
 /// `PlanCanvas` at a time (Task 15).
+///
+/// Several `PlanServiceView`s may show one controller (two areas of one
+/// floor, a map beside the plan). They share the camera, and the canvas
+/// placed last drives [canvasRect] (so [zoomBy]'s default focus and the
+/// host's coordinate conversions); the others draw the same plan. A canvas
+/// is placed when it first reports and again whenever it moves or
+/// resizes; the order among views placed in one frame is not defined (a
+/// view still owing the plan's first fit reports after one that does not),
+/// so mount the view that should drive after the others. When the driving
+/// canvas goes, the one placed before it takes over after the next frame.
 class PlanController extends ChangeNotifier {
   /// A controller over [kits] and [json], or an empty plan. Throws, before
   /// it builds anything it would have to dispose: a [KitSetError] for the
@@ -2600,7 +2610,8 @@ class PlanController extends ChangeNotifier {
   }
 
   /// The canvas's place in global logical pixels, or null while none is
-  /// mounted.
+  /// mounted. With several views of this controller, the canvas placed
+  /// last (see the class comment).
   ValueListenable<Rect?> get canvasRect => _canvasRect;
 
   /// A canvas is at [global], or, null, [view] is going.
