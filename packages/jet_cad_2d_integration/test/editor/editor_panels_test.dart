@@ -82,7 +82,7 @@ void main() {
       // The door.
       final door = doorOf(d);
       await select(tester, c, [door]);
-      expect(section(ArchitectureTypes.opening, ArchitectureTools.door),
+      expect(sectionFinder(ArchitectureTypes.opening, ArchitectureTools.door),
           findsOneWidget);
       expect(field('flip-hinge'), findsNothing);
       expect(field('flip-swing'), findsNothing);
@@ -97,13 +97,8 @@ void main() {
       expect(menuOf(tester, 'kind').onChanged, isNull);
       // A symbol with a family: the Size menu (ruling IT-R8: armed and
       // placed with a click, as a user would).
-      for (var i = 0;
-          i < 400 && c.symbolsState.value != SymbolsState.ready;
-          i++) {
-        await tester.runAsync(
-            () => Future<void>.delayed(const Duration(milliseconds: 20)));
-        await tester.pump();
-      }
+      expect(await symbolsReady(tester, c), isTrue,
+          reason: 'premise: the furniture library loaded');
       expect(
           c.armSymbol(c.symbols
               .firstWhere((s) => s.component.key == 'architecture.sofa.two')),
@@ -172,7 +167,7 @@ void main() {
       }
       // The north wall, beyond its inner face.
       await clickAt(Vector2(25500, 16850));
-      expect(section(ArchitectureTypes.wall, ArchitectureTools.wall),
+      expect(sectionFinder(ArchitectureTypes.wall, ArchitectureTools.wall),
           findsOneWidget);
       expect(fieldOf(tester, field('thickness')).readOnly, isTrue);
       expect(menuOf(tester, 'justification').onChanged, isNull);
@@ -186,7 +181,7 @@ void main() {
       expect(menuOf(tester, 'kind').onChanged, isNull);
       // The east wall's window.
       await clickAt(Vector2(25875, 14200));
-      expect(section(ArchitectureTypes.opening, ArchitectureTools.door),
+      expect(sectionFinder(ArchitectureTypes.opening, ArchitectureTools.door),
           findsOneWidget);
       expect(fieldOf(tester, field('width')).readOnly, isTrue);
       expect(byKey('layer-picker'), findsNothing);

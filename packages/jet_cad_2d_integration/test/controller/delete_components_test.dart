@@ -94,8 +94,11 @@ void main() {
     }
     doc.commands.undo();
     expect(canon(doc), before);
-    expect(
-        c.unitDetails.singleWhere((x) => x.unit.label == '1').data, isNotNull);
+    // `dataOf` was nullable (a missing component); `PlanUnitDetail.data`
+    // is a non-nullable map, empty when no data is stored, so "it came
+    // back" is the stored map itself (C7 class 3, the API's form).
+    expect(c.unitDetails.singleWhere((x) => x.unit.label == '1').data,
+        equals(hostData()));
   });
 
   test(

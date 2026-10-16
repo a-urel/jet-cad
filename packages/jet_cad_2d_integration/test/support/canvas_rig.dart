@@ -32,8 +32,21 @@ Finder field(String id) => find.byWidgetPredicate(
 
 /// The section of [typeId] or the settings of [toolId] (today's
 /// `<type>-section`, shown for the object and for its tool).
-Finder section(String typeId, String toolId) => find.byWidgetPredicate(
+Finder sectionFinder(String typeId, String toolId) => find.byWidgetPredicate(
     (w) => w.key == Key('section-$typeId') || w.key == Key('settings-$toolId'));
+
+/// Lets [c]'s symbol libraries load (Task 23's furniture): frames and
+/// short real waits, at most 400 rounds; returns whether the state is
+/// ready. Bounded, it never sleeps on: a library that never loads fails
+/// the caller's next expectation.
+Future<bool> symbolsReady(WidgetTester tester, PlanController c) async {
+  for (var i = 0; i < 400 && c.symbolsState.value != SymbolsState.ready; i++) {
+    await tester
+        .runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+    await tester.pump();
+  }
+  return c.symbolsState.value == SymbolsState.ready;
+}
 
 /// [c] in its editor in a [size] window, in [locale], two frames: the rig's
 /// [pumpEditor] and one more frame.

@@ -43,13 +43,8 @@ void main() {
     await pumpPlanEditor(tester, c);
     await frameOn(tester, c, l.at(3000.5, 2000.25), scale: 0.25);
     await focusCanvas(tester);
-    for (var i = 0;
-        i < 400 && c.symbolsState.value != SymbolsState.ready;
-        i++) {
-      await tester.runAsync(
-          () => Future<void>.delayed(const Duration(milliseconds: 20)));
-      await tester.pump();
-    }
+    expect(await symbolsReady(tester, c), isTrue,
+        reason: 'premise: the furniture library loaded');
     final entry = c.symbols
         .firstWhere((s) => s.component.key == 'architecture.sofa.three')
         .entry;
