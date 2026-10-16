@@ -242,7 +242,8 @@ final class _Host implements ServicesHost {
 /// resizes; the order among views placed in one frame is not defined (a
 /// view still owing the plan's first fit reports after one that does not),
 /// so mount the view that should drive after the others. When the driving
-/// canvas goes, the one placed before it takes over after the next frame.
+/// canvas goes, the most recent reporter among the rest takes over after the
+/// next frame.
 class PlanController extends ChangeNotifier {
   /// A controller over [kits] and [json], or an empty plan. Throws, before
   /// it builds anything it would have to dispose: a [KitSetError] for the
@@ -2619,6 +2620,8 @@ class PlanController extends ChangeNotifier {
   void canvasPlaced(Object view, Rect? global) {
     if (_disposed) return;
     if (global != null) {
+      // Remove, then insert: a report moves the view to the end, so `last`
+      // is always the most recent reporter, also for the fallback below.
       _canvases
         ..remove(view)
         ..[view] = global;

@@ -100,4 +100,61 @@ void main() {
     await frames(tester);
     expect(c.canvasRect.value, isNull, reason: 'no canvas, none drives');
   });
+
+  testWidgets(
+      'H3 three views: the driver is the most recent reporter, also after '
+      'an unmount (not the first, not the first mounted)', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1440, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final c = serviceController()..setMode(PlanMode.service);
+    const keys = {'a': Key('view-a'), 'b': Key('view-b'), 'c': Key('view-c')};
+    const lefts = {'a': 0.0, 'b': 450.0, 'c': 900.0};
+
+    Widget three(Set<String> shown, Map<String, double> widths) => MaterialApp(
+            home: Scaffold(
+                body: Stack(children: [
+          for (final n in ['a', 'b', 'c'])
+            if (shown.contains(n))
+              Positioned(
+                  key: ValueKey(n),
+                  left: lefts[n],
+                  top: 0,
+                  width: widths[n] ?? 300,
+                  height: 400,
+                  child: KeyedSubtree(
+                      key: keys[n],
+                      child: PlanServiceView(controller: c, autofocus: false)))
+        ])));
+
+    final widths = <String, double>{};
+    final shown = <String>{};
+    Future<void> show() async {
+      await tester.pumpWidget(three({...shown}, {...widths}));
+      await frames(tester);
+    }
+
+    Rect canvas(String n) => canvasOf(tester, keys[n]!);
+
+    for (final n in ['a', 'b', 'c']) {
+      shown.add(n);
+      await show();
+    }
+    expect(c.canvasRect.value, canvas('c'), reason: 'C placed last');
+
+    widths['a'] = 280;
+    await show();
+    expect(c.canvasRect.value, canvas('a'), reason: 'A reported again');
+    widths['b'] = 320;
+    await show();
+    expect(c.canvasRect.value, canvas('b'), reason: 'B reported again');
+
+    // Order of reports: C, A, B. B goes: A, the latest remaining reporter.
+    shown.remove('b');
+    await show();
+    expect(c.canvasRect.value, canvas('a'), reason: 'not C, not the first');
+
+    shown.remove('a');
+    await show();
+    expect(c.canvasRect.value, canvas('c'));
+  });
 }
