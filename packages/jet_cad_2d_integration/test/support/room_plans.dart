@@ -98,7 +98,7 @@ const placements = [
 /// A group transform for object number [k] of a [Placement.groups] plan: a
 /// translation near the placement times a rotation that is never a multiple
 /// of 90°.
-Transform2 _groupFor(Placement p, int k) => p.m
+Transform2 groupFor(Placement p, int k) => p.m
     .multiply(Transform2.translation(311.5 * (k % 7), -173.25 * (k % 5)))
     .multiply(Transform2.rotation(0.3 + 0.7 * (k % 9)));
 
@@ -352,7 +352,7 @@ RoomPlan roomPlan(List<W> walls,
       var k = 0;
       for (final w in walls) {
         final h = doc.handleSeed.next();
-        final g = place.groups ? _groupFor(place, k++) : Transform2.identity();
+        final g = place.groups ? groupFor(place, k++) : Transform2.identity();
         final inv = g.invert();
         final s = inv.transformPoint(place.at(w.sx, w.sy));
         final e = inv.transformPoint(place.at(w.ex, w.ey));
@@ -367,7 +367,7 @@ RoomPlan roomPlan(List<W> walls,
       }
       for (final (sx, sy, ex, ey) in seps) {
         final h = doc.handleSeed.next();
-        final g = place.groups ? _groupFor(place, k++) : Transform2.identity();
+        final g = place.groups ? groupFor(place, k++) : Transform2.identity();
         final inv = g.invert();
         final s = inv.transformPoint(place.at(sx, sy));
         final e = inv.transformPoint(place.at(ex, ey));

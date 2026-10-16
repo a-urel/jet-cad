@@ -5,6 +5,7 @@
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
 
 import 'box/box_plan.dart';
+import 'dimension/dimension_plan.dart';
 import 'opening/opening_plan.dart';
 import 'room/room_plan.dart';
 import 'separator/separator_plan.dart';
@@ -23,6 +24,7 @@ final PlanKit architectureKit = PlanKit(
     openingPlanType,
     separatorPlanType,
     roomPlanType,
+    dimensionPlanType,
   ],
   tools: [
     boxPlanTool,

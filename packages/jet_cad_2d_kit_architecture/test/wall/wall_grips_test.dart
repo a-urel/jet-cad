@@ -1,6 +1,7 @@
 // Ported from jet_cad_floor_plan/test/wall_grips_test.dart (3a Task 12,
-// R-P1): the provider-direct tails of EG1, EG3, EG4 and EG6, and of EG8
-// (Task 17, R-P8), whose WallGrips is a kit internal, assertions
+// R-P1): the provider-direct tails of EG1, EG3, EG4 and EG6, of EG8
+// (Task 17, R-P8) and the kit's readers of EG9 and EG10 (Task 21, R-P8),
+// whose WallGrips is a kit internal, assertions
 // unchanged, each over its case's fixture as the shell case leaves it
 // there (the shell part ends undone or
 // refused, so the document is the fixture's). The shell parts run in
@@ -8,12 +9,27 @@
 // rotated group (`groupAt`, or a spoke's group at its hub).
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
+import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
+    show ObjectGripProvider;
+import 'package:jet_cad_2d_kit/testing.dart' show FakePlanServices;
+import 'package:jet_cad_2d_kit_architecture/src/dimension/dimension.dart';
+import 'package:jet_cad_2d_kit_architecture/src/dimension/dimension_attach.dart';
+import 'package:jet_cad_2d_kit_architecture/src/dimension/dimension_grips.dart';
+import 'package:jet_cad_2d_kit_architecture/src/kit.dart';
+import 'package:jet_cad_2d_kit_architecture/src/opening/opening_geometry.dart';
+import 'package:jet_cad_2d_kit_architecture/src/opening/opening_grips.dart';
+import 'package:jet_cad_2d_kit_architecture/src/room/room_inputs.dart';
+import 'package:jet_cad_2d_kit_architecture/src/separator/separator_grips.dart';
+import 'package:jet_cad_2d_kit_architecture/src/wall/wall_bands.dart';
+import 'package:jet_cad_2d_kit_architecture/src/wall/wall_geometry.dart'
+    show wallsInDocument;
 import 'package:jet_cad_2d_kit_architecture/src/opening/opening.dart';
 import 'package:jet_cad_2d_kit_architecture/src/separator/separator.dart';
 import 'package:jet_cad_2d_kit_architecture/src/wall/wall.dart';
 import 'package:jet_cad_2d_kit_architecture/src/wall/wall_grips.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
+import '../support/dimension_fixture.dart' show dimLines;
 import '../support/wall_fixture.dart';
 
 /// The walls [build] adds to an empty document with the kit tests' system,
@@ -344,5 +360,218 @@ void main() {
       expect((p - q).length, lessThan(1e-6));
     }
     expect((b1 - lEnd).length, lessThan(1e-6));
+  });
+
+  test(
+      "EG9-k a file's group carrying WallParams and OpeningParams is an opening everywhere and a wall nowhere; a separator carrying OpeningParams is a separator everywhere, the kit's readers directly",
+      () {
+    final doc = shadowDoc(dangling: false);
+    // A file's opening hosted on the shadow, which is no wall.
+    const orphan = Handle(5700);
+    doc.commands.execute(AddNodeCommand(GroupNode(
+        handle: orphan,
+        parent: doc.rootHandle,
+        transform: Transform2.translation(ox + 1500.25, oy - 900.5)
+            .multiply(Transform2.rotation(1.3)),
+        children: const [])));
+    doc.commands.clearHistory();
+    doc.components.attach<OpeningParams>(
+        orphan, const OpeningParams(shadow, 300, 600, OpeningKind.window));
+    final m = doc.tree.accumulatedTransform(shadow);
+    final tipW = m.transformPoint(shadowTip(doc));
+    final ws = worldWallOf(doc, shadow);
+    expect((tipW - ws.e).length, lessThan(1e-6),
+        reason: 'premise: the shadow\'s WallParams ends on its own child');
+
+    // The document adapter (Ruling 08-8).
+    expect(wallsInDocument(doc, shadow, liveOf(doc)), isNull);
+    expect([
+      for (final w in wallsInDocument(doc, wc, liveOf(doc))!.walls) w.handle
+    ], [
+      wa,
+      wb
+    ]);
+    expect([for (final (h, _) in openingsInDocument(doc, wc, liveOf(doc))) h],
+        [shadow]);
+    expect(openingsInDocument(doc, wb, liveOf(doc)), isEmpty);
+
+    // The band cache: a point in the shadow's band only, and a control.
+    final bands = WallBands(liveOf(doc));
+    addTearDown(bands.dispose);
+    final n = Vector2(-ws.d.y, ws.d.x);
+    final inBand = (ws.s + ws.e) * 0.5 + n * 300;
+    expect(bands.hostAt(doc, inBand.x, inBand.y), isNull);
+    final aMid = (endOf(doc, wa, 0) + endOf(doc, wa, 1)) * 0.5;
+    expect(bands.hostAt(doc, aMid.x, aMid.y), wa);
+
+    // The dimension attach: T, and the candidates at the shadow's tip.
+    expect(thickestWall(doc, liveOf(doc)), closeTo(200, 1e-9),
+        reason: "A's, not 400");
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+    final ends = attachCandidates(doc, index, tipW,
+        live: liveOf(doc),
+        objectSnap: true,
+        thickest: thickestWall(doc, liveOf(doc)));
+    expect([for (final e in ends) e.wall], isNot(contains(shadow)));
+    final atA = attachCandidates(doc, index, endOf(doc, wa, 0),
+        live: liveOf(doc),
+        objectSnap: true,
+        thickest: thickestWall(doc, liveOf(doc)));
+    expect([for (final e in atA) e.wall], contains(wa), reason: 'control');
+
+    // The rooms' document adapter.
+    final inputs = RoomInputs(doc, liveOf(doc));
+    addTearDown(inputs.dispose);
+    expect(inputs.inputOf(shadow), isNull);
+    expect(inputs.inputOf(sep), isNotNull);
+    expect(inputs.inputOf(wa), isNotNull);
+
+    // The grips: each group's naming type's provider.
+    List<(GripRole, int, double, double)> rows(List<Grip> gs) =>
+        [for (final g in gs) (g.role, g.index, g.x, g.y)];
+    final services = FakePlanServices(document: doc, catalog: testCatalog());
+    addTearDown(services.dispose);
+    ObjectGripProvider objectOf(Handle h) => architectureKit.types
+        .singleWhere((t) => t.id == liveOf(doc)(h))
+        .gripsFor(services)!;
+    final opening = rows(OpeningGrips(live: liveOf(doc)).gripsOf(doc, shadow));
+    expect(opening, isNotEmpty);
+    expect(rows(objectOf(shadow).gripsOf(doc, shadow)), opening);
+    expect(objectOf(shadow).movable(doc, shadow), isFalse);
+    final separator = rows(
+        SeparatorGrips(inputs: inputs, objectSnap: () => true)
+            .gripsOf(doc, sep));
+    expect(separator, hasLength(2));
+    expect(rows(objectOf(sep).gripsOf(doc, sep)), separator);
+    expect(objectOf(sep).movable(doc, sep), isTrue);
+  });
+
+  test(
+      "EG10-k a file's dimension group carrying WallParams on the joint is a dimension, not a wall, the kit's readers directly",
+      () {
+    // Not an opening: a fix that skips only groups carrying OpeningParams
+    // leaves this one a wall.
+    const dim = Handle(0x1A2B);
+    final at = Transform2.translation(ox + 820.5, oy - 1330.25)
+        .multiply(Transform2.rotation(0.7));
+    final toDim = at.invert();
+    // Across the stray's line (below), beyond its far end: the dimension
+    // line crosses it.
+    final d0 = toDim.transformPoint(plan(4200, 1500));
+    final d1 = toDim.transformPoint(plan(6600, 1500));
+    final doc = gripDoc((doc) {
+      addL(doc);
+      doc.commands.execute(CompoundCommand([
+        AddNodeCommand(GroupNode(
+            handle: dim,
+            parent: doc.rootHandle,
+            transform: at,
+            children: const [])),
+        SetComponentCommand<DimensionParams>(
+            dim,
+            DimensionParams(FixedEnd(d0.x, d0.y), FixedEnd(d1.x, d1.y),
+                DimKind.aligned, 350.5)),
+      ], label: 'Add dimension'));
+    });
+    expect(kids(doc, dim), isNotEmpty,
+        reason: 'premise: regenerated as a dimension');
+    // Written straight into the store, as a file brings it in: 400 thick,
+    // from the L's corner (on the joint, in world) out between B and C.
+    final ws0 = toDim.transformPoint(lCorner);
+    final we0 = toDim.transformPoint(polar(lCorner, 23 + 40, 1800));
+    final stray =
+        WallParams(ws0.x, ws0.y, we0.x, we0.y, 400, Justification.left);
+    doc.components.attach<WallParams>(dim, stray);
+    // Today's :803 (`dimP`) is read by the shell part's after-drag checks
+    // (EG10, the integration package's): unused here.
+    final corner = endOf(doc, wa, 1);
+    final ws = worldWallOf(doc, dim);
+    expect((ws.s - corner).length, lessThan(wallJoin.linear),
+        reason: 'premise: on the joint in world; only the rule excludes it');
+    expect((ws.s - Vector2(ox, oy)).length, greaterThan(1000));
+
+    // The document adapter: no wall, and not among A's others.
+    expect(wallsInDocument(doc, dim, liveOf(doc)), isNull);
+    expect([
+      for (final w in wallsInDocument(doc, wa, liveOf(doc))!.walls) w.handle
+    ], [
+      wb,
+      wc
+    ]);
+
+    // The band cache: a point in the stray's band only, and a control.
+    final bands = WallBands(liveOf(doc));
+    addTearDown(bands.dispose);
+    final n = Vector2(-ws.d.y, ws.d.x);
+    final inBand = (ws.s + ws.e) * 0.5 + n * 200;
+    expect(bands.hostAt(doc, inBand.x, inBand.y), isNull);
+    final aMid = (endOf(doc, wa, 0) + endOf(doc, wa, 1)) * 0.5;
+    expect(bands.hostAt(doc, aMid.x, aMid.y), wa, reason: 'control');
+
+    // The dimension attach: T, and the candidates where the stray's line
+    // (offset 0) crosses the dimension line, a point of the dimension's own
+    // children, so the index's tight box reaches the dimension group and the
+    // walk's owner check decides it (as EG9's shadow tip).
+    expect(thickestWall(doc, liveOf(doc)), closeTo(200, 1e-9),
+        reason: "A's, not 400");
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+    final (a, b) = dimLines(doc, dim).first;
+    double cross(Vector2 u, Vector2 v) => u.x * v.y - u.y * v.x;
+    final t = cross(ws.s - a, ws.d) / cross(b - a, ws.d);
+    expect(t, inExclusiveRange(0.05, 0.95),
+        reason: "premise: the stray's line crosses the dimension line");
+    final hit = a + (b - a) * t;
+    expect(cross(hit - ws.s, ws.d).abs() / ws.d.length, lessThan(1e-6),
+        reason: "premise: on the stray's line");
+    final owners = <Handle>{};
+    final tight = dimAttach.linear;
+    index.forEachInRect(
+        Aabb2.raw(hit.x - tight, hit.y - tight, hit.x + tight, hit.y + tight),
+        const QueryFilter.rendering(),
+        (slot) => owners.add(doc.entities.ownerAt(slot)));
+    expect(owners, {dim},
+        reason: "premise: the tight box reaches the dimension's children");
+    final ends = attachCandidates(doc, index, hit,
+        live: liveOf(doc),
+        objectSnap: true,
+        thickest: thickestWall(doc, liveOf(doc)));
+    expect([for (final e in ends) e.wall], isNot(contains(dim)));
+    final atCorner = attachCandidates(doc, index, corner,
+        live: liveOf(doc),
+        objectSnap: true,
+        thickest: thickestWall(doc, liveOf(doc)));
+    expect([for (final e in atCorner) e.wall], containsAll([wa, wb]),
+        reason: "control: the stray's line at the joint finds A and B");
+
+    // The rooms' adapter: a wall would be an input.
+    final inputs = RoomInputs(doc, liveOf(doc));
+    addTearDown(inputs.dispose);
+    expect(inputs.inputOf(dim), isNull);
+    expect(inputs.inputOf(wa), isNotNull, reason: 'control');
+
+    // The grips: the dimension's, never the wall's.
+    List<(GripRole, int, double, double)> rows(List<Grip> gs) =>
+        [for (final g in gs) (g.role, g.index, g.x, g.y)];
+    expect(WallGrips(live: liveOf(doc)).gripsOf(doc, dim), isEmpty);
+    final services = FakePlanServices(document: doc, catalog: testCatalog());
+    addTearDown(services.dispose);
+    ObjectGripProvider objectOf(Handle h) => architectureKit.types
+        .singleWhere((t) => t.id == liveOf(doc)(h))
+        .gripsFor(services)!;
+    final own = rows(
+        DimensionGrips(index: index, objectSnap: () => true, live: liveOf(doc))
+            .gripsOf(doc, dim));
+    expect(own, hasLength(3));
+    expect(rows(objectOf(dim).gripsOf(doc, dim)), own);
+
+    final q = gridOf(plan(3500, -400));
+    final g = WallGrips(live: liveOf(doc)).gripsOf(doc, wa)[1];
+    final c =
+        WallGrips(live: liveOf(doc)).drag(doc, wa, g, q)! as CompoundCommand;
+    // ignore: avoid_dynamic_calls
+    expect([for (final m in c.children) (m as dynamic).handle as Handle],
+        [wa, wb]);
   });
 }

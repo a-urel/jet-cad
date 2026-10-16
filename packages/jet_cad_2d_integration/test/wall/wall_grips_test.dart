@@ -4,9 +4,12 @@
 // unchanged; the provider-direct tails of EG1, EG3, EG4, EG6 and EG8 use
 // the kit's WallGrips and run in the kit as EG1-k, EG3-k, EG4-k, EG6-k and
 // EG8-k (R-P1, R12-3); the shown grips are the controller's grip cache
-// (R-P9). EG9, EG10 move to Task 21 (R-P8).
+// (R-P9). EG9, EG10 (3a Task 21, R-P8): the panel, the Position field and
+// the corner drag here; their adapters, band cache, attach, room inputs and
+// grips run in the kit as EG9-k, EG10-k.
 // WG-refuse-short is new (Review Focus 3's kit half, R-P15).
 // ignore_for_file: invalid_use_of_internal_member
+import 'package:flutter/foundation.dart' show Key;
 import 'package:flutter/gestures.dart' show PointerDeviceKind, kPrimaryButton;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
@@ -523,5 +526,143 @@ void main() {
     expect(doc.components.get<OpeningParams>(sep), sepO);
     await undoKey(tester);
     expect(canon(doc), before);
+  });
+
+  testWidgets(
+      'EG9 (fix/live-object-rule) a file\'s group carrying WallParams and '
+      'OpeningParams is an opening everywhere and a wall nowhere; a '
+      'separator carrying OpeningParams is a separator everywhere and an '
+      'opening nowhere', (tester) async {
+    final ctrl = shadowController(dangling: false);
+    final doc = ctrl.document;
+    // A file's opening hosted on the shadow, which is no wall.
+    const orphan = Handle(5700);
+    doc.commands.execute(AddNodeCommand(GroupNode(
+        handle: orphan,
+        parent: doc.rootHandle,
+        transform: Transform2.translation(ox + 1500.25, oy - 900.5)
+            .multiply(Transform2.rotation(1.3)),
+        children: const [])));
+    doc.commands.clearHistory();
+    doc.components.attach<OpeningParams>(
+        orphan, const OpeningParams(shadow, 300, 600, OpeningKind.window));
+    final m = doc.tree.accumulatedTransform(shadow);
+    final tipW = m.transformPoint(shadowTip(doc));
+    final ws = worldWallOf(doc, shadow);
+    expect((tipW - ws.e).length, lessThan(1e-6),
+        reason: 'premise: the shadow\'s WallParams ends on its own child');
+
+    // The adapters, the band cache, the attach, the room inputs and the
+    // grips: EG9-k (the kit).
+
+    // The panel: the Opening section for the shadow, no section for the
+    // separator.
+    await pumpEditor(tester, ctrl, centre: lCorner, scale: 0.15);
+    ctrl.activeSelection.replace([SelectionKey.root(shadow)]);
+    await tester.pump();
+    expect(
+        find.byKey(const Key('section-architecture.opening')), findsOneWidget);
+    expect(find.byKey(const Key('section-architecture.wall')), findsNothing);
+    ctrl.activeSelection.replace([SelectionKey.root(sep)]);
+    await tester.pump();
+    expect(find.byKey(const Key('section-architecture.opening')), findsNothing);
+    expect(find.byKey(const Key('section-architecture.wall')), findsNothing);
+
+    // The Position field: an opening hosted on the shadow has no wall, so
+    // no position is valid (the field reverts, nothing is written); the
+    // shadow's own position, on C, commits one step.
+    Future<void> enter(String text) async {
+      await tester.enterText(find.byKey(const Key('property-position')), text);
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pump();
+    }
+
+    final o2 = doc.components.get<OpeningParams>(orphan)!;
+    ctrl.activeSelection.replace([SelectionKey.root(orphan)]);
+    await tester.pump();
+    expect(
+        find.byKey(const Key('section-architecture.opening')), findsOneWidget);
+    expect(ws.s.distanceTo(ws.e), greaterThan(50),
+        reason: "premise: 50 lies within the shadow's WallParams");
+    await enter('50');
+    expect(doc.components.get<OpeningParams>(orphan), o2);
+    expect(doc.commands.undoDepth, 0);
+    ctrl.activeSelection.replace([SelectionKey.root(shadow)]);
+    await tester.pump();
+    await enter('650');
+    expect(doc.components.get<OpeningParams>(shadow)!.position, 650);
+    expect(doc.commands.undoDepth, 1);
+  });
+
+  testWidgets(
+      'EG10 (fix/live-object-rule, the L2 review\'s m1) a file\'s dimension '
+      'group carrying WallParams on the joint is a dimension, not a wall: '
+      'not among the adapter\'s walls, the band cache\'s or the attach\'s, '
+      'no wall grips or wall section, and the corner drag leaves it alone',
+      (tester) async {
+    // Not an opening: a fix that skips only groups carrying OpeningParams
+    // leaves this one a wall.
+    const dim = Handle(0x1A2B);
+    final at = Transform2.translation(ox + 820.5, oy - 1330.25)
+        .multiply(Transform2.rotation(0.7));
+    final toDim = at.invert();
+    // Across the stray's line (below), beyond its far end: the dimension
+    // line crosses it.
+    final d0 = toDim.transformPoint(plan(4200, 1500));
+    final d1 = toDim.transformPoint(plan(6600, 1500));
+    final ctrl = wallController(gripPlan((doc) {
+      addL(doc);
+      doc.commands.execute(CompoundCommand([
+        AddNodeCommand(GroupNode(
+            handle: dim,
+            parent: doc.rootHandle,
+            transform: at,
+            children: const [])),
+        SetComponentCommand<DimensionParams>(
+            dim,
+            DimensionParams(FixedEnd(d0.x, d0.y), FixedEnd(d1.x, d1.y),
+                DimKind.aligned, 350.5)),
+      ], label: 'Add dimension'));
+    }));
+    final doc = ctrl.document;
+    expect(kids(doc, dim), isNotEmpty,
+        reason: 'premise: regenerated as a dimension');
+    // Written straight into the store, as a file brings it in: 400 thick,
+    // from the L's corner (on the joint, in world) out between B and C.
+    final ws0 = toDim.transformPoint(lCorner);
+    final we0 = toDim.transformPoint(polar(lCorner, 23 + 40, 1800));
+    final stray =
+        WallParams(ws0.x, ws0.y, we0.x, we0.y, 400, Justification.left);
+    doc.components.attach<WallParams>(dim, stray);
+    final dimP = doc.components.get<DimensionParams>(dim)!;
+    final corner = endOf(doc, wa, 1);
+    final ws = worldWallOf(doc, dim);
+    expect((ws.s - corner).length, lessThan(wallJoin.linear),
+        reason: 'premise: on the joint in world; only the rule excludes it');
+    expect((ws.s - Vector2(ox, oy)).length, greaterThan(1000));
+
+    // The adapters, the band cache, the attach, the room inputs and the
+    // grips: EG10-k (the kit).
+
+    // The corner drag: A and B only; the dimension group as loaded.
+    final q = gridOf(doc, plan(3500, -400));
+    // The provider directly: EG10-k (the kit).
+    await pumpEditor(tester, ctrl, centre: lCorner, scale: 0.15);
+    final before = canon(doc);
+    await selectWall(tester, ctrl, wa);
+    await dragWorld(tester, ctrl, corner, q);
+    expect(tester.takeException(), isNull);
+    expect(doc.commands.undoDepth, 1, reason: 'the commit succeeds');
+    expect(doc.components.get<WallParams>(dim), stray);
+    expect(doc.components.get<DimensionParams>(dim), dimP);
+    await undoKey(tester);
+    expect(canon(doc), before);
+
+    // The panel: the Dimension section, not the Wall section.
+    ctrl.activeSelection.replace([SelectionKey.root(dim)]);
+    await tester.pump();
+    expect(find.byKey(const Key('section-architecture.dimension')),
+        findsOneWidget);
+    expect(find.byKey(const Key('section-architecture.wall')), findsNothing);
   });
 }
