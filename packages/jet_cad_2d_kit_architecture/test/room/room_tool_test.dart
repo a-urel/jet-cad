@@ -1121,4 +1121,43 @@ void main() {
     expect(rig.tool.occupied.value, const RoomOccupied('Room 1'),
         reason: 'control: the live room it made occupies the face');
   });
+
+  test(
+      'RT-one-pass a hover checks the inputs\' liveness once, however many '
+      'readers its verdict and trace run; a read outside an event checks '
+      'every time (spec 3a C1.5; M-RT-14, M-RT-15)', () {
+    // The two-room box at the corpus far origin, every wall in its own
+    // turned group, nothing frozen: the steady state.
+    final plan = buildPlan(twoRoomWalls, place: corpusGroups);
+    final rig = roomRig(plan.doc);
+    final inputs = rig.inputs;
+    hoverTo(rig, plan.at(1500.25, 2000.5));
+    expect(rig.tool.debugPreview, hasLength(1),
+        reason: 'premise: the left face, traced and memoised');
+    final rebuilds = inputs.debugRebuilds;
+    for (final (what, p, traced) in [
+      ('the same face, reused', plan.at(1700.75, 1200.25), false),
+      ('the right face, traced', plan.at(5500.5, 2600.75), true),
+      ('the partition\'s band, traced', plan.at(3010.5, 2400.25), true),
+      ('the band, reused', plan.at(2990.25, 1700.5), false),
+    ]) {
+      final passes = inputs.debugLivenessPasses;
+      final traces = rig.tool.debugTraces;
+      hoverTo(rig, p);
+      expect(rig.tool.debugTraces - traces, traced ? 1 : 0,
+          reason: 'premise: $what');
+      expect(inputs.debugLivenessPasses - passes, 1,
+          reason: '$what: one liveness pass for the hover');
+    }
+    expect(inputs.debugRebuilds, rebuilds,
+        reason: 'premise: nothing changed, nothing rebuilt');
+
+    // Outside a pointer event every read checks again: the bracket closed.
+    final passes = inputs.debugLivenessPasses;
+    inputs
+      ..placedIn(everywhere)
+      ..placedIn(everywhere);
+    expect(inputs.debugLivenessPasses - passes, 2,
+        reason: 'two reads outside an event: two passes');
+  });
 }

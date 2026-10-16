@@ -70,8 +70,16 @@ class SeparatorTool extends PlacementTool {
   void hovered(Vector2 raw) {
     _bandShown = false;
     if (points.isEmpty) return;
-    final trimmed = trimSeparator(points.first, hoverPoint, inputs,
-        objectSnap: _objectSnap(_context));
+    // One liveness pass over the inputs for the whole hover: the trim reads
+    // `placedIn` up to three times (spec 3a C1.5).
+    inputs.beginEvent();
+    final (Vector2, Vector2)? trimmed;
+    try {
+      trimmed = trimSeparator(points.first, hoverPoint, inputs,
+          objectSnap: _objectSnap(_context));
+    } finally {
+      inputs.endEvent();
+    }
     if (trimmed == null) return;
     _bandStart.setFrom(trimmed.$1);
     _bandEnd.setFrom(trimmed.$2);
@@ -85,9 +93,16 @@ class SeparatorTool extends PlacementTool {
       _bandShown = false;
       return;
     }
-    inputs.invalidate();
-    final trimmed = trimSeparator(points.first, point, inputs,
-        objectSnap: _objectSnap(ctx));
+    inputs
+      ..invalidate()
+      ..beginEvent();
+    final (Vector2, Vector2)? trimmed;
+    try {
+      trimmed = trimSeparator(points.first, point, inputs,
+          objectSnap: _objectSnap(ctx));
+    } finally {
+      inputs.endEvent();
+    }
     if (trimmed == null) return;
     final (s, e) = trimmed;
     try {

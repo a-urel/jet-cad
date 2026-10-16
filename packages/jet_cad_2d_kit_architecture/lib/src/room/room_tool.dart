@@ -245,11 +245,27 @@ class RoomTool extends PlacementTool implements ToolNotice {
   @override
   void hovered(Vector2 raw) {
     _pointer.setFrom(raw);
-    _show(_verdictAt(raw));
+    // One liveness pass over the inputs for the whole hover, however many
+    // of their readers the verdict and its trace run (spec 3a C1.5).
+    inputs.beginEvent();
+    try {
+      _show(_verdictAt(raw));
+    } finally {
+      inputs.endEvent();
+    }
   }
 
   @override
   void accept(Vector2 point, ToolContext ctx) {
+    inputs.beginEvent();
+    try {
+      _accept(ctx);
+    } finally {
+      inputs.endEvent();
+    }
+  }
+
+  void _accept(ToolContext ctx) {
     inputs.invalidate();
     final verdict = _verdictAt(_raw, contours: false);
     _show(verdict);
@@ -463,8 +479,13 @@ class RoomTool extends PlacementTool implements ToolNotice {
     if (_disposed || (_preview.isEmpty && _occupiedNotice.value == null)) {
       return;
     }
-    inputs.invalidate();
-    _show(_verdictAt(_pointer, contours: false));
+    inputs.beginEvent();
+    try {
+      inputs.invalidate();
+      _show(_verdictAt(_pointer, contours: false));
+    } finally {
+      inputs.endEvent();
+    }
     notifyListeners();
   }
 

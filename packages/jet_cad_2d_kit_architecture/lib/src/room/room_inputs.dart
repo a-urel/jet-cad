@@ -265,6 +265,36 @@ final class RoomInputs implements PlaceSource, Disposable {
     _generation++;
   }
 
+  /// Whether a pointer event is being handled ([beginEvent]).
+  bool _inEvent = false;
+
+  /// Whether the current event has already checked every cached object's
+  /// liveness, or rebuilt the cache from live objects: read only while
+  /// [_inEvent].
+  bool _checked = false;
+
+  /// Opens one pointer event's reads (a hover, a click, a re-read after a
+  /// document change): until [endEvent], the whole-cache liveness check
+  /// ([_dropFrozen]) runs at most once, at the event's first read, and the
+  /// per-handle one ([_dropFrozenAround]) not at all after it, since that
+  /// pass checked every handle it would. A freeze happens between events,
+  /// never inside one (a plan freezes on its own, outside a tool's
+  /// handler), and an edit inside one goes through [invalidate], after
+  /// which the rebuild reads only live objects; so one check per event sees
+  /// every freeze at the next event's first read (spec 3a C1.5). The Room
+  /// and Separator tools bracket each event with it (`try`/`finally`).
+  /// Outside a bracket every read checks, as before.
+  void beginEvent() {
+    _inEvent = true;
+    _checked = false;
+  }
+
+  /// Closes the bracket [beginEvent] opened: every later read checks again
+  /// until the next [beginEvent].
+  void endEvent() {
+    _inEvent = false;
+  }
+
   final Map<Handle, RoomInput?> _inputs = {};
   final Map<Handle, List<Handle>> _neighbours = {};
 
@@ -281,6 +311,10 @@ final class RoomInputs implements PlaceSource, Disposable {
 
   /// How many times the cache was rebuilt. Never reset.
   int debugRebuilds = 0;
+
+  /// How many whole-cache liveness passes ran ([_dropFrozen] over a fresh
+  /// cache): one per pointer event in steady state. Never reset.
+  int debugLivenessPasses = 0;
 
   /// [h]'s input, or null when [h] is not a live wall or separator or is
   /// degenerate.
@@ -326,6 +360,8 @@ final class RoomInputs implements PlaceSource, Disposable {
   void _refresh() {
     if (!_stale) return;
     _stale = false;
+    // Built from live objects only: nothing for this event to re-check.
+    _checked = true;
     debugRebuilds++;
     _inputs.clear();
     _neighbours.clear();
@@ -373,7 +409,9 @@ final class RoomInputs implements PlaceSource, Disposable {
   /// ([placedIn], [bounds], [generation]) run it. Iterates [_held] in
   /// place: O(n) calls of [live] for n cached objects, no allocation.
   void _dropFrozen() {
-    if (_stale) return;
+    if (_stale || (_inEvent && _checked)) return;
+    debugLivenessPasses++;
+    _checked = true;
     for (var i = 0; i < _held.length; i++) {
       final want =
           i < _heldWalls ? ArchitectureTypes.wall : ArchitectureTypes.separator;
@@ -393,7 +431,7 @@ final class RoomInputs implements PlaceSource, Disposable {
   /// not hold answers nothing either way: a freeze only removes. No
   /// allocation.
   void _dropFrozenAround(Handle h) {
-    if (_stale || !_inputs.containsKey(h)) return;
+    if (_stale || (_inEvent && _checked) || !_inputs.containsKey(h)) return;
     final around = _neighbours[h];
     if (around == null) {
       if (live(h) != ArchitectureTypes.separator) invalidate();

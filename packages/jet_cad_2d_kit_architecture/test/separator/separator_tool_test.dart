@@ -451,4 +451,35 @@ void main() {
           reason: why);
     }
   });
+
+  test(
+      'ST-one-pass a hover with a start pending checks the inputs\' '
+      'liveness once, though the trim reads placedIn three times (spec 3a '
+      'C1.5; M-ST-1)', () {
+    // The box at the corpus far origin, every wall in its own turned group;
+    // the hover end lies in the east wall's band, so the trim runs all its
+    // readers: both ends' bands, then the bands the trimmed end touches.
+    final plan = buildPlan(boxWalls, place: corpusGroups);
+    final rig = separatorRig(plan.doc);
+    final inputs = rig.inputs;
+    final a = plan.at(5000.25, 2000.5);
+    hoverTo(rig, a);
+    pressAt(rig, a);
+    hoverTo(rig, plan.at(8030.5, 2500.75));
+    expect(rig.tool.debugBand, isNotNull, reason: 'premise: a rubber band');
+    final rebuilds = inputs.debugRebuilds;
+    for (final p in [
+      plan.at(8040.25, 2600.5),
+      plan.at(8020.75, 1400.25),
+      plan.at(6000.5, 3000.75),
+    ]) {
+      final passes = inputs.debugLivenessPasses;
+      hoverTo(rig, p);
+      expect(rig.tool.debugBand, isNotNull, reason: 'premise: $p');
+      expect(inputs.debugLivenessPasses - passes, 1,
+          reason: 'one liveness pass for the hover at $p');
+    }
+    expect(inputs.debugRebuilds, rebuilds,
+        reason: 'premise: nothing changed, nothing rebuilt');
+  });
 }
