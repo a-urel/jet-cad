@@ -1,0 +1,258 @@
+e0e19eda test(demo): export and print keep the old assertions
+diff --git a/apps/architecture_demo/test/document_commands_test.dart b/apps/architecture_demo/test/document_commands_test.dart
+index fdb1dc5b..7685ee12 100644
+--- a/apps/architecture_demo/test/document_commands_test.dart
++++ b/apps/architecture_demo/test/document_commands_test.dart
+@@ -6,14 +6,14 @@
+ //   PORT   DC1b DC2 DC4 DC5 DC6 DC9 DC10 DC10b DC11
+ //   SPLIT  DC1 (order: the app's Open sample button leads the bar), DC7
+ //          (buttons cannot grey out; the file callbacks do nothing while
+ //          busy, Undo and Redo are the library's), DC12 and DC12c (the name
+ //          and the dirty mark are a bounded host widget in
+ //          `PlanEditorBar.leading`; DC12 keeps 800 px, DC12c's floor moves
+-//          to 800 px with Export's button and the name at 144 px, re-measured in
+-//          Task 6)
++//          to 800 px with Export's button and the
++//          name at 144 px, re-measured in Task 6)
+ //   COVERED DC3: packages/jet_cad_2d_plan/test/editor/plan_editor_test.dart
+ //          ED-3 (:133, "without them none is offered") and ED-U (:445),
+ //          editor/editor_view_test.dart V1 (:28, "the editor has Export and
+ //          Print and no file commands"); "no name" is the
+ //          app's widget. The redo chords go with DC2.
+ //          DC8: packages/jet_cad_2d_plan/test/panels/layer_panel_test.dart:612
+@@ -876,13 +876,14 @@ void main() {
+       'stay on screen (spec 12a D7, S-27)', (tester) async {
+     // Decided: premise impossible (the range). The floor is 800 px, measured
+     // on this layout: the 144 px name, the 40 px Open sample button, the
+     // library's toolbar (Export's button in it, since Task 6) and its gap,
+     // OSNAP and the zoom, and the bar's padding, with nothing left for the
+     // status; at 799 px the bar overflows by 1 px. (Task 4b measured 776 px
+-    // with a 160 px name and no Export button.) The old range was 704 px down to 656 px: the host widgets
++    // with a 160 px name and no Export button.) The old range was 704 px down
++    // to 656 px: the host widgets
+     // (the name and Open sample) add 200 px to the 576 px the library's bar
+     // needs by itself, so 656 px would leave the name 40 px.
+     final rig = await pumpApp(tester, size: const Size(1000, 600));
+     final c = rig.controller;
+     const long = 'the ground floor of the house by the lake, third revision';
+     rig.files.scriptOpen(
+diff --git a/apps/architecture_demo/test/export/busy_test.dart b/apps/architecture_demo/test/export/busy_test.dart
+index 9f7dcb05..c54dde7d 100644
+--- a/apps/architecture_demo/test/export/busy_test.dart
++++ b/apps/architecture_demo/test/export/busy_test.dart
+@@ -10,17 +10,16 @@
+ //      app has no hook for that stretch (the N6-gap test pins what happens
+ //      to a flow started there);
+ //   3. the library calls `onExport` -> `exportFlow`: busy again, for the
+ //      save panel and the write (the N6-write test).
+ import 'dart:async';
+ import 'dart:typed_data';
++import 'dart:ui' show AppExitResponse;
+ 
+ import 'package:architecture_demo/busy_wrappers.dart';
+ import 'package:flutter/material.dart';
+-import 'dart:ui' show AppExitResponse;
+-
+ import 'package:flutter/services.dart' show LogicalKeyboardKey;
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+ import 'package:pdf/pdf.dart' show PdfPageFormat;
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+diff --git a/apps/architecture_demo/test/export/export_flow_test.dart b/apps/architecture_demo/test/export/export_flow_test.dart
+index f87563a1..9446d5c0 100644
+--- a/apps/architecture_demo/test/export/export_flow_test.dart
++++ b/apps/architecture_demo/test/export/export_flow_test.dart
+@@ -16,12 +16,18 @@
+ // Intent halves of the SPLIT rows: PF13 (page_flows_test.dart:441: PDF magic,
+ // MediaBox and PNG pixels per choice), PF12 (:414, a null answer exports
+ // nothing), PF7 (:217, the library's flows hold Print and Export), PF2 (:143,
+ // `<name>.png`), X-1 (the initial choice), EF4 (export/export_font_test.dart:
+ // 38, the default font).
+ //
++// Decided: premise impossible (EX1's instance placement, colour and
++// lineweight overrides, the separator, `fontLoads == 1`): the sample has no
++// rotated instance with overrides, and the app injects no font cache; those
++// are covered by jet_cad_2d_flutter `export/export_pdf_test.dart`, PF13 and
++// SP-export-pdf. The text and placement checks below stand in for them.
++//
+ // Decided: premise impossible (spec decision 5): the old tests asserted the
+ // buttons *disabled* while a flow runs. `PlanEditor` has no host hook to grey
+ // them, so the -open forms assert that the callback or the dialog does
+ // nothing while the app is busy. EX14's bare host is gone: the app has no
+ // font injection; the name is the session's (`exportName`, decision 8).
+ import 'dart:io';
+@@ -60,13 +66,16 @@ void main() {
+       expect((w.name, w.location, w.kind),
+           ('flat.pdf', '/out/flat.pdf', FileKind.pdf));
+       expect(w.bytes.sublist(0, 4), '%PDF'.codeUnits);
+       final content = parsePdf(w.bytes);
+       expect(content.mediaBox[2], closeTo(297 * ptPerMm, 1e-3));
+       expect(content.mediaBox[3], closeTo(210 * ptPerMm, 1e-3));
+-      expect(content.textRuns, isNotEmpty, reason: 'the sample\'s labels');
++      expect([for (final t in content.textRuns) t.string],
++          unorderedEquals(liveTexts(rig.controller)),
++          reason: 'the plan\'s labels, each once, in the embedded font');
++      expectInsideSheet(content);
+       final reference = await referenceExport(tester, rig.controller);
+       expect(operatorsOf(content), operatorsOf(reference),
+           reason: 'the bytes are the export command\'s');
+       expect(content.paths, isNotEmpty);
+       expect(rig.session.busy.value, isFalse);
+       expect(rig.controller.dirty.value, isFalse,
+@@ -292,13 +301,14 @@ void main() {
+           'EX12 with the dialog open, $label+P and $label+E are consumed: '
+           'nothing runs, no second dialog, no print', (tester) async {
+         final printer = FakePagePrinter();
+         final rig = await pumpFlat(tester, printer: printer);
+         await openDialog(tester);
+         for (final key in [LogicalKeyboardKey.keyP, LogicalKeyboardKey.keyE]) {
+-          await chord(tester, modifier, key);
++          expect(await chordHandled(tester, modifier, key), isTrue,
++              reason: '$label+${key.keyLabel} handled');
+           await tester.pump();
+         }
+         expect(tester.takeException(), isNull);
+         expect(find.byKey(const Key('export-dialog')), findsOneWidget);
+         expect(printer.calls, isEmpty);
+         expect(rig.files.saveLocationCalls, isEmpty);
+diff --git a/apps/architecture_demo/test/export/export_font_test.dart b/apps/architecture_demo/test/export/export_font_test.dart
+index d2ab4337..7dc16f15 100644
+--- a/apps/architecture_demo/test/export/export_font_test.dart
++++ b/apps/architecture_demo/test/export/export_font_test.dart
+@@ -111,11 +111,14 @@ void main() {
+                   multiLine: true)
+               .hasMatch(pubspec),
+           isTrue);
+       // The path resolves under the package's lib/.
+       expect(
+           File('../../packages/jet_cad_2d_plan/lib/fonts/Roboto-Regular.ttf')
+-              .existsSync(),
+-          isTrue);
++              .readAsBytesSync(),
++          orderedEquals(File(
++                  '../../packages/jet_cad_2d_flutter/test/golden/fonts/Roboto-Regular.ttf')
++              .readAsBytesSync()),
++          reason: 'the declared asset is the vendored face, byte for byte');
+     });
+   });
+ }
+diff --git a/apps/architecture_demo/test/export/print_flow_test.dart b/apps/architecture_demo/test/export/print_flow_test.dart
+index e9a58569..73a3cbe4 100644
+--- a/apps/architecture_demo/test/export/print_flow_test.dart
++++ b/apps/architecture_demo/test/export/print_flow_test.dart
+@@ -15,12 +15,15 @@
+ //   PR9  export/registry_test.dart:260 (X-8)
+ // Intent halves of the SPLIT rows: X-7, PF3 (name, format in pt, %PDF), PF9
+ // and PF11 (page_flows_test.dart:324, :388: the error is reported once and
+ // the guard is free), PF7 (:217, the library's print and export hold each
+ // other).
+ //
++// Decided: premise impossible (PR1's `fontLoads == 1`): the app injects no
++// font cache.
++//
+ // Decided: premise impossible (spec decision 5): the old tests asserted the
+ // buttons *disabled* while a flow runs; the -open forms assert the callback
+ // or the printer does nothing while the app is busy. The separator the old PR1
+ // checked is not in the architecture kit's plan (its omission is I
+ // `separator/separator_export_test.dart`).
+ import 'dart:async';
+@@ -66,13 +69,16 @@ void main() {
+       final reference = await referenceExport(tester, rig.controller);
+       expect(operatorsOf(printed), operatorsOf(reference),
+           reason: 'the same content stream as an export');
+       expect(printed.mediaBox, reference.mediaBox);
+       expect(printed.mediaBox[2], closeTo(call.format.width, 1e-3));
+       expect(printed.mediaBox[3], closeTo(call.format.height, 1e-3));
+-      expect(printed.textRuns, isNotEmpty, reason: 'premise: text embedded');
++      expect([for (final t in printed.textRuns) t.string],
++          unorderedEquals(liveTexts(rig.controller)),
++          reason: 'the plan\'s labels, in the embedded font');
++      expectInsideSheet(printed);
+     });
+ 
+     testWidgets(
+         'PR3-open a throwing printer shows the page-flow error dialog '
+         '(neutral words, the thrown text); the print job is over, so the app '
+         'is not busy meanwhile', (tester) async {
+diff --git a/apps/architecture_demo/test/support/app_rig.dart b/apps/architecture_demo/test/support/app_rig.dart
+index aadc1c15..7abda0a6 100644
+--- a/apps/architecture_demo/test/support/app_rig.dart
++++ b/apps/architecture_demo/test/support/app_rig.dart
+@@ -109,12 +109,23 @@ Future<void> chord(WidgetTester tester, LogicalKeyboardKey modifier,
+   await tester.sendKeyDownEvent(modifier);
+   await press(tester, key);
+   await tester.sendKeyUpEvent(modifier);
+   await tester.pump();
+ }
+ 
++/// Presses [key] with [modifier]; whether the key-down was handled (the
++/// result of the key event, as the old app's `chordHandled`).
++Future<bool> chordHandled(WidgetTester tester, LogicalKeyboardKey modifier,
++    LogicalKeyboardKey key) async {
++  await tester.sendKeyDownEvent(modifier);
++  final handled = await tester.sendKeyEvent(key);
++  await tester.sendKeyUpEvent(modifier);
++  await tester.pump();
++  return handled;
++}
++
+ /// Cmd+Z: the editor's undo binding.
+ Future<void> undoKey(WidgetTester tester) =>
+     chord(tester, LogicalKeyboardKey.meta, LogicalKeyboardKey.keyZ);
+ 
+ /// The global position of world [p] under [c]'s camera.
+ Offset globalOf(WidgetTester tester, PlanController c, Vector2 p) {
+diff --git a/apps/architecture_demo/test/support/export_rig.dart b/apps/architecture_demo/test/support/export_rig.dart
+index 392b6dfd..06cf9015 100644
+--- a/apps/architecture_demo/test/support/export_rig.dart
++++ b/apps/architecture_demo/test/support/export_rig.dart
+@@ -4,13 +4,13 @@
+ // panned off the sheet, and the readings of a PDF and a PNG.
+ import 'dart:io';
+ import 'dart:typed_data';
+ 
+ import 'package:flutter/material.dart';
+ import 'package:flutter_test/flutter_test.dart';
+-import 'package:jet_cad_2d/jet_cad_2d.dart' show PageComponent;
++import 'package:jet_cad_2d/jet_cad_2d.dart' show EntityKind, PageComponent;
+ import 'package:jet_cad_2d_flutter/export_testing.dart';
+ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+ 
+ import 'app_fakes.dart';
+ import 'app_rig.dart';
+ 
+@@ -98,6 +98,33 @@ Future<PdfContent> referenceExport(
+ }
+ 
+ /// The page [c]'s plan carries, or null when it has none (the library's
+ /// `page` notifier is internal).
+ PageComponent? pageOf(PlanController c) =>
+     c.document.components.get<PageComponent>(c.document.rootHandle);
++
++/// The strings of [c]'s live TEXT entities, read from the document apart from
++/// the exporter: what the PDF's text runs must be.
++List<String> liveTexts(PlanController c) {
++  final e = c.document.entities;
++  return [
++    for (final slot in e.liveSlots)
++      if (e.kindAt(slot) == EntityKind.text) e.textAt(slot),
++  ];
++}
++
++/// Every vertex of every path of [content] lies on the sheet (its MediaBox,
++/// 1 pt of slack): an export that followed the turned screen, or forgot the
++/// page's origin, would put drawing elsewhere.
++void expectInsideSheet(PdfContent content) {
++  final w = content.mediaBox[2], h = content.mediaBox[3];
++  var outside = 0;
++  for (final p in content.paths) {
++    for (final s in p.subpaths) {
++      for (final v in s.vertices) {
++        if (v.x < -1 || v.y < -1 || v.x > w + 1 || v.y > h + 1) outside++;
++      }
++    }
++  }
++  expect(content.paths, isNotEmpty);
++  expect(outside, 0, reason: 'vertices outside the sheet');
++}

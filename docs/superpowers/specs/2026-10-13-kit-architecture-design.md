@@ -524,3 +524,7 @@ by this wave; these rules make sure nothing in it blocks it.
   and 3b (`apps/architecture_demo`). A13's "the demos" and A11's
   `apps/floor_planner` → `apps/architecture_demo` are 3b's for the
   architecture demo; `apps/restaurant_demo` stays sub-project 4's.
+- **2026-10-16, sub-project 3b done** (spec
+  [2026-10-16-architecture-demo-design.md](2026-10-16-architecture-demo-design.md)):
+  A11's `apps/floor_planner` stays beside `apps/architecture_demo` until
+  sub-project 4 removes it with the old packages.

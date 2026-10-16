@@ -118,7 +118,12 @@ class PlanPagePanelState extends State<PlanPagePanel> {
   /// Shows the stored scale in the scale field, dropping any text typed and
   /// not submitted, and commits nothing: the controller's settle calls it
   /// before a flow reads the document (D14: unsubmitted text is not saved).
-  void resyncScale() => _syncScale();
+  /// A scale field that has the focus hands it back to the canvas, as the
+  /// old shell's settle did.
+  void resyncScale() {
+    _scaleFocus.handBack();
+    _syncScale();
+  }
 
   bool get _editable => widget.controller.permissions.editPage;
 

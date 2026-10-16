@@ -1,0 +1,3570 @@
+diff --git a/apps/architecture_demo/test/app_shell_test.dart b/apps/architecture_demo/test/app_shell_test.dart
+index 5976ac95..62e2596e 100644
+--- a/apps/architecture_demo/test/app_shell_test.dart
++++ b/apps/architecture_demo/test/app_shell_test.dart
+@@ -6,19 +6,12 @@ import 'package:flutter/services.dart';
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+ 
+-Future<ArchitectureDemoAppState> pumpApp(WidgetTester tester) async {
+-  await tester.binding.setSurfaceSize(const Size(1400, 900));
+-  addTearDown(() => tester.binding.setSurfaceSize(null));
+-  await tester.pumpWidget(const ArchitectureDemoApp());
+-  await tester.pump();
+-  return tester
+-      .state<ArchitectureDemoAppState>(find.byType(ArchitectureDemoApp));
+-}
++import 'support/app_rig.dart';
+ 
+ void main() {
+   testWidgets('AS1 the app pumps: one editor, the kit\'s Symbols tab, clean',
+       (tester) async {
+-    final app = await pumpApp(tester);
++    final app = (await pumpApp(tester)).app;
+     expect(find.byType(PlanEditor), findsOneWidget);
+     expect(find.text('Symbols'), findsWidgets);
+     expect(app.controller.dirty.value, isFalse);
+@@ -30,7 +23,7 @@ void main() {
+   ]) {
+     testWidgets('CH-consume ${modifier.keyLabel}+S over a dialog is handled',
+         (tester) async {
+-      final app = await pumpApp(tester);
++      final app = (await pumpApp(tester)).app;
+       final navigator = tester.state<NavigatorState>(find.byType(Navigator));
+       showDialog<void>(
+           context: navigator.context,
+diff --git a/apps/architecture_demo/test/app_words_test.dart b/apps/architecture_demo/test/app_words_test.dart
+index 65863ea9..384e8b8a 100644
+--- a/apps/architecture_demo/test/app_words_test.dart
++++ b/apps/architecture_demo/test/app_words_test.dart
+@@ -1,17 +1,21 @@
+ // Ported from apps/floor_planner/test/app_words_test.dart (audit
+ // docs/superpowers/specs/2026-10-16-architecture-demo-test-audit.md, section
+-// "app_words_test.dart"). AW3 is ported as it was; AW1, AW2 and AW4 read the
+-// whole app (its host's open-sample button and untitled name, the files
+-// seam), which ArchitectureDemoApp gets in Task 4: they move there. Their
+-// word-level content is pinned here against a minimal harness (AW-locale).
++// "app_words_test.dart"). AW1-AW4 are PORT. AW1, AW2 and AW4 pump the whole
++// app (Task 4 gave it the host and the files seam); AW-locale is Task 3's
++// word-level stand-in for AW1/AW2, kept as the cheap pin of AppStrings.of.
+ // Spec 14d L16: the app follows the system's language and English for any
+ // other.
+ import 'package:architecture_demo/app_strings.dart';
+-import 'package:architecture_demo/document_files.dart' show FileKind;
++import 'package:architecture_demo/document_files.dart'
++    show DocumentNamePrompt, FileKind, FileTypeLabel;
++import 'package:architecture_demo/main.dart';
+ import 'package:flutter/material.dart';
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+ 
++import 'support/app_fakes.dart';
++import 'support/app_rig.dart';
++
+ Future<AppStrings> wordsFor(WidgetTester tester, Locale locale) async {
+   late AppStrings words;
+   await tester.pumpWidget(MaterialApp(
+@@ -25,7 +29,37 @@ Future<AppStrings> wordsFor(WidgetTester tester, Locale locale) async {
+   return words;
+ }
+ 
++String tooltipOf(WidgetTester tester, String key) =>
++    tester.widget<IconButton>(find.byKey(Key(key))).tooltip!;
++
++/// The whole app under the system [locale].
++Future<void> pumpIn(WidgetTester tester, Locale locale) async {
++  tester.platformDispatcher.localesTestValue = [locale];
++  addTearDown(tester.platformDispatcher.clearLocalesTestValue);
++  await pumpApp(tester);
++}
++
+ void main() {
++  testWidgets('AW1 a Turkish system: the app and the planner speak Turkish',
++      (tester) async {
++    await pumpIn(tester, const Locale('tr', 'TR'));
++    expect(tooltipOf(tester, 'toolbar-new'), 'Yeni (Ctrl+N)');
++    expect(tooltipOf(tester, 'toolbar-open-sample'), 'Örneği aç');
++    expect(tooltipOf(tester, 'toolbar-print'), 'Yazdır… (Ctrl+P)');
++    expect(find.text('Adsız'), findsOneWidget, reason: 'the untitled name');
++    expect(find.text('Duvar'), findsOneWidget);
++  });
++
++  testWidgets('AW2 a German system; a French one is English', (tester) async {
++    await pumpIn(tester, const Locale('de', 'DE'));
++    expect(tooltipOf(tester, 'toolbar-save-as'),
++        'Speichern unter… (Strg+Umschalt+S)');
++    expect(find.text('Unbenannt'), findsOneWidget);
++    await pumpIn(tester, const Locale('fr'));
++    expect(tooltipOf(tester, 'toolbar-new'), 'New (Ctrl+N)');
++    expect(find.text('Untitled'), findsOneWidget);
++  });
++
+   testWidgets(
+       'AW-locale the app\'s words follow the resolved locale: Turkish, '
+       'German, and English for French (AW1/AW2 at the word level)',
+@@ -82,4 +116,28 @@ void main() {
+         'Die Seite konnte nicht exportiert oder gedruckt werden');
+     expect(await word('tr'), 'Sayfa dışa aktarılamadı ya da yazdırılamadı');
+   });
++
++  testWidgets(
++      'AW4 the app hands its files the type names of the system\'s '
++      'language, read at each call (review F-4)', (tester) async {
++    tester.platformDispatcher.localesTestValue = [const Locale('de', 'DE')];
++    addTearDown(tester.platformDispatcher.clearLocalesTestValue);
++    await tester.binding.setSurfaceSize(const Size(1440, 900));
++    addTearDown(() => tester.binding.setSurfaceSize(null));
++    FileTypeLabel? handed;
++    await tester.pumpWidget(ArchitectureDemoApp(createFiles: (
++        {required DocumentNamePrompt askName,
++        required FileTypeLabel typeLabel}) {
++      handed = typeLabel;
++      return FakeDocumentFiles();
++    }));
++    await tester.pump();
++    expect(handed, isNotNull, reason: 'premise: the app made its files');
++    expect(handed!(FileKind.pdf), 'PDF-Dokument');
++    expect(handed!(FileKind.jetplan), 'Jet-Plan');
++    tester.platformDispatcher.localesTestValue = [const Locale('tr', 'TR')];
++    await tester.pump();
++    expect(handed!(FileKind.png), 'PNG görüntüsü',
++        reason: 'read at each call: the language of the moment');
++  });
+ }
+diff --git a/apps/architecture_demo/test/document_commands_test.dart b/apps/architecture_demo/test/document_commands_test.dart
+new file mode 100644
+index 00000000..a8ae2988
+--- /dev/null
++++ b/apps/architecture_demo/test/document_commands_test.dart
+@@ -0,0 +1,916 @@
++// Ported from apps/floor_planner/test/document_commands_test.dart (audit
++// docs/superpowers/specs/2026-10-16-architecture-demo-test-audit.md, section
++// "document_commands_test.dart"). The old table fed the toolbar and the
++// shortcuts from one command list; now `PlanEditor` owns its buttons and
++// chords and calls the host's callbacks. Dispositions:
++//   PORT   DC1b DC2 DC4 DC5 DC6 DC9 DC10 DC10b DC11
++//   SPLIT  DC1 (order: the app's Open sample button leads the bar), DC7
++//          (buttons cannot grey out; the file callbacks do nothing while
++//          busy, Undo and Redo are the library's), DC12 and DC12c (the name
++//          and the dirty mark are a bounded host widget in
++//          `PlanEditorBar.leading`; DC12 keeps 800 px, DC12c's floor moves
++//          to 776 px, re-measured)
++//   COVERED DC3: packages/jet_cad_2d_plan/test/editor/plan_editor_test.dart
++//          ED-3 (:133, "without them none is offered") and ED-U (:445),
++//          editor/editor_view_test.dart V1 (:28, "the editor has Export and
++//          Print and no file commands"); "no name" is the
++//          app's widget. The redo chords go with DC2.
++//          DC8: packages/jet_cad_2d_plan/test/panels/layer_panel_test.dart:612
++//          ("no shell shortcut fires while typing: letters, Undo, Redo and
++//          Escape stop at the field") and panels/page_scale_field_test.dart:36
++//          (A9); the canvas half is DC2.
++//   DROPPED DC12b: the half-of-the-shared-width rule was the old bar's
++//          layout (the name beside the status line in one flexible pair);
++//          the new name is a host widget of bounded width, so the rule has
++//          no counterpart. Its intent (a long name is cut and the status
++//          takes the rest) is DC12 and DC12c.
++// Spec 12a D6, D7 (plan 12a Task 6): a disabled command's binding stays and
++// does nothing; every command waits while a flow runs or a shape is
++// part-way; the file chords are consumed above the Navigator and run
++// nothing there; Undo and Redo re-read the history after the settle; the
++// top bar shows the name and the dirty mark without overflowing, and the
++// tab title follows.
++import 'dart:convert';
++
++import 'package:flutter/foundation.dart' show defaultTargetPlatform;
++import 'package:flutter/gestures.dart' show PointerDeviceKind;
++import 'package:flutter/material.dart';
++import 'package:flutter/rendering.dart' show RenderParagraph;
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
++import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import 'support/app_rig.dart';
++
++/// Far from the origin and from the page, where the edits land.
++final Vector2 far = Vector2(-43210.5, 31234.75);
++
++/// The seven buttons the old toolbar had, in the old order.
++const List<String> kIds = [
++  'new',
++  'open',
++  'open-sample',
++  'save',
++  'save-as',
++  'undo',
++  'redo',
++];
++
++/// The buttons left to right in the app's bar: Open sample leads, then the
++/// library's file buttons, Print, then Undo and Redo (Export waits for the
++/// app's `onExport`, Task 6).
++const List<String> kBarOrder = [
++  'open-sample',
++  'new',
++  'open',
++  'save',
++  'save-as',
++  'print',
++  'undo',
++  'redo',
++];
++
++Finder button(String id) => find.byKey(Key('toolbar-$id'));
++
++/// Whether the toolbar button [id] is enabled, as built.
++bool on(WidgetTester tester, String id) =>
++    tester.widget<IconButton>(button(id)).onPressed != null;
++
++Map<String, bool> states(WidgetTester tester) =>
++    {for (final id in kIds) id: on(tester, id)};
++
++Map<String, bool> all(bool value) => {for (final id in kIds) id: value};
++
++Future<void> tapButton(WidgetTester tester, String id) async {
++  await tester.tap(button(id));
++  await tester.pump();
++}
++
++/// A chord, spelled out here rather than read from the library, so a library
++/// that lost one is caught.
++typedef Chord = ({
++  LogicalKeyboardKey key,
++  bool meta,
++  bool control,
++  bool shift,
++  String name
++});
++
++Chord cmd(LogicalKeyboardKey key, String name, {bool shift = false}) =>
++    (key: key, meta: true, control: false, shift: shift, name: name);
++
++Chord ctrl(LogicalKeyboardKey key, String name, {bool shift = false}) =>
++    (key: key, meta: false, control: true, shift: shift, name: name);
++
++final Chord cmdZ = cmd(LogicalKeyboardKey.keyZ, 'Cmd+Z');
++final Chord ctrlZ = ctrl(LogicalKeyboardKey.keyZ, 'Ctrl+Z');
++final Chord cmdShiftZ =
++    cmd(LogicalKeyboardKey.keyZ, 'Cmd+Shift+Z', shift: true);
++final Chord ctrlShiftZ =
++    ctrl(LogicalKeyboardKey.keyZ, 'Ctrl+Shift+Z', shift: true);
++final Chord ctrlY = ctrl(LogicalKeyboardKey.keyY, 'Ctrl+Y');
++final Chord cmdS = cmd(LogicalKeyboardKey.keyS, 'Cmd+S');
++final Chord ctrlS = ctrl(LogicalKeyboardKey.keyS, 'Ctrl+S');
++final Chord cmdShiftS =
++    cmd(LogicalKeyboardKey.keyS, 'Cmd+Shift+S', shift: true);
++final Chord ctrlShiftS =
++    ctrl(LogicalKeyboardKey.keyS, 'Ctrl+Shift+S', shift: true);
++final Chord cmdO = cmd(LogicalKeyboardKey.keyO, 'Cmd+O');
++final Chord ctrlO = ctrl(LogicalKeyboardKey.keyO, 'Ctrl+O');
++final Chord cmdN = cmd(LogicalKeyboardKey.keyN, 'Cmd+N');
++final Chord ctrlN = ctrl(LogicalKeyboardKey.keyN, 'Ctrl+N');
++
++final List<Chord> fileChords = [
++  cmdN,
++  ctrlN,
++  cmdO,
++  ctrlO,
++  cmdS,
++  ctrlS,
++  cmdShiftS,
++  ctrlShiftS
++];
++
++/// Presses [c]; whether the key-down was handled.
++Future<bool> pressChord(WidgetTester tester, Chord c) async {
++  final mods = [
++    if (c.meta) LogicalKeyboardKey.metaLeft,
++    if (c.control) LogicalKeyboardKey.controlLeft,
++    if (c.shift) LogicalKeyboardKey.shiftLeft,
++  ];
++  for (final m in mods) {
++    await tester.sendKeyDownEvent(m);
++  }
++  final handled = await tester.sendKeyEvent(c.key);
++  for (final m in mods.reversed) {
++    await tester.sendKeyUpEvent(m);
++  }
++  await tester.pump();
++  return handled;
++}
++
++/// Counts every call into the dispatcher (execute, undo, redo), through the
++/// hook each of them calls first: a disabled command must make none, not
++/// rely on the dispatcher refusing (spec 12a D6, S-8).
++class DispatcherSpy {
++  DispatcherSpy(this.doc) : _guard = doc.commands.onBeforeMutate {
++    doc.commands.onBeforeMutate = () {
++      calls++;
++      _guard?.call();
++    };
++  }
++
++  final DraftDocument doc;
++  final void Function()? _guard;
++  int calls = 0;
++
++  void restore() => doc.commands.onBeforeMutate = _guard;
++}
++
++/// The history, as a record to compare before and after.
++({int depth, bool canRedo, int state}) historyOf(DraftDocument doc) => (
++      depth: doc.commands.undoDepth,
++      canRedo: doc.commands.canRedo,
++      state: doc.commands.stateId,
++    );
++
++/// The Room tool over the sample's first room, which is renamed to
++/// [roomName]: the status line then reads the kit's "already a room"
++/// notice. The mouse rests on the room's seed. Returns the notice.
++Future<String> longRoomNotice(
++    WidgetTester tester, PlanController c, String roomName) async {
++  final room = liveOf<RoomParams>(c, ArchitectureTypes.room).first;
++  final params = c.document.components.get<RoomParams>(room)!;
++  expect(
++      c.execute(SetComponentCommand<RoomParams>(
++          room, params.copyWith(name: roomName))),
++      isTrue,
++      reason: 'premise: renamed');
++  final seed =
++      c.document.tree.accumulatedTransform(room).transformPoint(params.seed);
++  await aimCamera(tester, c, seed);
++  await press(tester, LogicalKeyboardKey.keyM);
++  final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
++  await mouse.addPointer(location: globalOf(tester, c, seed));
++  addTearDown(mouse.removePointer);
++  await mouse.moveTo(globalOf(tester, c, seed) + const Offset(1, 1));
++  await tester.pump();
++  return tester.widget<Text>(find.byKey(const Key('status-text'))).data!;
++}
++
++/// Two walls drawn far off the origin through the Wall tool, the shape
++/// ended: the plan's document, two steps of history.
++Future<void> twoWalls(WidgetTester tester, PlanController c) async {
++  await aimCamera(tester, c, far);
++  await drawWall(
++      tester, c, far + Vector2(-1600, -400), far + Vector2(1400, 300));
++  await drawWall(
++      tester, c, far + Vector2(-900, 1300), far + Vector2(1700, 2100));
++  expect(c.document.commands.undoDepth, 2, reason: 'premise');
++}
++
++/// Selects the wall [wall] with a canvas click on its middle, then types
++/// [text] into its thickness field without Enter: the field keeps the focus
++/// and the plan is unchanged (spec 12a D2's pending input).
++Future<void> typeThickness(
++    WidgetTester tester, PlanController c, Handle wall, String text) async {
++  final before = c.document.components.get<WallParams>(wall);
++  await clickAt(tester, c, wallMid(c, wall));
++  expect(c.activeSelection.keys, [SelectionKey.root(wall)], reason: 'premise');
++  final thickness = find.byKey(const Key('property-thickness'));
++  await tester.tap(thickness);
++  await tester.pump();
++  await tester.enterText(thickness, text);
++  await tester.pump();
++  expect(panelFieldFocused(), isTrue,
++      reason: 'premise: the field has the focus');
++  expect(c.document.components.get<WallParams>(wall), before,
++      reason: 'premise: typed, not committed');
++}
++
++void main() {
++  testWidgets(
++      'DC1-open the toolbar: the app\'s Open sample leads, then New, Open, '
++      'Save, Save As, Print and, after a gap, Undo and Redo; the file '
++      'buttons are enabled on a fresh plan, Undo and Redo not; an edit '
++      'enables Undo, an undo enables Redo (spec 12a D6, D7)', (tester) async {
++    // Intent half (order, the 12 px group gap before Undo, Undo and Redo
++    // following the history): COVERED, checked: packages/jet_cad_2d_plan/
++    // test/editor/plan_editor_test.dart:133 (ED-3: new, open, save, save-as,
++    // export, print, undo, redo) and :445 (ED-U).
++    // Decided: premise impossible (the order: the app's Open sample button
++    // is a `PlanEditorBar.leading` widget, left of the library's buttons;
++    // Export has no button until the app's `onExport`, Task 6; Print is the
++    // library's and was added after the old test).
++    final rig = await pumpApp(tester);
++    final c = rig.controller;
++    final doc = c.document;
++
++    for (final id in kBarOrder) {
++      expect(button(id), findsOneWidget, reason: id);
++    }
++    for (var i = 1; i < kBarOrder.length; i++) {
++      expect(tester.getTopLeft(button(kBarOrder[i])).dx,
++          greaterThan(tester.getTopRight(button(kBarOrder[i - 1])).dx - 0.001),
++          reason: '${kBarOrder[i]} after ${kBarOrder[i - 1]}');
++    }
++    final gap = tester.getTopLeft(button('undo')).dx -
++        tester.getTopRight(button('print')).dx;
++    final step = tester.getTopLeft(button('print')).dx -
++        tester.getTopRight(button('save-as')).dx;
++    expect(gap, greaterThanOrEqualTo(step + 12), reason: 'the group gap');
++
++    expect(states(tester), {...all(true), 'undo': false, 'redo': false},
++        reason: 'fresh');
++
++    await aimCamera(tester, c, far);
++    await drawWall(tester, c, far, far + Vector2(2500, -700));
++    expect(doc.commands.undoDepth, 1, reason: 'premise');
++    expect(states(tester), {...all(true), 'redo': false}, reason: 'edited');
++
++    await tapButton(tester, 'undo');
++    expect(doc.commands.undoDepth, 0);
++    expect(doc.commands.canRedo, isTrue);
++    expect(states(tester), {...all(true), 'undo': false}, reason: 'undone');
++
++    await tapButton(tester, 'redo');
++    expect(doc.commands.undoDepth, 1);
++    expect(states(tester), {...all(true), 'redo': false}, reason: 'redone');
++  });
++
++  testWidgets(
++      'DC1b each tooltip names its first chord: ⌘ glyphs on macOS, Ctrl+ '
++      'elsewhere; Open sample has none (spec 12a D6, S-26)', (tester) async {
++    await pumpApp(tester);
++    final mac = defaultTargetPlatform == TargetPlatform.macOS;
++    final expected = mac
++        ? const {
++            'new': 'New (⌘N)',
++            'open': 'Open… (⌘O)',
++            'open-sample': 'Open sample',
++            'save': 'Save (⌘S)',
++            'save-as': 'Save As… (⌘⇧S)',
++            'undo': 'Undo (⌘Z)',
++            'redo': 'Redo (⌘⇧Z)',
++          }
++        : const {
++            'new': 'New (Ctrl+N)',
++            'open': 'Open… (Ctrl+O)',
++            'open-sample': 'Open sample',
++            'save': 'Save (Ctrl+S)',
++            'save-as': 'Save As… (Ctrl+Shift+S)',
++            'undo': 'Undo (Ctrl+Z)',
++            'redo': 'Redo (Ctrl+Shift+Z)',
++          };
++    expect({
++      for (final id in kIds) id: tester.widget<IconButton>(button(id)).tooltip
++    }, expected);
++  },
++      variant: const TargetPlatformVariant({
++        TargetPlatform.macOS,
++        TargetPlatform.windows,
++        TargetPlatform.linux
++      }));
++
++  testWidgets(
++      'DC2 a tap on Undo or Redo, and each of their chords (Ctrl+Y too), '
++      'moves exactly one step and back to the same state (spec 12a D6)',
++      (tester) async {
++    final rig = await pumpApp(tester);
++    final c = rig.controller;
++    final doc = c.document;
++    await twoWalls(tester, c);
++    final two = doc.commands.stateId;
++
++    await tapButton(tester, 'undo');
++    expect(doc.commands.undoDepth, 1, reason: 'one step, not two');
++    final one = doc.commands.stateId;
++    await tapButton(tester, 'redo');
++    expect(doc.commands.undoDepth, 2);
++    expect(doc.commands.stateId, two);
++
++    for (final (undo, redo) in [
++      (cmdZ, cmdShiftZ),
++      (ctrlZ, ctrlShiftZ),
++      (cmdZ, ctrlY),
++    ]) {
++      expect(await pressChord(tester, undo), isTrue, reason: undo.name);
++      expect(doc.commands.undoDepth, 1, reason: undo.name);
++      expect(doc.commands.stateId, one, reason: undo.name);
++      expect(await pressChord(tester, redo), isTrue, reason: redo.name);
++      expect(doc.commands.undoDepth, 2, reason: redo.name);
++      expect(doc.commands.stateId, two, reason: redo.name);
++    }
++    expect(c.activeTool.value, 'plan.select',
++        reason: 'no chord reached a tool letter');
++  });
++
++  testWidgets(
++      'DC4 each file button and each file chord, Cmd and Ctrl, runs its own '
++      'flow; the tool stays Select (spec 12a D6)', (tester) async {
++    final rig = await pumpApp(tester);
++    final c = rig.controller;
++    final files = rig.files;
++    final session = rig.session;
++
++    // Open: the button, then Cmd+O, then Ctrl+O; each cancelled.
++    for (final how in ['button', cmdO, ctrlO]) {
++      files.scriptOpenCancel();
++      how == 'button'
++          ? await tapButton(tester, 'open')
++          : await pressChord(tester, how as Chord);
++      await tester.pump();
++    }
++    expect(files.openCalls, 3);
++    expect(files.saveLocationCalls, isEmpty);
++
++    // Save As: the button, Cmd+Shift+S, Ctrl+Shift+S; each cancelled.
++    for (final how in ['button', cmdShiftS, ctrlShiftS]) {
++      files.scriptSaveCancel();
++      how == 'button'
++          ? await tapButton(tester, 'save-as')
++          : await pressChord(tester, how as Chord);
++      await tester.pump();
++    }
++    expect(files.saveLocationCalls, hasLength(3));
++    expect(files.writes, isEmpty);
++
++    // Save: untitled, the button asks; titled, Cmd+S and Ctrl+S write in
++    // place without asking.
++    files.scriptSaveLocation(name: 'plan.jetplan', location: '/p/plan');
++    await tapButton(tester, 'save');
++    await tester.pump();
++    expect(files.saveLocationCalls, hasLength(4));
++    expect(files.writes, hasLength(1));
++    expect(session.name, 'plan');
++    await pressChord(tester, cmdS);
++    await tester.pump();
++    await pressChord(tester, ctrlS);
++    await tester.pump();
++    expect(files.saveLocationCalls, hasLength(4), reason: 'titled: no ask');
++    expect(
++        files.writes.map((w) => w.location), ['/p/plan', '/p/plan', '/p/plan']);
++
++    // Open sample, then New: the button, Cmd+N, Ctrl+N.
++    await tapButton(tester, 'open-sample');
++    await tester.pump();
++    expect(c.document.entities.liveCount, greaterThanOrEqualTo(500));
++    expect(session.name, 'Untitled');
++    for (final how in ['button', cmdN, ctrlN]) {
++      final before = c.document;
++      how == 'button'
++          ? await tapButton(tester, 'new')
++          : await pressChord(tester, how as Chord);
++      await tester.pump();
++      expect(identical(c.document, before), isFalse, reason: '$how');
++      expect(c.document.entities.liveCount, 0, reason: '$how');
++    }
++    expect(files.openCalls, 3);
++    expect(files.saveLocationCalls, hasLength(4));
++    expect(files.writes, hasLength(3));
++    expect(files.unscriptedCalls, 0);
++    expect(session.busy.value, isFalse);
++    expect(c.activeTool.value, 'plan.select',
++        reason: 'Cmd+N and Cmd+S are not the Window and Separator letters');
++  });
++
++  testWidgets(
++      'DC5 mid-shape: with the Wall tool part-way every library button is '
++      'disabled and a tap changes nothing -- with a wall down too; Escape '
++      'enables them and a tap undoes (spec 12a D6, T-2; M-12a-23)',
++      (tester) async {
++    // Library gap (spec decision 10): the toolbar's mid-shape gating is not
++    // pinned by a library test; pinned here through the app.
++    // Decided: premise impossible for Open sample: it is the app's own
++    // button, and the tool controller (which knows `isMidShape`) is internal
++    // to the library, so it cannot grey out; DC5-open-sample below pins what
++    // it does instead.
++    final rig = await pumpApp(tester);
++    final c = rig.controller;
++    final files = rig.files;
++    final doc = c.document;
++    await twoWalls(tester, c);
++    await tapButton(tester, 'undo');
++    expect(doc.commands.canRedo, isTrue, reason: 'premise: a redo stack');
++    expect(states(tester), all(true), reason: 'premise: all enabled');
++    final libraryIds = [
++      for (final id in kIds)
++        if (id != 'open-sample') id
++    ];
++    Map<String, bool> libraryStates() =>
++        {for (final id in libraryIds) id: on(tester, id)};
++    Map<String, bool> libraryAll(bool v) =>
++        {for (final id in libraryIds) id: v};
++
++    // One click: no wall yet, the redo stack intact -- only the shape
++    // disables Redo.
++    final a = far + Vector2(-2200, -2600), b = far + Vector2(1900, -2400);
++    await press(tester, LogicalKeyboardKey.keyW);
++    await clickAt(tester, c, a);
++    expect(activeTool(tester).isMidShape, isTrue, reason: 'premise');
++    expect(libraryStates(), libraryAll(false));
++    final before = historyOf(doc);
++    final spy = DispatcherSpy(doc);
++    for (final id in libraryIds) {
++      await tapButton(tester, id);
++    }
++    expect(historyOf(doc), before);
++    expect(spy.calls, 0);
++    expect(identical(c.document, doc), isTrue);
++    expect(files.openCalls + files.saveLocationCalls.length, 0);
++    expect(files.writes, isEmpty);
++
++    // Two clicks: a wall down, the chain goes on.
++    await clickAt(tester, c, b);
++    expect(doc.commands.undoDepth, 2, reason: 'premise: a wall down');
++    expect(activeTool(tester).isMidShape, isTrue, reason: 'premise');
++    expect(libraryStates(), libraryAll(false));
++    final down = historyOf(doc);
++    spy.calls = 0;
++    await tapButton(tester, 'undo');
++    await tapButton(tester, 'save');
++    expect(historyOf(doc), down);
++    expect(spy.calls, 0);
++    expect(files.saveLocationCalls, isEmpty);
++
++    // Escape ends the shape: enabled again (Redo waits on its stack, cut by
++    // the wall), and a tap undoes.
++    await press(tester, LogicalKeyboardKey.escape);
++    expect(c.activeTool.value, ArchitectureTools.wall, reason: 'premise');
++    expect(activeTool(tester).isMidShape, isFalse);
++    expect(libraryStates(), {...libraryAll(true), 'redo': false});
++    await tapButton(tester, 'undo');
++    expect(doc.commands.undoDepth, 1);
++    expect(spy.calls, 1);
++    spy.restore();
++  });
++
++  testWidgets(
++      'DC5-open-sample mid-shape the app\'s Open sample button is not '
++      'gated: on a clean plan a tap replaces the plan, the half-drawn wall '
++      'is dropped and the tool is Select again', (tester) async {
++    // Decided: premise impossible (see DC5): this pins what the app does.
++    final rig = await pumpApp(tester);
++    final c = rig.controller;
++    await aimCamera(tester, c, far);
++    await press(tester, LogicalKeyboardKey.keyW);
++    await clickAt(tester, c, far + Vector2(-2200, -2600));
++    expect(activeTool(tester).isMidShape, isTrue, reason: 'premise');
++    expect(c.dirty.value, isFalse, reason: 'premise: clean');
++    expect(on(tester, 'open-sample'), isTrue);
++
++    await tapButton(tester, 'open-sample');
++    await tester.pump();
++    expect(c.document.entities.liveCount, greaterThanOrEqualTo(500));
++    expect(c.activeTool.value, 'plan.select');
++    expect(activeTool(tester).isMidShape, isFalse);
++    expect(tester.takeException(), isNull);
++  });
++
++  testWidgets(
++      'DC6 the app tools: Wall, Separator, Dimension and Box are mid-shape '
++      'after one click (commands disabled), until Escape; Door, Window, Gap '
++      'and Room place with one click and never are (spec 12a D6)',
++      (tester) async {
++    final rig = await pumpApp(tester);
++    final c = rig.controller;
++    final doc = c.document;
++    final centre = far;
++    await aimCamera(tester, c, centre);
++    await press(tester, LogicalKeyboardKey.keyW);
++    for (final p in [
++      centre + Vector2(-2000, -1500),
++      centre + Vector2(2000, -1500),
++      centre + Vector2(2000, 1500),
++      centre + Vector2(-2000, 1500),
++      centre + Vector2(-2000, -1500),
++    ]) {
++      await clickAt(tester, c, p);
++    }
++    await press(tester, LogicalKeyboardKey.enter);
++    await press(tester, LogicalKeyboardKey.escape);
++    expect(wallsOf(c), hasLength(4), reason: 'premise: the enclosure');
++    expect(on(tester, 'undo'), isTrue, reason: 'premise');
++
++    for (final (letter, name) in [
++      (LogicalKeyboardKey.keyW, 'Wall'),
++      (LogicalKeyboardKey.keyS, 'Separator'),
++      (LogicalKeyboardKey.keyI, 'Dimension'),
++      (LogicalKeyboardKey.keyB, 'Box'),
++    ]) {
++      await press(tester, letter);
++      final tool = activeTool(tester);
++      expect(tool.isMidShape, isFalse, reason: '$name: fresh');
++      expect(on(tester, 'undo'), isTrue, reason: '$name: fresh');
++      await clickAt(tester, c, centre + Vector2(-700, 300));
++      expect(tool.isMidShape, isTrue, reason: '$name: one click');
++      expect(on(tester, 'undo'), isFalse, reason: name);
++      expect(on(tester, 'save'), isFalse, reason: name);
++      await press(tester, LogicalKeyboardKey.escape);
++      expect(tool.isMidShape, isFalse, reason: '$name: Escape');
++      expect(on(tester, 'undo'), isTrue, reason: '$name: Escape');
++      expect(on(tester, 'save'), isTrue, reason: '$name: Escape');
++    }
++
++    for (final (letter, name, at) in [
++      (LogicalKeyboardKey.keyD, 'Door', centre + Vector2(-1000, -1500)),
++      (LogicalKeyboardKey.keyN, 'Window', centre + Vector2(900, -1500)),
++      (LogicalKeyboardKey.keyG, 'Gap', centre + Vector2(2000, 200)),
++      (LogicalKeyboardKey.keyM, 'Room', centre + Vector2(-300, 200)),
++    ]) {
++      await press(tester, letter);
++      final tool = activeTool(tester);
++      final depth = doc.commands.undoDepth;
++      await clickAt(tester, c, at);
++      expect(doc.commands.undoDepth, depth + 1, reason: '$name: placed');
++      expect(tool.isMidShape, isFalse, reason: name);
++      expect(on(tester, 'undo'), isTrue, reason: name);
++      expect(on(tester, 'save'), isTrue, reason: name);
++      await press(tester, LogicalKeyboardKey.escape);
++    }
++    expect(liveOf<OpeningParams>(c, ArchitectureTypes.opening), hasLength(3),
++        reason: 'premise');
++    expect(liveOf<RoomParams>(c, ArchitectureTypes.room), hasLength(1),
++        reason: 'premise');
++  });
++
++  testWidgets(
++      'DC7-open during a held write, no file command and no second Save '
++      'reaches the files or the dispatcher, and every file chord is still '
++      'consumed; Undo and Redo are the library\'s and act (spec 12a D6, S-8, '
++      'S-26, T-6; M-12a-9, M-12a-12)', (tester) async {
++    // Decided: premise impossible (spec decision 5): the buttons cannot be
++    // disabled, so the file callbacks do nothing while busy; and Undo and
++    // Redo during a write are not held (the old test pinned that none of
++    // their chords or taps reached the dispatcher). The edit-during-a-write
++    // consequences are RN1-open-undo (document_replace_test.dart).
++    final rig = await pumpApp(tester);
++    final c = rig.controller;
++    final files = rig.files;
++    final session = rig.session;
++    files.scriptOpen(
++        name: 'flat.jetplan', bytes: sampleBytes(), location: '/p/flat');
++    await rig.host.openFlow();
++    await tester.pump();
++    final doc = c.document;
++    await twoWalls(tester, c);
++    await pressChord(tester, cmdZ);
++    expect(doc.commands.undoDepth, 1, reason: 'premise');
++    expect(doc.commands.canRedo, isTrue, reason: 'premise: a redo stack');
++    expect(c.dirty.value, isTrue, reason: 'premise: dirty');
++    expect(c.activeTool.value, 'plan.select',
++        reason: 'premise: the shape ended');
++
++    files.holdWrites = true;
++    expect(await pressChord(tester, cmdS), isTrue);
++    expect(files.writes, hasLength(1));
++    expect(await pressChord(tester, cmdS), isTrue);
++    expect(files.writes, hasLength(1), reason: 'a second Cmd+S: no write');
++    expect(session.busy.value, isTrue, reason: 'premise: a flow runs');
++
++    final before = historyOf(doc);
++    final spy = DispatcherSpy(doc);
++    for (final chord in fileChords) {
++      expect(await pressChord(tester, chord), isTrue,
++          reason: '${chord.name} is consumed');
++      await tester.pump();
++    }
++    for (final id in ['new', 'open', 'open-sample', 'save', 'save-as']) {
++      await tapButton(tester, id);
++    }
++    expect(historyOf(doc), before);
++    expect(spy.calls, 0, reason: 'no call reached the dispatcher');
++    expect(files.writes, hasLength(1), reason: 'no second write');
++    expect(files.openCalls, 1, reason: 'the Open of the fixture only');
++    expect(files.saveLocationCalls, isEmpty);
++    expect(identical(c.document, doc), isTrue);
++
++    files.heldWrites.single.complete();
++    await tester.pump();
++    await tester.pump();
++    expect(session.busy.value, isFalse);
++    await pressChord(tester, cmdZ);
++    expect(doc.commands.undoDepth, 0, reason: 'idle again: Undo acts');
++    expect(spy.calls, 1);
++    spy.restore();
++  });
++
++  testWidgets(
++      'DC9 above the dialogs: with the error dialog up (busy), and with the '
++      'page panel\'s sheet dropdown open (idle, titled), every file chord is '
++      'handled and runs nothing; after each, the chords act again (spec 12a '
++      'D6, T-3, U-3, R-10; M-12a-24, M-12a-30)', (tester) async {
++    final rig = await pumpApp(tester);
++    final c = rig.controller;
++    final files = rig.files;
++    final session = rig.session;
++
++    // The error dialog of a failed Open, reached by Cmd+O.
++    final launch = c.document;
++    files.scriptOpen(name: 'list.jetplan', bytes: utf8.encode('[]'));
++    await pressChord(tester, cmdO);
++    await tester.pump();
++    expect(find.byKey(const Key('document-error')), findsOneWidget,
++        reason: 'premise: the dialog is up');
++    expect(session.busy.value, isTrue, reason: 'premise');
++    for (final chord in fileChords) {
++      expect(await pressChord(tester, chord), isTrue,
++          reason: '${chord.name} handled');
++      await tester.pump();
++    }
++    expect(files.openCalls, 1);
++    expect(files.saveLocationCalls, isEmpty);
++    expect(files.writes, isEmpty);
++    expect(identical(c.document, launch), isTrue);
++    await dismissError(tester);
++    expect(session.busy.value, isFalse);
++    files.scriptOpenCancel();
++    await pressChord(tester, cmdO);
++    await tester.pump();
++    expect(files.openCalls, 2, reason: 'Cmd+O acts again');
++
++    // The sheet dropdown's route over a titled, dirty, idle plan.
++    files.scriptOpen(
++        name: 'flat.jetplan', bytes: sampleBytes(), location: '/p/flat');
++    await rig.host.openFlow();
++    await tester.pump();
++    final doc = c.document;
++    await aimCamera(tester, c, far);
++    await drawWall(tester, c, far, far + Vector2(1800, 900));
++    expect(c.dirty.value, isTrue, reason: 'premise');
++    await tester.tap(find.byKey(const Key('page-preset')));
++    await tester.pumpAndSettle();
++    expect(find.text('Letter'), findsWidgets, reason: 'premise: menu open');
++    expect(session.busy.value, isFalse, reason: 'premise: idle');
++    expect(on(tester, 'save'), isTrue, reason: 'premise: Save could act');
++    // Save first: a Save that ran here would write in place at once.
++    for (final chord in [
++      cmdS,
++      ctrlS,
++      cmdShiftS,
++      ctrlShiftS,
++      cmdO,
++      ctrlO,
++      cmdN,
++      ctrlN,
++    ]) {
++      expect(await pressChord(tester, chord), isTrue,
++          reason: '${chord.name} handled');
++      await tester.pump();
++      expect(files.writes, isEmpty, reason: '${chord.name}: no write lands');
++      expect(files.openCalls, 3, reason: chord.name);
++      expect(files.saveLocationCalls, isEmpty, reason: chord.name);
++      expect(identical(c.document, doc), isTrue, reason: chord.name);
++    }
++
++    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
++    await tester.pumpAndSettle();
++    expect(find.text('Letter'), findsNothing, reason: 'premise: menu closed');
++    await pressChord(tester, cmdS);
++    await tester.pump();
++    expect(files.writes.map((w) => w.location), ['/p/flat'],
++        reason: 'Cmd+S saves again');
++    expect(c.dirty.value, isFalse);
++  });
++
++  testWidgets(
++      'DC10 Redo after a settle: a thickness typed without Enter is committed '
++      'by the settle as its own step, which cuts the redo branch, and Redo '
++      'then makes no call (spec 12a D2, D6, U-2; M-12a-29)', (tester) async {
++    final rig = await pumpApp(tester);
++    final c = rig.controller;
++    final doc = c.document;
++    await twoWalls(tester, c);
++    await pressChord(tester, cmdZ);
++    expect(doc.commands.canRedo, isTrue, reason: 'premise: a redo stack');
++    expect(on(tester, 'redo'), isTrue, reason: 'premise');
++    final wall = wallsOf(c).single;
++    final params = doc.components.get<WallParams>(wall)!;
++    await typeThickness(tester, c, wall, '262.5');
++    expect(on(tester, 'redo'), isTrue, reason: 'premise: Redo can be tapped');
++
++    final changes = <DocChange>[];
++    final sub = doc.commands.changes.listen(changes.add);
++    addTearDown(sub.cancel);
++    final spy = DispatcherSpy(doc);
++    await tapButton(tester, 'redo');
++    await tester.pump();
++    expect(
++        doc.components.get<WallParams>(wall), params.copyWith(thickness: 262.5),
++        reason: 'committed');
++    expect(doc.commands.undoDepth, 2, reason: 'the commit is its own step');
++    expect(doc.commands.canRedo, isFalse);
++    expect(spy.calls, 1, reason: 'the settle\'s commit, and no redo call');
++    expect(changes.whereType<CommandRedone>(), isEmpty);
++    expect(changes.whereType<CommandApplied>(), hasLength(1));
++    expect(on(tester, 'redo'), isFalse);
++    expect(panelFieldFocused(), isFalse, reason: 'handed back');
++    spy.restore();
++  });
++
++  testWidgets(
++      'DC10b Undo settles first: a thickness typed without Enter is committed '
++      'as its own step, and the tap on Undo removes that step, not the wall '
++      '(spec 12a D2, R-9)', (tester) async {
++    final rig = await pumpApp(tester);
++    final c = rig.controller;
++    final doc = c.document;
++    await twoWalls(tester, c);
++    final wall = wallsOf(c).last;
++    final params = doc.components.get<WallParams>(wall)!;
++    final two = doc.commands.stateId;
++    await typeThickness(tester, c, wall, '90');
++    expect(params.thickness, isNot(90), reason: 'premise');
++
++    await tapButton(tester, 'undo');
++    expect(doc.components.get<WallParams>(wall), params,
++        reason: 'the committed value is undone, the wall stays');
++    expect(doc.commands.undoDepth, 2, reason: 'the walls stay');
++    expect(doc.commands.stateId, two);
++    expect(doc.commands.canRedo, isTrue);
++    await tapButton(tester, 'redo');
++    expect(doc.components.get<WallParams>(wall), params.copyWith(thickness: 90),
++        reason: 'the redo branch is the committed value');
++  });
++
++  testWidgets(
++      'DC11 the tab title and the top bar follow dirty: • and Edited after an '
++      'edit, gone after a save, back after an undo past it (spec 12a D5, D7, '
++      'U-4; M-12a-31)', (tester) async {
++    final rig = await pumpApp(tester);
++    final c = rig.controller;
++    final files = rig.files;
++
++    expect(titleOf(tester), 'Untitled — jet-cad');
++    expect(shownName(tester), 'Untitled');
++    expect(find.byTooltip('Edited'), findsNothing);
++
++    await aimCamera(tester, c, far);
++    await drawWall(tester, c, far, far + Vector2(-2100, 1300));
++    expect(titleOf(tester), '• Untitled — jet-cad');
++    expect(shownName(tester), '• Untitled');
++    expect(find.byTooltip('Edited'), findsOneWidget);
++
++    files.scriptSaveLocation(name: 'hall.jetplan', location: '/p/hall');
++    await pressChord(tester, cmdS);
++    await tester.pump();
++    expect(files.writes, hasLength(1), reason: 'premise: saved');
++    expect(titleOf(tester), 'hall — jet-cad');
++    expect(shownName(tester), 'hall');
++    expect(find.byTooltip('Edited'), findsNothing);
++
++    await pressChord(tester, cmdZ);
++    expect(titleOf(tester), '• hall — jet-cad');
++    expect(shownName(tester), '• hall');
++    expect(find.byTooltip('Edited'), findsOneWidget);
++  });
++
++  testWidgets(
++      'DC12 at 800 px a long file name, dirty, and then a long status '
++      'line do not overflow the top bar: each is cut with an ellipsis, and '
++      'OSNAP and the zoom stay on screen (spec 12a D7, S-27, T-13)',
++      (tester) async {
++    // Intent half: COVERED, checked: packages/jet_cad_2d_plan/test/editor/
++    // editor_words_test.dart:190 (the OV-$code cases: "no overflow from 704 px
++    // down to 656 px", the library bar without host widgets).
++    // The width is the old 800 px: the name is bounded at 160 px.
++    final rig = await pumpApp(tester, size: const Size(800, 600));
++    final c = rig.controller;
++    const long = 'the ground floor of the house by the lake, third revision, '
++        'with the new kitchen and the long hallway to the garden';
++    rig.files.scriptOpen(
++        name: '$long.jetplan', bytes: sampleBytes(), location: '/p/long');
++    await rig.host.openFlow();
++    await tester.pump();
++    await aimCamera(tester, c, far);
++    await drawWall(tester, c, far + Vector2(-500, 0), far + Vector2(500, 0));
++    await tester.pump();
++    expect(tester.takeException(), isNull);
++
++    final name = find.byKey(const Key('document-name'));
++    expect(tester.widget<Text>(name).data, '• $long');
++    RenderParagraph paragraph(Finder f) => tester.renderObject<RenderParagraph>(
++        find.descendant(of: f, matching: find.byType(RichText)));
++    expect(paragraph(name).didExceedMaxLines, isTrue,
++        reason: 'cut, not wrapped');
++    expect(tester.getRect(name).width, 160, reason: 'bounded at 160');
++    final bar = tester.getRect(find.byKey(const Key('chrome-top')));
++    expect(
++        tester.getRect(name).right,
++        lessThanOrEqualTo(
++            tester.getRect(find.byKey(const Key('status-text'))).left));
++    for (final key in const ['osnap-text', 'zoom-text']) {
++      final r = tester.getRect(find.byKey(Key(key)));
++      expect(r.right, lessThanOrEqualTo(bar.right), reason: key);
++      expect(r.width, greaterThan(0), reason: key);
++    }
++    expect(tester.getRect(button('redo')).left, greaterThan(bar.left));
++
++    // A long status line too: the Room tool over a room with a long name
++    // says "Room — Already a room: <name>".
++    const roomName = 'the living room with the bay window, the fireplace and '
++        'the door to the terrace';
++    final notice = await longRoomNotice(tester, c, roomName);
++    expect(tester.takeException(), isNull);
++    final status = find.byKey(const Key('status-text'));
++    expect(notice, 'Room — Already a room: $roomName',
++        reason: 'premise: a long status');
++    expect(paragraph(status).didExceedMaxLines, isTrue,
++        reason: 'the status is cut, not wrapped');
++    for (final key in const ['osnap-text', 'zoom-text']) {
++      final r = tester.getRect(find.byKey(Key(key)));
++      expect(r.right, lessThanOrEqualTo(bar.right), reason: key);
++      expect(r.width, greaterThan(0), reason: key);
++    }
++  });
++
++  testWidgets(
++      'DC12c from 1000 px down to 776 px wide a titled long name and a '
++      'long status line do not overflow the top bar, and OSNAP and the zoom '
++      'stay on screen (spec 12a D7, S-27)', (tester) async {
++    // Decided: premise impossible (the range). The floor is 776 px, measured
++    // on this layout: the 160 px name, the 40 px Open sample button, the
++    // library's toolbar and its gap, OSNAP and the zoom, and the bar's
++    // padding, with nothing left for the status; at 775 px the bar overflows
++    // by 1 px. The old range was 704 px down to 656 px: the host widgets
++    // (the name and Open sample) add 200 px to the 576 px the library's bar
++    // needs by itself, so 656 px would leave the name 40 px.
++    final rig = await pumpApp(tester, size: const Size(1000, 600));
++    final c = rig.controller;
++    const long = 'the ground floor of the house by the lake, third revision';
++    rig.files.scriptOpen(
++        name: '$long.jetplan', bytes: sampleBytes(), location: '/p/long');
++    await rig.host.openFlow();
++    await tester.pump();
++    const roomName = 'the living room with the bay window, the fireplace and '
++        'the door to the terrace';
++    final notice = await longRoomNotice(tester, c, roomName);
++    expect(notice, 'Room — Already a room: $roomName', reason: 'premise');
++    expect(tester.takeException(), isNull);
++    final name = find.byKey(const Key('document-name'));
++    final status = find.byKey(const Key('status-text'));
++    for (var width = 1000; width >= 776; width--) {
++      await tester.binding.setSurfaceSize(Size(width.toDouble(), 600));
++      await tester.pump();
++      expect(tester.takeException(), isNull, reason: '$width px');
++      expect(tester.widget<Text>(name).data, '• $long',
++          reason: 'premise at $width px: the long name');
++      expect(tester.widget<Text>(status).data, notice,
++          reason: 'premise at $width px: the long status');
++      expect(tester.getRect(name).right,
++          lessThanOrEqualTo(tester.getRect(status).left),
++          reason: '$width px');
++      final bar = tester.getRect(find.byKey(const Key('chrome-top')));
++      expect(bar.width, width, reason: 'premise');
++      for (final key in const ['osnap-text', 'zoom-text']) {
++        final r = tester.getRect(find.byKey(Key(key)));
++        expect(r.right, lessThanOrEqualTo(bar.right), reason: '$key, $width');
++        expect(r.width, greaterThan(0), reason: '$key, $width');
++      }
++    }
++  });
++}
+diff --git a/apps/architecture_demo/test/document_files_sources_test.dart b/apps/architecture_demo/test/document_files_sources_test.dart
+index f879a591..c9cc59a0 100644
+--- a/apps/architecture_demo/test/document_files_sources_test.dart
++++ b/apps/architecture_demo/test/document_files_sources_test.dart
+@@ -1,5 +1,4 @@
+ // Ported from apps/floor_planner/test/document_files_sources_test.dart (audit docs/superpowers/specs/2026-10-16-architecture-demo-test-audit.md, section "document_files_sources_test.dart").
+-// DS3 is not here: see the note in the file body (moved to Task 4).
+ // Spec 13 D8, plan 13 Task 8 (review finding 1): the platform files cannot
+ // run here (the io side needs the macOS panel, the web side a browser), so
+ // their use of the file kind is pinned by their source, as the render
+@@ -28,9 +27,15 @@ void main() {
+         reason: 'no fixed English group');
+   });
+ 
+-  // DS3 (the app names the panels' types through its strings: main.dart
+-  // pins createFiles(askName:, typeLabel:)) moves to Task 4: main.dart gets
+-  // the files seam, the session and the host there.
++  test(
++      'DS3 the app names the panels\' types through its strings (spec 14d '
++      'L16, review 14d-1 F-5)', () {
++    final main = File('lib/main.dart').readAsStringSync();
++    expect(main,
++        contains('createFiles(askName: _askName, typeLabel: _typeLabel)'));
++    expect(main, contains('this.createFiles = createDocumentFiles'),
++        reason: 'the platform\'s files by default');
++  });
+ 
+   test('DS2 the web save names the file and types the blob by the kind', () {
+     expect(web, contains('fileNameFor(await askName(suggestedName), kind)'));
+diff --git a/apps/architecture_demo/test/document_host_test.dart b/apps/architecture_demo/test/document_host_test.dart
+new file mode 100644
+index 00000000..78a554a3
+--- /dev/null
++++ b/apps/architecture_demo/test/document_host_test.dart
+@@ -0,0 +1,363 @@
++// Ported from apps/floor_planner/test/document_host_test.dart (audit
++// docs/superpowers/specs/2026-10-16-architecture-demo-test-audit.md, section
++// "document_host_test.dart"). DH1, DH4, DH5 are SPLIT (the -open half is
++// here; the intent half is covered by the library tests named at each
++// case); DH2, DH3, DH6 are PORT; DH7 is DROPPED: its premise (a per-swap
++// shell rebuild that re-wires the busy flag's listeners) is gone, the
++// controller and the editor stay across a swap, and the behaviour after a
++// swap is covered by RN1 and DC7 in document_replace_test.dart and
++// document_commands_test.dart.
++import 'package:flutter/material.dart';
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
++import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart'
++    show ArchitectureTools;
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import 'support/app_rig.dart';
++
++/// Far from the origin and from the page, where the edits land.
++final Vector2 far = Vector2(41234.5, 27345.25);
++
++/// Edit, undo, redo, save, and a cut redo branch, on the host's current
++/// plan, with the title following. The plan is clean at [name] on entry;
++/// [saveAs] is true when the first save asks where (an untitled plan).
++Future<void> dirtyRun(AppRig rig,
++    {required String name, required bool saveAs}) async {
++  final tester = rig.tester;
++  final c = rig.controller;
++  final commands = c.document.commands;
++  expect(c.dirty.value, isFalse, reason: 'premise: clean');
++  expect(titleOf(tester), '$name — jet-cad');
++  await aimCamera(tester, c, far);
++
++  // Edit: dirty. Undo: clean. Redo: dirty.
++  await drawWall(tester, c, far + Vector2(-1500, 0), far + Vector2(1500, 0));
++  final base = commands.undoDepth;
++  expect(base, greaterThan(0), reason: 'premise: an edit');
++  expect(c.dirty.value, isTrue, reason: 'edit');
++  expect(titleOf(tester), '• $name — jet-cad');
++  await undoKey(tester);
++  expect(c.dirty.value, isFalse, reason: 'undo returns to the save');
++  expect(titleOf(tester), '$name — jet-cad');
++  c.redo();
++  await tester.pump();
++  expect(c.dirty.value, isTrue, reason: 'redo');
++  expect(titleOf(tester), '• $name — jet-cad');
++
++  // Save: clean, at the encoded state.
++  if (saveAs) {
++    rig.files.scriptSaveLocation(name: 'run.jetplan', location: '/plans/run');
++  }
++  final saved = rig.host.saveStep();
++  await tester.pump();
++  expect(await saved, isTrue);
++  await tester.pump();
++  final savedName = saveAs ? 'run' : name;
++  expect(c.dirty.value, isFalse, reason: 'save');
++  expect(titleOf(tester), '$savedName — jet-cad');
++
++  // Undo past the save: dirty. Another edit cuts the saved state's redo
++  // branch: dirty, and no undo or redo comes back to it.
++  await undoKey(tester);
++  expect(c.dirty.value, isTrue, reason: 'undo past the save');
++  await drawWall(tester, c, far + Vector2(0, -1500), far + Vector2(0, 1500));
++  expect(c.document.commands.canRedo, isFalse,
++      reason: 'premise: the branch is cut');
++  expect(c.dirty.value, isTrue, reason: 'another edit');
++  await undoKey(tester);
++  expect(c.dirty.value, isTrue, reason: 'the saved state is gone for good');
++  c.redo();
++  await tester.pump();
++  expect(c.dirty.value, isTrue, reason: 'and not on the redo either');
++  expect(titleOf(tester), '• $savedName — jet-cad');
++}
++
++void main() {
++  testWidgets(
++      'DH1-open the app launches on the empty plan: untitled, clean, no '
++      'history, millimetres, the default page live (spec 12a D4, T-11)',
++      (tester) async {
++    // Intent half: COVERED, checked: packages/jet_cad_2d_plan/test/
++    // controller/plan_controller_test.dart:30 (C1), controller/new_plan_test.dart:34
++    // (ND1), packages/jet_cad_2d_integration/test/scaffold/prepare_test.dart:21
++    // (SC-prepare, DASHED at handle 6) and packages/jet_cad_2d_plan/test/
++    // editor/editor_view_test.dart:49 ("a bare editor opens on the empty
++    // document and its default page").
++    // Decided: premise impossible (the launch plan is the controller's: its
++    // DASHED record and page are the library's, not the app's).
++    final rig = await pumpApp(tester);
++    final c = rig.controller;
++    final doc = c.document;
++
++    expect(doc.entities.liveCount, 0);
++    expect(doc.commands.canUndo, isFalse);
++    expect(doc.commands.canRedo, isFalse);
++    expect(doc.header.units, DrawingUnits.millimeters);
++    expect(rig.session.name, 'Untitled');
++    expect(rig.session.fileName, isNull);
++    expect(rig.session.location, isNull);
++    expect(c.dirty.value, isFalse);
++    expect(rig.session.busy.value, isFalse);
++    expect(titleOf(tester), 'Untitled — jet-cad');
++    expect(shownName(tester), 'Untitled');
++    // The page, live: the document's component, the zoom text, the panel.
++    expect(doc.components.get<PageComponent>(doc.rootHandle),
++        PageComponent(originX: -7425, originY: -5250));
++    expect(tester.widget<Text>(find.byKey(const Key('zoom-text'))).data,
++        startsWith('1:50 · '));
++    expect(find.byType(PlanPagePanel), findsOneWidget);
++    expect(find.byKey(const Key('page-scale')), findsOneWidget);
++    expect(rig.files.openCalls + rig.files.saveLocationCalls.length, 0);
++    expect(rig.files.writes, isEmpty);
++  });
++
++  testWidgets(
++      'DH2 New after an edit (Don\'t Save) replaces the plan with a fresh '
++      'empty one, untitled and clean; Open sample opens the flat untitled '
++      'and clean (spec 12a D4, D10)', (tester) async {
++    final rig = await pumpApp(tester);
++    final c = rig.controller;
++    await aimCamera(tester, c, far);
++    await drawWall(tester, c, far, far + Vector2(2000, 700));
++    final first = c.document;
++    expect(c.dirty.value, isTrue, reason: 'premise');
++
++    await discardAndRun(tester, rig.host.newFlow());
++    final fresh = c.document;
++    expect(identical(fresh, first), isFalse);
++    expect(fresh.entities.liveCount, 0);
++    expect(fresh.commands.canUndo, isFalse);
++    expect(fresh.components.get<PageComponent>(fresh.rootHandle),
++        PageComponent(originX: -7425, originY: -5250));
++    expect(rig.session.name, 'Untitled');
++    expect(c.dirty.value, isFalse);
++    expect(titleOf(tester), 'Untitled — jet-cad');
++
++    await rig.host.openSampleFlow();
++    await tester.pump();
++    final sample = c.document;
++    expect(identical(sample, fresh), isFalse);
++    expect(c.save(), sampleText(), reason: 'the flat, unchanged');
++    expect(sample.entities.liveCount, greaterThanOrEqualTo(500));
++    expect(sample.commands.canUndo, isFalse, reason: 'nothing to undo');
++    expect(rig.session.name, 'Untitled');
++    expect(rig.session.fileName, isNull);
++    expect(c.dirty.value, isFalse);
++    expect(rig.session.busy.value, isFalse);
++    expect(rig.files.writes, isEmpty);
++  });
++
++  testWidgets(
++      'DH3 dirty follows the undo position against the save point: edit, '
++      'undo, redo, save, and a cut branch (spec 12a D5; M-12a-2, M-12a-4)',
++      (tester) async {
++    final rig = await pumpApp(tester);
++    await dirtyRun(rig, name: 'Untitled', saveAs: true);
++    expect(rig.files.writes, hasLength(1));
++    expect(rig.session.location, '/plans/run');
++  });
++
++  testWidgets(
++      'DH4-open the same after an Open: the title and dirty follow the '
++      'opened plan, whose save point is the load (spec 12a D5; M-12a-19)',
++      (tester) async {
++    // Intent half: COVERED, checked: packages/jet_cad_2d_plan/test/
++    // controller/plan_controller_test.dart:119 C6 ("a load forgets the last
++    // save's state").
++    // Decided: premise impossible (there is no per-document change
++    // subscription to re-make: the controller's dirty is recomputed on every
++    // command and on a load).
++    final rig = await pumpApp(tester);
++    final c = rig.controller;
++    // The launch plan is edited first, so its own changes are not what makes
++    // the opened one read dirty.
++    await aimCamera(tester, c, far);
++    await drawWall(tester, c, far, far + Vector2(0, 2500));
++    rig.files.scriptOpen(
++        name: 'flat.jetplan', bytes: sampleBytes(), location: '/plans/flat');
++    await discardAndRun(tester, rig.host.openFlow());
++    expect(rig.session.name, 'flat');
++    expect(rig.session.location, '/plans/flat');
++    expect(c.document.entities.liveCount, greaterThanOrEqualTo(500),
++        reason: 'premise: the flat is open');
++    await dirtyRun(rig, name: 'flat', saveAs: false);
++    expect(rig.files.writes.single.location, '/plans/flat',
++        reason: 'a titled plan saves in place');
++  });
++
++  testWidgets(
++      'DH5-open swap hygiene: one controller across New and Open, the old '
++      'document disposed and released by everything that held it, the '
++      'selection and the tool reset, and the object-snap setting survives '
++      'and still toggles (spec 12a D2, S-11; M-12a-20, M-12a-21)',
++      (tester) async {
++    // Intent half: COVERED, checked: packages/jet_cad_2d_plan/test/
++    // controller/lifetimes_test.dart:23 (C-life1, products disposed on a swap)
++    // and packages/jet_cad_2d_plan/test/panels/layer_page_controller_test.dart:123
++    // (LP-1, the old document loses the panel's listener). The snap setting's
++    // survival is unpinned there, so it is pinned here.
++    // Decided: premise impossible (no per-swap shell: the editor keeps the
++    // controller, and the controller's identity is what stays).
++    final rig = await pumpApp(tester);
++    final c = rig.controller;
++    final host = rig.host;
++    final launch = c.document;
++    await rig.host.openSampleFlow();
++    await tester.pump();
++    final old = c.document;
++    expect(launch.commands.isDisposed, isTrue, reason: 'the first swap');
++    expect(identical(rig.controller, c), isTrue,
++        reason: 'one controller across the swap');
++
++    // The old plan in a state of its own: object snap off, a wall selected,
++    // the Wall tool active.
++    await press(tester, LogicalKeyboardKey.f3);
++    expect(tester.widget<Text>(find.byKey(const Key('osnap-text'))).data,
++        'osnap off');
++    c.activeSelection.replace([SelectionKey.root(wallsOf(c).first)]);
++    await tester.pump();
++    expect(c.activeSelection.isEmpty, isFalse, reason: 'premise');
++    await press(tester, LogicalKeyboardKey.keyW);
++    expect(c.activeTool.value, ArchitectureTools.wall, reason: 'premise');
++    expect(old.commands.expander, isNotNull, reason: 'premise: installed');
++    expect(old.commands.onAfterMutate, isNotNull, reason: 'premise');
++    expect(old.commands.onBeforeMutate, isNotNull, reason: 'premise');
++    expect(old.tables.debugListenerCount, greaterThan(0), reason: 'premise');
++
++    rig.files.scriptOpen(name: 'flat.jetplan', bytes: sampleBytes());
++    await rig.host.openFlow();
++    await tester.pump();
++    await tester.pump();
++
++    expect(identical(c.document, old), isFalse);
++    expect(old.commands.isDisposed, isTrue, reason: 'disposed after the swap');
++    expect(old.commands.expander, isNull);
++    expect(old.commands.onAfterMutate, isNull);
++    expect(old.commands.onBeforeMutate, isNull);
++    expect(old.tables.debugListenerCount, 0);
++    expect(c.activeSelection.isEmpty, isTrue);
++    expect(c.activeTool.value, 'plan.select');
++    expect(tester.widget<Text>(find.byKey(const Key('osnap-text'))).data,
++        'osnap off',
++        reason: 'the setting survives the swap');
++    await press(tester, LogicalKeyboardKey.f3);
++    expect(
++        tester.widget<Text>(find.byKey(const Key('osnap-text'))).data, 'OSNAP');
++    await press(tester, LogicalKeyboardKey.f3);
++    expect(tester.widget<Text>(find.byKey(const Key('osnap-text'))).data,
++        'osnap off');
++    expect(identical(rig.host, host), isTrue, reason: 'one host');
++  });
++
++  testWidgets(
++      'DH6 New and Open sample from a titled plan forget its file: untitled, '
++      'no file name, no location, and the next Save asks where instead of '
++      'writing over the old file; the old document lives until the swap\'s '
++      'frame (spec 12a D2, S-11, S-28)', (tester) async {
++    final rig = await pumpApp(tester);
++    final c = rig.controller;
++    final files = rig.files;
++    final session = rig.session;
++    final host = rig.host;
++
++    // Titled and saved: opened from /p/plan, edited through the Wall tool
++    // far from the origin, then Cmd+S writes in place.
++    files.scriptOpen(
++        name: 'plan.jetplan', bytes: sampleBytes(), location: '/p/plan');
++    await host.openFlow();
++    await tester.pump();
++    await aimCamera(tester, c, far);
++    await drawWall(tester, c, far, far + Vector2(1900, -600));
++    await chord(tester, LogicalKeyboardKey.meta, LogicalKeyboardKey.keyS);
++    await tester.pump();
++    final saved = c.document;
++    expect(files.writes.single.location, '/p/plan', reason: 'premise');
++    expect(files.saveLocationCalls, isEmpty, reason: 'premise: in place');
++    expect(saved.commands.undoDepth, 1, reason: 'premise: edited');
++    expect(c.dirty.value, isFalse, reason: 'premise: saved');
++    expect((
++      session.name,
++      session.fileName,
++      session.location
++    ), (
++      'plan',
++      'plan.jetplan',
++      '/p/plan'
++    ), reason: 'premise: titled');
++
++    // New. The old document is still live until the frame; after it, not.
++    await host.newFlow();
++    expect(identical(c.document, saved), isFalse, reason: 'premise: swapped');
++    expect(saved.commands.isDisposed, isFalse,
++        reason: 'not disposed under the still-mounted old views');
++    await tester.pump();
++    expect(saved.commands.isDisposed, isTrue, reason: 'disposed after it');
++    expect((session.name, session.fileName, session.location),
++        ('Untitled', null, null));
++    expect(titleOf(tester), 'Untitled — jet-cad');
++    expect(shownName(tester), 'Untitled');
++
++    // An edit, then Cmd+S: a Save As, not a write over /p/plan.
++    await aimCamera(tester, c, far);
++    await drawWall(tester, c, far + Vector2(0, 800), far + Vector2(-2200, 800));
++    expect(c.dirty.value, isTrue, reason: 'premise');
++    files.scriptSaveLocation(name: 'fresh.jetplan', location: '/p/fresh');
++    await chord(tester, LogicalKeyboardKey.meta, LogicalKeyboardKey.keyS);
++    await tester.pump();
++    expect(files.saveLocationCalls, ['Untitled.jetplan']);
++    expect(files.writes, hasLength(2));
++    expect(files.writes.last.location, '/p/fresh');
++    expect(files.writes.last.bytes, bytesOf(c));
++    expect((session.name, session.location), ('fresh', '/p/fresh'));
++    expect(c.dirty.value, isFalse);
++
++    // Titled and left clean: opened from /p/plan again, edited and undone.
++    files.scriptOpen(
++        name: 'plan.jetplan', bytes: sampleBytes(), location: '/p/plan');
++    await host.openFlow();
++    await tester.pump();
++    final clean = c.document;
++    await aimCamera(tester, c, far);
++    await drawWall(
++        tester, c, far + Vector2(300, -1200), far + Vector2(300, 1700));
++    await undoKey(tester);
++    expect(clean.commands.canRedo, isTrue, reason: 'premise: edited, undone');
++    expect(c.dirty.value, isFalse, reason: 'premise: clean');
++    expect((
++      session.name,
++      session.fileName,
++      session.location
++    ), (
++      'plan',
++      'plan.jetplan',
++      '/p/plan'
++    ), reason: 'premise: titled');
++
++    // Open sample: the same, and the Save step asks too.
++    await host.openSampleFlow();
++    expect(clean.commands.isDisposed, isFalse,
++        reason: 'not disposed under the still-mounted old views');
++    await tester.pump();
++    expect(clean.commands.isDisposed, isTrue);
++    expect((session.name, session.fileName, session.location),
++        ('Untitled', null, null));
++    expect(titleOf(tester), 'Untitled — jet-cad');
++    expect(shownName(tester), 'Untitled');
++    files.scriptSaveLocation(name: 'flat.jetplan', location: '/p/flat');
++    final saving = host.saveStep();
++    await tester.pump();
++    expect(await saving, isTrue);
++    await tester.pump();
++    expect(files.saveLocationCalls, ['Untitled.jetplan', 'Untitled.jetplan']);
++    expect(files.writes, hasLength(3));
++    expect(files.writes.last.location, '/p/flat');
++    expect(files.writes.map((w) => w.location).where((l) => l == '/p/plan'),
++        hasLength(1),
++        reason: 'the opened file was written once, by its own Save');
++    expect(files.unscriptedCalls, 0);
++  });
++}
+diff --git a/apps/architecture_demo/test/document_open_test.dart b/apps/architecture_demo/test/document_open_test.dart
+new file mode 100644
+index 00000000..1dc8a35b
+--- /dev/null
++++ b/apps/architecture_demo/test/document_open_test.dart
+@@ -0,0 +1,346 @@
++// Ported from apps/floor_planner/test/document_open_test.dart (audit
++// docs/superpowers/specs/2026-10-16-architecture-demo-test-audit.md, section
++// "document_open_test.dart"). DO1, DO2 and DO6 are PORT. DO3, DO4 and DO5
++// are COVERED by library tests, each opened and checked:
++//   DO3 (a file without the DASHED record opens without one and saves back
++//   byte-identical): COVERED, checked: packages/jet_cad_2d_integration/test/
++//   scaffold/prepare_test.dart:21 (SC-prepare, `opened.save() == file`) and
++//   packages/jet_cad_2d_plan/test/controller/prepare_build_test.dart:105
++//   (PB3-prepare-load).
++//   DO4 (the page after an Open is live): COVERED, checked: packages/
++//   jet_cad_2d_plan/test/panels/layer_page_controller_test.dart:210 (LP-3,
++//   a load swaps the document under the Page panel) and packages/
++//   jet_cad_2d_plan/test/editor/editor_view_test.dart:64 (the zoom text
++//   reads the scale and the fitted zoom).
++//   DO5 (the catalog after an Open): COVERED, checked: packages/
++//   jet_cad_2d_kit_architecture/test/sample/sample_flat_test.dart:723
++//   (SP6, a loaded plan has no drift and no diagnostic), packages/
++//   jet_cad_2d_integration/test/wall/wall_grips_test.dart:180 (EG2, a
++//   selected wall shows two grips) and packages/jet_cad_2d_kit_architecture/
++//   test/wall/wall_live_test.dart:64 (WL1).
++import 'dart:convert';
++import 'dart:math' as math;
++import 'dart:ui' show PointerDeviceKind;
++
++import 'package:flutter/gestures.dart' show kPrimaryButton;
++import 'package:flutter/material.dart';
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
++    show InteractionLayer, SelectionKey, rotationGripOf;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show KitDiagnosticCode;
++import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import 'support/app_rig.dart';
++
++/// Every parametric object of the plan with its parameters: what a round
++/// trip must carry across.
++Map<String, Object?> objectsOf(PlanController c) {
++  final doc = c.document;
++  Map<int, Object?> of<T extends Component>() => {
++        for (final h in doc.components.withComponent<T>())
++          h.value: doc.components.get<T>(h),
++      };
++  return {
++    'walls': of<WallParams>(),
++    'openings': of<OpeningParams>(),
++    'rooms': of<RoomParams>(),
++    'dimensions': of<DimensionParams>(),
++  };
++}
++
++/// What the Open flow would throw for [bytes], computed here with a
++/// controller of its own: the dialog shows the thrown object's text.
++String decodeError(List<int> bytes) {
++  final probe = PlanController(kits: [architectureKit]);
++  addTearDown(probe.dispose);
++  try {
++    probe.load(utf8.decode(bytes));
++  } catch (e) {
++    return e.toString();
++  }
++  fail('premise: the fixture fails to load');
++}
++
++/// The sample's JSON with [edit] applied, as bytes.
++List<int> editedSample(void Function(Map<String, Object?> json) edit) {
++  final json = jsonDecode(sampleText()) as Map<String, Object?>;
++  edit(json);
++  return utf8.encode(jsonEncode(json));
++}
++
++/// Sets every `scaleDenominator` under [node] to 0: the page's.
++int zeroScale(Object? node) {
++  var n = 0;
++  if (node is Map<String, Object?>) {
++    if (node.containsKey('scaleDenominator')) {
++      node['scaleDenominator'] = 0;
++      n++;
++    }
++    for (final v in node.values) {
++      n += zeroScale(v);
++    }
++  } else if (node is List) {
++    for (final v in node) {
++      n += zeroScale(v);
++    }
++  }
++  return n;
++}
++
++/// [t]'s six entries, for exact comparison.
++List<double> entriesOf(Transform2 t) => [t.a, t.b, t.c, t.d, t.e, t.f];
++
++Future<void> dragGlobal(WidgetTester tester, Offset a, Offset b) async {
++  final gesture = await tester.createGesture(
++      kind: PointerDeviceKind.mouse, buttons: kPrimaryButton);
++  await gesture.down(a);
++  await gesture.moveTo(a + const Offset(12, 7));
++  await gesture.moveTo(b);
++  await gesture.up();
++  await gesture.removePointer();
++  await tester.pump();
++  await tester.pump();
++}
++
++void main() {
++  testWidgets(
++      'DO1 sample → Save As → Open → Save: the second bytes are the first, '
++      'the first are the plan\'s text computed apart from the app, and every '
++      'object comes back (spec 12a D8, D13, S-9; M-12a-1)', (tester) async {
++    final rig = await pumpApp(tester);
++    final c = rig.controller;
++    final files = rig.files;
++    await rig.host.openSampleFlow();
++    await tester.pump();
++    final saved = c.document;
++    final objects = objectsOf(c);
++    expect((objects['walls']! as Map).length, greaterThan(5),
++        reason: 'premise: the flat');
++
++    files.scriptSaveLocation(name: 'flat.jetplan', location: '/plans/flat');
++    expect(await rig.host.saveAsStep(), isTrue);
++    await tester.pump();
++    expect(files.saveLocationCalls, ['Untitled.jetplan']);
++    final first = files.writes.single;
++    expect(first.bytes, utf8.encode(sampleText()),
++        reason: 'exactly the plan\'s text for the flat');
++    expect((first.location, first.name), ('/plans/flat', 'flat.jetplan'));
++    expect(rig.session.name, 'flat');
++
++    files.scriptOpen(
++        name: 'flat.jetplan', bytes: first.bytes, location: '/plans/flat');
++    await rig.host.openFlow();
++    await tester.pump();
++    expect(identical(c.document, saved), isFalse, reason: 'premise: swapped');
++    expect(objectsOf(c), objects);
++    expect(c.dirty.value, isFalse);
++
++    expect(await rig.host.saveStep(), isTrue);
++    await tester.pump();
++    expect(files.saveLocationCalls, hasLength(1), reason: 'no second ask');
++    final second = files.writes.last;
++    expect(files.writes, hasLength(2));
++    expect(second.bytes, first.bytes, reason: 'byte-identical');
++    expect((second.location, second.name), ('/plans/flat', 'flat.jetplan'));
++  });
++
++  testWidgets(
++      'DO2 from New: a room walled in and a free wall rotated through the '
++      'rotation grip, far from the origin → Save As → Open → Save: bytes '
++      'equal, the rotated group\'s transform comes back (spec 12a S-3, T-10)',
++      (tester) async {
++    final rig = await pumpApp(tester);
++    final c = rig.controller;
++    final files = rig.files;
++    final doc = c.document;
++    final centre = Vector2(41000, 27000);
++    await aimCamera(tester, c, centre);
++
++    // Four walls closing a room, a room in it, and a wall on its own.
++    await press(tester, LogicalKeyboardKey.keyW);
++    for (final p in [
++      centre + Vector2(-2000, -1500),
++      centre + Vector2(2000, -1500),
++      centre + Vector2(2000, 1500),
++      centre + Vector2(-2000, 1500),
++      centre + Vector2(-2000, -1500),
++    ]) {
++      await clickAt(tester, c, p);
++    }
++    await press(tester, LogicalKeyboardKey.enter);
++    await press(tester, LogicalKeyboardKey.escape);
++    expect(wallsOf(c), hasLength(4), reason: 'premise: the enclosure');
++    await press(tester, LogicalKeyboardKey.keyM);
++    await clickAt(tester, c, centre + Vector2(-300, 200));
++    await press(tester, LogicalKeyboardKey.escape);
++    expect(liveOf<RoomParams>(c, ArchitectureTypes.room), hasLength(1),
++        reason: 'premise: the room');
++    await drawWall(
++        tester, c, centre + Vector2(3500, -1000), centre + Vector2(3500, 1000));
++    final free = wallsOf(c).last;
++
++    // Selected, then turned by its rotation grip.
++    await clickAt(tester, c, centre + Vector2(3500, 300));
++    expect(c.activeSelection.keys, [SelectionKey.root(free)],
++        reason: 'premise');
++    final grips = tester
++        .widget<InteractionLayer>(find.byType(InteractionLayer))
++        .tools
++        .context
++        .grips!;
++    expect(grips.rotatable, isTrue, reason: 'premise');
++    final grip = rotationGripOf(
++            grips.box!, c.camera.value.worldToScreenMatrix, grips.frame)
++        .centre;
++    final origin = tester.getTopLeft(find.byType(InteractionLayer));
++    await dragGlobal(
++        tester, origin + grip, origin + grip + const Offset(90, 35));
++    final turned = doc.tree[free]!.transform;
++    expect(turned.isIdentity, isFalse, reason: 'premise: rotated');
++    expect(math.atan2(turned.b, turned.a).abs(), greaterThan(0.05),
++        reason: 'premise: a real turn, not a nudge');
++    await press(tester, LogicalKeyboardKey.escape);
++    final objects = objectsOf(c);
++
++    files.scriptSaveLocation(name: 'room.jetplan', location: '/plans/room');
++    expect(await rig.host.saveStep(), isTrue, reason: 'untitled: Save As');
++    await tester.pump();
++    final first = files.writes.single.bytes;
++    expect(first, bytesOf(c));
++
++    files.scriptOpen(
++        name: 'room.jetplan', bytes: first, location: '/plans/room');
++    await rig.host.openFlow();
++    await tester.pump();
++    final opened = c.document;
++    expect(identical(opened, doc), isFalse, reason: 'premise: swapped');
++    expect(entriesOf(opened.tree[free]!.transform), entriesOf(turned));
++    expect(objectsOf(c), objects);
++    expect(liveOf<RoomParams>(c, ArchitectureTypes.room), hasLength(1));
++
++    expect(await rig.host.saveStep(), isTrue);
++    await tester.pump();
++    expect(files.writes, hasLength(2));
++    expect(files.writes.last.bytes, first, reason: 'byte-identical');
++  });
++
++  testWidgets(
++      'DO6 a file that cannot be read, from a dirty plan with history (Open, '
++      'then Don\'t Save): the same document, depth and dirt; a dialog naming '
++      'the file and the error; busy cleared, so Open asks again; a '
++      'cancelled picker, after the replace dialog, shows no error dialog '
++      '(spec 12a D8, S-12, S-13, T-9; M-12a-8, M-12a-16, M-12a-17)',
++      (tester) async {
++    final rig = await pumpApp(tester);
++    final c = rig.controller;
++    final files = rig.files;
++    final session = rig.session;
++    final host = rig.host;
++    await aimCamera(tester, c, Vector2(41234.5, 27345.25));
++    await drawWall(
++        tester, c, Vector2(40234.5, 27345.25), Vector2(42734.5, 28045.25));
++    final doc = c.document;
++    final depth = doc.commands.undoDepth;
++    expect(depth, 1, reason: 'premise: history');
++    expect(c.dirty.value, isTrue, reason: 'premise: dirty');
++
++    final failures = <String, List<int>>{
++      'latin.jetplan': [0x7B, 0xFF, 0xFE, 0xC3, 0x28, 0x7D],
++      'cut.jetplan': utf8.encode('{"schemaVersion": 1, "header": {'),
++      'list.jetplan': utf8.encode('[]'),
++      'bare.jetplan': utf8.encode('{"schemaVersion": 1}'),
++      'future.jetplan':
++          editedSample((json) => json['schemaVersion'] = kSchemaVersion + 1),
++    };
++    for (final MapEntry(key: name, value: bytes) in failures.entries) {
++      final expected = decodeError(bytes);
++      final calls = files.openCalls;
++      files.scriptOpen(name: name, bytes: bytes, location: '/plans/$name');
++      final flow = host.openFlow();
++      await tester.pump();
++      expect(files.openCalls, calls, reason: '$name: the dialog first');
++      await answerReplace(tester, 'replace-discard');
++      expect(files.openCalls, calls + 1, reason: '$name: the picker');
++      expect(find.byKey(const Key('document-error')), findsOneWidget,
++          reason: name);
++      expect(
++          tester
++              .widget<Text>(find.byKey(const Key('document-error-title')))
++              .data,
++          'Could not open $name');
++      expect(
++          tester
++              .widget<Text>(find.byKey(const Key('document-error-text')))
++              .data,
++          expected);
++      expect(session.busy.value, isTrue,
++          reason: '$name: busy under the dialog');
++      await dismissError(tester);
++      await flow;
++      expect(find.byKey(const Key('document-error')), findsNothing);
++      expect(identical(c.document, doc), isTrue, reason: name);
++      expect(doc.commands.isDisposed, isFalse, reason: name);
++      expect(doc.commands.undoDepth, depth, reason: name);
++      expect(c.dirty.value, isTrue, reason: name);
++      expect(session.name, 'Untitled', reason: name);
++      expect(session.location, isNull, reason: name);
++      expect(session.busy.value, isFalse, reason: '$name: busy cleared');
++    }
++
++    // The picker itself failing is reported the same way.
++    files.scriptOpenThrow(StateError('the disk went away'));
++    final thrown = host.openFlow();
++    await tester.pump();
++    await answerReplace(tester, 'replace-discard');
++    expect(
++        tester.widget<Text>(find.byKey(const Key('document-error-text'))).data,
++        'Bad state: the disk went away');
++    expect(
++        tester.widget<Text>(find.byKey(const Key('document-error-title'))).data,
++        'Could not open the file');
++    await dismissError(tester);
++    await thrown;
++    expect(identical(c.document, doc), isTrue);
++
++    // A cancelled picker, after Don't Save: no error dialog, nothing
++    // changes.
++    files.scriptOpenCancel();
++    await discardAndRun(tester, host.openFlow());
++    expect(find.byKey(const Key('document-error')), findsNothing);
++    expect(identical(c.document, doc), isTrue);
++    expect(doc.commands.undoDepth, depth);
++    expect(c.dirty.value, isTrue);
++    expect(session.busy.value, isFalse);
++    expect(files.openCalls, failures.length + 2);
++    expect(files.unscriptedCalls, 0);
++  });
++
++  testWidgets(
++      'DO6-open-scale a page scale of 0 is not an unreadable file now: the '
++      'plan opens, the page component is dropped and the library reports an '
++      'unreadable component (spec 12a D8, T-9)', (tester) async {
++    // Decided: premise impossible (the old decoder threw on a zero scale and
++    // the Open flow showed its dialog; `load` keeps what it can read and
++    // reports `componentUnreadable`, plan_controller.dart load -> decodePlan).
++    // The intent -- a file that cannot be read changes nothing -- is the five
++    // fixtures of DO6, which still fail.
++    final rig = await pumpApp(tester);
++    final c = rig.controller;
++    var zeroed = 0;
++    final bytes = editedSample((json) => zeroed = zeroScale(json));
++    expect(zeroed, 1, reason: 'premise: the page\'s scale alone');
++    rig.files.scriptOpen(name: 'scale.jetplan', bytes: bytes);
++    await rig.host.openFlow();
++    await tester.pump();
++    expect(find.byKey(const Key('document-error')), findsNothing);
++    expect(rig.session.name, 'scale');
++    expect(c.document.components.get<PageComponent>(c.document.rootHandle),
++        isNull);
++    expect(c.diagnostics.value.map((d) => d.code),
++        contains(KitDiagnosticCode.componentUnreadable));
++  });
++}
+diff --git a/apps/architecture_demo/test/document_replace_test.dart b/apps/architecture_demo/test/document_replace_test.dart
+new file mode 100644
+index 00000000..24500800
+--- /dev/null
++++ b/apps/architecture_demo/test/document_replace_test.dart
+@@ -0,0 +1,687 @@
++// Ported from apps/floor_planner/test/document_replace_test.dart (audit
++// docs/superpowers/specs/2026-10-16-architecture-demo-test-audit.md, section
++// "document_replace_test.dart"): RP1-RP8, RN1-RN3, all PORT. New, Open and
++// Open sample ask Save / Don't Save / Cancel before they replace a dirty
++// plan -- for Open, before the picker -- and replace a clean one without
++// asking. Save runs the Save step inside the flow's busy span: a cancelled
++// or failed save keeps everything, and a save that succeeded while an edit
++// landed asks again. While the nested save is held, nothing else runs.
++//
++// Decided: premise impossible (spec decision 5): the old tests asserted
++// every toolbar button *disabled* while a flow runs. `PlanEditor` has no
++// host hook to grey its buttons, so the app's file callbacks do nothing
++// while busy and the buttons stay enabled. Every "disabled" loop below is
++// therefore its `-open` form: the busy flag is up, the buttons are still
++// built enabled, and a tap or a chord starts no second flow. Undo and Redo
++// are the library's own and are not held either (decision 5 does not toggle
++// `PlanPermissions`): see RN1-open-undo.
++//
++// RP7 drives the flows through the toolbar buttons, not by calling them: the
++// editor settles pending input before it calls the host's callback
++// (`PlanController.settlePendingInput` is internal to the library, so the
++// host cannot), which is the path of every button and chord of the app.
++import 'package:flutter/material.dart';
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
++import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
++
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import 'support/app_rig.dart';
++
++/// Far from the origin and from the page, where the edits land.
++final Vector2 far = Vector2(-39876.25, 33456.5);
++
++Finder get dialog => find.byKey(const Key('replace-dialog'));
++
++/// Whether the toolbar button [id] is enabled, as built.
++bool enabled(WidgetTester tester, String id) =>
++    tester.widget<IconButton>(find.byKey(Key('toolbar-$id'))).onPressed != null;
++
++const List<String> kIds = [
++  'new',
++  'open',
++  'open-sample',
++  'save',
++  'save-as',
++  'undo',
++  'redo',
++];
++
++/// The file buttons: the ones decision 5 holds while busy.
++const List<String> kFileIds = ['new', 'open', 'open-sample', 'save', 'save-as'];
++
++/// The app's plan, titled and dirty with history: the sample opened from
++/// `/p/plan` as `plan.jetplan`, then a wall drawn through the Wall tool far
++/// from the origin under a rotated camera, the shape ended. The plan must
++/// be clean on entry, so the Open asks nothing.
++Future<void> titledDirty(AppRig rig, {Vector2? at}) async {
++  final c = rig.controller;
++  expect(c.dirty.value, isFalse, reason: 'premise: Open asks nothing');
++  rig.files.scriptOpen(
++      name: 'plan.jetplan', bytes: sampleBytes(), location: '/p/plan');
++  await rig.host.openFlow();
++  await rig.tester.pump();
++  final depth = c.document.commands.undoDepth;
++  final p = at ?? far;
++  await aimCamera(rig.tester, c, p);
++  await drawWall(
++      rig.tester, c, p + Vector2(-1600, 250), p + Vector2(1400, -450));
++  expect(c.document.commands.undoDepth, depth + 1, reason: 'premise: an edit');
++  expect(c.dirty.value, isTrue, reason: 'premise: dirty');
++  expect((
++    rig.session.name,
++    rig.session.fileName,
++    rig.session.location
++  ), (
++    'plan',
++    'plan.jetplan',
++    '/p/plan'
++  ), reason: 'premise: titled');
++}
++
++/// The host kept the plan as it was: the same document, not disposed, at
++/// [depth], still dirty, titled `plan` at `/p/plan`, and no flow running.
++void expectKept(AppRig rig, Object doc, int depth, {required String reason}) {
++  final c = rig.controller;
++  final session = rig.session;
++  expect(identical(c.document, doc), isTrue, reason: reason);
++  expect(c.document.commands.isDisposed, isFalse, reason: reason);
++  expect(c.document.commands.undoDepth, depth, reason: reason);
++  expect(c.dirty.value, isTrue, reason: reason);
++  expect((
++    session.name,
++    session.fileName,
++    session.location
++  ), (
++    'plan',
++    'plan.jetplan',
++    '/p/plan'
++  ), reason: reason);
++  expect(titleOf(rig.tester), '• plan — jet-cad', reason: reason);
++  expect(session.busy.value, isFalse, reason: reason);
++  expect(dialog, findsNothing, reason: reason);
++}
++
++void main() {
++  testWidgets(
++      'RP1 a dirty plan and New, Open sample or Open: the dialog, busy under '
++      'it; Cancel and Escape keep everything, with no picker, no panel and '
++      'no write (spec 12a D10; M-12a-10)', (tester) async {
++    final rig = await pumpApp(tester);
++    await titledDirty(rig);
++    final doc = rig.controller.document;
++    final depth = doc.commands.undoDepth;
++    final files = rig.files;
++    final host = rig.host;
++    final flows = <String, Future<void> Function()>{
++      'New': host.newFlow,
++      'Open sample': host.openSampleFlow,
++      'Open': host.openFlow,
++    };
++
++    for (final MapEntry(key: name, value: run) in flows.entries) {
++      for (final escape in [false, true]) {
++        final how = '$name, ${escape ? 'Escape' : 'Cancel'}';
++        final flow = run();
++        await tester.pump();
++        expect(dialog, findsOneWidget, reason: how);
++        expect(tester.widget<Text>(find.byKey(const Key('replace-title'))).data,
++            'Save the changes to plan?',
++            reason: how);
++        expect(rig.session.busy.value, isTrue, reason: '$how: busy under it');
++        if (escape) {
++          await press(tester, LogicalKeyboardKey.escape);
++          await tester.pump();
++        } else {
++          await answerReplace(tester, 'replace-cancel');
++        }
++        expect(dialog, findsNothing, reason: '$how: closed');
++        noDialog(tester);
++        await flow;
++        await tester.pump();
++        expectKept(rig, doc, depth, reason: how);
++        expect(enabled(tester, 'new'), isTrue, reason: '$how: idle again');
++      }
++    }
++    expect(files.openCalls, 1, reason: 'the fixture\'s Open only: no picker');
++    expect(files.saveLocationCalls, isEmpty);
++    expect(files.writes, isEmpty);
++    expect(files.unscriptedCalls, 0);
++  });
++
++  testWidgets(
++      'RP2 Don\'t Save replaces: New and Open sample from a titled, dirty '
++      'plan end untitled, with no file name and no location, clean, and '
++      'nothing written; the next Save asks where (spec 12a D2, D10, S-28; '
++      't5b-review n-2)', (tester) async {
++    final rig = await pumpApp(tester);
++    final c = rig.controller;
++    final session = rig.session;
++    final files = rig.files;
++
++    await titledDirty(rig);
++    final first = c.document;
++    await discardAndRun(tester, rig.host.newFlow());
++    expect(dialog, findsNothing);
++    expect(first.commands.isDisposed, isTrue, reason: 'replaced');
++    expect(c.document.entities.liveCount, 0, reason: 'the New one');
++    expect((session.name, session.fileName, session.location),
++        ('Untitled', null, null));
++    expect(c.dirty.value, isFalse);
++    expect(titleOf(tester), 'Untitled — jet-cad');
++    expect(shownName(tester), 'Untitled');
++
++    await titledDirty(rig, at: far + Vector2(0, 9000));
++    final second = c.document;
++    await discardAndRun(tester, rig.host.openSampleFlow());
++    expect(second.commands.isDisposed, isTrue, reason: 'replaced');
++    expect(c.save(), sampleText(), reason: 'the flat');
++    expect((session.name, session.fileName, session.location),
++        ('Untitled', null, null));
++    expect(c.dirty.value, isFalse);
++    expect(titleOf(tester), 'Untitled — jet-cad');
++    expect(shownName(tester), 'Untitled');
++    expect(files.writes, isEmpty, reason: 'Don\'t Save writes nothing');
++
++    // The next Save asks where, rather than writing over /p/plan.
++    await aimCamera(tester, c, far);
++    await drawWall(tester, c, far, far + Vector2(2100, 900));
++    files.scriptSaveLocation(name: 'new.jetplan', location: '/p/new');
++    await chord(tester, LogicalKeyboardKey.meta, LogicalKeyboardKey.keyS);
++    await tester.pump();
++    expect(files.saveLocationCalls, ['Untitled.jetplan']);
++    expect(files.writes.single.location, '/p/new');
++    expect(files.unscriptedCalls, 0);
++  });
++
++  testWidgets(
++      'RP3 Save, and the save does not happen: a cancelled Save As panel '
++      '(untitled) or a failed write (titled) keeps everything, dirty, and '
++      'replaces nothing (spec 12a D10)', (tester) async {
++    final rig = await pumpApp(tester);
++    final c = rig.controller;
++    final session = rig.session;
++    final files = rig.files;
++
++    // Untitled: the Save step is a Save As, and its panel is cancelled.
++    final launch = c.document;
++    await aimCamera(tester, c, far);
++    await drawWall(tester, c, far, far + Vector2(-1800, 1100));
++    expect(c.dirty.value, isTrue, reason: 'premise');
++    files.scriptSaveCancel();
++    final newing = rig.host.newFlow();
++    await tester.pump();
++    await answerReplace(tester, 'replace-save');
++    noDialog(tester);
++    await newing;
++    await tester.pump();
++    expect(files.saveLocationCalls, ['Untitled.jetplan']);
++    expect(files.writes, isEmpty);
++    expect(identical(c.document, launch), isTrue);
++    expect(launch.commands.isDisposed, isFalse);
++    expect(launch.commands.undoDepth, 1);
++    expect(c.dirty.value, isTrue);
++    expect(session.name, 'Untitled');
++    expect(session.busy.value, isFalse);
++    expect(dialog, findsNothing);
++
++    // Titled: the write fails; the error, then nothing else.
++    await undoKey(tester);
++    expect(c.dirty.value, isFalse, reason: 'premise: back to clean');
++    await titledDirty(rig);
++    final doc = c.document;
++    final depth = doc.commands.undoDepth;
++    files.failNextWrite(StateError('the disk is full'));
++    final opening = rig.host.openSampleFlow();
++    await tester.pump();
++    await answerReplace(tester, 'replace-save');
++    expect(find.byKey(const Key('document-error')), findsOneWidget);
++    expect(session.busy.value, isTrue, reason: 'busy under the error');
++    await dismissError(tester);
++    noDialog(tester);
++    await opening;
++    await tester.pump();
++    expect(files.writes.single.location, '/p/plan', reason: 'it was tried');
++    expectKept(rig, doc, depth, reason: 'after a failed write');
++    expect(files.unscriptedCalls, 0);
++  });
++
++  testWidgets(
++      'RP4 Save (the default: Enter) writes, then replaces: titled in place, '
++      'and untitled through Save As; the bytes are the plan\'s before the '
++      'swap (spec 12a D10, D13)', (tester) async {
++    final rig = await pumpApp(tester);
++    final c = rig.controller;
++    final session = rig.session;
++    final files = rig.files;
++
++    await titledDirty(rig);
++    final doc = c.document;
++    final before = bytesOf(c);
++    final newing = rig.host.newFlow();
++    await tester.pump();
++    expect(dialog, findsOneWidget);
++    await press(tester, LogicalKeyboardKey.enter);
++    await tester.pump();
++    expect(dialog, findsNothing, reason: 'Enter answered it');
++    noDialog(tester);
++    await newing;
++    await tester.pump();
++    expect(files.saveLocationCalls, isEmpty, reason: 'in place');
++    expect(files.writes.single.location, '/p/plan');
++    expect(files.writes.single.bytes, before);
++    expect(doc.commands.isDisposed, isTrue, reason: 'then replaced');
++    expect(c.document.entities.liveCount, 0, reason: 'the New one');
++    expect((session.name, session.location), ('Untitled', null));
++    expect(c.dirty.value, isFalse);
++    expect(session.busy.value, isFalse);
++
++    // Untitled: Save asks where, writes, then Open sample replaces.
++    final untitled = c.document;
++    await aimCamera(tester, c, far);
++    await drawWall(tester, c, far, far + Vector2(900, 2300));
++    final untitledBytes = bytesOf(c);
++    files.scriptSaveLocation(name: 'room.jetplan', location: '/p/room');
++    final opening = rig.host.openSampleFlow();
++    await tester.pump();
++    await answerReplace(tester, 'replace-save');
++    noDialog(tester);
++    await opening;
++    await tester.pump();
++    expect(files.saveLocationCalls, ['Untitled.jetplan']);
++    expect(files.writes, hasLength(2));
++    expect(files.writes.last.location, '/p/room');
++    expect(files.writes.last.bytes, untitledBytes);
++    expect(untitled.commands.isDisposed, isTrue);
++    expect(c.save(), sampleText());
++    expect((session.name, session.location), ('Untitled', null));
++    expect(c.dirty.value, isFalse);
++    expect(files.unscriptedCalls, 0);
++  });
++
++  testWidgets(
++      'RP5 a clean plan with history is replaced without a dialog, by New, '
++      'Open sample and Open (the picker at once) (spec 12a D10)',
++      (tester) async {
++    final rig = await pumpApp(tester);
++    final c = rig.controller;
++    final files = rig.files;
++
++    Future<void> cleanTitled() async {
++      await titledDirty(rig);
++      await chord(tester, LogicalKeyboardKey.meta, LogicalKeyboardKey.keyS);
++      await tester.pump();
++      expect(c.dirty.value, isFalse, reason: 'premise: saved');
++      expect(c.document.commands.undoDepth, greaterThan(0), reason: 'premise');
++    }
++
++    await cleanTitled();
++    var old = c.document;
++    await rig.host.newFlow();
++    expect(dialog, findsNothing);
++    await tester.pump();
++    expect(old.commands.isDisposed, isTrue, reason: 'New replaced it');
++
++    await cleanTitled();
++    old = c.document;
++    await rig.host.openSampleFlow();
++    expect(dialog, findsNothing);
++    await tester.pump();
++    expect(old.commands.isDisposed, isTrue, reason: 'Open sample did');
++
++    await cleanTitled();
++    old = c.document;
++    final calls = files.openCalls;
++    files.scriptOpen(name: 'other.jetplan', bytes: sampleBytes());
++    await rig.host.openFlow();
++    expect(dialog, findsNothing);
++    expect(files.openCalls, calls + 1, reason: 'the picker at once');
++    await tester.pump();
++    expect(old.commands.isDisposed, isTrue, reason: 'Open did');
++    expect(rig.session.name, 'other');
++    expect(files.unscriptedCalls, 0);
++  });
++
++  testWidgets(
++      'RP6 Open asks before the picker: Cancel opens no picker; Save writes, '
++      'then the picker opens and the file replaces the plan (spec 12a D10)',
++      (tester) async {
++    final rig = await pumpApp(tester);
++    final c = rig.controller;
++    final files = rig.files;
++    await titledDirty(rig);
++    final doc = c.document;
++    final depth = doc.commands.undoDepth;
++    final calls = files.openCalls;
++
++    final cancelled = rig.host.openFlow();
++    await tester.pump();
++    expect(dialog, findsOneWidget);
++    expect(files.openCalls, calls, reason: 'the dialog comes first');
++    await answerReplace(tester, 'replace-cancel');
++    noDialog(tester);
++    await cancelled;
++    await tester.pump();
++    expect(files.openCalls, calls, reason: 'Cancel: no picker');
++    expectKept(rig, doc, depth, reason: 'Cancel');
++
++    final before = bytesOf(c);
++    files.scriptOpen(
++        name: 'other.jetplan', bytes: sampleBytes(), location: '/p/other');
++    final saved = rig.host.openFlow();
++    await tester.pump();
++    expect(files.openCalls, calls, reason: 'the dialog comes first');
++    await answerReplace(tester, 'replace-save');
++    noDialog(tester);
++    await saved;
++    await tester.pump();
++    expect(files.writes.single.bytes, before);
++    expect(files.openCalls, calls + 1, reason: 'then the picker');
++    expect(doc.commands.isDisposed, isTrue);
++    expect((rig.session.name, rig.session.location), ('other', '/p/other'));
++    expect(c.dirty.value, isFalse);
++    expect(files.unscriptedCalls, 0);
++  });
++
++  testWidgets(
++      'RP7 a clean plan with a Selection panel value typed and not '
++      'submitted: New, Open sample and Open (the toolbar buttons) settle it '
++      'first, so the plan is dirty and the dialog appears; Cancel keeps the '
++      'committed value (spec 12a D2, D10)', (tester) async {
++    final rig = await pumpApp(tester);
++    final c = rig.controller;
++    final files = rig.files;
++    await titledDirty(rig);
++    final doc = c.document;
++    final wall = wallsOf(c).last;
++    await clickAt(tester, c, wallMid(c, wall));
++    expect(c.activeSelection.keys, [SelectionKey.root(wall)],
++        reason: 'premise: the drawn wall is selected');
++
++    var thickness = 150.25;
++    for (final button in ['new', 'open-sample', 'open']) {
++      final name = button;
++      // Saved, so clean; then a thickness typed without Enter.
++      await chord(tester, LogicalKeyboardKey.meta, LogicalKeyboardKey.keyS);
++      await tester.pump();
++      expect(c.dirty.value, isFalse, reason: '$name: premise: clean');
++      final params = doc.components.get<WallParams>(wall)!;
++      final depth = doc.commands.undoDepth;
++      thickness += 37.5;
++      final field = find.byKey(const Key('property-thickness'));
++      await tester.tap(field);
++      await tester.pump();
++      await tester.enterText(field, '$thickness');
++      await tester.pump();
++      expect(panelFieldFocused(), isTrue,
++          reason: '$name: premise: typed, still focused');
++      expect(doc.components.get<WallParams>(wall), params,
++          reason: '$name: premise: not committed');
++      expect(c.dirty.value, isFalse, reason: '$name: premise: clean');
++
++      await rig.tapKey('toolbar-$button');
++      await tester.pump();
++      expect(dialog, findsOneWidget, reason: '$name: the settle made it dirty');
++      expect(doc.components.get<WallParams>(wall),
++          params.copyWith(thickness: thickness),
++          reason: '$name: committed');
++      expect(doc.commands.undoDepth, depth + 1, reason: '$name: its own step');
++      await answerReplace(tester, 'replace-cancel');
++      noDialog(tester);
++      await tester.pump();
++      expectKept(rig, doc, depth + 1, reason: name);
++    }
++    expect(files.openCalls, 1, reason: 'only the fixture\'s Open');
++    expect(files.writes, hasLength(3));
++    expect(files.unscriptedCalls, 0);
++  });
++
++  testWidgets(
++      'RN1 nested flows: dirty, Cmd+N, Save with the write held -- Cmd+O, '
++      'Cmd+S, Cmd+N and every file button do nothing; the write completes '
++      'and the plan is replaced (spec 12a D6, D10, T-8)', (tester) async {
++    final rig = await pumpApp(tester);
++    final c = rig.controller;
++    final files = rig.files;
++    final session = rig.session;
++    await titledDirty(rig);
++    final doc = c.document;
++    final depth = doc.commands.undoDepth;
++    final before = bytesOf(c);
++    final stateId = doc.commands.stateId;
++
++    files.holdWrites = true;
++    await chord(tester, LogicalKeyboardKey.meta, LogicalKeyboardKey.keyN);
++    await answerReplace(tester, 'replace-save');
++    expect(files.writes, hasLength(1), reason: 'premise: the write is held');
++    expect(session.busy.value, isTrue);
++
++    for (final key in [
++      LogicalKeyboardKey.keyO,
++      LogicalKeyboardKey.keyS,
++      LogicalKeyboardKey.keyN,
++    ]) {
++      await chord(tester, LogicalKeyboardKey.meta, key);
++    }
++    for (final id in kFileIds) {
++      // -open: the buttons are built enabled (decision 5); a tap is a no-op.
++      expect(enabled(tester, id), isTrue, reason: id);
++      await tester.tap(find.byKey(Key('toolbar-$id')));
++      await tester.pump();
++    }
++    expect(files.openCalls, 1, reason: 'only the fixture\'s Open');
++    expect(files.saveLocationCalls, isEmpty);
++    expect(files.writes, hasLength(1), reason: 'no second write');
++    expect(dialog, findsNothing, reason: 'no second dialog');
++    expect(identical(c.document, doc), isTrue);
++    expect(doc.commands.undoDepth, depth);
++    expect(doc.commands.stateId, stateId);
++    expect(session.busy.value, isTrue);
++
++    files.heldWrites.single.complete();
++    await tester.pump();
++    await tester.pump();
++    expect(files.writes.single.bytes, before);
++    expect(doc.commands.isDisposed, isTrue, reason: 'replaced');
++    expect(c.document.entities.liveCount, 0, reason: 'the New one');
++    expect((session.name, session.location), ('Untitled', null));
++    expect(c.dirty.value, isFalse);
++    expect(session.busy.value, isFalse);
++    expect(enabled(tester, 'new'), isTrue);
++  });
++
++  testWidgets(
++      'RN1-open-undo Undo is the library\'s and is not held by the app '
++      '(decision 5): Cmd+Z during a held write undoes the edit, and when the '
++      'write completes the plan is dirty again (the save point is the '
++      'encoded state), so the dialog asks again rather than lose the undo',
++      (tester) async {
++    // Decided: premise impossible (the old RN1 asserted Cmd+Z and the Undo
++    // and Redo taps did nothing while a write was held; `PlanPermissions`
++    // is not toggled by the app, decision 5, so the library's Undo acts).
++    final rig = await pumpApp(tester);
++    final c = rig.controller;
++    final files = rig.files;
++    await titledDirty(rig);
++    final doc = c.document;
++    final depth = doc.commands.undoDepth;
++
++    files.holdWrites = true;
++    final newing = rig.host.newFlow();
++    await tester.pump();
++    await answerReplace(tester, 'replace-save');
++    expect(files.writes, hasLength(1), reason: 'premise: held');
++
++    await undoKey(tester);
++    expect(doc.commands.undoDepth, depth - 1, reason: 'Undo acts');
++    files.heldWrites.single.complete();
++    await tester.pump();
++    await tester.pump();
++    expect(dialog, findsOneWidget, reason: 'asked again');
++    expect(identical(c.document, doc), isTrue, reason: 'not replaced');
++    expect(c.dirty.value, isTrue,
++        reason: 'the plan differs from the bytes that were written');
++    await answerReplace(tester, 'replace-cancel');
++    noDialog(tester);
++    await newing;
++    await tester.pump();
++    expectKept(rig, doc, depth - 1, reason: 'the undone state is kept');
++    expect(files.writes, hasLength(1));
++  });
++
++  testWidgets(
++      'RN2 nested flows: an edit lands while the Save is held -- the write '
++      'completes with the pre-edit bytes and the dialog is shown again, '
++      'still busy; Cancel keeps the edit (spec 12a D5, D10, T-8; '
++      'M-12a-26)', (tester) async {
++    final rig = await pumpApp(tester);
++    final c = rig.controller;
++    final files = rig.files;
++    final session = rig.session;
++    await titledDirty(rig);
++    final doc = c.document;
++    final before = bytesOf(c);
++
++    files.holdWrites = true;
++    final newing = rig.host.newFlow();
++    await tester.pump();
++    await answerReplace(tester, 'replace-save');
++    expect(files.writes, hasLength(1), reason: 'premise: held');
++
++    // The canvas stays live: a wall through the tool while the write waits.
++    await drawWall(
++        tester, c, far + Vector2(-700, 1900), far + Vector2(2600, 1900));
++    final depth = doc.commands.undoDepth;
++    expect(c.dirty.value, isTrue, reason: 'premise: edited');
++
++    files.heldWrites.single.complete();
++    await tester.pump();
++    await tester.pump();
++    expect(files.writes.single.bytes, before, reason: 'the pre-edit bytes');
++    expect(dialog, findsOneWidget, reason: 'asked again');
++    expect(identical(c.document, doc), isTrue, reason: 'not replaced');
++    expect(c.dirty.value, isTrue);
++    expect(session.busy.value, isTrue, reason: 'still the outer flow\'s');
++
++    await answerReplace(tester, 'replace-cancel');
++    noDialog(tester);
++    await newing;
++    await tester.pump();
++    expectKept(rig, doc, depth, reason: 'the edit is kept');
++    expect(files.writes, hasLength(1));
++  });
++
++  testWidgets(
++      'RN3 a swap while a write is held: the write, when it lands, does not '
++      'mark the new plan saved nor give it the old file (spec 12a D3, D5, '
++      'S-28; t5-review R6). The file callbacks do nothing while busy, so the '
++      'flows are called directly, as nested flows', (tester) async {
++    final rig = await pumpApp(tester);
++    final c = rig.controller;
++    final files = rig.files;
++    final session = rig.session;
++    await titledDirty(rig);
++    final doc = c.document;
++
++    files.holdWrites = true;
++    final saving = rig.host.saveStep();
++    await tester.pump();
++    expect(files.writes, hasLength(1), reason: 'premise: held');
++    final replacing = rig.host.newFlow();
++    await discardAndRun(tester, replacing);
++    expect(doc.commands.isDisposed, isTrue, reason: 'premise: swapped');
++    final fresh = c.document;
++    expect((
++      session.name,
++      session.fileName,
++      session.location
++    ), (
++      'Untitled',
++      null,
++      null
++    ), reason: 'premise');
++    expect(session.busy.value, isTrue, reason: 'the save is still running');
++
++    files.heldWrites.single.complete();
++    expect(await saving, isTrue);
++    await tester.pump();
++    expect(identical(c.document, fresh), isTrue);
++    expect((
++      session.name,
++      session.fileName,
++      session.location
++    ), (
++      'Untitled',
++      null,
++      null
++    ), reason: 'the old file is not the new plan\'s');
++    expect(titleOf(tester), 'Untitled — jet-cad');
++    expect(c.dirty.value, isFalse);
++    expect(session.busy.value, isFalse);
++
++    // An edit, then Save asks where rather than writing over /p/plan.
++    files.holdWrites = false;
++    await aimCamera(tester, c, far);
++    await drawWall(tester, c, far, far + Vector2(1700, -1300));
++    expect(c.dirty.value, isTrue);
++    files.scriptSaveLocation(name: 'fresh.jetplan', location: '/p/fresh');
++    await chord(tester, LogicalKeyboardKey.meta, LogicalKeyboardKey.keyS);
++    await tester.pump();
++    expect(files.saveLocationCalls, ['Untitled.jetplan']);
++    expect(files.writes.last.location, '/p/fresh');
++    expect(files.unscriptedCalls, 0);
++  });
++
++  testWidgets(
++      'RP8 with the replace dialog up, each of Cmd and Ctrl with S, O, N and '
++      'Shift+S is handled and runs nothing: no write, no panel, no picker, '
++      'still one dialog; Cancel then keeps everything (spec 12a D6, T-3, '
++      'U-3; M-12a-24)', (tester) async {
++    final rig = await pumpApp(tester);
++    final files = rig.files;
++    await titledDirty(rig);
++    final doc = rig.controller.document;
++    final depth = doc.commands.undoDepth;
++    final opens = files.openCalls;
++
++    final flow = rig.host.newFlow();
++    await tester.pump();
++    expect(dialog, findsOneWidget, reason: 'premise: the dialog is up');
++
++    for (final modifier in [
++      LogicalKeyboardKey.metaLeft,
++      LogicalKeyboardKey.controlLeft,
++    ]) {
++      for (final (key, shift) in [
++        (LogicalKeyboardKey.keyS, false),
++        (LogicalKeyboardKey.keyO, false),
++        (LogicalKeyboardKey.keyN, false),
++        (LogicalKeyboardKey.keyS, true),
++      ]) {
++        final what = '${modifier.keyLabel}${shift ? '+Shift' : ''}+'
++            '${key.keyLabel}';
++        await tester.sendKeyDownEvent(modifier);
++        if (shift) await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
++        final handled = await tester.sendKeyEvent(key);
++        if (shift) await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
++        await tester.sendKeyUpEvent(modifier);
++        await tester.pump();
++        await tester.pump();
++        expect(handled, isTrue, reason: '$what: handled');
++        expect(dialog, findsOneWidget, reason: '$what: still one dialog');
++        expect(files.writes, isEmpty, reason: '$what: no write');
++        expect(files.saveLocationCalls, isEmpty, reason: '$what: no panel');
++        expect(files.openCalls, opens, reason: '$what: no picker');
++      }
++    }
++
++    await answerReplace(tester, 'replace-cancel');
++    noDialog(tester);
++    await flow;
++    await tester.pump();
++    expectKept(rig, doc, depth, reason: 'Cancel after the chords');
++    expect(files.unscriptedCalls, 0);
++  });
++}
+diff --git a/apps/architecture_demo/test/document_sample_test.dart b/apps/architecture_demo/test/document_sample_test.dart
+new file mode 100644
+index 00000000..a2fccff9
+--- /dev/null
++++ b/apps/architecture_demo/test/document_sample_test.dart
+@@ -0,0 +1,179 @@
++// The new cases of the document flows (spec B6; brief of Task 4, step 6):
++//   N2  Open sample: the flat is there, clean, with nothing to undo; an edit
++//       makes it dirty and New then asks.
++//   N4  The sample saved as a file, New, Open: the plan, its text and its
++//       title come back.
++//   SV-edit-during-write  An edit made while the write is held stays dirty
++//       (the save point is the state `save()` encoded).
++//   OP-garbage  A file that is not a plan changes nothing: not the text, the
++//       name, the dirty mark nor the history.
++// Mutations are named at each case and listed in the Task 4 report.
++import 'dart:convert';
++
++import 'package:flutter/material.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import 'support/app_rig.dart';
++
++/// The sample's furniture: the eight filled regions the flat draws at the
++/// root (they are drafted fills, not library symbols).
++int rootFills(DraftDocument doc) => [
++      for (final slot in doc.entities.liveSlots)
++        if (doc.entities.kindAt(slot) == EntityKind.fill &&
++            doc.entities.ownerAt(slot) == doc.rootHandle)
++          slot,
++    ].length;
++
++void main() {
++  testWidgets(
++      'N2 Open sample: walls, rooms and furniture are there, clean, with '
++      'nothing to undo; an edit makes it dirty and New asks', (tester) async {
++    // Mutations: M-N2a opens the sample with `newPlan(build: buildSampleFlat)`
++    // followed by an `execute` (an undo step, dirty): the clean and the undo
++    // assertions go red. M-N2b makes `_mayDiscard` return true without
++    // asking: the dialog assertion goes red.
++    final rig = await pumpApp(tester);
++    final c = rig.controller;
++    expect(liveOfAny(c, ArchitectureTypes.wall), 0, reason: 'premise: empty');
++
++    await rig.tapKey('toolbar-open-sample');
++    await tester.pump();
++    expect(liveOfAny(c, ArchitectureTypes.wall), 10, reason: 'walls');
++    expect(liveOfAny(c, ArchitectureTypes.room), 7, reason: 'rooms');
++    expect(liveOfAny(c, ArchitectureTypes.opening), 15, reason: 'openings');
++    expect(liveOfAny(c, ArchitectureTypes.separator), 1, reason: 'separator');
++    expect(liveOfAny(c, ArchitectureTypes.dimension), 5, reason: 'dimensions');
++    expect(rootFills(c.document), 8, reason: 'furniture');
++    expect(c.dirty.value, isFalse, reason: 'clean');
++    expect(c.canUndo.value, isFalse, reason: 'nothing to undo');
++    expect(c.document.commands.undoDepth, 0);
++    expect(rig.session.name, 'Untitled');
++    expect(titleOf(tester), 'Untitled — jet-cad');
++
++    await rig.editOnce();
++    expect(c.dirty.value, isTrue, reason: 'an edit');
++    expect(c.canUndo.value, isTrue);
++    final asking = rig.host.newFlow();
++    await tester.pump();
++    expect(find.byKey(const Key('replace-dialog')), findsOneWidget,
++        reason: 'New asks about the edit');
++    await answerReplace(tester, 'replace-cancel');
++    await asking;
++    await tester.pump();
++    expect(c.dirty.value, isTrue, reason: 'Cancel kept the plan');
++    expect(liveOfAny(c, ArchitectureTypes.wall), 11);
++  });
++
++  testWidgets(
++      'N4 the sample saved as flat.jetplan, New, Open flat.jetplan: the '
++      'plan\'s text is the saved text, the title reads flat, clean',
++      (tester) async {
++    // Mutation M-N4: the write takes `save()` of a fresh `newPlan`: the
++    // texts differ, red.
++    final rig = await pumpApp(tester);
++    final c = rig.controller;
++    final files = rig.files;
++    await rig.tapKey('toolbar-open-sample');
++    await tester.pump();
++
++    files.scriptSaveLocation(name: 'flat.jetplan', location: '/plans/flat');
++    expect(await rig.host.saveAsStep(), isTrue);
++    await tester.pump();
++    final saved = files.writes.single.bytes;
++    expect(utf8.decode(saved), sampleText(), reason: 'premise: the flat');
++
++    await rig.host.newFlow();
++    await tester.pump();
++    expect(liveOfAny(c, ArchitectureTypes.wall), 0, reason: 'premise: New');
++    expect(rig.session.name, 'Untitled');
++
++    files.scriptOpen(
++        name: 'flat.jetplan', bytes: saved, location: '/plans/flat');
++    await rig.host.openFlow();
++    await tester.pump();
++    expect(c.save(), utf8.decode(saved), reason: 'the saved text');
++    expect(liveOfAny(c, ArchitectureTypes.wall), 10);
++    expect(titleOf(tester), 'flat — jet-cad');
++    expect(c.dirty.value, isFalse);
++  });
++
++  testWidgets(
++      'SV-edit-during-write an edit made while the write is held: the '
++      'plan is dirty when the write completes (Review Focus 1)',
++      (tester) async {
++    // Mutation: after the write, the host calls `save()` again and then
++    // `markSaved()` (the state read after the await is the save point): the
++    // edit is marked saved, dirty is false, red.
++    final rig = await pumpApp(tester);
++    final c = rig.controller;
++    final files = rig.files;
++    await aimCamera(tester, c, kFar);
++    await drawWall(tester, c, kFar, kFar + Vector2(1800, 700));
++    files.scriptSaveLocation(name: 'a.jetplan', location: '/p/a');
++    files.holdWrites = true;
++
++    final saving = rig.host.saveStep();
++    await tester.pump();
++    expect(files.writes, hasLength(1), reason: 'premise: the write is held');
++    final encoded = files.writes.single.bytes;
++    await rig.editOnce(at: kFar + Vector2(0, 6000));
++    expect(c.dirty.value, isTrue, reason: 'premise: edited during the write');
++
++    files.heldWrites.single.complete();
++    expect(await saving, isTrue);
++    await tester.pump();
++    expect(c.dirty.value, isTrue, reason: 'the edit is not on disk');
++    expect(titleOf(tester), '• a — jet-cad');
++    expect(files.writes.single.bytes, encoded, reason: 'the pre-edit bytes');
++    expect(rig.session.name, 'a');
++  });
++
++  testWidgets(
++      'OP-garbage a file that is not a plan, opened over an edited, named '
++      'plan: the error dialog says it could not be opened, and the text, '
++      'the name, the dirty mark and the undo history are unchanged '
++      '(Review Focus 2)', (tester) async {
++    // Mutation: the session is named before `load` is called: the name
++    // changes to the garbage file's, red.
++    final rig = await pumpApp(tester);
++    final c = rig.controller;
++    final files = rig.files;
++    files.scriptOpen(
++        name: 'plan.jetplan', bytes: sampleBytes(), location: '/p/plan');
++    await rig.host.openFlow();
++    await tester.pump();
++    await rig.editOnce();
++    expect(c.dirty.value, isTrue, reason: 'premise: edited');
++    expect(rig.session.name, 'plan', reason: 'premise: named');
++    final text = c.save();
++    final depth = c.document.commands.undoDepth;
++
++    files.scriptOpen(
++        name: 'junk.jetplan',
++        bytes: utf8.encode('{"not": "a plan"}'),
++        location: '/p/junk');
++    final opening = rig.host.openFlow();
++    await tester.pump();
++    await answerReplace(tester, 'replace-discard');
++    expect(find.byKey(const Key('document-error')), findsOneWidget);
++    expect(
++        tester.widget<Text>(find.byKey(const Key('document-error-title'))).data,
++        'Could not open junk.jetplan');
++    await dismissError(tester);
++    await opening;
++    await tester.pump();
++
++    expect(c.save(), text, reason: 'the plan\'s text');
++    expect(rig.session.name, 'plan', reason: 'the name');
++    expect(rig.session.fileName, 'plan.jetplan');
++    expect(rig.session.location, '/p/plan');
++    expect(c.dirty.value, isTrue, reason: 'still dirty');
++    expect(c.canUndo.value, isTrue, reason: 'undo is still available');
++    expect(c.document.commands.undoDepth, depth);
++    expect(titleOf(tester), '• plan — jet-cad');
++    expect(rig.session.busy.value, isFalse);
++  });
++}
+diff --git a/apps/architecture_demo/test/document_save_test.dart b/apps/architecture_demo/test/document_save_test.dart
+new file mode 100644
+index 00000000..6324f048
+--- /dev/null
++++ b/apps/architecture_demo/test/document_save_test.dart
+@@ -0,0 +1,292 @@
++// Ported from apps/floor_planner/test/document_save_test.dart (audit
++// docs/superpowers/specs/2026-10-16-architecture-demo-test-audit.md, section
++// "document_save_test.dart"): DS1-DS7, all PORT. The save point is the
++// state the bytes were encoded at (`save()` then `markSaved()`); a failed or
++// cancelled save leaves it and clears busy; an untitled Save asks where, a
++// titled one writes in place (macOS) or downloads under its name without
++// asking (web); the web's name prompt; a Save As whose panel throws shows
++// the error and changes nothing. Library half of DS1: packages/
++// jet_cad_2d_plan/test/controller/plan_controller_test.dart C4.
++import 'package:architecture_demo/document_host.dart';
++import 'package:flutter/material.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import 'support/app_fakes.dart';
++import 'support/app_rig.dart';
++
++final Vector2 far = Vector2(-38765.5, 29345.75);
++
++/// The app with the sample opened from `flat.jetplan` (at [location]),
++/// then edited through the Wall tool far from the origin: titled, dirty,
++/// one step of history.
++Future<AppRig> titledDirty(
++    WidgetTester tester, FakeDocumentFiles files, Object? location) async {
++  final rig = await pumpApp(tester, files: files);
++  files.scriptOpen(
++      name: 'flat.jetplan', bytes: sampleBytes(), location: location);
++  await rig.host.openFlow();
++  await tester.pump();
++  await aimCamera(tester, rig.controller, far);
++  await drawWall(tester, rig.controller, far, far + Vector2(2600, -900));
++  expect(rig.session.name, 'flat', reason: 'premise: titled');
++  expect(rig.controller.document.commands.undoDepth, 1, reason: 'premise');
++  expect(rig.controller.dirty.value, isTrue, reason: 'premise: dirty');
++  return rig;
++}
++
++void main() {
++  for (final inPlace in [true, false]) {
++    testWidgets(
++        'DS1 the save point is the encoded state: an edit while the write is '
++        'held leaves the plan dirty, the bytes are the pre-edit ones, and '
++        'undoing that edit is clean (writesInPlace: $inPlace; spec 12a D5, '
++        'S-2; M-12a-13)', (tester) async {
++      final files = FakeDocumentFiles(writesInPlace: inPlace);
++      final rig = await titledDirty(tester, files, inPlace ? '/p/flat' : null);
++      final c = rig.controller;
++      final encoded = bytesOf(c);
++
++      files.holdWrites = true;
++      final saving = rig.host.saveStep();
++      await tester.pump();
++      expect(files.writes, hasLength(1));
++      expect(files.writes.single.bytes, encoded);
++      expect(
++          files.writes.single.location, inPlace ? '/p/flat' : 'flat.jetplan');
++      expect(files.saveLocationCalls, isEmpty, reason: 'titled: no ask');
++      expect(rig.session.busy.value, isTrue);
++
++      // The canvas stays live while the write is pending.
++      await drawWall(
++          tester, c, far + Vector2(0, 1500), far + Vector2(-1800, 2900));
++      expect(c.document.commands.undoDepth, 2,
++          reason: 'premise: edited meanwhile');
++      files.heldWrites.single.complete();
++      await tester.pump();
++      expect(await saving, isTrue);
++      await tester.pump();
++      expect(rig.session.busy.value, isFalse);
++      expect(c.dirty.value, isTrue,
++          reason: 'the edit made during the write is not saved');
++      expect(titleOf(tester), '• flat — jet-cad');
++      await undoKey(tester);
++      expect(c.dirty.value, isFalse,
++          reason: 'the saved state is the one before that edit');
++    });
++  }
++
++  testWidgets(
++      'DS2 a failed write from dirty: the dialog, still dirty, busy '
++      'cleared; then a save writes and is clean (spec 12a D5, S-13, S-21; '
++      'M-12a-3, M-12a-17)', (tester) async {
++    final files = FakeDocumentFiles();
++    final rig = await titledDirty(tester, files, '/p/flat');
++    final c = rig.controller;
++    final doc = c.document;
++
++    files.failNextWrite(Exception('the disk is full'));
++    final failing = rig.host.saveStep();
++    await tester.pump();
++    await tester.pump();
++    expect(files.writes, hasLength(1), reason: 'the write was tried');
++    expect(
++        tester.widget<Text>(find.byKey(const Key('document-error-title'))).data,
++        'Could not save flat.jetplan');
++    expect(
++        tester.widget<Text>(find.byKey(const Key('document-error-text'))).data,
++        'Exception: the disk is full');
++    expect(rig.session.busy.value, isTrue, reason: 'busy under the dialog');
++    await dismissError(tester);
++    expect(await failing, isFalse);
++    expect(c.dirty.value, isTrue, reason: 'the save point stays');
++    expect(rig.session.busy.value, isFalse, reason: 'busy cleared');
++    expect(doc.commands.undoDepth, 1);
++
++    final retry = rig.host.saveStep();
++    await tester.pump();
++    expect(await retry, isTrue);
++    await tester.pump();
++    expect(files.writes, hasLength(2));
++    expect(files.writes.last.bytes, bytesOf(c));
++    expect(c.dirty.value, isFalse);
++    expect(rig.session.busy.value, isFalse);
++  });
++
++  testWidgets(
++      'DS3 a cancelled Save As from dirty: no write, no dialog, still dirty '
++      'and untitled; on a titled plan too (spec 12a D5, D9; M-12a-3)',
++      (tester) async {
++    final files = FakeDocumentFiles();
++    final rig = await pumpApp(tester, files: files);
++    final c = rig.controller;
++    await aimCamera(tester, c, far);
++    await drawWall(tester, c, far, far + Vector2(-2100, 400));
++    expect(c.dirty.value, isTrue, reason: 'premise');
++
++    files.scriptSaveCancel();
++    expect(await rig.host.saveStep(), isFalse, reason: 'untitled: Save As');
++    await tester.pump();
++    expect(files.saveLocationCalls, ['Untitled.jetplan']);
++    expect(files.writes, isEmpty);
++    expect(find.byKey(const Key('document-error')), findsNothing);
++    expect(c.dirty.value, isTrue);
++    expect(rig.session.name, 'Untitled');
++    expect(rig.session.busy.value, isFalse);
++
++    // Titled now; a cancelled Save As keeps its name, location and dirt.
++    files.scriptSaveLocation(name: 'a.jetplan', location: '/p/a');
++    expect(await rig.host.saveStep(), isTrue);
++    await tester.pump();
++    await drawWall(tester, c, far + Vector2(0, 900), far + Vector2(1300, 900));
++    expect(c.dirty.value, isTrue, reason: 'premise');
++    files.scriptSaveCancel();
++    expect(await rig.host.saveAsStep(), isFalse);
++    await tester.pump();
++    expect(files.saveLocationCalls,
++        ['Untitled.jetplan', 'Untitled.jetplan', 'a.jetplan']);
++    expect(files.writes, hasLength(1));
++    expect(c.dirty.value, isTrue);
++    expect((rig.session.name, rig.session.location), ('a', '/p/a'));
++  });
++
++  testWidgets(
++      'DS4 an untitled Save asks where, names the plan after the file and '
++      'saves there from then on; Save As asks again and moves it (spec 12a '
++      'D9)', (tester) async {
++    final files = FakeDocumentFiles();
++    final rig = await pumpApp(tester, files: files);
++    final c = rig.controller;
++    final session = rig.session;
++    await aimCamera(tester, c, far);
++    await drawWall(tester, c, far, far + Vector2(1700, 1700));
++
++    files.scriptSaveLocation(name: 'house.jetplan', location: '/p/house');
++    expect(await rig.host.saveStep(), isTrue);
++    await tester.pump();
++    expect(files.saveLocationCalls, ['Untitled.jetplan']);
++    expect(files.writes.single.location, '/p/house');
++    expect(files.writes.single.name, 'house.jetplan');
++    expect(files.writes.single.bytes, bytesOf(c));
++    expect((session.name, session.fileName, session.location),
++        ('house', 'house.jetplan', '/p/house'));
++    expect(c.dirty.value, isFalse);
++    expect(titleOf(tester), 'house — jet-cad');
++
++    await drawWall(tester, c, far + Vector2(0, -900), far + Vector2(900, -900));
++    expect(await rig.host.saveStep(), isTrue);
++    await tester.pump();
++    expect(files.saveLocationCalls, hasLength(1), reason: 'no second ask');
++    expect(files.writes.last.location, '/p/house');
++    expect(c.dirty.value, isFalse);
++
++    files.scriptSaveLocation(name: 'barn.jetplan', location: '/p/barn');
++    expect(await rig.host.saveAsStep(), isTrue);
++    await tester.pump();
++    expect(files.saveLocationCalls.last, 'house.jetplan');
++    expect(files.writes.last.location, '/p/barn');
++    expect((session.name, session.location), ('barn', '/p/barn'));
++    expect(titleOf(tester), 'barn — jet-cad');
++  });
++
++  testWidgets(
++      'DS5 web: Save on a titled plan downloads under its name without '
++      'asking and marks it clean (spec 12a D9, decision 9)', (tester) async {
++    final files = FakeDocumentFiles(writesInPlace: false);
++    final rig = await titledDirty(tester, files, null);
++    final c = rig.controller;
++    expect(rig.session.location, isNull, reason: 'premise: the web gives none');
++    final saving = rig.host.saveStep();
++    await tester.pump();
++    await tester.pump();
++    expect(files.saveLocationCalls, isEmpty, reason: 'no name prompt');
++    expect(find.byKey(const Key('document-error')), findsNothing);
++    expect(await saving, isTrue);
++    await tester.pump();
++    // The write takes the file's name as its location (Task 4 review n-1):
++    // the web download ignores it, and the interface wants one.
++    expect(files.writes.single.location, 'flat.jetplan');
++    expect(files.writes.single.name, 'flat.jetplan');
++    expect(files.writes.single.bytes, bytesOf(c));
++    expect(c.dirty.value, isFalse);
++    expect(rig.session.name, 'flat');
++  });
++
++  testWidgets(
++      'DS6 the web name prompt starts from the suggestion and returns the '
++      'typed name on Save or Enter, null on Cancel (spec 12a D9, T-12)',
++      (tester) async {
++    late BuildContext context;
++    await tester.pumpWidget(MaterialApp(home: Builder(builder: (c) {
++      context = c;
++      return const SizedBox();
++    })));
++
++    Future<String?> ask() =>
++        showDocumentNamePrompt(context, 'Untitled.jetplan');
++
++    var answer = ask();
++    await tester.pump();
++    await tester.pump();
++    final field = find.byKey(const Key('name-prompt-field'));
++    expect(
++        tester.widget<TextField>(field).controller!.text, 'Untitled.jetplan');
++    await tester.enterText(field, 'Kitchen');
++    await tester.tap(find.byKey(const Key('name-prompt-save')));
++    await tester.pump();
++    expect(await answer, 'Kitchen');
++
++    answer = ask();
++    await tester.pump();
++    await tester.pump();
++    await tester.enterText(field, 'Hall');
++    await tester.tap(find.byKey(const Key('name-prompt-cancel')));
++    await tester.pump();
++    expect(await answer, isNull);
++
++    answer = ask();
++    await tester.pump();
++    await tester.pump();
++    await tester.enterText(field, 'Bath');
++    await tester.testTextInput.receiveAction(TextInputAction.done);
++    await tester.pump();
++    expect(await answer, 'Bath');
++    expect(find.byKey(const Key('name-prompt')), findsNothing);
++  });
++
++  testWidgets(
++      'DS7 a Save As whose panel throws, from a titled dirty plan: the '
++      'dialog, false, still dirty and titled, no write, busy cleared (spec '
++      '12a D5, D8, S-21; Task 5 deviation 5)', (tester) async {
++    final files = FakeDocumentFiles();
++    final rig = await titledDirty(tester, files, '/p/flat');
++    final c = rig.controller;
++    final session = rig.session;
++    final doc = c.document;
++
++    files.scriptSaveLocationThrow(StateError('the panel failed'));
++    final saving = rig.host.saveAsStep();
++    await tester.pump();
++    await tester.pump();
++    expect(files.saveLocationCalls, ['flat.jetplan']);
++    expect(
++        tester.widget<Text>(find.byKey(const Key('document-error-title'))).data,
++        'Could not save flat');
++    expect(
++        tester.widget<Text>(find.byKey(const Key('document-error-text'))).data,
++        'Bad state: the panel failed');
++    expect(session.busy.value, isTrue, reason: 'busy under the dialog');
++    await dismissError(tester);
++    expect(await saving, isFalse);
++    expect(find.byKey(const Key('document-error')), findsNothing);
++    expect(files.writes, isEmpty);
++    expect(c.dirty.value, isTrue, reason: 'the save point stays');
++    expect(session.busy.value, isFalse, reason: 'busy cleared');
++    expect(identical(c.document, doc), isTrue);
++    expect(doc.commands.undoDepth, 1);
++    expect((session.name, session.fileName, session.location),
++        ('flat', 'flat.jetplan', '/p/flat'));
++    expect(titleOf(tester), '• flat — jet-cad');
++    expect(files.unscriptedCalls, 0);
++  });
++}
+diff --git a/apps/architecture_demo/test/document_separator_test.dart b/apps/architecture_demo/test/document_separator_test.dart
+new file mode 100644
+index 00000000..7a5cb353
+--- /dev/null
++++ b/apps/architecture_demo/test/document_separator_test.dart
+@@ -0,0 +1,138 @@
++// Ported from apps/floor_planner/test/document_separator_test.dart (audit
++// docs/superpowers/specs/2026-10-16-architecture-demo-test-audit.md, section
++// "document_separator_test.dart"): FS1-FS3, all PORT. The app's new plans
++// print the decimal separator of the language of the moment: New and Open
++// sample reach `controller.newPlan` after the editor reported the locale;
++// the launch plan resolves the system's locales as the app's `MaterialApp`
++// does. Library halves: packages/jet_cad_2d_plan/test/controller/
++// locale_separator_test.dart (NS1, NS6, NS8), editor/editor_separator_test.dart
++// (NS1, NS2); Open sample's words: packages/jet_cad_2d_kit_architecture/
++// test/sample/sample_flat_test.dart SF-words (German comma; the Turkish
++// strings below are not pinned there).
++import 'package:architecture_demo/document_host.dart';
++import 'package:flutter/material.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++
++import 'support/app_rig.dart';
++
++/// The app under the system [locales], at 1440 x 900.
++Future<AppRig> pumpUnder(WidgetTester tester, List<Locale> locales) async {
++  tester.platformDispatcher.localesTestValue = locales;
++  addTearDown(tester.platformDispatcher.clearLocalesTestValue);
++  return pumpApp(tester);
++}
++
++/// The plan's page separator.
++DecimalSeparator separatorOf(PlanController c) => c.document.components
++    .get<PageComponent>(c.document.rootHandle)!
++    .decimalSeparator;
++
++/// The language under the app's `DocumentHost`.
++PlanStrings hostStrings(WidgetTester tester) =>
++    PlanStrings.of(tester.element(find.byType(DocumentHost)));
++
++/// The system's locales switched while the app runs.
++Future<void> switchSystemTo(WidgetTester tester, Locale locale) async {
++  tester.platformDispatcher.localesTestValue = [locale];
++  await tester.pump();
++  await tester.pump();
++}
++
++Future<void> tapToolbar(WidgetTester tester, String id) async {
++  await tester.tap(find.byKey(Key('toolbar-$id')));
++  await tester.pump();
++  await tester.pump();
++}
++
++void main() {
++  for (final (locales, language, expected) in [
++    (const [Locale('de', 'DE')], 'de', DecimalSeparator.comma),
++    // French is not spoken: the next locale, German, is the app's (V-2).
++    (
++      const [Locale('fr', 'FR'), Locale('de', 'DE')],
++      'de',
++      DecimalSeparator.comma
++    ),
++    (const [Locale('fr', 'FR')], 'en', DecimalSeparator.point),
++  ]) {
++    testWidgets(
++        'FS1 the launch plan under the system locales $locales prints '
++        '${expected.name}, the separator of the language the app resolves',
++        (tester) async {
++      final rig = await pumpUnder(tester, locales);
++      final strings = hostStrings(tester);
++      expect(strings.languageCode, language,
++          reason: 'premise: the language the MaterialApp resolved');
++      final c = rig.controller;
++      expect(rig.session.fileName, isNull, reason: 'premise: the launch plan');
++      expect(separatorOf(c), expected);
++      expect(
++          separatorOf(c),
++          strings.decimalSeparator == ','
++              ? DecimalSeparator.comma
++              : DecimalSeparator.point);
++      expect(c.document.commands.undoDepth, 0);
++      expect(c.dirty.value, isFalse);
++    });
++  }
++
++  testWidgets(
++      'FS2 New prints the separator of the language of the moment: comma '
++      'after the system turns German, point after it turns English again',
++      (tester) async {
++    final rig = await pumpUnder(tester, const [Locale('en', 'US')]);
++    final c = rig.controller;
++    final launch = c.document;
++    expect(separatorOf(c), DecimalSeparator.point, reason: 'premise');
++
++    await switchSystemTo(tester, const Locale('de', 'DE'));
++    expect(hostStrings(tester).languageCode, 'de', reason: 'premise');
++    expect(separatorOf(c), DecimalSeparator.point,
++        reason: 'the open plan is not converted (N2)');
++    await tapToolbar(tester, 'new');
++    final german = c.document;
++    expect(identical(german, launch), isFalse, reason: 'premise: New ran');
++    expect(separatorOf(c), DecimalSeparator.comma);
++    expect(german.commands.undoDepth, 0);
++    expect(c.dirty.value, isFalse);
++
++    await switchSystemTo(tester, const Locale('en', 'GB'));
++    expect(hostStrings(tester).languageCode, 'en', reason: 'premise');
++    await tapToolbar(tester, 'new');
++    expect(identical(c.document, german), isFalse, reason: 'premise: New ran');
++    expect(separatorOf(c), DecimalSeparator.point);
++  });
++
++  testWidgets(
++      'FS3 Open sample in Turkish prints comma: every area and every value '
++      'with a comma', (tester) async {
++    final rig = await pumpUnder(tester, const [Locale('en', 'US')]);
++    final c = rig.controller;
++    await switchSystemTo(tester, const Locale('tr', 'TR'));
++    expect(hostStrings(tester).languageCode, 'tr', reason: 'premise');
++    await tapToolbar(tester, 'open-sample');
++    final doc = c.document;
++    expect(doc.entities.liveCount, greaterThan(500), reason: 'premise');
++    expect(separatorOf(c), DecimalSeparator.comma);
++
++    final rooms = liveOf<RoomParams>(c, ArchitectureTypes.room);
++    final areas = [for (final r in rooms) roomLabels(doc, r)[1]];
++    // The rooms in build order: the Hall, the two bedrooms, the kitchen,
++    // the bath, the living room and the dining area.
++    expect(areas, [
++      '22,00 m²',
++      '8,45 m²',
++      '8,41 m²',
++      '13,97 m²',
++      '13,37 m²',
++      '21,90 m²',
++      '23,04 m²',
++    ]);
++    final dims = liveOf<DimensionParams>(c, ArchitectureTypes.dimension);
++    expect([for (final d in dims) dimensionText(doc, d)],
++        ['14,00', '9,00', '4,69', '4,38', '3,58']);
++  });
++}
+diff --git a/apps/architecture_demo/test/document_settle_test.dart b/apps/architecture_demo/test/document_settle_test.dart
+new file mode 100644
+index 00000000..ae3f1663
+--- /dev/null
++++ b/apps/architecture_demo/test/document_settle_test.dart
+@@ -0,0 +1,439 @@
++// Ported from apps/floor_planner/test/document_settle_test.dart (audit
++// docs/superpowers/specs/2026-10-16-architecture-demo-test-audit.md, section
++// "document_settle_test.dart"): ST1, ST1b, ST2, ST3, ST5, ST6 and ST8 are
++// PORT; ST4 and ST7 are SPLIT: the -open halves are here (Cmd+S through the
++// app: the bytes carry the stored scale, the field shows it), the intent half
++// is COVERED, checked: packages/jet_cad_2d_plan/test/panels/
++// layer_page_controller_test.dart:273 (LP-5, "the controller's settle
++// re-syncs a typed, unsubmitted scale"). Library halves of the rest:
++// plan_controller_test.dart C11 (settle before undo/redo), editor/
++// plan_editor_test.dart ED-3 (the editor settles, then calls the host once),
++// panels/property_panel_test.dart P-swap-pending, panels/
++// page_scale_field_test.dart A15.
++//
++// The library's settle finishes an open text entry and hands the panel focus
++// back to the canvas (Task 4b), so ST2, ST3, ST4-focus and ST8 run.
++//
++// A flow commits typed but unsubmitted input before it reads the plan,
++// synchronously -- a Selection panel value lands as its own step, an open
++// text entry is committed, and the page scale field is re-synced to the
++// stored scale -- and the saved bytes, the save point and the dirty state
++// all see it. A toolbar click on macOS with a mouse does not end the text
++// entry first (T-1). A text entry ended by a click elsewhere hands the
++// focus back to the canvas, where the file chords work.
++import 'dart:convert';
++
++import 'package:flutter/gestures.dart' show PointerDeviceKind;
++import 'package:flutter/material.dart';
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
++import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import 'support/app_rig.dart';
++
++/// Far from the origin and from the page, where the edits land.
++final Vector2 far = Vector2(37654.25, -28765.5);
++
++/// Cmd+S, spelled out; whether the key-down was handled.
++Future<bool> cmdS(WidgetTester tester) async {
++  await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
++  final handled = await tester.sendKeyEvent(LogicalKeyboardKey.keyS);
++  await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
++  await tester.pump();
++  return handled;
++}
++
++/// Cmd+Shift+S (Save As), spelled out; whether the key-down was handled.
++Future<bool> cmdShiftS(WidgetTester tester) async {
++  await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
++  await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
++  final handled = await tester.sendKeyEvent(LogicalKeyboardKey.keyS);
++  await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
++  await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
++  await tester.pump();
++  return handled;
++}
++
++/// The saved [bytes] loaded as the app opens a file, by a controller of its
++/// own (disposed at tear-down).
++PlanController decoded(List<int> bytes) {
++  final c = PlanController(kits: [architectureKit]);
++  addTearDown(c.dispose);
++  c.load(utf8.decode(bytes));
++  return c;
++}
++
++/// The strings of the plan's text entities.
++List<String> textsOf(DraftDocument doc) => [
++      for (final slot in doc.entities.liveSlots)
++        if (doc.entities.kindAt(slot) == EntityKind.text)
++          doc.entities.read(slot).text,
++    ];
++
++double scaleOf(DraftDocument doc) =>
++    doc.components.get<PageComponent>(doc.rootHandle)!.scaleDenominator;
++
++/// Whether the canvas (the `InteractionLayer`'s node) has the focus.
++bool canvasFocused() =>
++    FocusManager.instance.primaryFocus?.debugLabel == 'InteractionLayer';
++
++/// The text in the page panel's scale field.
++String scaleField(WidgetTester tester) => tester
++    .widget<TextField>(find.byKey(const Key('page-scale')))
++    .controller!
++    .text;
++
++Finder get entry => find.byKey(const Key('text-entry'));
++
++/// The Text tool, a click at world [at] (a mouse when [mouse]), then [text]
++/// typed into the entry without Enter.
++Future<void> openEntry(
++    WidgetTester tester, PlanController c, Vector2 at, String text,
++    {bool mouse = false}) async {
++  await press(tester, LogicalKeyboardKey.keyT);
++  await tester.tapAt(globalOf(tester, c, at),
++      kind: mouse ? PointerDeviceKind.mouse : PointerDeviceKind.touch);
++  await tester.pump();
++  expect(entry, findsOneWidget, reason: 'premise: the entry is open');
++  await tester.enterText(entry, text);
++  await tester.pump();
++  expect(FocusManager.instance.primaryFocus?.debugLabel, 'text-entry',
++      reason: 'premise: the entry has the focus');
++}
++
++void main() {
++  for (final saveAs in [false, true]) {
++    final keys = saveAs ? 'Cmd+Shift+S' : 'Cmd+S';
++    testWidgets(
++        'ST1${saveAs ? 'b' : ''} a selected wall\'s thickness typed without '
++        'Enter, then $keys: the bytes carry it, the commit is its own step, '
++        'and the plan is clean after '
++        '(spec 12a D2, S-4, S-5, S-19; M-12a-11)', (tester) async {
++      final rig = await pumpApp(tester);
++      final c = rig.controller;
++      final files = rig.files;
++      final doc = c.document;
++      await aimCamera(tester, c, far);
++      await drawWall(
++          tester, c, far + Vector2(-1700, -300), far + Vector2(1300, 500));
++      await drawWall(
++          tester, c, far + Vector2(-800, 1400), far + Vector2(1800, 2200));
++      final wall = wallsOf(c).last;
++      final params = doc.components.get<WallParams>(wall)!;
++      expect(params.thickness, isNot(262.5), reason: 'premise');
++
++      await clickAt(tester, c, wallMid(c, wall));
++      expect(c.activeSelection.keys, [SelectionKey.root(wall)],
++          reason: 'premise: the wall is selected');
++      final thickness = find.byKey(const Key('property-thickness'));
++      await tester.tap(thickness);
++      await tester.pump();
++      await tester.enterText(thickness, '262.5');
++      await tester.pump();
++      expect(panelFieldFocused(), isTrue,
++          reason: 'premise: typed, the field still focused');
++      expect(doc.components.get<WallParams>(wall), params,
++          reason: 'premise: nothing committed yet');
++      final depth = doc.commands.undoDepth;
++      expect(depth, greaterThan(1), reason: 'premise');
++      expect(c.dirty.value, isTrue, reason: 'premise: dirty');
++
++      files.scriptSaveLocation(name: 'hall.jetplan', location: '/p/hall');
++      expect(await (saveAs ? cmdShiftS(tester) : cmdS(tester)), isTrue);
++      await tester.pump();
++
++      expect(files.writes, hasLength(1));
++      final saved = files.writes.single.bytes;
++      final reread = decoded(saved).document;
++      expect(reread.components.get<WallParams>(wall),
++          params.copyWith(thickness: 262.5),
++          reason: 'the bytes carry the typed thickness');
++      expect(saved, bytesOf(c), reason: 'encoded at the committed state');
++      expect(doc.components.get<WallParams>(wall)!.thickness, 262.5);
++      expect(doc.commands.undoDepth, depth + 1,
++          reason: 'the commit is its own step');
++      expect(c.dirty.value, isFalse, reason: 'clean after the save');
++      expect(canvasFocused(), isTrue, reason: 'handed back to the canvas');
++
++      // One undo takes back the commit alone.
++      await undoKey(tester);
++      expect(doc.components.get<WallParams>(wall), params);
++      expect(wallsOf(c), hasLength(2));
++      expect(c.dirty.value, isTrue);
++    });
++  }
++
++  testWidgets(
++      'ST2 a text entry with typed text, then Cmd+S: the bytes contain the '
++      'text entity, committed as one step, and the plan is clean after; the '
++      'focus is back on the canvas (spec 12a D2, R-5; M-12a-11)',
++      (tester) async {
++    final rig = await pumpApp(tester);
++    final c = rig.controller;
++    final files = rig.files;
++    final doc = c.document;
++    await aimCamera(tester, c, far);
++    await drawWall(
++        tester, c, far + Vector2(-1500, 0), far + Vector2(1500, 900));
++    await openEntry(tester, c, far + Vector2(-400, 1600), 'Kitchen');
++    expect(textsOf(doc), isEmpty, reason: 'premise: not committed');
++    expect(doc.commands.undoDepth, 1, reason: 'premise');
++
++    files.scriptSaveLocation(name: 'plan.jetplan', location: '/p/plan');
++    expect(await cmdS(tester), isTrue);
++    await tester.pump();
++
++    expect(files.writes, hasLength(1));
++    final saved = files.writes.single.bytes;
++    expect(textsOf(decoded(saved).document), ['Kitchen'],
++        reason: 'the bytes contain the text entity');
++    expect(saved, bytesOf(c));
++    expect(textsOf(doc), ['Kitchen']);
++    expect(doc.commands.undoDepth, 2, reason: 'one step');
++    expect(entry, findsNothing, reason: 'the entry is closed');
++    expect(c.dirty.value, isFalse, reason: 'clean after the save');
++    expect(canvasFocused(), isTrue);
++    await press(tester, LogicalKeyboardKey.keyL);
++    expect(c.activeTool.value, 'plan.line',
++        reason: 'the letters reach the editor again');
++  });
++
++  testWidgets(
++      'ST3 the same through the toolbar on macOS with a mouse: an open entry '
++      'leaves Save enabled, and a click on toolbar-save saves the typed text '
++      '(spec 12a D2, D7, T-1, U-1; M-12a-22, M-12a-28)', (tester) async {
++    final rig = await pumpApp(tester);
++    final c = rig.controller;
++    final files = rig.files;
++    final doc = c.document;
++    await aimCamera(tester, c, far);
++    await drawWall(
++        tester, c, far + Vector2(-900, -1200), far + Vector2(1600, -600));
++    await openEntry(tester, c, far + Vector2(300, 700), 'Hall', mouse: true);
++    expect(textsOf(doc), isEmpty, reason: 'premise: not committed');
++    final save = find.byKey(const Key('toolbar-save'));
++    expect(tester.widget<IconButton>(save).onPressed, isNotNull,
++        reason: 'an open entry is not mid-shape: Save is enabled');
++
++    files.scriptSaveLocation(name: 'hall.jetplan', location: '/p/hall');
++    await tester.tap(save, kind: PointerDeviceKind.mouse);
++    await tester.pump();
++    await tester.pump();
++
++    expect(files.writes, hasLength(1));
++    final saved = files.writes.single.bytes;
++    expect(textsOf(decoded(saved).document), ['Hall'],
++        reason: 'the bytes contain the text entity');
++    expect(saved, bytesOf(c));
++    expect(doc.commands.undoDepth, 2, reason: 'one step');
++    expect(entry, findsNothing);
++    expect(c.dirty.value, isFalse, reason: 'clean after the save');
++    expect(canvasFocused(), isTrue);
++  }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
++
++  testWidgets(
++      'ST4-open a page scale typed without Enter, then Cmd+S: nothing is '
++      'committed, the bytes carry the stored scale, and the field shows it '
++      'after (spec 12a D2, D14, T-13)', (tester) async {
++    // Intent half: COVERED, checked: layer_page_controller_test.dart LP-5.
++    // Decided: premise impossible (the re-sync is the Page panel's settle,
++    // registered with the controller; the old test reached it through the
++    // shell's registry).
++    final rig = await pumpApp(tester);
++    final c = rig.controller;
++    final files = rig.files;
++    final doc = c.document;
++    final scale = find.byKey(const Key('page-scale'));
++
++    // A stored scale that is not the default, submitted: one step, dirty.
++    await tester.tap(scale);
++    await tester.pump();
++    await tester.enterText(scale, '125');
++    await tester.testTextInput.receiveAction(TextInputAction.done);
++    await tester.pump();
++    expect(scaleOf(doc), 125, reason: 'premise: submitted');
++    expect(doc.commands.undoDepth, 1, reason: 'premise');
++    expect(c.dirty.value, isTrue, reason: 'premise');
++
++    await tester.tap(scale);
++    await tester.pump();
++    await tester.enterText(scale, '40');
++    await tester.pump();
++    expect(scaleField(tester), '40', reason: 'premise: typed');
++    expect(panelFieldFocused(), isTrue,
++        reason: 'premise: the field still focused');
++
++    files.scriptSaveLocation(name: 'sheet.jetplan', location: '/p/sheet');
++    expect(await cmdS(tester), isTrue);
++    await tester.pump();
++
++    expect(files.writes, hasLength(1));
++    final saved = files.writes.single.bytes;
++    expect(scaleOf(decoded(saved).document), 125,
++        reason: 'the stored scale is saved');
++    expect(saved, bytesOf(c));
++    expect(scaleOf(doc), 125, reason: 'nothing committed');
++    expect(doc.commands.undoDepth, 1);
++    expect(scaleField(tester), '125',
++        reason: 'the field shows the stored scale');
++    expect(c.dirty.value, isFalse);
++  });
++
++  testWidgets(
++      'ST4-focus after Cmd+S with a page scale typed, the canvas has the '
++      'focus (the old shell handed it back when it settled; spec 12a D2, '
++      'R-5)', (tester) async {
++    final rig = await pumpApp(tester);
++    final scale = find.byKey(const Key('page-scale'));
++    await tester.tap(scale);
++    await tester.pump();
++    await tester.enterText(scale, '40');
++    await tester.pump();
++    expect(panelFieldFocused(), isTrue, reason: 'premise: typed');
++    rig.files.scriptSaveLocation(name: 'sheet.jetplan', location: '/p/sheet');
++    expect(await cmdS(tester), isTrue);
++    await tester.pump();
++    expect(canvasFocused(), isTrue);
++  });
++
++  testWidgets(
++      'ST5 a text entry ended by a mouse click on the tool palette or on a '
++      'panel, or by a touch on a panel, is cancelled, and hands the focus '
++      'back to the canvas: Cmd+S then saves (plan 12a Task 7; spec 05 D9, '
++      '12a D6)', (tester) async {
++    final rig = await pumpApp(tester);
++    final c = rig.controller;
++    final files = rig.files;
++    await aimCamera(tester, c, far);
++    await drawWall(
++        tester, c, far + Vector2(-1300, 400), far + Vector2(1100, 1700));
++    files.scriptSaveLocation(name: 'room.jetplan', location: '/p/room');
++    await cmdS(tester);
++    expect(files.writes, hasLength(1), reason: 'premise: titled');
++
++    // A mouse on the palette and on a panel; a touch on the panel, which
++    // on macOS ends the entry too (EditableText's own platform rule).
++    for (final (i, (target, kind)) in [
++      (find.byKey(const Key('tool-plan.line')), PointerDeviceKind.mouse),
++      (find.text('Page'), PointerDeviceKind.mouse),
++      (find.text('Page'), PointerDeviceKind.touch),
++    ].indexed) {
++      final before = bytesOf(c);
++      await openEntry(tester, c, far + Vector2(-200.0 + 900 * i, 2400), 'Porch',
++          mouse: true);
++      await tester.tap(target, kind: kind);
++      await tester.pump();
++      expect(entry, findsNothing, reason: '$target $kind: the entry ended');
++      expect(bytesOf(c), before,
++          reason: '$target $kind: cancelled, not committed');
++      expect(canvasFocused(), isTrue,
++          reason: '$target $kind: the canvas has it');
++
++      expect(await cmdS(tester), isTrue, reason: '$target $kind');
++      await tester.pump();
++      expect(files.writes, hasLength(2 + i),
++          reason: '$target $kind: Cmd+S saves');
++      expect(files.writes.last.location, '/p/room');
++      expect(files.writes.last.bytes, before);
++      await press(tester, LogicalKeyboardKey.escape);
++    }
++    expect(c.dirty.value, isFalse);
++  }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
++
++  testWidgets(
++      'ST6 a touch outside the entry on Android keeps it open with the focus, '
++      'as EditableText\'s default does, and a mouse click ends it: the '
++      'hand-back drops the focus only where the default would '
++      '(plan 12a Task 7)', (tester) async {
++    final rig = await pumpApp(tester);
++    final c = rig.controller;
++    final doc = c.document;
++    await aimCamera(tester, c, far);
++    await openEntry(tester, c, far + Vector2(-600, 1100), 'Stair');
++    await tester.tap(find.text('Page'));
++    await tester.pump();
++    expect(entry, findsOneWidget, reason: 'still open');
++    expect(FocusManager.instance.primaryFocus?.debugLabel, 'text-entry');
++    await tester.testTextInput.receiveAction(TextInputAction.done);
++    await tester.pump();
++    expect(textsOf(doc), ['Stair'], reason: 'Enter still commits it');
++
++    // A mouse on Android is not a touch: the entry ends, cancelled, and the
++    // canvas has the focus.
++    final before = bytesOf(c);
++    await openEntry(tester, c, far + Vector2(700, 1900), 'Porch', mouse: true);
++    await tester.tap(find.text('Page'), kind: PointerDeviceKind.mouse);
++    await tester.pump();
++    expect(entry, findsNothing, reason: 'a mouse click ends the entry');
++    expect(bytesOf(c), before, reason: 'cancelled, not committed');
++    expect(canvasFocused(), isTrue);
++  }, variant: TargetPlatformVariant.only(TargetPlatform.android));
++
++  testWidgets(
++      'ST7-open a page scale typed and left by Tab, not by a tap, still shows '
++      'the typed text; Cmd+S re-syncs it to the stored scale all the same, '
++      'with nothing committed (plan 12a Task 7 deviation 2; spec 12a D2, '
++      'D14)', (tester) async {
++    // Intent half: COVERED, checked: layer_page_controller_test.dart LP-5.
++    // Decided: premise impossible (see ST4-open).
++    final rig = await pumpApp(tester);
++    final c = rig.controller;
++    final files = rig.files;
++    final doc = c.document;
++    final scale = find.byKey(const Key('page-scale'));
++    await aimCamera(tester, c, far);
++    await drawWall(
++        tester, c, far + Vector2(-1100, 200), far + Vector2(1700, 900));
++    final stored = scaleOf(doc);
++
++    await tester.tap(scale);
++    await tester.pump();
++    await tester.enterText(scale, '40');
++    await tester.pump();
++    await press(tester, LogicalKeyboardKey.tab);
++    expect(panelFieldFocused(), isFalse, reason: 'premise: Tab left the field');
++    expect(scaleField(tester), '40', reason: 'premise: the text stays');
++    expect(scaleOf(doc), stored, reason: 'premise: nothing committed');
++
++    files.scriptSaveLocation(name: 'tab.jetplan', location: '/p/tab');
++    expect(await cmdS(tester), isTrue);
++    await tester.pump();
++
++    expect(files.writes, hasLength(1));
++    expect(scaleOf(decoded(files.writes.single.bytes).document), stored);
++    expect(scaleField(tester), '${stored.round()}',
++        reason: 'the field shows the stored scale');
++    expect(doc.commands.undoDepth, 1, reason: 'nothing committed');
++    expect(c.dirty.value, isFalse);
++  });
++
++  testWidgets(
++      'ST8 an open text entry with nothing typed, then Cmd+S: the settle '
++      'closes it, commits nothing, and the canvas has the focus (plan 12a '
++      'Task 7 deviation 6; spec 12a D2, R-5)', (tester) async {
++    final rig = await pumpApp(tester);
++    final c = rig.controller;
++    final files = rig.files;
++    final doc = c.document;
++    await aimCamera(tester, c, far);
++    await drawWall(
++        tester, c, far + Vector2(-1400, -700), far + Vector2(900, 400));
++    await openEntry(tester, c, far + Vector2(250, 1300), '');
++    final before = bytesOf(c);
++
++    files.scriptSaveLocation(name: 'empty.jetplan', location: '/p/empty');
++    expect(await cmdS(tester), isTrue);
++    await tester.pump();
++
++    expect(entry, findsNothing, reason: 'the settle closed the entry');
++    expect(canvasFocused(), isTrue);
++    expect(files.writes.single.bytes, before, reason: 'nothing committed');
++    expect(textsOf(doc), isEmpty);
++    expect(doc.commands.undoDepth, 1);
++    expect(c.dirty.value, isFalse);
++  });
++}

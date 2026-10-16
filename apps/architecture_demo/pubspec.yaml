@@ -1,0 +1,52 @@
+name: architecture_demo
+description: >-
+  The architecture kit's demo: the plan library's editor over the
+  architecture kit, with the document flows (new, open sample, open, save,
+  save as, export, print, exit) on macOS and the web.
+publish_to: none
+version: 0.0.1
+resolution: workspace
+
+environment:
+  # The old floor planner app's bounds, for its reasons: printing 5.15 needs
+  # Flutter 3.41 and pdf 3.13 needs Dart 3.12 (Flutter 3.44); the sdk
+  # bound sets the language version, kept at 3.5 so the formatter's style
+  # matches the copied files.
+  sdk: ^3.5.0
+  flutter: ">=3.44.0"
+
+dependencies:
+  file_selector: ^1.1.0
+  flutter:
+    sdk: flutter
+  jet_cad_2d_kit_architecture: ^0.1.0
+  jet_cad_2d_plan: ^0.8.0
+  # The print wrapper names PdfPageFormat (PagePrinter's signature).
+  pdf: ^3.13.1
+  web: ^1.1.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  # The smoke run on the real macOS binary (integration_test/smoke_test.dart).
+  integration_test:
+    sdk: flutter
+  # The tests drive the editor through the engine's types (Handle, Tool,
+  # InteractionLayer, Transform2), the kit's diagnostics and world points
+  # (Vector2).
+  jet_cad_2d: ^0.7.2
+  jet_cad_2d_flutter: ^0.7.2
+  jet_cad_2d_kit: ^0.1.0
+  vector_math: ^2.2.0
+
+flutter:
+  uses-material-design: true
+  # The bare family the documents name, from the plan library's bytes (a
+  # package font path is resolved under the package's lib/), so no platform
+  # -- the web's engine fetches Google's Roboto when the manifest has none --
+  # draws text in another face.
+  fonts:
+    - family: Roboto
+      fonts:
+        - asset: packages/jet_cad_2d_plan/fonts/Roboto-Regular.ttf

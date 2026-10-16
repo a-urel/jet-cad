@@ -1,0 +1,1738 @@
+1b133ff4 test(demo): export and print, ported; N6
+e9d7c93a feat(demo): export writes, print and the busy wrappers
+ apps/architecture_demo/lib/busy_wrappers.dart      |  56 ++++
+ apps/architecture_demo/lib/document_host.dart      |  58 +++-
+ apps/architecture_demo/pubspec.yaml                |   8 +
+ .../test/document_commands_test.dart               |  33 ++-
+ apps/architecture_demo/test/export/busy_test.dart  | 280 ++++++++++++++++++
+ .../test/export/export_end_to_end_test.dart        | 122 ++++++++
+ .../test/export/export_flow_test.dart              | 328 +++++++++++++++++++++
+ .../test/export/export_font_test.dart              | 121 ++++++++
+ .../test/export/print_flow_test.dart               | 256 ++++++++++++++++
+ apps/architecture_demo/test/support/app_fakes.dart |  41 +++
+ .../architecture_demo/test/support/export_rig.dart | 103 +++++++
+ 11 files changed, 1387 insertions(+), 19 deletions(-)
+diff --git a/apps/architecture_demo/lib/busy_wrappers.dart b/apps/architecture_demo/lib/busy_wrappers.dart
+new file mode 100644
+index 00000000..5b6d3eff
+--- /dev/null
++++ b/apps/architecture_demo/lib/busy_wrappers.dart
+@@ -0,0 +1,56 @@
++// Spec decision 5: the app's `busy` covers the library's own page flows
++// through two wrappers. `PlanEditor` has no hook to grey out its buttons,
++// so the app sees an export or a print only through the two seams it hands
++// the editor: the export dialog and the page printer.
++import 'dart:typed_data';
++
++import 'package:flutter/foundation.dart' show ValueNotifier;
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:pdf/pdf.dart' show PdfPageFormat;
++
++/// The export dialog with the session busy while it is up (spec decision
++/// 5): the library's own dialog, so the app sees the export in flight.
++///
++/// While a flow already runs (a save write, say) the library cannot know:
++/// its Export button is enabled and its guard is free. The dialog then does
++/// not open and answers null, which the library reads as a cancel, so no
++/// export starts during another flow ("the callback does nothing while
++/// busy"). Busy is cleared when the dialog answers or throws.
++///
++/// The busy span ends there. What follows -- the library makes the bytes,
++/// then calls `onExport` -- is not busy until the host's export write
++/// starts (see `DocumentHostState.exportFlow`).
++PlanExportDialog busyExportDialog(ValueNotifier<bool> busy,
++        {PlanExportDialog dialog = showPlanExportDialog}) =>
++    (context, initial, exporters) async {
++      if (busy.value) return null;
++      busy.value = true;
++      try {
++        return await dialog(context, initial, exporters);
++      } finally {
++        busy.value = false;
++      }
++    };
++
++/// [inner] with the session busy while the platform's print job runs. While
++/// a flow already runs the print does nothing (the library's Print is
++/// enabled all the same): the library has made the PDF and is told it was
++/// printed. Busy is cleared when the job ends or throws; a throw reaches
++/// the library, which reports it through `onPageFlowError`.
++final class BusyPagePrinter implements PagePrinter {
++  BusyPagePrinter(this.busy, this.inner);
++
++  final ValueNotifier<bool> busy;
++  final PagePrinter inner;
++
++  @override
++  Future<void> print(Uint8List pdf, String name, PdfPageFormat format) async {
++    if (busy.value) return;
++    busy.value = true;
++    try {
++      await inner.print(pdf, name, format);
++    } finally {
++      busy.value = false;
++    }
++  }
++}
+diff --git a/apps/architecture_demo/lib/document_host.dart b/apps/architecture_demo/lib/document_host.dart
+index a526336b..6d7805c1 100644
+--- a/apps/architecture_demo/lib/document_host.dart
++++ b/apps/architecture_demo/lib/document_host.dart
+@@ -32,16 +32,17 @@ import 'dart:ui' show AppExitResponse;
+ import 'package:flutter/material.dart';
+ import 'package:flutter/scheduler.dart';
+ import 'package:flutter/services.dart' show LogicalKeyboardKey;
+ import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart'
+     show buildSampleFlat;
+ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+ 
+ import 'app_strings.dart';
++import 'busy_wrappers.dart';
+ import 'document_files.dart';
+ import 'document_session.dart';
+ import 'exit_guard.dart';
+ 
+ /// What a save encoded: the plan's document (to tell a swap during the
+ /// write) and its bytes.
+ typedef _Encoded = ({Object plan, Uint8List bytes});
+ 
+@@ -81,16 +82,24 @@ class DocumentHost extends StatefulWidget {
+ 
+ class DocumentHostState extends State<DocumentHost> {
+   PlanController get _controller => widget.controller;
+   DocumentSession get _session => widget.session;
+ 
+   late final AppLifecycleListener _exitListener;
+   late final ExitGuard _exitGuard;
+ 
++  /// The printer the editor gets: busy around the platform's print job.
++  /// Made once, not per build.
++  late final PagePrinter _printer =
++      BusyPagePrinter(_session.busy, widget.printer);
++
++  /// The export dialog the editor gets: busy while it is up. Made once.
++  late final PlanExportDialog _exportDialog = busyExportDialog(_session.busy);
++
+   /// Runs [body] as a flow: busy for its whole span when no flow is running
+   /// yet, cleared however it ends; inside another flow, busy is the outer
+   /// one's.
+   Future<T> _flow<T>(Future<T> Function() body) async {
+     final busy = _session.busy;
+     if (busy.value) return body();
+     busy.value = true;
+     try {
+@@ -152,16 +161,52 @@ class DocumentHostState extends State<DocumentHost> {
+       } catch (_) {
+         // Settled as far as it could; the dialog's Save reports the error.
+       }
+       return _mayDiscard();
+     });
+     return mayExit ? AppExitResponse.exit : AppExitResponse.cancel;
+   }
+ 
++  /// The editor's export hand-over (`PlanEditor.onExport`), as a flow: asks
++  /// where, then writes the bytes under the file kind of `export.name`'s
++  /// extension (`pdf` or `png`, the only ones the library's built-in
++  /// exporters make; any other is an [ArgumentError] shown as the export
++  /// failing). A cancelled panel writes nothing. A throw shows the error.
++  ///
++  /// The sequence, from the library's `EditorPageFlows.export`: the library
++  /// takes its own one-flow guard (Export and Print refuse a second press);
++  /// the dialog runs inside [busyExportDialog]'s busy span, which ends when
++  /// it answers; the library then makes the bytes -- the app is NOT busy
++  /// for that stretch, there is no hook; then it calls this with the guard
++  /// still held, and the busy span of this flow covers the panel and the
++  /// write. A New, Open or Save started during the byte-making is not held:
++  /// New and Open replace the plan, which the library sees (the document
++  /// is no longer the one it exported) and drops the export; Save writes
++  /// its own file. The document is never moved off its save point by an
++  /// export.
++  Future<void> exportFlow(PlanExport export) => _flow(() async {
++        try {
++          final dot = export.name.lastIndexOf('.');
++          final kind = switch (dot < 0 ? '' : export.name.substring(dot + 1)) {
++            'pdf' => FileKind.pdf,
++            'png' => FileKind.png,
++            final other => throw ArgumentError.value(
++                export.name, 'name', 'has no exportable extension: "$other"'),
++          };
++          final place =
++              await widget.files.saveLocation(export.name, kind: kind);
++          if (place == null) return;
++          await widget.files
++              .write(place.location, place.name, export.bytes, kind: kind);
++        } catch (e) {
++          await _showError((w) => w.exportFailed, e);
++        }
++      });
++
+   void _armExitGuard() => _exitGuard.armed = _controller.dirty.value;
+ 
+   Future<SaveChoice> _askToSave() async {
+     if (!mounted) return SaveChoice.cancel;
+     final choice = await showDialog<SaveChoice>(
+       context: context,
+       barrierDismissible: false,
+       builder: (_) => _SaveChangesDialog(name: _session.name),
+@@ -353,39 +398,44 @@ class DocumentHostState extends State<DocumentHost> {
+         listenable: _session,
+         builder: (context, _) => Scaffold(
+           body: PlanEditor(
+             controller: _controller,
+             onNew: _idle(newFlow),
+             onOpen: _idle(openFlow),
+             onSave: _idle(saveStep),
+             onSaveAs: _idle(saveAsStep),
+-            printer: widget.printer,
++            onExport: (export) => unawaited(exportFlow(export)),
++            onExportDialog: _exportDialog,
++            printer: _printer,
++            onPageFlowError: (e) =>
++                unawaited(_showError((w) => w.pageFlowFailed, e)),
+             exportName: _session.name,
+             bar: PlanEditorBar(leading: [
+               _DocumentTitle(session: _session, controller: _controller),
+               _OpenSampleButton(onPressed: _idle(openSampleFlow)),
+             ]),
+           ),
+         ),
+       );
+ }
+ 
+ /// The plan's name, with `• ` in front and an `Edited` tooltip while it is
+-/// dirty, cut with an ellipsis at 160 px: with the Open sample button and the
+-/// library's bar that leaves the top bar fitting 800 px.
++/// dirty, cut with an ellipsis at 144 px: with the Open sample button and
++/// the library's bar, Export's button included (it was 160 px before the app
++/// gave `onExport`), that leaves the top bar fitting 800 px.
+ class _DocumentTitle extends StatelessWidget {
+   const _DocumentTitle({required this.session, required this.controller});
+ 
+   final DocumentSession session;
+   final PlanController controller;
+ 
+   @override
+   Widget build(BuildContext context) => ConstrainedBox(
+-        constraints: const BoxConstraints(maxWidth: 160),
++        constraints: const BoxConstraints(maxWidth: 144),
+         child: ListenableBuilder(
+           listenable: Listenable.merge([session, controller.dirty]),
+           builder: (context, _) {
+             final dirty = controller.dirty.value;
+             final text = Text(dirty ? '• ${session.name}' : session.name,
+                 key: const Key('document-name'),
+                 maxLines: 1,
+                 softWrap: false,
+diff --git a/apps/architecture_demo/pubspec.yaml b/apps/architecture_demo/pubspec.yaml
+index 6040e413..f3c9cd6d 100644
+--- a/apps/architecture_demo/pubspec.yaml
++++ b/apps/architecture_demo/pubspec.yaml
+@@ -34,8 +34,16 @@ dev_dependencies:
+   # (Vector2).
+   jet_cad_2d: ^0.7.2
+   jet_cad_2d_flutter: ^0.7.2
+   jet_cad_2d_kit: ^0.1.0
+   vector_math: ^2.2.0
+ 
+ flutter:
+   uses-material-design: true
++  # The bare family the documents name, from the plan library's bytes (a
++  # package font path is resolved under the package's lib/), so no platform
++  # -- the web's engine fetches Google's Roboto when the manifest has none --
++  # draws text in another face.
++  fonts:
++    - family: Roboto
++      fonts:
++        - asset: packages/jet_cad_2d_plan/fonts/Roboto-Regular.ttf
+diff --git a/apps/architecture_demo/test/document_commands_test.dart b/apps/architecture_demo/test/document_commands_test.dart
+index a8ae2988..fdb1dc5b 100644
+--- a/apps/architecture_demo/test/document_commands_test.dart
++++ b/apps/architecture_demo/test/document_commands_test.dart
+@@ -4,17 +4,18 @@
+ // shortcuts from one command list; now `PlanEditor` owns its buttons and
+ // chords and calls the host's callbacks. Dispositions:
+ //   PORT   DC1b DC2 DC4 DC5 DC6 DC9 DC10 DC10b DC11
+ //   SPLIT  DC1 (order: the app's Open sample button leads the bar), DC7
+ //          (buttons cannot grey out; the file callbacks do nothing while
+ //          busy, Undo and Redo are the library's), DC12 and DC12c (the name
+ //          and the dirty mark are a bounded host widget in
+ //          `PlanEditorBar.leading`; DC12 keeps 800 px, DC12c's floor moves
+-//          to 776 px, re-measured)
++//          to 800 px with Export's button and the name at 144 px, re-measured in
++//          Task 6)
+ //   COVERED DC3: packages/jet_cad_2d_plan/test/editor/plan_editor_test.dart
+ //          ED-3 (:133, "without them none is offered") and ED-U (:445),
+ //          editor/editor_view_test.dart V1 (:28, "the editor has Export and
+ //          Print and no file commands"); "no name" is the
+ //          app's widget. The redo chords go with DC2.
+ //          DC8: packages/jet_cad_2d_plan/test/panels/layer_panel_test.dart:612
+ //          ("no shell shortcut fires while typing: letters, Undo, Redo and
+ //          Escape stop at the field") and panels/page_scale_field_test.dart:36
+@@ -56,24 +57,25 @@ const List<String> kIds = [
+   'open-sample',
+   'save',
+   'save-as',
+   'undo',
+   'redo',
+ ];
+ 
+ /// The buttons left to right in the app's bar: Open sample leads, then the
+-/// library's file buttons, Print, then Undo and Redo (Export waits for the
+-/// app's `onExport`, Task 6).
++/// library's file buttons, Export and Print (Export has its button since the
++/// app gave `onExport`, Task 6), then Undo and Redo.
+ const List<String> kBarOrder = [
+   'open-sample',
+   'new',
+   'open',
+   'save',
+   'save-as',
++  'export',
+   'print',
+   'undo',
+   'redo',
+ ];
+ 
+ Finder button(String id) => find.byKey(Key('toolbar-$id'));
+ 
+ /// Whether the toolbar button [id] is enabled, as built.
+@@ -239,34 +241,34 @@ void main() {
+       'buttons are enabled on a fresh plan, Undo and Redo not; an edit '
+       'enables Undo, an undo enables Redo (spec 12a D6, D7)', (tester) async {
+     // Intent half (order, the 12 px group gap before Undo, Undo and Redo
+     // following the history): COVERED, checked: packages/jet_cad_2d_plan/
+     // test/editor/plan_editor_test.dart:133 (ED-3: new, open, save, save-as,
+     // export, print, undo, redo) and :445 (ED-U).
+     // Decided: premise impossible (the order: the app's Open sample button
+     // is a `PlanEditorBar.leading` widget, left of the library's buttons;
+-    // Export has no button until the app's `onExport`, Task 6; Print is the
+-    // library's and was added after the old test).
++    // Export and Print are the library's and came after the old test; the
++    // step between two buttons is read between Export and Print).
+     final rig = await pumpApp(tester);
+     final c = rig.controller;
+     final doc = c.document;
+ 
+     for (final id in kBarOrder) {
+       expect(button(id), findsOneWidget, reason: id);
+     }
+     for (var i = 1; i < kBarOrder.length; i++) {
+       expect(tester.getTopLeft(button(kBarOrder[i])).dx,
+           greaterThan(tester.getTopRight(button(kBarOrder[i - 1])).dx - 0.001),
+           reason: '${kBarOrder[i]} after ${kBarOrder[i - 1]}');
+     }
+     final gap = tester.getTopLeft(button('undo')).dx -
+         tester.getTopRight(button('print')).dx;
+     final step = tester.getTopLeft(button('print')).dx -
+-        tester.getTopRight(button('save-as')).dx;
++        tester.getTopRight(button('export')).dx;
+     expect(gap, greaterThanOrEqualTo(step + 12), reason: 'the group gap');
+ 
+     expect(states(tester), {...all(true), 'undo': false, 'redo': false},
+         reason: 'fresh');
+ 
+     await aimCamera(tester, c, far);
+     await drawWall(tester, c, far, far + Vector2(2500, -700));
+     expect(doc.commands.undoDepth, 1, reason: 'premise');
+@@ -812,17 +814,17 @@ void main() {
+   testWidgets(
+       'DC12 at 800 px a long file name, dirty, and then a long status '
+       'line do not overflow the top bar: each is cut with an ellipsis, and '
+       'OSNAP and the zoom stay on screen (spec 12a D7, S-27, T-13)',
+       (tester) async {
+     // Intent half: COVERED, checked: packages/jet_cad_2d_plan/test/editor/
+     // editor_words_test.dart:190 (the OV-$code cases: "no overflow from 704 px
+     // down to 656 px", the library bar without host widgets).
+-    // The width is the old 800 px: the name is bounded at 160 px.
++    // The width is the old 800 px: the name is bounded at 144 px.
+     final rig = await pumpApp(tester, size: const Size(800, 600));
+     final c = rig.controller;
+     const long = 'the ground floor of the house by the lake, third revision, '
+         'with the new kitchen and the long hallway to the garden';
+     rig.files.scriptOpen(
+         name: '$long.jetplan', bytes: sampleBytes(), location: '/p/long');
+     await rig.host.openFlow();
+     await tester.pump();
+@@ -832,17 +834,17 @@ void main() {
+     expect(tester.takeException(), isNull);
+ 
+     final name = find.byKey(const Key('document-name'));
+     expect(tester.widget<Text>(name).data, '• $long');
+     RenderParagraph paragraph(Finder f) => tester.renderObject<RenderParagraph>(
+         find.descendant(of: f, matching: find.byType(RichText)));
+     expect(paragraph(name).didExceedMaxLines, isTrue,
+         reason: 'cut, not wrapped');
+-    expect(tester.getRect(name).width, 160, reason: 'bounded at 160');
++    expect(tester.getRect(name).width, 144, reason: 'bounded at 144');
+     final bar = tester.getRect(find.byKey(const Key('chrome-top')));
+     expect(
+         tester.getRect(name).right,
+         lessThanOrEqualTo(
+             tester.getRect(find.byKey(const Key('status-text'))).left));
+     for (final key in const ['osnap-text', 'zoom-text']) {
+       final r = tester.getRect(find.byKey(Key(key)));
+       expect(r.right, lessThanOrEqualTo(bar.right), reason: key);
+@@ -864,41 +866,42 @@ void main() {
+     for (final key in const ['osnap-text', 'zoom-text']) {
+       final r = tester.getRect(find.byKey(Key(key)));
+       expect(r.right, lessThanOrEqualTo(bar.right), reason: key);
+       expect(r.width, greaterThan(0), reason: key);
+     }
+   });
+ 
+   testWidgets(
+-      'DC12c from 1000 px down to 776 px wide a titled long name and a '
++      'DC12c from 1000 px down to 800 px wide a titled long name and a '
+       'long status line do not overflow the top bar, and OSNAP and the zoom '
+       'stay on screen (spec 12a D7, S-27)', (tester) async {
+-    // Decided: premise impossible (the range). The floor is 776 px, measured
+-    // on this layout: the 160 px name, the 40 px Open sample button, the
+-    // library's toolbar and its gap, OSNAP and the zoom, and the bar's
+-    // padding, with nothing left for the status; at 775 px the bar overflows
+-    // by 1 px. The old range was 704 px down to 656 px: the host widgets
++    // Decided: premise impossible (the range). The floor is 800 px, measured
++    // on this layout: the 144 px name, the 40 px Open sample button, the
++    // library's toolbar (Export's button in it, since Task 6) and its gap,
++    // OSNAP and the zoom, and the bar's padding, with nothing left for the
++    // status; at 799 px the bar overflows by 1 px. (Task 4b measured 776 px
++    // with a 160 px name and no Export button.) The old range was 704 px down to 656 px: the host widgets
+     // (the name and Open sample) add 200 px to the 576 px the library's bar
+     // needs by itself, so 656 px would leave the name 40 px.
+     final rig = await pumpApp(tester, size: const Size(1000, 600));
+     final c = rig.controller;
+     const long = 'the ground floor of the house by the lake, third revision';
+     rig.files.scriptOpen(
+         name: '$long.jetplan', bytes: sampleBytes(), location: '/p/long');
+     await rig.host.openFlow();
+     await tester.pump();
+     const roomName = 'the living room with the bay window, the fireplace and '
+         'the door to the terrace';
+     final notice = await longRoomNotice(tester, c, roomName);
+     expect(notice, 'Room — Already a room: $roomName', reason: 'premise');
+     expect(tester.takeException(), isNull);
+     final name = find.byKey(const Key('document-name'));
+     final status = find.byKey(const Key('status-text'));
+-    for (var width = 1000; width >= 776; width--) {
++    for (var width = 1000; width >= 800; width--) {
+       await tester.binding.setSurfaceSize(Size(width.toDouble(), 600));
+       await tester.pump();
+       expect(tester.takeException(), isNull, reason: '$width px');
+       expect(tester.widget<Text>(name).data, '• $long',
+           reason: 'premise at $width px: the long name');
+       expect(tester.widget<Text>(status).data, notice,
+           reason: 'premise at $width px: the long status');
+       expect(tester.getRect(name).right,
+diff --git a/apps/architecture_demo/test/export/busy_test.dart b/apps/architecture_demo/test/export/busy_test.dart
+new file mode 100644
+index 00000000..9f7dcb05
+--- /dev/null
++++ b/apps/architecture_demo/test/export/busy_test.dart
+@@ -0,0 +1,280 @@
++// N6 (spec decision 5, Task 6 Review Focus 3): the app is busy around the
++// library's page flows, through two wrappers -- the export dialog and the
++// page printer -- and around its own export write. While busy, the app's
++// file callbacks do nothing and the exit request is cancelled.
++//
++// The sequence of an export, from the library's `EditorPageFlows.export`:
++//   1. the dialog runs inside `busyExportDialog`: busy for as long as it is up;
++//   2. its answer ends that busy span; the library then makes the bytes (PDF
++//      and PNG are async) with ITS OWN guard held and the app not busy: the
++//      app has no hook for that stretch (the N6-gap test pins what happens
++//      to a flow started there);
++//   3. the library calls `onExport` -> `exportFlow`: busy again, for the
++//      save panel and the write (the N6-write test).
++import 'dart:async';
++import 'dart:typed_data';
++
++import 'package:architecture_demo/busy_wrappers.dart';
++import 'package:flutter/material.dart';
++import 'dart:ui' show AppExitResponse;
++
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:pdf/pdf.dart' show PdfPageFormat;
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/app_fakes.dart';
++import '../support/app_rig.dart';
++import '../support/export_rig.dart';
++
++final Vector2 far = Vector2(-37654.5, 30123.25);
++
++/// The editor's own New callback: what its New button and Cmd+N call. Under
++/// a dialog's barrier a tap would not reach the button.
++Future<void> pressNew(WidgetTester tester) async {
++  await tester.widget<PlanEditor>(find.byType(PlanEditor)).onNew!();
++  await tester.pump();
++}
++
++/// Draws a wall far from the origin: the plan is dirty, one step of history.
++Future<void> dirtyIt(AppRig rig) async {
++  await aimCamera(rig.tester, rig.controller, far);
++  await drawWall(rig.tester, rig.controller, far, far + Vector2(2600, -900));
++  expect(rig.controller.dirty.value, isTrue, reason: 'premise: dirty');
++}
++
++void main() {
++  testWidgets(
++      'N6-dialog while the export dialog is up the app is busy: New does '
++      'nothing (no replace dialog, the plan unchanged); dismissed, busy '
++      'ends', (tester) async {
++    final rig = await pumpFlat(tester);
++    await dirtyIt(rig);
++    final doc = rig.controller.document;
++    final walls = wallsOf(rig.controller).length;
++    expect(rig.session.busy.value, isFalse, reason: 'premise: idle');
++    await openDialog(tester);
++    expect(rig.session.busy.value, isTrue);
++    await pressNew(tester);
++    await tester.pump();
++    expect(find.byKey(const Key('replace-dialog')), findsNothing);
++    expect(identical(rig.controller.document, doc), isTrue);
++    expect(wallsOf(rig.controller), hasLength(walls));
++    expect(rig.controller.dirty.value, isTrue);
++    await tapKey2(tester, 'export-cancel');
++    expect(rig.session.busy.value, isFalse);
++    expect(find.byKey(const Key('export-dialog')), findsNothing);
++  });
++
++  testWidgets(
++      'N6-print while the print job is pending the app is busy: Cmd+S '
++      'writes and asks nothing; completed, busy ends', (tester) async {
++    final printer = FakePagePrinter()..hold = true;
++    final rig = await pumpFlat(tester, printer: printer);
++    await tester.tap(printButton);
++    await settleUntil(tester, () => printer.held.isNotEmpty);
++    expect(printer.held, hasLength(1), reason: 'premise: the job is pending');
++    expect(rig.session.busy.value, isTrue);
++    await chord(tester, LogicalKeyboardKey.meta, LogicalKeyboardKey.keyS);
++    await tester.pump();
++    expect(rig.files.saveLocationCalls, isEmpty);
++    expect(rig.files.writes, isEmpty);
++    printer.held.single.complete();
++    await tester.pump();
++    await tester.pump();
++    expect(rig.session.busy.value, isFalse);
++    await chord(tester, LogicalKeyboardKey.meta, LogicalKeyboardKey.keyS);
++    expect(rig.files.writes, hasLength(1), reason: 'Save works again');
++  });
++
++  testWidgets(
++      'N6-exit while the export dialog is up the exit request is cancelled, '
++      'with no second dialog; after it closes the app exits', (tester) async {
++    final rig = await pumpFlat(tester);
++    await openDialog(tester);
++    final response = tester.binding.handleRequestAppExit();
++    await tester.pump();
++    expect(find.byKey(const Key('replace-dialog')), findsNothing);
++    expect(find.byKey(const Key('export-dialog')), findsOneWidget,
++        reason: 'the one dialog is still the export\'s');
++    expect(await response, AppExitResponse.cancel);
++    await tapKey2(tester, 'export-cancel');
++    expect(rig.session.busy.value, isFalse);
++    final after = tester.binding.handleRequestAppExit();
++    await tester.pump();
++    expect(await after, AppExitResponse.exit, reason: 'clean and idle');
++  });
++
++  testWidgets(
++      'N6-write while the export write is held the app is busy: New and '
++      'Cmd+S do nothing and a second flow does not start; the write ends '
++      'busy', (tester) async {
++    final rig = await pumpFlat(tester);
++    final files = rig.files
++      ..holdWrites = true
++      ..scriptSaveLocation(name: 'flat.pdf', location: '/out/flat.pdf');
++    final doc = rig.controller.document;
++    await openDialog(tester);
++    await tapKey2(tester, 'export-ok');
++    await settleUntil(tester, () => files.heldWrites.isNotEmpty);
++    expect(files.heldWrites, hasLength(1), reason: 'premise: write held');
++    expect(rig.session.busy.value, isTrue);
++    await pressNew(tester);
++    await chord(tester, LogicalKeyboardKey.meta, LogicalKeyboardKey.keyS);
++    await tester.pump();
++    expect(identical(rig.controller.document, doc), isTrue,
++        reason: 'New did not run');
++    expect(files.writes, hasLength(1), reason: 'Save did not run');
++    expect(files.saveLocationCalls, ['flat.pdf']);
++    files.heldWrites.single.complete();
++    await tester.pump();
++    await tester.pump();
++    expect(rig.session.busy.value, isFalse);
++  });
++
++  testWidgets(
++      'N6-gap between the dialog closing and the write starting the app is '
++      'NOT busy (the library is making the bytes): a New started there '
++      'replaces the plan, and the library drops the export -- nothing is '
++      'asked, nothing written, busy ends false', (tester) async {
++    final rig = await pumpFlat(tester);
++    final doc = rig.controller.document;
++    await openDialog(tester);
++    await tapKey2(tester, 'export-format-plan.png');
++    await tapKey2(tester, 'export-dpi-300');
++    await tester.tap(find.byKey(const Key('export-ok')));
++    await tester.pump();
++    await tester.pump();
++    expect(find.byKey(const Key('export-dialog')), findsNothing,
++        reason: 'premise: the dialog has closed');
++    expect(rig.files.saveLocationCalls, isEmpty,
++        reason: 'premise: the bytes are still being made');
++    expect(rig.session.busy.value, isFalse,
++        reason: 'the gap: no hook in the library, the app is not busy');
++    await pressNew(tester);
++    expect(identical(rig.controller.document, doc), isFalse,
++        reason: 'New ran: the plan is replaced');
++    // EX3-open's 300 dpi export needs about a second of real time to reach
++    // its save panel; wait twice that.
++    await tester
++        .runAsync(() => Future<void>.delayed(const Duration(seconds: 2)));
++    await tester.pump();
++    expect(rig.files.saveLocationCalls, isEmpty);
++    expect(rig.files.writes, isEmpty);
++    expect(rig.session.busy.value, isFalse);
++  });
++
++  testWidgets(
++      'N6-once the editor gets the same busy printer and the same busy '
++      'dialog across rebuilds, and the printer wraps the one given',
++      (tester) async {
++    final printer = FakePagePrinter();
++    final rig = await pumpFlat(tester, printer: printer);
++    PlanEditor editor() => tester.widget<PlanEditor>(find.byType(PlanEditor));
++    final first = editor();
++    expect(first.printer, isA<BusyPagePrinter>());
++    expect((first.printer! as BusyPagePrinter).inner, same(printer));
++    expect((first.printer! as BusyPagePrinter).busy, same(rig.session.busy));
++    expect(first.onExportDialog, isNotNull);
++    rig.session.nameChanged();
++    await tester.pump();
++    final second = editor();
++    expect(identical(second, first), isFalse, reason: 'premise: rebuilt');
++    expect(second.printer, same(first.printer));
++    expect(second.onExportDialog, same(first.onExportDialog));
++  });
++
++  group('the wrappers', () {
++    late BuildContext context;
++    Future<void> pumpContext(WidgetTester tester) async {
++      await tester.pumpWidget(const SizedBox());
++      context = tester.element(find.byType(SizedBox));
++    }
++
++    testWidgets(
++        'busyExportDialog: busy while the given dialog runs; its answer '
++        'passes through; busy ends when it answers or throws', (tester) async {
++      await pumpContext(tester);
++      final busy = ValueNotifier(false);
++      final answer = Completer<PlanExportAnswer?>();
++      var seen = <bool>[];
++      Future<PlanExportAnswer?> inner(
++          BuildContext c, PlanExportAnswer i, List<PlanExporter> e) {
++        seen.add(busy.value);
++        return answer.future;
++      }
++
++      const given = PlanExportAnswer(
++          exporter: 'plan.png',
++          choice: PlanExportChoice(dpi: PlanExportDpi.d300));
++      final result =
++          busyExportDialog(busy, dialog: inner)(context, given, const []);
++      expect(seen, [true], reason: 'busy when the dialog started');
++      expect(busy.value, isTrue);
++      answer.complete(given);
++      expect(await result, same(given));
++      expect(busy.value, isFalse);
++
++      Future<PlanExportAnswer?> throwing(
++              BuildContext c, PlanExportAnswer i, List<PlanExporter> e) =>
++          Future.error(StateError('no dialog'));
++      await expectLater(
++          busyExportDialog(busy, dialog: throwing)(context, given, const []),
++          throwsStateError);
++      expect(busy.value, isFalse, reason: 'cleared by the finally');
++      seen = [];
++    });
++
++    testWidgets(
++        'busyExportDialog during another flow: the dialog does not open and '
++        'answers null; the other flow\'s busy stays', (tester) async {
++      await pumpContext(tester);
++      final busy = ValueNotifier(true);
++      var opened = 0;
++      Future<PlanExportAnswer?> inner(
++          BuildContext c, PlanExportAnswer i, List<PlanExporter> e) async {
++        opened++;
++        return i;
++      }
++
++      final result = await busyExportDialog(busy, dialog: inner)(
++          context, PlanExportAnswer.initial, const []);
++      expect(result, isNull);
++      expect(opened, 0);
++      expect(busy.value, isTrue);
++    });
++
++    test(
++        'BusyPagePrinter: busy while the inner job runs, cleared when it '
++        'ends or throws (the throw reaches the caller); during another flow '
++        'it prints nothing and leaves busy', () async {
++      final busy = ValueNotifier(false);
++      final inner = FakePagePrinter()..hold = true;
++      final printer = BusyPagePrinter(busy, inner);
++      const format = PdfPageFormat(100, 200);
++      final bytes = Uint8List.fromList([1, 2, 3]);
++      final job = printer.print(bytes, 'n', format);
++      await Future<void>.delayed(Duration.zero);
++      expect(busy.value, isTrue);
++      expect(inner.calls.single.name, 'n');
++      expect(inner.calls.single.pdf, bytes);
++      expect(inner.calls.single.format, format);
++      inner.held.single.complete();
++      await job;
++      expect(busy.value, isFalse);
++
++      inner
++        ..hold = false
++        ..failNext = StateError('no printer');
++      await expectLater(printer.print(bytes, 'n', format), throwsStateError);
++      expect(busy.value, isFalse, reason: 'cleared by the finally');
++
++      busy.value = true;
++      final before = inner.calls.length;
++      await printer.print(bytes, 'n', format);
++      expect(inner.calls.length, before, reason: 'nothing printed');
++      expect(busy.value, isTrue, reason: 'the other flow\'s');
++    });
++  });
++}
+diff --git a/apps/architecture_demo/test/export/export_end_to_end_test.dart b/apps/architecture_demo/test/export/export_end_to_end_test.dart
+new file mode 100644
+index 00000000..fc7a281a
+--- /dev/null
++++ b/apps/architecture_demo/test/export/export_end_to_end_test.dart
+@@ -0,0 +1,122 @@
++// Ported from apps/floor_planner/test/export/export_end_to_end_test.dart
++// (audit docs/superpowers/specs/2026-10-16-architecture-demo-test-audit.md,
++// section "export/export_end_to_end_test.dart"): E2E, PORT. The app with a
++// scripted `DocumentFiles` and a fake printer; Open sample from the toolbar;
++// Save; Export -> PDF, Export -> PNG at 150 dpi and Print... through the
++// toolbar; Save again. The sample's page is A4 landscape at 1:50, off the
++// origin, so the sizes below are read off its page, and the premises say it
++// is not the identity case. The old app's `session.dirty` is the
++// controller's `dirty` now.
++import 'package:architecture_demo/document_files.dart';
++import 'package:flutter_test/flutter_test.dart';
++
++import '../support/app_fakes.dart';
++import '../support/app_rig.dart';
++import '../support/export_rig.dart';
++
++void main() {
++  testWidgets(
++      'E2E Open sample, Save, Export PDF, Export PNG at 150 dpi, Print, '
++      'Save: the PDF is the sample\'s page in pt with embedded text, the PNG '
++      'the page at 150 dpi, the print the export\'s content, and the second '
++      'Save byte-identical to the first', (tester) async {
++    final printer = FakePagePrinter();
++    final rig = await pumpApp(tester, printer: printer);
++    final files = rig.files;
++    final c = rig.controller;
++
++    await rig.tapKey('toolbar-open-sample');
++    await tester.pump();
++    noDialog(tester);
++    final doc = c.document;
++    expect(doc.entities.liveCount, greaterThanOrEqualTo(500),
++        reason: 'premise: the sample is open');
++    final page = pageOf(c);
++    expect(page, isNotNull, reason: 'premise: the sample has a page');
++    expect((page!.effectiveWidthMm, page.effectiveHeightMm), (297.0, 210.0),
++        reason: 'premise: A4 landscape');
++    expect(page.originX == 0 || page.originY == 0, isFalse,
++        reason: 'premise: the sheet is not at the origin');
++
++    // Save before: the sample is untitled, so Save asks where.
++    files.scriptSaveLocation(name: 'sample.jetplan', location: '/p/sample');
++    await rig.tapKey('toolbar-save');
++    await tester.pump();
++    noDialog(tester);
++    expect(files.writes, hasLength(1), reason: 'premise: saved');
++    final before = files.writes.single.bytes;
++    expect(rig.session.name, 'sample');
++
++    // Export -> PDF.
++    files.scriptSaveLocation(name: 'sample.pdf', location: '/out/sample.pdf');
++    await openDialog(tester);
++    await tapKey2(tester, 'export-format-plan.pdf');
++    await tapKey2(tester, 'export-ok');
++    await settleWrites(tester, files, count: 2);
++    noDialog(tester);
++    expect(files.writes, hasLength(2));
++    final pdf = files.writes[1];
++    expect((pdf.name, pdf.kind), ('sample.pdf', FileKind.pdf));
++    final content = parsePdf(pdf.bytes);
++    expect(content.mediaBox[0], 0);
++    expect(content.mediaBox[1], 0);
++    expect(content.mediaBox[2], closeTo(297 * ptPerMm, 1e-3));
++    expect(content.mediaBox[3], closeTo(210 * ptPerMm, 1e-3));
++    expect(content.paths, isNotEmpty);
++    expect(content.textRuns, isNotEmpty, reason: 'the sample\'s labels');
++    for (final run in content.textRuns) {
++      expect(run.fontInfo.subtype, '/Type0');
++      expect(run.fontInfo.descendantSubtype, '/CIDFontType2');
++      expect(run.fontInfo.fontFile, '/FontFile2',
++          reason: 'the font is embedded');
++      expect(run.string, isNotNull, reason: 'it maps back to Unicode');
++    }
++
++    // Export -> PNG at 150 dpi.
++    files.scriptSaveLocation(name: 'sample.png', location: '/out/sample.png');
++    await openDialog(tester);
++    await tapKey2(tester, 'export-format-plan.png');
++    await tapKey2(tester, 'export-dpi-150');
++    await tapKey2(tester, 'export-ok');
++    await settleWrites(tester, files, count: 3);
++    noDialog(tester);
++    expect(files.writes, hasLength(3));
++    final png = files.writes[2];
++    expect((png.name, png.kind), ('sample.png', FileKind.png));
++    expect(png.bytes.sublist(1, 4), 'PNG'.codeUnits);
++    // round(297 / 25.4 * 150) x round(210 / 25.4 * 150).
++    expect((pngWidth(png.bytes), pngHeight(png.bytes)), (1754, 1240));
++    await tester.pump();
++
++    // Print....
++    await tester.tap(printButton);
++    await settleUntil(tester, () => printer.calls.isNotEmpty);
++    await tester.pump();
++    noDialog(tester);
++    expect(printer.calls, hasLength(1));
++    final call = printer.calls.single;
++    expect(call.name, 'sample');
++    expect(call.format.width, closeTo(297 * ptPerMm, 1e-9));
++    expect(call.format.height, closeTo(210 * ptPerMm, 1e-9));
++    final printed = parsePdf(call.pdf);
++    expect(operatorsOf(printed), operatorsOf(content),
++        reason: 'the print is the export\'s content stream');
++    expect(printed.mediaBox, content.mediaBox);
++    expect(rig.session.busy.value, isFalse);
++
++    // Save after: the flows read the document and wrote nothing to it.
++    expect(identical(c.document, doc), isTrue);
++    expect(c.dirty.value, isFalse,
++        reason: 'no export or print moved the document off its save point');
++    await rig.tapKey('toolbar-save');
++    await tester.pump();
++    noDialog(tester);
++    expect(files.writes, hasLength(4));
++    final after = files.writes[3];
++    expect((after.location, after.kind), ('/p/sample', FileKind.jetplan),
++        reason: 'premise: saved in place');
++    expect(after.bytes, before,
++        reason: 'Save after the exports is byte-identical to Save before');
++    expect(files.unscriptedCalls, 0);
++  });
++}
+diff --git a/apps/architecture_demo/test/export/export_flow_test.dart b/apps/architecture_demo/test/export/export_flow_test.dart
+new file mode 100644
+index 00000000..f87563a1
+--- /dev/null
++++ b/apps/architecture_demo/test/export/export_flow_test.dart
+@@ -0,0 +1,328 @@
++// Ported from apps/floor_planner/test/export/export_flow_test.dart (audit
++// docs/superpowers/specs/2026-10-16-architecture-demo-test-audit.md, section
++// "export/export_flow_test.dart"): EX1, EX3, EX5, EX10, EX13, EX14 SPLIT
++// (the -open half is what the app does now; the intent half is the library's,
++// cited), EX6-EX8, EX9b, EX12 PORT, EX2, EX2b, EX4, EX9, EX11 COVERED.
++//
++// COVERED, checked (each opened and read):
++//   EX2   packages/jet_cad_2d_plan/test/export/registry_test.dart:115 (X-4)
++//   EX2b  registry_test.dart:260 (X-8); page_flows_test.dart:849 (PF17)
++//   EX4   page_flows_test.dart:479 (PF14), :627 (PF21);
++//         plan_export_types_test.dart:8 (X-1)
++//   EX9   editor/plan_editor_test.dart:360 (ED-X1);
++//         shortcuts/plan_shortcuts_test.dart:308 (KB-6);
++//         export/page_flows_test.dart:161 (PF3)
++//   EX11  editor/editor_bar_test.dart:385 (PF5), :402 (PF6)
++// Intent halves of the SPLIT rows: PF13 (page_flows_test.dart:441: PDF magic,
++// MediaBox and PNG pixels per choice), PF12 (:414, a null answer exports
++// nothing), PF7 (:217, the library's flows hold Print and Export), PF2 (:143,
++// `<name>.png`), X-1 (the initial choice), EF4 (export/export_font_test.dart:
++// 38, the default font).
++//
++// Decided: premise impossible (spec decision 5): the old tests asserted the
++// buttons *disabled* while a flow runs. `PlanEditor` has no host hook to grey
++// them, so the -open forms assert that the callback or the dialog does
++// nothing while the app is busy. EX14's bare host is gone: the app has no
++// font injection; the name is the session's (`exportName`, decision 8).
++import 'dart:io';
++import 'dart:typed_data';
++
++import 'package:architecture_demo/document_files.dart';
++import 'package:flutter/material.dart';
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart'
++    show PageComponent, SetComponentCommand;
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++
++import '../support/app_fakes.dart';
++import '../support/app_rig.dart';
++import '../support/export_rig.dart';
++
++void main() {
++  group('T-10 Export -> PDF', () {
++    testWidgets(
++        'EX1-open Export -> PDF asks where for flat.pdf (kind pdf) and writes '
++        'the library\'s bytes there: the page\'s MediaBox, its content stream '
++        'the export command\'s, not what the turned screen shows',
++        (tester) async {
++      final rig = await pumpFlat(tester);
++      final files = rig.files
++        ..scriptSaveLocation(name: 'flat.pdf', location: '/out/flat.pdf');
++      await openDialog(tester);
++      await tapKey2(tester, 'export-ok');
++      await settleWrites(tester, files);
++      noDialog(tester);
++      expect(files.saveLocationCalls, ['flat.pdf']);
++      expect(files.saveLocationKinds, [FileKind.pdf]);
++      expect(files.writes, hasLength(1));
++      final w = files.writes.single;
++      expect((w.name, w.location, w.kind),
++          ('flat.pdf', '/out/flat.pdf', FileKind.pdf));
++      expect(w.bytes.sublist(0, 4), '%PDF'.codeUnits);
++      final content = parsePdf(w.bytes);
++      expect(content.mediaBox[2], closeTo(297 * ptPerMm, 1e-3));
++      expect(content.mediaBox[3], closeTo(210 * ptPerMm, 1e-3));
++      expect(content.textRuns, isNotEmpty, reason: 'the sample\'s labels');
++      final reference = await referenceExport(tester, rig.controller);
++      expect(operatorsOf(content), operatorsOf(reference),
++          reason: 'the bytes are the export command\'s');
++      expect(content.paths, isNotEmpty);
++      expect(rig.session.busy.value, isFalse);
++      expect(rig.controller.dirty.value, isFalse,
++          reason: 'an export leaves the document at its save point');
++    });
++
++    testWidgets(
++        'EX3-open Export -> PNG at 300 dpi writes flat.png (kind png) of the '
++        'page\'s size', (tester) async {
++      final rig = await pumpFlat(tester);
++      final files = rig.files
++        ..scriptSaveLocation(name: 'flat.png', location: '/out/flat.png');
++      await openDialog(tester);
++      await tapKey2(tester, 'export-format-plan.png');
++      await tapKey2(tester, 'export-dpi-300');
++      await tapKey2(tester, 'export-ok');
++      await settleWrites(tester, files);
++      noDialog(tester);
++      expect(files.saveLocationCalls, ['flat.png']);
++      expect(files.saveLocationKinds, [FileKind.png]);
++      final w = files.writes.single;
++      expect((w.name, w.location, w.kind),
++          ('flat.png', '/out/flat.png', FileKind.png));
++      expect(w.bytes.sublist(1, 4), 'PNG'.codeUnits);
++      final page = pageOf(rig.controller)!;
++      expect((
++        pngWidth(w.bytes),
++        pngHeight(w.bytes)
++      ), (
++        (page.effectiveWidthMm / 25.4 * 300).round(),
++        (page.effectiveHeightMm / 25.4 * 300).round()
++      ));
++      expect((pngWidth(w.bytes), pngHeight(w.bytes)), (3508, 2480),
++          reason: 'A4 landscape at 300 dpi, computed by hand');
++      await tester.pump();
++      expect(rig.session.busy.value, isFalse);
++    });
++  });
++
++  group('T-10 cancel and failure', () {
++    testWidgets(
++        'EX5-open the app is busy while the dialog is up; Cancel asks '
++        'nothing and writes nothing', (tester) async {
++      final rig = await pumpFlat(tester);
++      await openDialog(tester);
++      expect(rig.session.busy.value, isTrue,
++          reason: 'busy over the dialog (an exit request is cancelled '
++              'meanwhile)');
++      await tapKey2(tester, 'export-cancel');
++      expect(find.byKey(const Key('export-dialog')), findsNothing);
++      expect(rig.files.saveLocationCalls, isEmpty);
++      expect(rig.files.writes, isEmpty);
++      expect(rig.files.unscriptedCalls, 0);
++      expect(rig.session.busy.value, isFalse);
++    });
++
++    testWidgets('EX6 Escape cancels the dialog', (tester) async {
++      final rig = await pumpFlat(tester);
++      await openDialog(tester);
++      await press(tester, LogicalKeyboardKey.escape);
++      await tester.pump();
++      expect(find.byKey(const Key('export-dialog')), findsNothing);
++      expect(rig.files.saveLocationCalls, isEmpty);
++      expect(rig.files.writes, isEmpty);
++      expect(rig.session.busy.value, isFalse);
++    });
++
++    testWidgets('EX7 a cancelled save writes nothing', (tester) async {
++      final rig = await pumpFlat(tester);
++      rig.files.scriptSaveCancel();
++      await openDialog(tester);
++      await tapKey2(tester, 'export-ok');
++      await settleUntil(tester, () => rig.files.saveLocationCalls.isNotEmpty);
++      await tester.pump();
++      expect(rig.files.saveLocationCalls, ['flat.pdf']);
++      expect(rig.files.writes, isEmpty);
++      noDialog(tester);
++      expect(rig.session.busy.value, isFalse);
++    });
++
++    testWidgets('EX8 a throwing write shows "Export failed"', (tester) async {
++      final rig = await pumpFlat(tester);
++      rig.files
++        ..scriptSaveLocation(name: 'flat.pdf', location: '/out/flat.pdf')
++        ..failNextWrite(const FileSystemException('disk full'));
++      await openDialog(tester);
++      await tapKey2(tester, 'export-ok');
++      await settleUntil(tester,
++          () => find.byKey(const Key('document-error')).evaluate().isNotEmpty);
++      expect(find.byKey(const Key('document-error')), findsOneWidget);
++      expect(
++          tester
++              .widget<Text>(find.byKey(const Key('document-error-title')))
++              .data,
++          'Export failed');
++      expect(
++          tester
++              .widget<Text>(find.byKey(const Key('document-error-text')))
++              .data,
++          contains('disk full'));
++      expect(rig.session.busy.value, isTrue,
++          reason: 'busy while the error is up');
++      await dismissError(tester);
++      expect(rig.session.busy.value, isFalse);
++      expect(rig.files.writes, hasLength(1), reason: 'the attempt');
++    });
++
++    testWidgets(
++        'EX8b a save panel that throws shows "Export failed" and writes '
++        'nothing', (tester) async {
++      final rig = await pumpFlat(tester);
++      rig.files.scriptSaveLocationThrow(const FileSystemException('no panel'));
++      await openDialog(tester);
++      await tapKey2(tester, 'export-ok');
++      await settleUntil(tester,
++          () => find.byKey(const Key('document-error')).evaluate().isNotEmpty);
++      expect(
++          tester
++              .widget<Text>(find.byKey(const Key('document-error-title')))
++              .data,
++          'Export failed');
++      expect(rig.files.writes, isEmpty);
++      await dismissError(tester);
++      expect(rig.session.busy.value, isFalse);
++    });
++
++    testWidgets(
++        'EX13-open the file kind comes from the export\'s extension: a name '
++        'the library does not make (.svg, none) is an error shown as '
++        '"Export failed", nothing asked and nothing written', (tester) async {
++      final rig = await pumpFlat(tester);
++      for (final name in ['flat.svg', 'flat']) {
++        final flow = rig.host.exportFlow(
++            PlanExport(bytes: Uint8List(3), name: name, mimeType: 'image/svg'));
++        await tester.pump();
++        expect(
++            tester
++                .widget<Text>(find.byKey(const Key('document-error-title')))
++                .data,
++            'Export failed');
++        expect(
++            tester
++                .widget<Text>(find.byKey(const Key('document-error-text')))
++                .data,
++            contains(name));
++        await dismissError(tester);
++        await flow;
++        expect(rig.session.busy.value, isFalse);
++      }
++      expect(rig.files.saveLocationCalls, isEmpty);
++      expect(rig.files.writes, isEmpty);
++    });
++  });
++
++  group('T-10 enabled', () {
++    testWidgets(
++        'EX9b Export and Print follow the page: removed, undone, redone '
++        '(the bar\'s flags listen to the plan\'s page)', (tester) async {
++      final rig = await pumpFlat(tester);
++      final c = rig.controller;
++      final root = c.document.rootHandle;
++      bool both() => on(tester, 'export') && on(tester, 'print');
++      bool neither() => !on(tester, 'export') && !on(tester, 'print');
++      Future<void> settle() async {
++        await tester.pump();
++        await tester.pump(const Duration(milliseconds: 100));
++        await tester.pump();
++      }
++
++      expect(both(), isTrue, reason: 'premise: a page');
++      c.document.commands
++          .execute(SetComponentCommand<PageComponent>(root, null));
++      await settle();
++      expect(pageOf(c), isNull, reason: 'premise: removed');
++      expect(neither(), isTrue, reason: 'removed');
++      c.document.commands.undo();
++      await settle();
++      expect(pageOf(c), isNotNull, reason: 'premise: undone');
++      expect(both(), isTrue, reason: 'attached again by the undo');
++      c.document.commands.redo();
++      await settle();
++      expect(pageOf(c), isNull, reason: 'premise: redone');
++      expect(neither(), isTrue, reason: 'redone');
++    });
++
++    testWidgets(
++        'EX10-open Export during another flow does nothing: with a Save As '
++        'write held (the app busy), the button and Cmd+E open no dialog; '
++        'after it ends they do', (tester) async {
++      final rig = await pumpFlat(tester);
++      final files = rig.files
++        ..holdWrites = true
++        ..scriptSaveLocation(name: 'flat.jetplan', location: '/p/f2');
++      final saving = rig.host.saveAsStep();
++      await tester.pump();
++      expect(files.heldWrites, hasLength(1), reason: 'premise: held');
++      expect(rig.session.busy.value, isTrue, reason: 'premise: busy');
++      expect(on(tester, 'export'), isTrue,
++          reason: 'the library cannot grey the button (decision 5)');
++      await tester.tap(exportButton);
++      await tester.pump();
++      await tester.pump();
++      await chord(tester, LogicalKeyboardKey.meta, LogicalKeyboardKey.keyE);
++      await tester.pump();
++      expect(find.byKey(const Key('export-dialog')), findsNothing);
++      expect(rig.session.busy.value, isTrue, reason: 'still the write\'s');
++      expect(files.heldWrites, hasLength(1));
++      files.heldWrites.single.complete();
++      await saving;
++      await tester.pump();
++      expect(rig.session.busy.value, isFalse);
++      await openDialog(tester);
++      await tapKey2(tester, 'export-cancel');
++    });
++  });
++
++  group('T-10 chords', () {
++    for (final (modifier, label) in [
++      (LogicalKeyboardKey.meta, 'Cmd'),
++      (LogicalKeyboardKey.control, 'Ctrl'),
++    ]) {
++      testWidgets(
++          'EX12 with the dialog open, $label+P and $label+E are consumed: '
++          'nothing runs, no second dialog, no print', (tester) async {
++        final printer = FakePagePrinter();
++        final rig = await pumpFlat(tester, printer: printer);
++        await openDialog(tester);
++        for (final key in [LogicalKeyboardKey.keyP, LogicalKeyboardKey.keyE]) {
++          await chord(tester, modifier, key);
++          await tester.pump();
++        }
++        expect(tester.takeException(), isNull);
++        expect(find.byKey(const Key('export-dialog')), findsOneWidget);
++        expect(printer.calls, isEmpty);
++        expect(rig.files.saveLocationCalls, isEmpty);
++        expect(rig.files.writes, isEmpty);
++        await tapKey2(tester, 'export-cancel');
++        expect(find.byKey(const Key('export-dialog')), findsNothing);
++        expect(printer.calls, isEmpty, reason: 'nothing queued behind it');
++      });
++    }
++  });
++
++  group('the flow\'s parts', () {
++    testWidgets(
++        'EX14-open a bare app exports a PDF named after the session '
++        '(Untitled.pdf) in the library\'s default font', (tester) async {
++      final rig = await pumpApp(tester);
++      expect(rig.session.name, 'Untitled', reason: 'premise: untitled');
++      rig.files.scriptSaveLocation(name: 'Untitled.pdf', location: '/out/u');
++      await openDialog(tester);
++      await tapKey2(tester, 'export-ok');
++      await settleWrites(tester, rig.files);
++      expect(rig.files.saveLocationCalls, ['Untitled.pdf']);
++      expect(rig.files.writes.single.kind, FileKind.pdf);
++      expect(rig.files.writes.single.bytes.sublist(0, 4), '%PDF'.codeUnits);
++    });
++  });
++}
+diff --git a/apps/architecture_demo/test/export/export_font_test.dart b/apps/architecture_demo/test/export/export_font_test.dart
+new file mode 100644
+index 00000000..d2ab4337
+--- /dev/null
++++ b/apps/architecture_demo/test/export/export_font_test.dart
+@@ -0,0 +1,121 @@
++// Ported from apps/floor_planner/test/export/export_font_test.dart (audit
++// docs/superpowers/specs/2026-10-16-architecture-demo-test-audit.md, section
++// "export/export_font_test.dart"): EF9 SPLIT, EF11, EF12 PORT, EF1, EF2,
++// EF10 COVERED, EF3 DROPPED; EF4-EF8 are not 3b (ported in the plan library).
++//
++// COVERED, checked (each opened and read), in packages/jet_cad_2d_plan/test:
++//   EF1, EF2  fonts/plan_assets_test.dart:55 (W-F1: the font and the licence
++//             are the vendored ones byte for byte)
++//   EF10      export/export_font_test.dart:38 (EF4, the bundled font through
++//             rootBundle) and export/page_flows_test.dart:441 (PF13, the
++//             controller's default fonts); the app gives the controller no
++//             font, so the default is what runs (EF9-open below exports in it)
++// DROPPED: EF3 -- the app owns no font copy or README; the plan package's
++//   `assets/fonts/README.md` records the digest.
++//
++// Decided: premise impossible (the app has no font injection): EF9's "the
++// app hands its cache to the host" is gone; its intent is that the font
++// survives a document swap, which holds because one `PlanController` is
++// kept across New and Open (the cache is the controller's).
++import 'dart:io';
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart' show PlanExportChoice;
++
++import '../support/app_rig.dart';
++import '../support/export_rig.dart';
++
++void main() {
++  group('T-12 the app and its font', () {
++    testWidgets(
++        'EF9-open one PlanController is kept across New and Open, so the '
++        'export font it holds survives a document swap: an export after each '
++        'embeds the font', (tester) async {
++      final rig = await pumpFlat(tester);
++      final controller = rig.controller;
++
++      Future<void> exportsInTheFont() async {
++        final export = await tester.runAsync(() =>
++            controller.export('plan.pdf', PlanExportChoice.initial, name: 'x'));
++        final content = parsePdf(export!.bytes);
++        expect(content.textRuns, isNotEmpty, reason: 'premise: has text');
++        for (final run in content.textRuns) {
++          expect(run.fontInfo.fontFile, '/FontFile2',
++              reason: 'the bundled font is embedded');
++        }
++      }
++
++      await exportsInTheFont();
++      await rig.host.newFlow();
++      await tester.pump();
++      expect(rig.controller, same(controller), reason: 'after New');
++      // A new plan has no labels; the sample is the plan with text.
++      await rig.host.openSampleFlow();
++      await tester.pump();
++      expect(rig.controller, same(controller), reason: 'after Open sample');
++      await exportsInTheFont();
++      rig.files.scriptOpen(
++          name: 'again.jetplan', bytes: sampleBytes(), location: '/p/a');
++      await rig.host.openFlow();
++      await tester.pump();
++      expect(rig.controller, same(controller), reason: 'after Open');
++      await exportsInTheFont();
++    });
++  });
++
++  group('main', () {
++    // No test runs `main()` (it calls `runApp`), so the lines that make the
++    // font and the licence appear in the running app are pinned by source,
++    // as the old app pinned them.
++    String mainBody() {
++      final source = File('lib/main.dart').readAsStringSync();
++      final start = source.indexOf('main() async {');
++      expect(start, isNonNegative, reason: 'premise: main() is found');
++      final end = source.indexOf('\n}', start);
++      expect(end, greaterThan(start), reason: 'premise: its body ends');
++      // Comments do not run: a commented-out call is no call.
++      return source
++          .substring(start, end)
++          .replaceAll(RegExp(r'//[^\n]*'), '')
++          .replaceAll(RegExp(r'/\*.*?\*/', dotAll: true), '');
++    }
++
++    test(
++        'EF11 main() initialises the binding, awaits the plan font, '
++        'registers the licence, then runs the app', () {
++      final body = mainBody();
++      final binding =
++          body.indexOf('WidgetsFlutterBinding.ensureInitialized();');
++      final font = body.indexOf('await ensurePlanFonts();');
++      final licence = body.indexOf('registerFontLicences();');
++      final run = body.indexOf('runApp(');
++      expect(binding, isNonNegative, reason: 'the binding is initialised');
++      expect(font, isNonNegative, reason: 'the font is registered, awaited');
++      expect(licence, isNonNegative, reason: 'the licence is registered');
++      expect(run, isNonNegative, reason: 'premise: main() runs the app');
++      expect(binding, lessThan(font));
++      expect(font, lessThan(licence));
++      expect(licence, lessThan(run), reason: 'before the app runs');
++    });
++
++    test(
++        'EF12 the pubspec declares the bare family Roboto from the plan '
++        'package\'s font (on the web the engine fetches another Roboto when '
++        'the manifest has none)', () {
++      final pubspec = File('pubspec.yaml').readAsStringSync();
++      expect(
++          RegExp(
++                  r'^\s*fonts:\s*\n\s*-\s*family:\s*Roboto\s*\n\s*fonts:\s*\n'
++                  r'\s*-\s*asset:\s*packages/jet_cad_2d_plan/fonts/'
++                  r'Roboto-Regular\.ttf\s*$',
++                  multiLine: true)
++              .hasMatch(pubspec),
++          isTrue);
++      // The path resolves under the package's lib/.
++      expect(
++          File('../../packages/jet_cad_2d_plan/lib/fonts/Roboto-Regular.ttf')
++              .existsSync(),
++          isTrue);
++    });
++  });
++}
+diff --git a/apps/architecture_demo/test/export/print_flow_test.dart b/apps/architecture_demo/test/export/print_flow_test.dart
+new file mode 100644
+index 00000000..e9a58569
+--- /dev/null
++++ b/apps/architecture_demo/test/export/print_flow_test.dart
+@@ -0,0 +1,256 @@
++// Ported from apps/floor_planner/test/export/print_flow_test.dart (audit
++// docs/superpowers/specs/2026-10-16-architecture-demo-test-audit.md, section
++// "export/print_flow_test.dart"): PR1, PR3, PR5, PR10 SPLIT, PR6, PR8 PORT,
++// PR2, PR4, PR7, PR9 COVERED.
++//
++// COVERED, checked (each opened and read), in packages/jet_cad_2d_plan/test:
++//   PR2  export/registry_test.dart:240 (X-7: the format from the page's
++//        effective size in pt); the A3 portrait fixture itself is in
++//        jet_cad_2d_flutter's export/export_pdf_test.dart
++//   PR4  editor/plan_editor_test.dart:360 (ED-X1); shortcuts/
++//        plan_shortcuts_test.dart:308 (KB-6); export/page_flows_test.dart:161
++//        (PF3, print answers false)
++//   PR7  editor/plan_editor_test.dart:133 (ED-3: export, print in order);
++//        editor/editor_words_test.dart:134 (SW1, "Yazdir... (Ctrl+P)")
++//   PR9  export/registry_test.dart:260 (X-8)
++// Intent halves of the SPLIT rows: X-7, PF3 (name, format in pt, %PDF), PF9
++// and PF11 (page_flows_test.dart:324, :388: the error is reported once and
++// the guard is free), PF7 (:217, the library's print and export hold each
++// other).
++//
++// Decided: premise impossible (spec decision 5): the old tests asserted the
++// buttons *disabled* while a flow runs; the -open forms assert the callback
++// or the printer does nothing while the app is busy. The separator the old PR1
++// checked is not in the architecture kit's plan (its omission is I
++// `separator/separator_export_test.dart`).
++import 'dart:async';
++import 'dart:io';
++import 'dart:typed_data';
++
++import 'package:flutter/material.dart';
++import 'package:flutter/services.dart'
++    show LogicalKeyboardKey, MethodCall, MethodChannel;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:pdf/pdf.dart' show PdfPageFormat;
++
++import '../support/app_fakes.dart';
++import '../support/app_rig.dart';
++import '../support/export_rig.dart';
++
++void main() {
++  group('T-10 Print', () {
++    testWidgets(
++        'PR1-open the button hands the printer one export: the content '
++        'stream of Export -> PDF, the session\'s name, the page in pt',
++        (tester) async {
++      final printer = FakePagePrinter();
++      final rig = await pumpFlat(tester, printer: printer);
++      expect(on(tester, 'print'), isTrue);
++
++      await tester.tap(printButton);
++      await settleUntil(tester, () => printer.calls.isNotEmpty);
++      await tester.pump();
++      noDialog(tester);
++      expect(printer.calls, hasLength(1), reason: 'printed once');
++      final call = printer.calls.single;
++      expect(call.name, 'flat');
++      expect(call.format.width, closeTo(297 * ptPerMm, 1e-9));
++      expect(call.format.height, closeTo(210 * ptPerMm, 1e-9));
++      expect(call.pdf.sublist(0, 4), '%PDF'.codeUnits);
++      expect(rig.files.saveLocationCalls, isEmpty, reason: 'nothing is saved');
++      expect(rig.files.writes, isEmpty);
++      expect(rig.session.busy.value, isFalse);
++
++      final printed = parsePdf(call.pdf);
++      final reference = await referenceExport(tester, rig.controller);
++      expect(operatorsOf(printed), operatorsOf(reference),
++          reason: 'the same content stream as an export');
++      expect(printed.mediaBox, reference.mediaBox);
++      expect(printed.mediaBox[2], closeTo(call.format.width, 1e-3));
++      expect(printed.mediaBox[3], closeTo(call.format.height, 1e-3));
++      expect(printed.textRuns, isNotEmpty, reason: 'premise: text embedded');
++    });
++
++    testWidgets(
++        'PR3-open a throwing printer shows the page-flow error dialog '
++        '(neutral words, the thrown text); the print job is over, so the app '
++        'is not busy meanwhile', (tester) async {
++      final printer = FakePagePrinter()
++        ..failNext = const FileSystemException('no printer');
++      final rig = await pumpFlat(tester, printer: printer);
++      await tester.tap(printButton);
++      await settleUntil(tester,
++          () => find.byKey(const Key('document-error')).evaluate().isNotEmpty);
++      expect(find.byKey(const Key('document-error')), findsOneWidget);
++      expect(
++          tester
++              .widget<Text>(find.byKey(const Key('document-error-title')))
++              .data,
++          'The page could not be exported or printed');
++      expect(
++          tester
++              .widget<Text>(find.byKey(const Key('document-error-text')))
++              .data,
++          contains('no printer'));
++      // Decided: the printer's busy span ends when its job throws; the
++      // library reports the error after that, and the app shows it unheld
++      // (the dialog is modal, the file chords are consumed above it).
++      expect(rig.session.busy.value, isFalse);
++      await dismissError(tester);
++      expect(find.byKey(const Key('document-error')), findsNothing);
++      expect(printer.calls, hasLength(1), reason: 'one error, one dialog');
++    });
++  });
++
++  group('T-10 Print waits', () {
++    testWidgets(
++        'PR10-open busy while the print dialog is up: Save does nothing, '
++        'Print and Export are held by the library, a second Cmd+P prints '
++        'nothing; busy ends with the job', (tester) async {
++      final printer = FakePagePrinter()..hold = true;
++      final rig = await pumpFlat(tester, printer: printer);
++      expect([
++        on(tester, 'print'),
++        on(tester, 'save'),
++        on(tester, 'export')
++      ], [
++        true,
++        true,
++        true
++      ], reason: 'premise: idle');
++      await tester.tap(printButton);
++      await settleUntil(tester, () => printer.held.isNotEmpty);
++      expect(printer.held, hasLength(1), reason: 'premise: the dialog is up');
++      // The dialog stays up a while: the flow waits for it, not a timer.
++      await tester.pump(const Duration(seconds: 30));
++      expect(rig.session.busy.value, isTrue);
++      expect(on(tester, 'print'), isFalse, reason: 'the library holds Print');
++      expect(on(tester, 'export'), isFalse, reason: 'the library holds Export');
++      expect(on(tester, 'save'), isTrue,
++          reason: 'the library cannot grey Save (decision 5)');
++      await tester.tap(find.byKey(const Key('toolbar-save')));
++      await tester.pump();
++      await chord(tester, LogicalKeyboardKey.meta, LogicalKeyboardKey.keyS);
++      await chord(tester, LogicalKeyboardKey.meta, LogicalKeyboardKey.keyP);
++      await tester.pump();
++      expect(rig.files.saveLocationCalls, isEmpty);
++      expect(rig.files.writes, isEmpty);
++      expect(printer.calls, hasLength(1), reason: 'no second print');
++      printer.held.single.complete();
++      await tester.pump();
++      await tester.pump();
++      expect(rig.session.busy.value, isFalse);
++      expect([on(tester, 'print'), on(tester, 'save'), on(tester, 'export')],
++          [true, true, true]);
++    });
++  });
++
++  group('T-10 Print enabled', () {
++    testWidgets(
++        'PR5-open Print during another flow prints nothing: with a Save As '
++        'write held the button and Cmd+P hand the printer no job; after it '
++        'ends Print works', (tester) async {
++      final printer = FakePagePrinter();
++      final rig = await pumpFlat(tester, printer: printer);
++      final files = rig.files
++        ..holdWrites = true
++        ..scriptSaveLocation(name: 'flat.jetplan', location: '/p/f2');
++      final saving = rig.host.saveAsStep();
++      await tester.pump();
++      expect(rig.session.busy.value, isTrue, reason: 'premise: busy');
++      expect(on(tester, 'print'), isTrue,
++          reason: 'the library cannot grey the button (decision 5)');
++      await tester.tap(printButton);
++      await chord(tester, LogicalKeyboardKey.meta, LogicalKeyboardKey.keyP);
++      await tester.runAsync(
++          () => Future<void>.delayed(const Duration(milliseconds: 300)));
++      await tester.pump();
++      expect(printer.calls, isEmpty);
++      expect(rig.session.busy.value, isTrue, reason: 'still the write\'s');
++      files.heldWrites.single.complete();
++      await saving;
++      await tester.pump();
++      expect(rig.session.busy.value, isFalse);
++      await tester.tap(printButton);
++      await settleUntil(tester, () => printer.calls.isNotEmpty);
++      expect(printer.calls, hasLength(1));
++    });
++  });
++
++  group('T-10 Print chords', () {
++    for (final (modifier, label) in [
++      (LogicalKeyboardKey.meta, 'Cmd'),
++      (LogicalKeyboardKey.control, 'Ctrl'),
++    ]) {
++      testWidgets('PR6 $label+P prints, once', (tester) async {
++        final printer = FakePagePrinter();
++        await pumpFlat(tester, printer: printer);
++        await chord(tester, modifier, LogicalKeyboardKey.keyP);
++        await settleUntil(tester, () => printer.calls.isNotEmpty);
++        await tester.pump();
++        noDialog(tester);
++        expect(printer.calls, hasLength(1));
++        expect(printer.calls.single.name, 'flat');
++      });
++    }
++  });
++
++  testWidgets(
++      'PR8 the production printer, at printing\'s platform channel: the '
++      'name, the page in pt, no dynamic layout, and the given bytes laid out '
++      'whatever paper the dialog asks for', (tester) async {
++    // printing's method-channel protocol (printing 5.15.1,
++    // method_channel.dart): Dart asks `printPdf`, the platform calls back
++    // `onLayout` for the bytes and `onCompleted` when the dialog closes.
++    const channel = MethodChannel('net.nfet.printing');
++    final messenger = tester.binding.defaultBinaryMessenger;
++    Map<Object?, Object?>? asked;
++    messenger.setMockMethodCallHandler(channel, (call) async {
++      if (call.method == 'printPdf') {
++        asked = call.arguments as Map<Object?, Object?>;
++        return 1;
++      }
++      return null;
++    });
++    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
++    Future<Object?> fromPlatform(String method, Map<String, Object?> args) {
++      final reply = Completer<Object?>();
++      messenger.handlePlatformMessage(
++          channel.name,
++          channel.codec.encodeMethodCall(MethodCall(method, args)),
++          (data) => reply.complete(
++              data == null ? null : channel.codec.decodeEnvelope(data)));
++      return reply.future;
++    }
++
++    final pdf = Uint8List.fromList(List.generate(64, (i) => (i * 37) % 251));
++    const format = PdfPageFormat(1190.5, 841.75);
++    var done = false;
++    final printing = const PrintingPagePrinter()
++        .print(pdf, 'flat', format)
++        .then((_) => done = true);
++    await tester.pump();
++    expect(asked, isNotNull, reason: 'the dialog was asked for');
++    expect(asked!['name'], 'flat');
++    expect(asked!['width'], 1190.5);
++    expect(asked!['height'], 841.75);
++    expect(asked!['dynamic'], isFalse);
++    final job = asked!['job'];
++    // The dialog asks for another paper (A4 portrait): the same bytes.
++    final laid = await fromPlatform('onLayout', {
++      'job': job,
++      'width': 595.0,
++      'height': 842.0,
++      'marginLeft': 0.0,
++      'marginTop': 0.0,
++      'marginRight': 0.0,
++      'marginBottom': 0.0,
++    });
++    expect(laid, pdf);
++    expect(done, isFalse, reason: 'it waits for the dialog');
++    await fromPlatform('onCompleted', {'job': job, 'completed': true});
++    await printing;
++    expect(done, isTrue);
++  });
++}
+diff --git a/apps/architecture_demo/test/support/app_fakes.dart b/apps/architecture_demo/test/support/app_fakes.dart
+index d16ae08d..d63abb3d 100644
+--- a/apps/architecture_demo/test/support/app_fakes.dart
++++ b/apps/architecture_demo/test/support/app_fakes.dart
+@@ -1,13 +1,15 @@
+ import 'dart:async';
+ import 'dart:typed_data';
+ 
+ import 'package:architecture_demo/document_files.dart';
+ import 'package:architecture_demo/exit_guard.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart' show PagePrinter;
++import 'package:pdf/pdf.dart' show PdfPageFormat;
+ 
+ /// One call to [FakeDocumentFiles.write], as it was made.
+ typedef FakeWrite = ({
+   Object location,
+   String name,
+   Uint8List bytes,
+   FileKind kind
+ });
+@@ -145,8 +147,47 @@ class FakeExitGuard implements ExitGuard {
+   set armed(bool value) {
+     if (disposed) throw StateError('FakeExitGuard: armed after dispose');
+     armings.add(value);
+   }
+ 
+   @override
+   void dispose() => disposed = true;
+ }
++
++/// One call to [FakePagePrinter.print], as it was made.
++class PrintCall {
++  PrintCall(this.pdf, this.name, this.format);
++
++  final Uint8List pdf;
++  final String name;
++  final PdfPageFormat format;
++}
++
++/// A [PagePrinter] for tests (ported from the old app's fake): records every
++/// call's bytes, name and page format; throws [failNext] once when set;
++/// while [hold] is set, keeps each call open (as the system print dialog
++/// does) until the test completes its completer in [held].
++class FakePagePrinter implements PagePrinter {
++  final List<PrintCall> calls = [];
++
++  /// Thrown by the next call, then cleared.
++  Object? failNext;
++
++  /// When true, each call waits on a completer added to [held].
++  bool hold = false;
++
++  /// The open calls' completers, in call order, while [hold] is set.
++  final List<Completer<void>> held = [];
++
++  @override
++  Future<void> print(Uint8List pdf, String name, PdfPageFormat format) async {
++    calls.add(PrintCall(pdf, name, format));
++    final failure = failNext;
++    failNext = null;
++    if (failure != null) throw failure;
++    if (hold) {
++      final open = Completer<void>();
++      held.add(open);
++      await open.future;
++    }
++  }
++}
+diff --git a/apps/architecture_demo/test/support/export_rig.dart b/apps/architecture_demo/test/support/export_rig.dart
+new file mode 100644
+index 00000000..392b6dfd
+--- /dev/null
++++ b/apps/architecture_demo/test/support/export_rig.dart
+@@ -0,0 +1,103 @@
++// The export and print tests' shared moves (ported from the old app's
++// test/support/export_flat.dart, on the architecture kit's sample): the app
++// pumped over the sample opened as `flat`, the screen's camera turned and
++// panned off the sheet, and the readings of a PDF and a PNG.
++import 'dart:io';
++import 'dart:typed_data';
++
++import 'package:flutter/material.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart' show PageComponent;
++import 'package:jet_cad_2d_flutter/export_testing.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++
++import 'app_fakes.dart';
++import 'app_rig.dart';
++
++const double ptPerMm = 72 / 25.4;
++
++Finder get exportButton => find.byKey(const Key('toolbar-export'));
++Finder get printButton => find.byKey(const Key('toolbar-print'));
++
++/// Whether the toolbar button [id] is enabled, as built.
++bool on(WidgetTester tester, String id) =>
++    tester.widget<IconButton>(find.byKey(Key('toolbar-$id'))).onPressed != null;
++
++/// The app with the sample opened from `flat.jetplan` (at `/p/flat`): titled
++/// `flat`, clean, its page A4 landscape at 1:50 off the origin; the screen's
++/// camera turned and panned far off the sheet, so an export that followed
++/// the screen would plot something else.
++Future<AppRig> pumpFlat(WidgetTester tester,
++    {FakeDocumentFiles? files, PagePrinter? printer}) async {
++  final rig = await pumpApp(tester, files: files, printer: printer);
++  rig.files.scriptOpen(
++      name: 'flat.jetplan', bytes: sampleBytes(), location: '/p/flat');
++  await rig.host.openFlow();
++  await tester.pump();
++  expect(rig.session.name, 'flat', reason: 'premise: titled');
++  expect(rig.controller.dirty.value, isFalse, reason: 'premise: clean');
++  final page = pageOf(rig.controller)!;
++  expect((page.effectiveWidthMm, page.effectiveHeightMm), (297.0, 210.0),
++      reason: 'premise: A4 landscape');
++  expect(page.originX != 0 && page.originY != 0, isTrue,
++      reason: 'premise: the sheet is off the origin');
++  await aimCamera(tester, rig.controller, kFar);
++  return rig;
++}
++
++/// Opens the export dialog through the bar's Export button.
++Future<void> openDialog(WidgetTester tester) async {
++  await tester.tap(exportButton);
++  await tester.pump();
++  await tester.pump();
++  expect(find.byKey(const Key('export-dialog')), findsOneWidget,
++      reason: 'premise: the dialog is up');
++}
++
++/// Taps the widget keyed [key], then two frames.
++Future<void> tapKey2(WidgetTester tester, String key) async {
++  await tester.tap(find.byKey(Key(key)));
++  await tester.pump();
++  await tester.pump();
++}
++
++/// Lets the export's engine work (the bytes, `toImage`, the encoding) run in
++/// real time under `runAsync`, with a pump for the fake zone's continuations,
++/// until [done] (at most 8 s).
++Future<void> settleUntil(WidgetTester tester, bool Function() done) async {
++  for (var i = 0; i < 400 && !done(); i++) {
++    await tester
++        .runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
++    await tester.pump();
++  }
++}
++
++/// [settleUntil] [count] files are written.
++Future<void> settleWrites(WidgetTester tester, FakeDocumentFiles files,
++        {int count = 1}) =>
++    settleUntil(tester, () => files.writes.length >= count);
++
++int pngWidth(Uint8List png) => ByteData.sublistView(png).getUint32(16);
++int pngHeight(Uint8List png) => ByteData.sublistView(png).getUint32(20);
++
++/// The content stream's operators, as written.
++List<String> operatorsOf(PdfContent content) =>
++    [for (final o in content.operators) o.toString()];
++
++PdfContent parsePdf(Uint8List bytes) =>
++    PdfContent.parse(bytes, inflate: zlib.decode);
++
++/// What Export -> PDF of [c]'s plan makes, asked of the library's own
++/// command apart from the app's wiring: the content stream to compare the
++/// app's written or printed bytes with.
++Future<PdfContent> referenceExport(
++    WidgetTester tester, PlanController c) async {
++  final export = await tester.runAsync(
++      () => c.export('plan.pdf', PlanExportChoice.initial, name: 'x'));
++  return parsePdf(export!.bytes);
++}
++
++/// The page [c]'s plan carries, or null when it has none (the library's
++/// `page` notifier is internal).
++PageComponent? pageOf(PlanController c) =>
++    c.document.components.get<PageComponent>(c.document.rootHandle);

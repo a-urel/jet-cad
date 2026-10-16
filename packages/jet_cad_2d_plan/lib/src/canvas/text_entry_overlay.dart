@@ -53,11 +53,32 @@ class TextEntryOverlay extends StatefulWidget {
 class _TextEntryOverlayState extends State<TextEntryOverlay> {
   final FocusNode _focus = FocusNode(debugLabel: 'text-entry');
 
+  /// Withdraws [_settle]'s registration with the controller.
+  VoidCallback? _releaseSettle;
+
   @override
   void initState() {
     super.initState();
+    _releaseSettle = widget.controller.registerSettle(_settle);
     widget.tool.pending.addListener(_onPending);
     _focus.addListener(_onFocus);
+  }
+
+  /// The controller's settle (planner_shell.dart:845-865): an open entry is
+  /// committed through the tool's `finish`, as Enter would (one step, empty
+  /// text commits nothing), and closed; [_onPending] then hands the focus
+  /// back to the canvas, so the focus loss finds nothing to cancel.
+  void _settle() {
+    if (widget.tool.isPending) widget.tool.finish(widget.tools.context);
+  }
+
+  @override
+  void didUpdateWidget(TextEntryOverlay oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.controller, widget.controller)) {
+      _releaseSettle?.call();
+      _releaseSettle = widget.controller.registerSettle(_settle);
+    }
   }
 
   /// A placement takes focus for the field; Ruling 05-7 hands it back to
@@ -122,6 +143,7 @@ class _TextEntryOverlayState extends State<TextEntryOverlay> {
 
   @override
   void dispose() {
+    _releaseSettle?.call();
     widget.tool.pending.removeListener(_onPending);
     _focus.removeListener(_onFocus);
     _focus.dispose();

@@ -1,0 +1,724 @@
+9ad321d6 test(demo): exit, title and language
+7d1bcba0 feat(demo): the exit request, the exit guard and the untitled name
+ apps/architecture_demo/lib/document_host.dart      |  49 ++-
+ .../architecture_demo/test/document_exit_test.dart | 424 +++++++++++++++++++++
+ .../test/document_replace_test.dart                |  43 +++
+ .../test/document_title_test.dart                  |  89 +++++
+ 4 files changed, 604 insertions(+), 1 deletion(-)
+diff --git a/apps/architecture_demo/lib/document_host.dart b/apps/architecture_demo/lib/document_host.dart
+index 3793c454..a526336b 100644
+--- a/apps/architecture_demo/lib/document_host.dart
++++ b/apps/architecture_demo/lib/document_host.dart
+@@ -22,16 +22,17 @@
+ //   after the command. A settle's own commit -- a typed panel value -- is
+ //   therefore not on `dirty` yet when the editor calls the host back.
+ //   `_mayDiscard` yields one microtask before it reads (see there); the
+ //   old app read the dispatcher's `differsFromSave` instead, and the save
+ //   point is private to the controller.
+ import 'dart:async';
+ import 'dart:convert';
+ import 'dart:typed_data';
++import 'dart:ui' show AppExitResponse;
+ 
+ import 'package:flutter/material.dart';
+ import 'package:flutter/scheduler.dart';
+ import 'package:flutter/services.dart' show LogicalKeyboardKey;
+ import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart'
+     show buildSampleFlat;
+ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+ 
+@@ -62,31 +63,34 @@ class DocumentHost extends StatefulWidget {
+       required this.files,
+       this.exitGuard,
+       this.printer = const PrintingPagePrinter()});
+ 
+   final PlanController controller;
+   final DocumentSession session;
+   final DocumentFiles files;
+ 
+-  /// The exit guard the host will arm while the plan is dirty (Task 5); the
++  /// The exit guard the host arms exactly while the plan is dirty; the
+   /// platform's when null.
+   final ExitGuard? exitGuard;
+ 
+   /// Where Print hands the page's PDF.
+   final PagePrinter printer;
+ 
+   @override
+   State<DocumentHost> createState() => DocumentHostState();
+ }
+ 
+ class DocumentHostState extends State<DocumentHost> {
+   PlanController get _controller => widget.controller;
+   DocumentSession get _session => widget.session;
+ 
++  late final AppLifecycleListener _exitListener;
++  late final ExitGuard _exitGuard;
++
+   /// Runs [body] as a flow: busy for its whole span when no flow is running
+   /// yet, cleared however it ends; inside another flow, busy is the outer
+   /// one's.
+   Future<T> _flow<T>(Future<T> Function() body) async {
+     final busy = _session.busy;
+     if (busy.value) return body();
+     busy.value = true;
+     try {
+@@ -124,16 +128,42 @@ class DocumentHostState extends State<DocumentHost> {
+           return true;
+         case SaveChoice.cancel:
+           return false;
+       }
+     }
+     return true;
+   }
+ 
++  /// The app's exit request, in this order: a flow in progress -- a
++  /// dialog, a panel, a write in flight -- cancels, with no second dialog;
++  /// else pending input is settled, so a typed value makes the plan dirty
++  /// rather than being lost; then a clean plan exits and a dirty one asks
++  /// as [_mayDiscard] does. A shape part-way does not block the exit and is
++  /// dropped.
++  ///
++  /// The settle is a discarded `controller.save()` (`settlePendingInput` is
++  /// `@internal`); `_mayDiscard` then yields one microtask before it reads
++  /// `dirty`. A save that throws is not an exit blocker here: the plan is
++  /// then asked about as it stands, and Save shows the error.
++  Future<AppExitResponse> _onExitRequested() async {
++    if (_session.busy.value) return AppExitResponse.cancel;
++    final mayExit = await _flow(() async {
++      try {
++        _controller.save();
++      } catch (_) {
++        // Settled as far as it could; the dialog's Save reports the error.
++      }
++      return _mayDiscard();
++    });
++    return mayExit ? AppExitResponse.exit : AppExitResponse.cancel;
++  }
++
++  void _armExitGuard() => _exitGuard.armed = _controller.dirty.value;
++
+   Future<SaveChoice> _askToSave() async {
+     if (!mounted) return SaveChoice.cancel;
+     final choice = await showDialog<SaveChoice>(
+       context: context,
+       barrierDismissible: false,
+       builder: (_) => _SaveChangesDialog(name: _session.name),
+     );
+     return choice ?? SaveChoice.cancel;
+@@ -285,16 +315,33 @@ class DocumentHostState extends State<DocumentHost> {
+             onPressed: () => Navigator.of(context).pop(),
+             child: Text(AppStrings.of(context).ok),
+           ),
+         ],
+       ),
+     );
+   }
+ 
++  @override
++  void initState() {
++    super.initState();
++    _exitListener = AppLifecycleListener(onExitRequested: _onExitRequested);
++    _exitGuard = widget.exitGuard ?? createExitGuard();
++    _armExitGuard();
++    _controller.dirty.addListener(_armExitGuard);
++  }
++
++  @override
++  void dispose() {
++    _controller.dirty.removeListener(_armExitGuard);
++    _exitGuard.dispose();
++    _exitListener.dispose();
++    super.dispose();
++  }
++
+   @override
+   void didChangeDependencies() {
+     super.didChangeDependencies();
+     if (_session.setUntitledName(AppStrings.of(context).untitled)) {
+       // Not during this build: the app's title listens to the session.
+       SchedulerBinding.instance.addPostFrameCallback((_) {
+         if (mounted) _session.nameChanged();
+       });
+diff --git a/apps/architecture_demo/test/document_exit_test.dart b/apps/architecture_demo/test/document_exit_test.dart
+new file mode 100644
+index 00000000..b43a41e2
+--- /dev/null
++++ b/apps/architecture_demo/test/document_exit_test.dart
+@@ -0,0 +1,424 @@
++// Ported from apps/floor_planner/test/document_exit_test.dart (audit
++// docs/superpowers/specs/2026-10-16-architecture-demo-test-audit.md, section
++// "document_exit_test.dart"): EX1-EX7 and EG1, all PORT. The app's exit
++// request (Cmd+Q, Quit, the window's close button on macOS) is driven through
++// the binding, so the host's AppLifecycleListener is registered and disposed
++// for real. In order: busy cancels with no second dialog; pending input is
++// settled; a clean plan exits; a dirty one asks Save / Don't Save / Cancel. A
++// shape part-way does not block. And the web's exit guard is armed exactly
++// while the plan is dirty, across a swap.
++//
++// Differences from the old file, all of the port: the document, the dirty
++// flag and the save point are the controller's (`controller.document`,
++// `controller.dirty`), the edits go through the kit's Wall tool, and EX5's
++// typed value is the architecture kit's `property-thickness` field.
++// Library half of EX5: packages/jet_cad_2d_plan/test/controller/
++// plan_controller_test.dart C11.
++import 'dart:ui' show AppExitResponse;
++
++import 'package:flutter/material.dart';
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
++import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import 'support/app_fakes.dart';
++import 'support/app_rig.dart';
++
++/// Far from the origin and from the page, where the edits land.
++final Vector2 far = Vector2(44321.75, -36543.25);
++
++Finder get dialog => find.byKey(const Key('replace-dialog'));
++
++/// The app edited through the Wall tool far from the origin under a rotated
++/// camera, the shape ended, then saved as `/p/hall`: titled, clean, with
++/// history.
++Future<void> titledClean(AppRig rig) async {
++  final tester = rig.tester;
++  final c = rig.controller;
++  await aimCamera(tester, c, far);
++  await drawWall(
++      tester, c, far + Vector2(-1500, -200), far + Vector2(1500, 400));
++  rig.files.scriptSaveLocation(name: 'hall.jetplan', location: '/p/hall');
++  await chord(tester, LogicalKeyboardKey.meta, LogicalKeyboardKey.keyS);
++  await tester.pump();
++  expect(rig.files.writes, isNotEmpty, reason: 'premise: saved');
++  expect(c.dirty.value, isFalse, reason: 'premise: clean');
++  expect(c.document.commands.undoDepth, 1, reason: 'premise: history');
++  expect(rig.session.name, 'hall', reason: 'premise: titled');
++}
++
++/// [titledClean], then one more wall: dirty, with history.
++Future<void> titledDirty(AppRig rig) async {
++  await titledClean(rig);
++  await drawWall(rig.tester, rig.controller, far + Vector2(-400, 1600),
++      far + Vector2(2200, 1600));
++  expect(rig.controller.dirty.value, isTrue, reason: 'premise: dirty');
++  expect(rig.controller.document.commands.undoDepth, 2, reason: 'premise');
++}
++
++/// Asks the app to exit, as the engine does for Cmd+Q, and pumps a frame;
++/// for a request that must answer without asking: it fails, rather than
++/// waits forever, if the request put up a dialog.
++Future<AppExitResponse> requestExit(WidgetTester tester) async {
++  final before = tester.widgetList(dialog).length;
++  final response = tester.binding.handleRequestAppExit();
++  await tester.pump();
++  expect(tester.widgetList(dialog).length, before,
++      reason: 'the request asked nothing');
++  return response;
++}
++
++void main() {
++  testWidgets(
++      'EX1 a clean plan exits with no dialog: the launch plan, one saved as '
++      'just before, and one saved in place (spec 12a D11, S-18; M-12a-2)',
++      (tester) async {
++    final rig = await pumpApp(tester);
++    final files = rig.files;
++    final c = rig.controller;
++
++    // The launch plan, never edited.
++    expect(await requestExit(tester), AppExitResponse.exit);
++    expect(dialog, findsNothing);
++
++    // Edited, then Cmd+S (a Save As), then the exit: no dialog. No premise
++    // reads the save point in between, so the exit is what sees it.
++    final doc = c.document;
++    await aimCamera(tester, c, far);
++    await drawWall(
++        tester, c, far + Vector2(-1500, -200), far + Vector2(1500, 400));
++    files.scriptSaveLocation(name: 'hall.jetplan', location: '/p/hall');
++    await chord(tester, LogicalKeyboardKey.meta, LogicalKeyboardKey.keyS);
++    await tester.pump();
++    expect(files.writes, hasLength(1), reason: 'premise: written');
++    expect(await requestExit(tester), AppExitResponse.exit,
++        reason: 'saved, so nothing to ask');
++
++    // Edited again and saved in place: the same.
++    await drawWall(tester, c, far + Vector2(0, -2000), far + Vector2(0, 2000));
++    await chord(tester, LogicalKeyboardKey.meta, LogicalKeyboardKey.keyS);
++    await tester.pump();
++    expect(files.writes.last.location, '/p/hall', reason: 'premise: in place');
++    expect(await requestExit(tester), AppExitResponse.exit,
++        reason: 'saved in place, so nothing to ask');
++    expect(identical(c.document, doc), isTrue);
++    expect(rig.session.busy.value, isFalse);
++  });
++
++  testWidgets(
++      'EX2 a dirty plan asks: Cancel (and Escape) cancel and keep '
++      'everything; Save that fails cancels; Don\'t Save exits without '
++      'writing; Save that succeeds writes the plan\'s bytes and exits '
++      '(spec 12a D11)', (tester) async {
++    final rig = await pumpApp(tester);
++    final files = rig.files;
++    final c = rig.controller;
++    final session = rig.session;
++    await titledDirty(rig);
++    final doc = c.document;
++    final writes = files.writes.length;
++
++    void expectKept(String reason) {
++      expect(identical(c.document, doc), isTrue, reason: reason);
++      expect(doc.commands.isDisposed, isFalse, reason: reason);
++      expect(doc.commands.undoDepth, 2, reason: reason);
++      expect(c.dirty.value, isTrue, reason: reason);
++      expect(session.busy.value, isFalse, reason: reason);
++      expect(dialog, findsNothing, reason: reason);
++    }
++
++    // Cancel.
++    var response = tester.binding.handleRequestAppExit();
++    await tester.pump();
++    expect(dialog, findsOneWidget);
++    expect(session.busy.value, isTrue, reason: 'busy under the dialog');
++    await answerReplace(tester, 'replace-cancel');
++    noDialog(tester);
++    expect(await response, AppExitResponse.cancel);
++    expectKept('Cancel');
++
++    // Escape.
++    response = tester.binding.handleRequestAppExit();
++    await tester.pump();
++    expect(dialog, findsOneWidget);
++    await press(tester, LogicalKeyboardKey.escape);
++    await tester.pump();
++    expect(dialog, findsNothing, reason: 'Escape answered it');
++    noDialog(tester);
++    expect(await response, AppExitResponse.cancel);
++    expectKept('Escape');
++    expect(files.writes, hasLength(writes), reason: 'nothing written');
++
++    // Save, and the write fails: the error, then cancel.
++    files.failNextWrite(StateError('the disk is full'));
++    response = tester.binding.handleRequestAppExit();
++    await tester.pump();
++    await answerReplace(tester, 'replace-save');
++    expect(find.byKey(const Key('document-error')), findsOneWidget);
++    await dismissError(tester);
++    noDialog(tester);
++    expect(await response, AppExitResponse.cancel);
++    expectKept('a failed save');
++    expect(files.writes, hasLength(writes + 1), reason: 'it was tried');
++
++    // Don't Save: exit, and nothing is written.
++    response = tester.binding.handleRequestAppExit();
++    await tester.pump();
++    await answerReplace(tester, 'replace-discard');
++    noDialog(tester);
++    expect(await response, AppExitResponse.exit);
++    expect(files.writes, hasLength(writes + 1));
++    expect(identical(c.document, doc), isTrue, reason: 'not replaced');
++    expect(session.busy.value, isFalse);
++
++    // Save, and it succeeds: the bytes, then exit.
++    final before = bytesOf(c);
++    response = tester.binding.handleRequestAppExit();
++    await tester.pump();
++    await answerReplace(tester, 'replace-save');
++    noDialog(tester);
++    expect(await response, AppExitResponse.exit);
++    expect(files.writes.last.location, '/p/hall');
++    expect(files.writes.last.bytes, before);
++    expect(c.dirty.value, isFalse);
++    expect(session.busy.value, isFalse);
++    expect(files.unscriptedCalls, 0);
++  });
++
++  testWidgets(
++      'EX3 an untitled dirty plan: Save runs Save As; a cancelled panel '
++      'cancels the exit (spec 12a D9, D11)', (tester) async {
++    final rig = await pumpApp(tester);
++    final files = rig.files;
++    final c = rig.controller;
++    await aimCamera(tester, c, far);
++    await drawWall(tester, c, far, far + Vector2(-2500, 1200));
++    expect(c.dirty.value, isTrue, reason: 'premise');
++
++    files.scriptSaveCancel();
++    var response = tester.binding.handleRequestAppExit();
++    await tester.pump();
++    await answerReplace(tester, 'replace-save');
++    noDialog(tester);
++    expect(await response, AppExitResponse.cancel);
++    expect(files.saveLocationCalls, ['Untitled.jetplan']);
++    expect(files.writes, isEmpty);
++    expect(c.dirty.value, isTrue);
++    expect(rig.session.busy.value, isFalse);
++
++    files.scriptSaveLocation(name: 'porch.jetplan', location: '/p/porch');
++    response = tester.binding.handleRequestAppExit();
++    await tester.pump();
++    await answerReplace(tester, 'replace-save');
++    noDialog(tester);
++    expect(await response, AppExitResponse.exit);
++    expect(files.writes.single.location, '/p/porch');
++    expect(files.writes.single.bytes, bytesOf(c));
++    expect(c.dirty.value, isFalse);
++    expect(files.unscriptedCalls, 0);
++  });
++
++  testWidgets(
++      'EX4 busy cancels at once with no second dialog: while a New asks, '
++      'while a save is held, and while the exit\'s own save is held; an '
++      'edit during that held save asks again (spec 12a D10, D11, S-17, T-8)',
++      (tester) async {
++    final rig = await pumpApp(tester);
++    final files = rig.files;
++    final c = rig.controller;
++    final session = rig.session;
++    await titledDirty(rig);
++    final doc = c.document;
++
++    // A New's dialog is up.
++    final newing = rig.host.newFlow();
++    await tester.pump();
++    expect(dialog, findsOneWidget, reason: 'premise');
++    expect(await requestExit(tester), AppExitResponse.cancel);
++    expect(dialog, findsOneWidget, reason: 'no second dialog');
++    await answerReplace(tester, 'replace-cancel');
++    noDialog(tester);
++    await newing;
++
++    // A Cmd+S write is held.
++    files.holdWrites = true;
++    await chord(tester, LogicalKeyboardKey.meta, LogicalKeyboardKey.keyS);
++    expect(files.heldWrites, hasLength(1), reason: 'premise');
++    expect(await requestExit(tester), AppExitResponse.cancel);
++    expect(dialog, findsNothing);
++    files.heldWrites.last.complete();
++    await tester.pump();
++    await tester.pump();
++    expect(c.dirty.value, isFalse, reason: 'premise: saved');
++
++    // The exit's own Save is held; an edit lands meanwhile.
++    await drawWall(
++        tester, c, far + Vector2(2000, -900), far + Vector2(2000, 900));
++    final before = bytesOf(c);
++    final response = tester.binding.handleRequestAppExit();
++    await tester.pump();
++    await answerReplace(tester, 'replace-save');
++    expect(files.heldWrites, hasLength(2), reason: 'premise: held');
++    expect(await requestExit(tester), AppExitResponse.cancel,
++        reason: 'a second request while the first is saving');
++    expect(dialog, findsNothing);
++    await drawWall(
++        tester, c, far + Vector2(-2000, -900), far + Vector2(-2000, 900));
++    files.heldWrites.last.complete();
++    await tester.pump();
++    await tester.pump();
++    expect(files.writes.last.bytes, before, reason: 'the pre-edit bytes');
++    expect(dialog, findsOneWidget, reason: 'dirty again: asked again');
++    expect(session.busy.value, isTrue);
++    await answerReplace(tester, 'replace-discard');
++    noDialog(tester);
++    expect(await response, AppExitResponse.exit);
++    expect(session.busy.value, isFalse);
++    expect(identical(c.document, doc), isTrue);
++  });
++
++  testWidgets(
++      'EX5 a clean plan with a Selection panel value typed and not '
++      'submitted: the exit settles first, so the value is committed and the '
++      'dialog appears; Cancel keeps it (spec 12a D2, D11, T-7; M-12a-25)',
++      (tester) async {
++    final rig = await pumpApp(tester);
++    final c = rig.controller;
++    await titledClean(rig);
++    final doc = c.document;
++    final wall = wallsOf(c).single;
++    final params = doc.components.get<WallParams>(wall)!;
++    expect(params.thickness, isNot(212.5), reason: 'premise');
++    await clickAt(tester, c, wallMid(c, wall));
++    expect(c.activeSelection.keys, [SelectionKey.root(wall)],
++        reason: 'premise: the wall is selected');
++    final field = find.byKey(const Key('property-thickness'));
++    await tester.tap(field);
++    await tester.pump();
++    await tester.enterText(field, '212.5');
++    await tester.pump();
++    expect(panelFieldFocused(), isTrue,
++        reason: 'premise: typed, the field focused');
++    expect(doc.components.get<WallParams>(wall), params,
++        reason: 'premise: not committed');
++    expect(c.dirty.value, isFalse, reason: 'premise: clean');
++
++    final response = tester.binding.handleRequestAppExit();
++    await tester.pump();
++    expect(dialog, findsOneWidget, reason: 'the typed value made it dirty');
++    expect(doc.components.get<WallParams>(wall),
++        params.copyWith(thickness: 212.5));
++    expect(doc.commands.undoDepth, 2, reason: 'the commit is its own step');
++    await answerReplace(tester, 'replace-cancel');
++    noDialog(tester);
++    expect(await response, AppExitResponse.cancel);
++    expect(doc.components.get<WallParams>(wall)!.thickness, 212.5);
++    expect(c.dirty.value, isTrue);
++  });
++
++  testWidgets(
++      'EX6 a shape part-way does not block the exit (spec 12a U-7): clean '
++      'with a Wall part-way exits; a Wall chain with a wall down asks',
++      (tester) async {
++    final rig = await pumpApp(tester);
++    final c = rig.controller;
++    await titledClean(rig);
++
++    await press(tester, LogicalKeyboardKey.keyW);
++    await clickAt(tester, c, far + Vector2(-900, -2600));
++    expect(activeTool(tester).isMidShape, isTrue, reason: 'premise');
++    expect(c.dirty.value, isFalse, reason: 'premise: nothing placed');
++    expect(await requestExit(tester), AppExitResponse.exit);
++    expect(dialog, findsNothing);
++
++    await clickAt(tester, c, far + Vector2(1900, -2600));
++    expect(activeTool(tester).isMidShape, isTrue,
++        reason: 'premise: the chain goes on');
++    expect(c.dirty.value, isTrue, reason: 'premise: a wall is down');
++    final response = tester.binding.handleRequestAppExit();
++    await tester.pump();
++    expect(dialog, findsOneWidget);
++    await answerReplace(tester, 'replace-discard');
++    noDialog(tester);
++    expect(await response, AppExitResponse.exit);
++  });
++
++  testWidgets(
++      'EX7 the listener goes with the host: a dirty plan, the app removed, '
++      'then an exit request exits with nothing asked and no error (spec 12a '
++      'D11, S-18)', (tester) async {
++    final rig = await pumpApp(tester);
++    await titledDirty(rig);
++    await tester.pumpWidget(const SizedBox());
++    expect(await requestExit(tester), AppExitResponse.exit);
++    expect(tester.takeException(), isNull);
++  });
++
++  testWidgets(
++      'EG1 the exit guard is armed exactly while the plan is dirty: edit, '
++      'undo, redo, a web-style save, and across a New and an Open sample; '
++      'disposed with the host (spec 12a D9, D11)', (tester) async {
++    final files = FakeDocumentFiles(writesInPlace: false);
++    final guard = FakeExitGuard();
++    final rig = await pumpApp(tester, files: files, guard: guard);
++    final c = rig.controller;
++    expect(guard.armings, [false], reason: 'clean at launch');
++
++    await aimCamera(tester, c, far);
++    await drawWall(tester, c, far, far + Vector2(2400, 300));
++    expect(guard.armings, [false, true], reason: 'edit');
++    await undoKey(tester);
++    expect(guard.armings, [false, true, false], reason: 'undo');
++    await tester.tap(find.byKey(const Key('toolbar-redo')));
++    await tester.pump();
++    expect(guard.armings, [false, true, false, true], reason: 'redo');
++    files.scriptSaveLocation(name: 'deck.jetplan', location: 'deck.jetplan');
++    await chord(tester, LogicalKeyboardKey.meta, LogicalKeyboardKey.keyS);
++    await tester.pump();
++    expect(guard.isArmed, isFalse, reason: 'saved (downloaded)');
++    expect(guard.armings, hasLength(5));
++
++    // A titled web plan's Save downloads without asking; clean again.
++    await drawWall(
++        tester, c, far + Vector2(0, 1500), far + Vector2(2400, 1500));
++    expect(guard.isArmed, isTrue);
++    await chord(tester, LogicalKeyboardKey.meta, LogicalKeyboardKey.keyS);
++    await tester.pump();
++    expect(files.saveLocationCalls, hasLength(1), reason: 'no second ask');
++    expect(files.writes, hasLength(2));
++    expect(guard.isArmed, isFalse);
++
++    // Across a swap: dirty, New (Don't Save) disarms; the new plan's edits
++    // arm it again.
++    await drawWall(
++        tester, c, far + Vector2(0, 3000), far + Vector2(2400, 3000));
++    expect(guard.isArmed, isTrue);
++    await discardAndRun(tester, rig.host.newFlow());
++    expect(guard.isArmed, isFalse, reason: 'the New plan is clean');
++    await aimCamera(tester, c, far);
++    await drawWall(tester, c, far, far + Vector2(-2400, 300));
++    expect(guard.isArmed, isTrue, reason: 'the new plan\'s edit');
++    await undoKey(tester);
++    expect(guard.isArmed, isFalse, reason: 'the new plan\'s undo');
++    await drawWall(tester, c, far, far + Vector2(-2400, -300));
++    await discardAndRun(tester, rig.host.openSampleFlow());
++    expect(guard.isArmed, isFalse, reason: 'the sample is clean');
++    expect(
++        guard.armings,
++        [
++          false, true, false, true, false, // launch, edit, undo, redo, save
++          true, false, // edit, save
++          true, false, // edit, New
++          true, false, // edit, undo
++          true, false, // edit, Open sample
++        ],
++        reason: 'set only when dirty changes');
++    expect(c.dirty.value, isFalse);
++
++    expect(guard.disposed, isFalse);
++    await tester.pumpWidget(const SizedBox());
++    expect(guard.disposed, isTrue, reason: 'disposed with the host');
++  });
++}
+diff --git a/apps/architecture_demo/test/document_replace_test.dart b/apps/architecture_demo/test/document_replace_test.dart
+index 24500800..d1fa5e02 100644
+--- a/apps/architecture_demo/test/document_replace_test.dart
++++ b/apps/architecture_demo/test/document_replace_test.dart
+@@ -679,9 +679,52 @@ void main() {
+ 
+     await answerReplace(tester, 'replace-cancel');
+     noDialog(tester);
+     await flow;
+     await tester.pump();
+     expectKept(rig, doc, depth, reason: 'Cancel after the chords');
+     expect(files.unscriptedCalls, 0);
+   });
++
++  // Not a port (carried from Task 4's re-review): the app torn down while
++  // a flow waits. A dialog left up never answers (its future stays pending
++  // and the flow with it, touching nothing); the live path is the held
++  // Save: the write finishes after the teardown, `_write` skips the
++  // disposed controller, and the flow's loop must not go on to ask or to
++  // replace the plan. Mutation M-RP-teardown: `_askToSave` without its
++  // `mounted` check shows a dialog on a dead context.
++  for (final flow in ['new', 'open-sample', 'open']) {
++    testWidgets(
++        'RP-teardown the app unmounted during the $flow flow\'s held Save: '
++        'the flow ends without asking again or replacing the plan',
++        (tester) async {
++      final rig = await pumpApp(tester);
++      await titledDirty(rig);
++      final c = rig.controller;
++      final files = rig.files;
++      final session = rig.session;
++      final opens = files.openCalls;
++      files.scriptOpen(
++          name: 'other.jetplan', bytes: sampleBytes(), location: '/p/other');
++      files.holdWrites = true;
++      final Future<void> running = switch (flow) {
++        'new' => rig.host.newFlow(),
++        'open-sample' => rig.host.openSampleFlow(),
++        _ => rig.host.openFlow(),
++      };
++      await tester.pump();
++      await answerReplace(tester, 'replace-save');
++      expect(files.heldWrites, hasLength(1), reason: 'premise: write held');
++
++      await tester.pumpWidget(const SizedBox());
++      expect(session.isDisposed, isTrue, reason: 'premise: torn down');
++      expect(() => c.dirty.addListener(() {}), throwsFlutterError,
++          reason: 'premise: controller disposed');
++      files.heldWrites.single.complete();
++      await running;
++      await tester.pump();
++      expect(tester.takeException(), isNull);
++      expect(files.openCalls, opens, reason: 'no picker after the teardown');
++      expect(files.writes, hasLength(1), reason: 'the one write');
++    });
++  }
+ }
+diff --git a/apps/architecture_demo/test/document_title_test.dart b/apps/architecture_demo/test/document_title_test.dart
+new file mode 100644
+index 00000000..a6eea95a
+--- /dev/null
++++ b/apps/architecture_demo/test/document_title_test.dart
+@@ -0,0 +1,89 @@
++// New tests N3 and N5 (audit docs/superpowers/specs/
++// 2026-10-16-architecture-demo-test-audit.md, "New tests"): the web tab's
++// title, which is the `MaterialApp`'s `onGenerateTitle`, follows the plan's
++// name, its dirty flag and the language.
++import 'package:flutter/material.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import 'support/app_rig.dart';
++
++final Vector2 far = Vector2(41234.5, -27654.25);
++
++/// Switches the system language to [locale] and pumps the two frames the
++/// app needs to show it in its title: the first rebuilds the host, whose
++/// post-frame callback tells the app; the second rebuilds the app.
++Future<void> switchTo(WidgetTester tester, Locale locale) async {
++  tester.platformDispatcher.localesTestValue = [locale];
++  await tester.pump();
++  await tester.pump();
++}
++
++void main() {
++  testWidgets(
++      'N3 the title: Untitled, dotted when edited, the file\'s name after a '
++      'Save As, and clean again after an edit is undone back to the save '
++      'point', (tester) async {
++    final rig = await pumpApp(tester);
++    final c = rig.controller;
++    expect(titleOf(tester), 'Untitled — jet-cad');
++
++    await rig.editOnce(at: far);
++    expect(titleOf(tester), '• Untitled — jet-cad');
++
++    rig.files.scriptSaveLocation(name: 'flat.jetplan', location: '/p/flat');
++    expect(await rig.host.saveAsStep(), isTrue);
++    await tester.pump();
++    expect(c.dirty.value, isFalse, reason: 'premise: saved');
++    expect(titleOf(tester), 'flat — jet-cad');
++
++    await drawWall(
++        tester, c, far + Vector2(0, 2500), far + Vector2(2600, 2500));
++    expect(titleOf(tester), '• flat — jet-cad');
++    await undoKey(tester);
++    expect(c.dirty.value, isFalse, reason: 'premise: back at the save point');
++    expect(titleOf(tester), 'flat — jet-cad',
++        reason: 'clean by the save point, not by a flag set in a save');
++  });
++
++  testWidgets(
++      'N5 the language: a switch from English to Turkish renames an '
++      'untitled plan in the title and the bar within that pump sequence, '
++      'and the editor speaks Turkish with it; a named plan keeps its '
++      'file\'s name through a switch to German', (tester) async {
++    tester.platformDispatcher.localesTestValue = [const Locale('en', 'US')];
++    addTearDown(tester.platformDispatcher.clearLocalesTestValue);
++    final rig = await pumpApp(tester);
++    expect(titleOf(tester), 'Untitled — jet-cad');
++    expect(shownName(tester), 'Untitled');
++    expect(find.text('Wall'), findsOneWidget, reason: 'premise: English');
++    expect(find.text('Duvar'), findsNothing);
++
++    await switchTo(tester, const Locale('tr', 'TR'));
++    expect(PlanStrings.of(tester.element(find.byType(PlanEditor))).cancel,
++        isNot('Cancel'),
++        reason: 'premise: the library switched');
++    expect(shownName(tester), 'Adsız', reason: 'the bar');
++    expect(titleOf(tester), 'Adsız — jet-cad', reason: 'the title');
++    expect(find.text('Duvar'), findsOneWidget, reason: 'an editor word');
++    expect(find.text('Wall'), findsNothing);
++
++    // Dirty and untitled: the dot stays, the word changes again.
++    await rig.editOnce(at: far);
++    expect(titleOf(tester), '• Adsız — jet-cad');
++    await switchTo(tester, const Locale('de', 'DE'));
++    expect(titleOf(tester), '• Unbenannt — jet-cad');
++
++    // Named: the file's name is not a word of any language.
++    rig.files.scriptSaveLocation(name: 'flat.jetplan', location: '/p/flat');
++    expect(await rig.host.saveAsStep(), isTrue);
++    await tester.pump();
++    expect(titleOf(tester), 'flat — jet-cad');
++    await switchTo(tester, const Locale('tr', 'TR'));
++    expect(titleOf(tester), 'flat — jet-cad');
++    expect(shownName(tester), 'flat');
++    await switchTo(tester, const Locale('en', 'US'));
++    expect(titleOf(tester), 'flat — jet-cad');
++  });
++}

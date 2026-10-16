@@ -1,0 +1,693 @@
+15cf9ba5 feat(demo): the file layer and the app's words, ported with their tests
+ apps/architecture_demo/lib/app_strings.dart        | 256 +++++++++++++++++++++
+ apps/architecture_demo/lib/document_files.dart     | 124 ++++++++++
+ apps/architecture_demo/lib/document_files_io.dart  |  68 ++++++
+ .../architecture_demo/lib/document_files_stub.dart |  11 +
+ apps/architecture_demo/lib/document_files_web.dart |  86 +++++++
+ apps/architecture_demo/lib/exit_guard.dart         |  23 ++
+ apps/architecture_demo/lib/exit_guard_stub.dart    |  17 ++
+ apps/architecture_demo/lib/exit_guard_web.dart     |  45 ++++
+ apps/architecture_demo/test/app_words_test.dart    |  85 +++++++
+ .../test/document_files_kind_test.dart             | 144 ++++++++++++
+ .../test/document_files_sources_test.dart          |  43 ++++
+ .../test/document_files_test.dart                  | 191 +++++++++++++++
+ apps/architecture_demo/test/support/app_fakes.dart | 152 ++++++++++++
+ 13 files changed, 1245 insertions(+)
+## Old vs new lib files (diff of copied files)
+### document_files.dart
+### document_files_io.dart
+### document_files_web.dart
+### document_files_stub.dart
+### exit_guard.dart
+### exit_guard_web.dart
+### exit_guard_stub.dart
+### app_strings.dart
+1c1
+< // The floor planner app's own words (spec 14d L16): its file commands and
+---
+> // The architecture demo's own words (spec 14d L16): its file commands and
+48,49c48,49
+<   /// "Print failed".
+<   String get printFailed;
+---
+>   /// "The page could not be exported or printed".
+>   String get pageFlowFailed;
+104c104
+<   String get printFailed => 'Print failed';
+---
+>   String get pageFlowFailed => 'The page could not be exported or printed';
+166c166,167
+<   String get printFailed => 'Drucken fehlgeschlagen';
+---
+>   String get pageFlowFailed =>
+>       'Die Seite konnte nicht exportiert oder gedruckt werden';
+229c230
+<   String get printFailed => 'Yazdırma başarısız';
+---
+>   String get pageFlowFailed => 'Sayfa dışa aktarılamadı ya da yazdırılamadı';
+## Test and fake diff
+diff --git a/apps/architecture_demo/test/app_words_test.dart b/apps/architecture_demo/test/app_words_test.dart
+new file mode 100644
+index 00000000..65863ea9
+--- /dev/null
++++ b/apps/architecture_demo/test/app_words_test.dart
+@@ -0,0 +1,85 @@
++// Ported from apps/floor_planner/test/app_words_test.dart (audit
++// docs/superpowers/specs/2026-10-16-architecture-demo-test-audit.md, section
++// "app_words_test.dart"). AW3 is ported as it was; AW1, AW2 and AW4 read the
++// whole app (its host's open-sample button and untitled name, the files
++// seam), which ArchitectureDemoApp gets in Task 4: they move there. Their
++// word-level content is pinned here against a minimal harness (AW-locale).
++// Spec 14d L16: the app follows the system's language and English for any
++// other.
++import 'package:architecture_demo/app_strings.dart';
++import 'package:architecture_demo/document_files.dart' show FileKind;
++import 'package:flutter/material.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++
++Future<AppStrings> wordsFor(WidgetTester tester, Locale locale) async {
++  late AppStrings words;
++  await tester.pumpWidget(MaterialApp(
++      locale: locale,
++      supportedLocales: planSupportedLocales,
++      localizationsDelegates: planLocalizationsDelegates,
++      home: Builder(builder: (context) {
++        words = AppStrings.of(context);
++        return const SizedBox();
++      })));
++  return words;
++}
++
++void main() {
++  testWidgets(
++      'AW-locale the app\'s words follow the resolved locale: Turkish, '
++      'German, and English for French (AW1/AW2 at the word level)',
++      (tester) async {
++    final tr = await wordsFor(tester, const Locale('tr', 'TR'));
++    expect(tr.openSample, 'Örneği aç');
++    expect(tr.untitled, 'Adsız');
++    final de = await wordsFor(tester, const Locale('de', 'DE'));
++    expect(de.untitled, 'Unbenannt');
++    expect(de.saveAs, 'Speichern unter…');
++    final fr = await wordsFor(tester, const Locale('fr'));
++    expect(fr.untitled, 'Untitled');
++    expect(fr.openSample, 'Open sample');
++  });
++
++  testWidgets(
++      'AW3 the file types\' names in each language (spec 14d L16, review '
++      '14d-1 F-5)', (tester) async {
++    final names = <String, List<String>>{};
++    for (final code in ['en', 'de', 'tr']) {
++      await tester.pumpWidget(Localizations(
++          locale: Locale(code),
++          delegates: const [DefaultWidgetsLocalizations.delegate],
++          child: Builder(builder: (context) {
++            final words = AppStrings.of(context);
++            names[code] = [
++              for (final k in FileKind.values) words.fileTypeLabel(k)
++            ];
++            return const SizedBox();
++          })));
++    }
++    expect(names['en'], ['Jet plan', 'PDF document', 'PNG image']);
++    expect(names['de'], ['Jet-Plan', 'PDF-Dokument', 'PNG-Bild']);
++    expect(names['tr'], ['Jet planı', 'PDF belgesi', 'PNG görüntüsü']);
++  });
++
++  testWidgets(
++      'AW-pageflow pageFlowFailed in en, de and tr (replaces printFailed)',
++      (tester) async {
++    Future<String> word(String code) async {
++      late String w;
++      await tester.pumpWidget(Localizations(
++          locale: Locale(code),
++          delegates: const [DefaultWidgetsLocalizations.delegate],
++          child: Builder(builder: (context) {
++            w = AppStrings.of(context).pageFlowFailed;
++            return const SizedBox();
++          })));
++      return w;
++    }
++
++    expect(await word('en'), 'The page could not be exported or printed');
++    expect(await word('de'),
++        'Die Seite konnte nicht exportiert oder gedruckt werden');
++    expect(await word('tr'), 'Sayfa dışa aktarılamadı ya da yazdırılamadı');
++  });
++}
+diff --git a/apps/architecture_demo/test/document_files_kind_test.dart b/apps/architecture_demo/test/document_files_kind_test.dart
+new file mode 100644
+index 00000000..cf26bec0
+--- /dev/null
++++ b/apps/architecture_demo/test/document_files_kind_test.dart
+@@ -0,0 +1,144 @@
++// Ported from apps/floor_planner/test/document_files_kind_test.dart (audit docs/superpowers/specs/2026-10-16-architecture-demo-test-audit.md, section "document_files_kind_test.dart").
++import 'dart:typed_data';
++
++import 'package:architecture_demo/document_files.dart';
++import 'package:flutter_test/flutter_test.dart';
++
++import 'support/app_fakes.dart';
++
++void main() {
++  group('FileKind (spec 13 D8)', () {
++    test(
++        'FK1 fileNameFor appends the kind\'s own extension, and only when '
++        'the name does not already end in it (M-13ac)', () {
++      expect(fileNameFor('plan', FileKind.pdf), 'plan.pdf');
++      expect(fileNameFor('plan', FileKind.png), 'plan.png');
++      expect(fileNameFor('plan', FileKind.jetplan), 'plan.jetplan');
++
++      // A name already carrying the kind's extension is kept as it is.
++      expect(fileNameFor('plan.png', FileKind.png), 'plan.png');
++      expect(fileNameFor('plan.pdf', FileKind.pdf), 'plan.pdf');
++      expect(fileNameFor(' plan.pdf ', FileKind.pdf), 'plan.pdf');
++      expect(fileNameFor('plan.jetplan', FileKind.jetplan), 'plan.jetplan');
++
++      // Another kind's extension is not this kind's: the suffix follows it.
++      expect(fileNameFor('plan.png', FileKind.pdf), 'plan.png.pdf');
++      expect(fileNameFor('plan.pdf', FileKind.png), 'plan.pdf.png');
++      expect(fileNameFor('plan.jetplan', FileKind.pdf), 'plan.jetplan.pdf');
++      expect(fileNameFor('plan.pdf', FileKind.jetplan), 'plan.pdf.jetplan');
++
++      // Case-sensitive, as jetplanFileName always was (DF1).
++      expect(fileNameFor('plan.PDF', FileKind.pdf), 'plan.PDF.pdf');
++      expect(fileNameFor('plan.Png', FileKind.png), 'plan.Png.png');
++      expect(jetplanFileName('plan.JETPLAN'), 'plan.JETPLAN.jetplan');
++
++      // Ending in the extension's letters is not ending in `.pdf`.
++      expect(fileNameFor('mypdf', FileKind.pdf), 'mypdf.pdf');
++    });
++
++    test('FK2 a blank or null typed name is a cancel for every kind', () {
++      for (final kind in FileKind.values) {
++        expect(fileNameFor(null, kind), isNull, reason: kind.name);
++        expect(fileNameFor('', kind), isNull, reason: kind.name);
++        expect(fileNameFor(' \t ', kind), isNull, reason: kind.name);
++      }
++    });
++
++    test('FK3 jetplanFileName is fileNameFor\'s jetplan case', () {
++      for (final typed in <String?>[
++        null,
++        '',
++        'Kitchen',
++        ' Kitchen 2 ',
++        'Kitchen.jetplan',
++        'plan.pdf',
++      ]) {
++        expect(jetplanFileName(typed), fileNameFor(typed, FileKind.jetplan),
++            reason: '$typed');
++      }
++    });
++
++    test('FK4 each kind\'s extension, type group and MIME type', () {
++      expect(FileKind.values,
++          <FileKind>[FileKind.jetplan, FileKind.pdf, FileKind.png]);
++
++      expect(FileKind.jetplan.extension, 'jetplan');
++      expect(FileKind.pdf.extension, 'pdf');
++      expect(FileKind.png.extension, 'png');
++
++      // The web write used application/json for a document before kinds
++      // existed; the jetplan kind keeps it.
++      expect(FileKind.jetplan.mimeType, 'application/json');
++      expect(FileKind.pdf.mimeType, 'application/pdf');
++      expect(FileKind.png.mimeType, 'image/png');
++
++      // The jetplan kind's group is the one the open panel offers.
++      expect(FileKind.jetplan.typeGroup.label, kJetplanTypeGroup.label);
++      expect(
++          FileKind.jetplan.typeGroup.extensions, kJetplanTypeGroup.extensions);
++      expect(FileKind.pdf.typeGroup.label, 'PDF document');
++      expect(FileKind.pdf.typeGroup.extensions, <String>['pdf']);
++      expect(FileKind.png.typeGroup.label, 'PNG image');
++      expect(FileKind.png.typeGroup.extensions, <String>['png']);
++      for (final kind in FileKind.values) {
++        expect(kind.typeGroup.allowsAny, isFalse, reason: kind.name);
++      }
++    });
++
++    test(
++        'FK5 the native save panel offers the kind\'s type group alone '
++        '(the io rule)', () {
++      for (final kind in FileKind.values) {
++        final groups = saveTypeGroupsFor(kind);
++        expect(groups, hasLength(1), reason: kind.name);
++        expect(groups.single.label, kind.typeGroup.label, reason: kind.name);
++        expect(groups.single.extensions, <String>[kind.extension],
++            reason: kind.name);
++      }
++    });
++  });
++
++  group('FakeDocumentFiles records the kind (spec 13 D8)', () {
++    test(
++        'FK6 saveLocation and write record the kind of each call; a call '
++        'without one is a jetplan', () async {
++      final files = FakeDocumentFiles();
++      files
++        ..scriptSaveLocation(name: 'a.pdf', location: '/p/a.pdf')
++        ..scriptSaveLocation(name: 'b.jetplan', location: '/p/b.jetplan')
++        ..scriptSaveCancel();
++
++      await files.saveLocation('A.pdf', kind: FileKind.pdf);
++      await files.saveLocation('B.jetplan');
++      expect(await files.saveLocation('C.png', kind: FileKind.png), isNull);
++      expect(files.saveLocationCalls, <String>['A.pdf', 'B.jetplan', 'C.png']);
++      expect(files.saveLocationKinds,
++          <FileKind>[FileKind.pdf, FileKind.jetplan, FileKind.png]);
++
++      await files.write('/p/a.png', 'a.png', Uint8List.fromList(<int>[1]),
++          kind: FileKind.png);
++      await files.write('/p/b.jetplan', 'b.jetplan', Uint8List(0));
++      await files.write('/p/c.pdf', 'c.pdf', Uint8List.fromList(<int>[2]),
++          kind: FileKind.pdf);
++      expect(files.writes.map((w) => w.kind),
++          <FileKind>[FileKind.png, FileKind.jetplan, FileKind.pdf]);
++      expect(files.writes.map((w) => w.name),
++          <String>['a.png', 'b.jetplan', 'c.pdf']);
++    });
++  });
++
++  test(
++      'DK-L the panels\' groups are named by the label given, the '
++      'extension kept; English by default (spec 14d L16)', () {
++    String named(FileKind k) => '<${k.name}>';
++    for (final kind in FileKind.values) {
++      final group = saveTypeGroupsFor(kind, label: named).single;
++      expect(group.label, '<${kind.name}>');
++      expect(group.extensions, <String>[kind.extension]);
++      expect(saveTypeGroupsFor(kind).single.label, kind.label);
++    }
++    expect(openTypeGroups(label: named).single.label, '<jetplan>');
++    expect(openTypeGroups(label: named).single.extensions,
++        kJetplanTypeGroup.extensions);
++  });
++}
+diff --git a/apps/architecture_demo/test/document_files_sources_test.dart b/apps/architecture_demo/test/document_files_sources_test.dart
+new file mode 100644
+index 00000000..f879a591
+--- /dev/null
++++ b/apps/architecture_demo/test/document_files_sources_test.dart
+@@ -0,0 +1,43 @@
++// Ported from apps/floor_planner/test/document_files_sources_test.dart (audit docs/superpowers/specs/2026-10-16-architecture-demo-test-audit.md, section "document_files_sources_test.dart").
++// DS3 is not here: see the note in the file body (moved to Task 4).
++// Spec 13 D8, plan 13 Task 8 (review finding 1): the platform files cannot
++// run here (the io side needs the macOS panel, the web side a browser), so
++// their use of the file kind is pinned by their source, as the render
++// package's T-11 pins page_export.dart. Named mutants: M-8iocall (the io
++// panel offers a fixed type group), M-8webname (spec M-13ac at the web call
++// site: the name takes a fixed kind's extension), M-8webmime (the web blob
++// has a fixed MIME type).
++import 'dart:io';
++
++import 'package:flutter_test/flutter_test.dart';
++
++void main() {
++  final io = File('lib/document_files_io.dart').readAsStringSync();
++  final web = File('lib/document_files_web.dart').readAsStringSync();
++
++  test(
++      'DS1 the io save panel offers the kind\'s type groups, named in the '
++      'app\'s language', () {
++    expect(
++        io,
++        contains(
++            'acceptedTypeGroups: saveTypeGroupsFor(kind, label: typeLabel)'));
++    expect(io, contains('openTypeGroups(label: typeLabel)'),
++        reason: 'the open panel, named too');
++    expect(io, isNot(contains('kJetplanTypeGroup')),
++        reason: 'no fixed English group');
++  });
++
++  // DS3 (the app names the panels' types through its strings: main.dart
++  // pins createFiles(askName:, typeLabel:)) moves to Task 4: main.dart gets
++  // the files seam, the session and the host there.
++
++  test('DS2 the web save names the file and types the blob by the kind', () {
++    expect(web, contains('fileNameFor(await askName(suggestedName), kind)'));
++    expect(web, contains('BlobPropertyBag(type: kind.mimeType)'));
++    expect(web, isNot(contains('application/')),
++        reason: 'no MIME type literal: the kind carries it');
++    expect(web, isNot(contains('jetplanFileName')),
++        reason: 'no jetplan-only naming');
++  });
++}
+diff --git a/apps/architecture_demo/test/document_files_test.dart b/apps/architecture_demo/test/document_files_test.dart
+new file mode 100644
+index 00000000..d25bfbf3
+--- /dev/null
++++ b/apps/architecture_demo/test/document_files_test.dart
+@@ -0,0 +1,191 @@
++// Ported from apps/floor_planner/test/document_files_test.dart (audit docs/superpowers/specs/2026-10-16-architecture-demo-test-audit.md, section "document_files_test.dart").
++import 'dart:typed_data';
++
++import 'package:architecture_demo/document_files.dart';
++import 'package:flutter_test/flutter_test.dart';
++
++import 'support/app_fakes.dart';
++
++void main() {
++  group('the shared part of DocumentFiles (spec 12a D9)', () {
++    test(
++        'DF1 a typed save name: blank is a cancel, white space is trimmed, '
++        'and .jetplan is appended only when the name does not end in it', () {
++      expect(jetplanFileName(null), isNull);
++      expect(jetplanFileName(''), isNull);
++      expect(jetplanFileName(' \t '), isNull);
++
++      expect(jetplanFileName('Kitchen'), 'Kitchen.jetplan');
++      expect(jetplanFileName('  Kitchen 2 '), 'Kitchen 2.jetplan');
++      expect(jetplanFileName('Kitchen.jetplan'), 'Kitchen.jetplan');
++      expect(jetplanFileName(' Kitchen.jetplan '), 'Kitchen.jetplan');
++      // Another extension is kept and the suffix added after it.
++      expect(jetplanFileName('plan.v2'), 'plan.v2.jetplan');
++      // Ending in the extension's letters is not ending in `.jetplan`.
++      expect(jetplanFileName('myjetplan'), 'myjetplan.jetplan');
++      expect(jetplanFileName('jetplan'), 'jetplan.jetplan');
++    });
++
++    test('DF2 the panels offer one type: .jetplan files, nothing else', () {
++      expect(kJetplanExtension, 'jetplan');
++      // `XTypeGroup` strips a leading dot itself, so the list reads the same
++      // written with or without one.
++      expect(kJetplanTypeGroup.extensions, <String>['jetplan']);
++      expect(kJetplanTypeGroup.allowsAny, isFalse);
++      expect(kJetplanTypeGroup.label, 'Jet plan');
++    });
++  });
++
++  group('FakeDocumentFiles (plan 12a P-5)', () {
++    test(
++        'DF3 open answers in the order scripted: a file, a cancel, a throw; '
++        'unscripted throws and is counted', () async {
++      final files = FakeDocumentFiles();
++      final source = <int>[0x7b, 0x7d, 0x0a];
++      files
++        ..scriptOpen(name: 'a.jetplan', bytes: source, location: '/p/a.jetplan')
++        ..scriptOpenCancel()
++        ..scriptOpenThrow(const FormatException('bad'))
++        ..scriptOpen(name: 'b.jetplan', bytes: <int>[0x31]);
++      // The script holds its own copy of the bytes.
++      source[0] = 0;
++
++      final first = await files.open();
++      expect(first!.name, 'a.jetplan');
++      expect(first.bytes, <int>[0x7b, 0x7d, 0x0a]);
++      expect(first.location, '/p/a.jetplan');
++      expect(await files.open(), isNull);
++      await expectLater(files.open(), throwsA(isA<FormatException>()));
++      final fourth = await files.open();
++      expect(fourth!.name, 'b.jetplan');
++      expect(fourth.bytes, <int>[0x31]);
++      expect(fourth.location, isNull);
++      expect(files.unscriptedCalls, 0);
++
++      await expectLater(files.open(), throwsA(isA<StateError>()));
++      expect(files.unscriptedCalls, 1);
++      expect(files.openCalls, 5);
++    });
++
++    test(
++        'DF4 saveLocation records each suggested name and answers in the '
++        'order scripted', () async {
++      final files = FakeDocumentFiles();
++      files
++        ..scriptSaveCancel()
++        ..scriptSaveLocation(name: 'b.jetplan', location: '/p/b.jetplan')
++        ..scriptSaveLocationThrow(StateError('panel'));
++
++      expect(await files.saveLocation('Untitled.jetplan'), isNull);
++      final second = await files.saveLocation('A.jetplan');
++      expect(second!.name, 'b.jetplan');
++      expect(second.location, '/p/b.jetplan');
++      await expectLater(
++          files.saveLocation('C.jetplan'),
++          throwsA(
++              isA<StateError>().having((e) => e.message, 'message', 'panel')));
++      expect(files.unscriptedCalls, 0);
++      await expectLater(files.saveLocation('D.jetplan'), throwsStateError);
++      expect(files.unscriptedCalls, 1);
++      expect(files.saveLocationCalls, <String>[
++        'Untitled.jetplan',
++        'A.jetplan',
++        'C.jetplan',
++        'D.jetplan',
++      ]);
++    });
++
++    test(
++        'DF5 write records every call, a failed one too; failNextWrite fails '
++        'the next write only; the recorded bytes are a copy', () async {
++      final files = FakeDocumentFiles();
++      final bytes = Uint8List.fromList(<int>[1, 2, 3]);
++
++      await files.write('/p/a.jetplan', 'a.jetplan', bytes);
++      bytes[0] = 9;
++      files.failNextWrite(const FileSystemLikeError());
++      await expectLater(files.write('/p/b.jetplan', 'b.jetplan', bytes),
++          throwsA(isA<FileSystemLikeError>()));
++      await files.write('/p/c.jetplan', 'c.jetplan', bytes);
++
++      expect(files.writes, hasLength(3));
++      expect(files.writes[0].location, '/p/a.jetplan');
++      expect(files.writes[0].name, 'a.jetplan');
++      expect(files.writes[0].bytes, <int>[1, 2, 3]);
++      expect(files.writes[1].location, '/p/b.jetplan');
++      expect(files.writes[1].bytes, <int>[9, 2, 3]);
++      expect(files.writes[2].name, 'c.jetplan');
++      expect(files.heldWrites, isEmpty);
++    });
++
++    test(
++        'DF6 holdWrites: a write completes only when the test completes it, '
++        'with a value or an error; writesInPlace is what was asked', () async {
++      final files = FakeDocumentFiles(writesInPlace: false);
++      expect(files.writesInPlace, isFalse);
++      expect(FakeDocumentFiles().writesInPlace, isTrue);
++
++      files.holdWrites = true;
++      var done = false;
++      final first = files
++          .write('a.jetplan', 'a.jetplan', Uint8List.fromList(<int>[5]))
++          .then((_) => done = true);
++      final second =
++          files.write('b.jetplan', 'b.jetplan', Uint8List.fromList(<int>[6]));
++      expect(files.writes, hasLength(2));
++      expect(files.heldWrites, hasLength(2));
++      await pumpEventQueue();
++      expect(done, isFalse);
++
++      files.heldWrites[0].complete();
++      await first;
++      expect(done, isTrue);
++      files.heldWrites[1].completeError(const FileSystemLikeError());
++      await expectLater(second, throwsA(isA<FileSystemLikeError>()));
++
++      files.holdWrites = false;
++      await files.write('c.jetplan', 'c.jetplan', Uint8List(0));
++      expect(files.heldWrites, hasLength(2));
++      expect(files.writes, hasLength(3));
++    });
++
++    test(
++        'DF7 failNextWrite wins over holdWrites: the write is recorded, '
++        'throws, and leaves no held write behind', () async {
++      final files = FakeDocumentFiles()..holdWrites = true;
++      files.failNextWrite(const FileSystemLikeError());
++
++      final failed =
++          files.write('/p/a.jetplan', 'a.jetplan', Uint8List.fromList([7]));
++      expect(files.writes, hasLength(1));
++      expect(files.heldWrites, isEmpty,
++          reason: 'a failed write is not also held');
++      await expectLater(failed, throwsA(isA<FileSystemLikeError>()));
++
++      // The error was used once: the next write is held again.
++      final next =
++          files.write('/p/b.jetplan', 'b.jetplan', Uint8List.fromList([8]));
++      expect(files.heldWrites, hasLength(1));
++      files.heldWrites.single.complete();
++      await next;
++      expect(files.writes, hasLength(2));
++    });
++  });
++
++  group('the platform selection (spec 12a D9)', () {
++    test(
++        'DF8 on the VM (the io library exists) the export selects the '
++        'native implementation, which writes in place, not the stub', () {
++      // The stub throws UnsupportedError here; the web one downloads
++      // (writesInPlace false).
++      final files = createDocumentFiles(askName: (_) async => null);
++      expect(files.writesInPlace, isTrue);
++    });
++  });
++}
++
++/// A thrown object that is not an [Exception] and not the [StateError] the
++/// fake throws itself: the host catches any thrown object (spec 12a S-12).
++class FileSystemLikeError {
++  const FileSystemLikeError();
++}
+diff --git a/apps/architecture_demo/test/support/app_fakes.dart b/apps/architecture_demo/test/support/app_fakes.dart
+new file mode 100644
+index 00000000..d16ae08d
+--- /dev/null
++++ b/apps/architecture_demo/test/support/app_fakes.dart
+@@ -0,0 +1,152 @@
++import 'dart:async';
++import 'dart:typed_data';
++
++import 'package:architecture_demo/document_files.dart';
++import 'package:architecture_demo/exit_guard.dart';
++
++/// One call to [FakeDocumentFiles.write], as it was made.
++typedef FakeWrite = ({
++  Object location,
++  String name,
++  Uint8List bytes,
++  FileKind kind
++});
++
++/// A scripted [DocumentFiles] for the host's tests (plan 12a P-5, spec 12a
++/// D9): no panel, no disk, no download.
++///
++/// [open] and [saveLocation] answer from queues the test fills, in order:
++/// a file, a cancel (null) or a throw. A call with nothing scripted throws
++/// a [StateError] and is counted in [unscriptedCalls], so a test that did
++/// not expect the call can say so even when the host catches the throw.
++///
++/// [write] records every call in [writes], in order, whatever its outcome.
++/// It then fails when [failNextWrite] queued an error, is held when
++/// [holdWrites] is set (the future is a [Completer]'s in [heldWrites], which
++/// the test completes, or completes with an error), and otherwise
++/// succeeds.
++class FakeDocumentFiles implements DocumentFiles {
++  FakeDocumentFiles({this.writesInPlace = true});
++
++  @override
++  final bool writesInPlace;
++
++  final _opens = <FutureOr<({String name, Uint8List bytes, Object? location})?>
++      Function()>[];
++  final _saveLocations =
++      <FutureOr<({String name, Object location})?> Function()>[];
++  final _writeErrors = <Object>[];
++
++  /// How many times [open] was called.
++  int openCalls = 0;
++
++  /// The `suggestedName` of every [saveLocation] call, in order.
++  final saveLocationCalls = <String>[];
++
++  /// The `kind` of every [saveLocation] call, in order (one per entry of
++  /// [saveLocationCalls]).
++  final saveLocationKinds = <FileKind>[];
++
++  /// Every [write] call, in order, including those that then failed or are
++  /// still held.
++  final writes = <FakeWrite>[];
++
++  /// When set, each [write] returns the future of a new [Completer] added
++  /// to [heldWrites] instead of completing by itself.
++  bool holdWrites = false;
++
++  /// The completers of the held writes, in order.
++  final heldWrites = <Completer<void>>[];
++
++  /// Calls that found nothing scripted.
++  int unscriptedCalls = 0;
++
++  /// The next [open] returns this file.
++  void scriptOpen(
++      {required String name, required List<int> bytes, Object? location}) {
++    final copy = Uint8List.fromList(bytes);
++    _opens.add(() => (name: name, bytes: copy, location: location));
++  }
++
++  /// The next [open] is cancelled (returns null).
++  void scriptOpenCancel() => _opens.add(() => null);
++
++  /// The next [open] throws [error].
++  void scriptOpenThrow(Object error) => _opens.add(() => throw error);
++
++  /// The next [saveLocation] returns this place.
++  void scriptSaveLocation({required String name, required Object location}) =>
++      _saveLocations.add(() => (name: name, location: location));
++
++  /// The next [saveLocation] is cancelled (returns null).
++  void scriptSaveCancel() => _saveLocations.add(() => null);
++
++  /// The next [saveLocation] throws [error].
++  void scriptSaveLocationThrow(Object error) =>
++      _saveLocations.add(() => throw error);
++
++  /// The next [write] throws [error] (after it is recorded).
++  void failNextWrite(Object error) => _writeErrors.add(error);
++
++  @override
++  Future<({String name, Uint8List bytes, Object? location})?> open() async {
++    openCalls++;
++    if (_opens.isEmpty) {
++      unscriptedCalls++;
++      throw StateError('FakeDocumentFiles.open: nothing scripted');
++    }
++    return _opens.removeAt(0)();
++  }
++
++  @override
++  Future<({String name, Object location})?> saveLocation(String suggestedName,
++      {FileKind kind = FileKind.jetplan}) async {
++    saveLocationCalls.add(suggestedName);
++    saveLocationKinds.add(kind);
++    if (_saveLocations.isEmpty) {
++      unscriptedCalls++;
++      throw StateError('FakeDocumentFiles.saveLocation: nothing scripted');
++    }
++    return _saveLocations.removeAt(0)();
++  }
++
++  @override
++  Future<void> write(Object location, String name, Uint8List bytes,
++      {FileKind kind = FileKind.jetplan}) {
++    writes.add((
++      location: location,
++      name: name,
++      bytes: Uint8List.fromList(bytes),
++      kind: kind
++    ));
++    if (_writeErrors.isNotEmpty) return Future.error(_writeErrors.removeAt(0));
++    if (holdWrites) {
++      final held = Completer<void>();
++      heldWrites.add(held);
++      return held.future;
++    }
++    return Future.value();
++  }
++}
++
++/// An [ExitGuard] that records what the host told it (spec 12a D11,
++/// Testing: "the fake `ExitGuard` is armed exactly while dirty").
++class FakeExitGuard implements ExitGuard {
++  /// Every value [armed] was set to, in order.
++  final armings = <bool>[];
++
++  /// Whether [dispose] was called.
++  bool disposed = false;
++
++  /// The last value set; false before any.
++  bool get isArmed => armings.isNotEmpty && armings.last;
++
++  @override
++  set armed(bool value) {
++    if (disposed) throw StateError('FakeExitGuard: armed after dispose');
++    armings.add(value);
++  }
++
++  @override
++  void dispose() => disposed = true;
++}

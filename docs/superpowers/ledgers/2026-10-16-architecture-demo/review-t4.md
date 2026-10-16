@@ -1,0 +1,30 @@
+# Review: Tasks 4 and 4b (reviewer: Sonnet, read-only)
+
+Range: 15cf9ba5..1b00fdaa. Verdicts: spec compliance PASS; quality PASS WITH FINDINGS.
+Findings: 0 Critical, 2 Important, 4 Minor.
+
+## Runs (copied from my own runs; tree clean afterwards, `git diff --quiet` ok)
+- apps/architecture_demo `flutter test`: `00:20 +94: All tests passed!`; `flutter analyze`: `No issues found! (ran in 3.5s)`; `dart format ...`: `Formatted 27 files (0 changed) in 0.05 seconds.`
+- packages/jet_cad_2d_plan `flutter test --enable-vmservice`: `02:09 +1554: All tests passed!`; `flutter analyze`: `No issues found! (ran in 3.1s)`.
+- Mutation A (app, `_write` failure path also calls `controller.markSaved()`): `00:21 +92 -2: Some tests failed.` (red; I did not capture the two names). Reverted.
+- Mutation B (app, `openSampleFlow` without `session.named(null, null)`): `00:22 +90 -4: Some tests failed.` Red: RP2, DH6, RP4, DC4. Reverted.
+- Mutation C (library, drop `_releaseSettle?.call()` from `_TextEntryOverlayState.dispose`): `02:01 +1554: All tests passed!` -- SURVIVES. Reverted. See Important 1.
+
+## Verdict 1: spec compliance
+- Host matches B2 and the brief: busy set by the outermost flow, cleared in `finally`; `_idle` no-ops; `_mayDiscard` yields a microtask then loops on `controller.dirty` (re-asks after an edit during the write); New/Open sample use `newPlan` then `named(null,null)`; Open decodes then `load`, any throw shows `couldNotOpen`, session named only after `load`; Save encodes with `save()` in one sync block, `markSaved` only after a good write. The identity guard departs from the brief but is ruled and justified (RN3).
+- Audit rows: all rows of the seven files have an outcome in the report and the file headers. Spot-checked 15: DC1 (SPLIT), DC3, DC8 (COVERED), DC7 (SPLIT), DC12, DC12c (SPLIT), DC12b (DROPPED, header), DH7 (DROPPED, header), DH1, DH4, DH5 (SPLIT), DO3, DO4, DO5 (COVERED), DO6-open-scale. All cited covering tests exist at the cited lines (opened and read: editor_words_test:190, plan_editor_test:133/:445, layer_panel_test:612, page_scale_field_test:36, layer_page_controller_test:123/:210/:273, plan_controller_test:119, lifetimes_test:23, prepare_test:21, sample_flat_test:723, wall_grips_test:180, wall_live_test:64, prepare_build_test:105, editor_view_test:28).
+- AW1/AW2/AW4/DS3 ported with their old assertions (AW1/AW2 diff-identical strings; DS3 pins the two main.dart strings). No `skip:` left in apps/architecture_demo/test. N2, N4, SV-edit-during-write, OP-garbage present, fixtures far from the origin / non-default, each names a mutation.
+- Task 4b library fix stays inside the 2a settle rule (plan_controller.dart:2336-2349 and the spec's "pending input is settled first"): the settle commits as Enter would, one step, empty commits nothing, then focus returns to the canvas.
+
+## Verdict 2: quality
+Ported cases compared with the old ones (ST1, ST2, ST4/ST7, DC12/DC12c, RP1/expectKept, DH1/DH5, DO1, DS1): no assertion weakened beyond the ruled ones (buttons-disabled loops, DC12c range, the shell-only identity checks). Items below are the exceptions.
+
+## Important
+1. packages/jet_cad_2d_plan/lib/src/canvas/text_entry_overlay.dart:63-83 and :146 -- the new settle's unregister (dispose) and re-register on controller swap (`didUpdateWidget`) are untested. Mutation C (delete the release in `dispose`) passes all 1554 tests. A stale settle stays in `controller._settles` after the canvas unmounts and runs `widget.tool` / `tools.context` of a disposed state on every save/load. The project's own facts (T1-2) warn that a dispose in the wrong place needs a reparent-then-unmount test. Fix: add a test beside SET-1: mount, unmount the canvas (or swap the controller via the host), open nothing, then count that `controller.settlePendingInput()` no longer touches the old tool (e.g. a TextTool subclass/spy counting `isPending` reads, or a second controller to show the old registration is released). Name the mutation in the test.
+2. apps/architecture_demo/lib/document_host.dart:134-146 (`openFlow`) -- `_mayDiscard` runs before `_pick()`, and nothing re-checks `dirty` after the picker returns. Under the accepted ruling (canvas edits and Undo stay live during a flow) an edit made while the picker is open is replaced by `load` without a question. The ruling's safety argument ("dirty stays right") covers the write, not this path. By reading; I did not run it. Fix: after `_pick` returns a file, call `_mayDiscard()` again (cheap when clean) and return if it says no; add a test with a held `files.open()` and `rig.editOnce()` during the hold (mutation: drop the second check, expect red).
+
+## Minor
+1. apps/architecture_demo/test/document_settle_test.dart:238-250 -- the ST4 split is stale after Task 4b. The "Decided: premise impossible" note on ST4-open no longer holds and ST4-focus (:283-299) does not repeat the saved-bytes assertions, so the old single ST4 (bytes + field + focus) is now two weaker halves. Fix: merge back into one ST4 with `canvasFocused()` added, delete ST4-focus and the stale note, and update the header (":14-15").
+2. apps/architecture_demo/test/document_settle_test.dart:141-143, :157-159 (ST1) -- premise `undoDepth, 2` became `greaterThan(1)` and the `session.savedState` check was dropped (the save point is private now). `dirty == false` stands in for it. Fine, but say so in the header or compare `c.save()` after a second no-op save.
+3. apps/architecture_demo/lib/document_host.dart:96-103, `_flow` finally and main.dart:109-113 -- `busy.value = false` after `_session.dispose()` would assert in debug if the app is torn down while a flow is in flight (e.g. a held write at test end). Not observed; by reading. Fix: guard with a `disposed` flag or let `DocumentSession.dispose` run after the host's flows (or ignore the set when disposed).
+4. packages/jet_cad_2d_plan/test/panels/page_scale_field_test.dart:55-77 -- SET-1 (text entry) sits in the page-scale test file; the mutation marker is a comment inside the test body. Move SET-1 to a canvas/text-entry file, keep the mutation named in the test description.

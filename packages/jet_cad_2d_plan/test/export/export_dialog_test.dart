@@ -1,6 +1,7 @@
 // Spec P5: the export dialog lists the registry; the resolution is asked
 // for an image format only; OK answers the choice, Cancel null.
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d_plan/src/export/builtin_exporters.dart';
 import 'package:jet_cad_2d_plan/src/export/export_dialog.dart';
@@ -67,6 +68,40 @@ void main() {
         reason: 'the initial answer it was given');
     await tester.tap(byKey('export-cancel'));
     await tester.pumpAndSettle();
+    expect(done, isTrue);
+    expect(got, isNull);
+  });
+
+  testWidgets(
+      'X-9b Escape closes the dialog and answers null, as Cancel does '
+      '(3b Task 7; the old PlanExportDialog Escape)', (tester) async {
+    final exporters = <PlanExporter>[
+      const PlanPdfExporter(),
+      const PlanPngExporter(),
+    ];
+    PlanExportAnswer? got = const PlanExportAnswer(
+        exporter: 'unset', choice: PlanExportChoice.initial);
+    var done = false;
+    await tester.pumpWidget(MaterialApp(
+        home: Builder(
+            builder: (context) => TextButton(
+                key: const Key('open'),
+                onPressed: () async {
+                  got = await showPlanExportDialog(
+                      context, PlanExportAnswer.initial, exporters);
+                  done = true;
+                },
+                child: const Text('open')))));
+    await tester.tap(byKey('open'));
+    await tester.pumpAndSettle();
+    // A choice made before Escape must not leak into the answer.
+    await tester.tap(byKey('export-format-plan.png'));
+    await tester.pump();
+    expect(byKey('export-dialog'), findsOneWidget, reason: 'premise: up');
+    expect(done, isFalse);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(byKey('export-dialog'), findsNothing);
     expect(done, isTrue);
     expect(got, isNull);
   });

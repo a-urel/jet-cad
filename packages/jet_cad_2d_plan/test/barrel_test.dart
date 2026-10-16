@@ -85,7 +85,15 @@ void main() {
       'PlanLongPress', 'PlanFloorDrag', 'PlanServiceAction', 'PlanServiceBar',
       'PlanServiceView', 'PlanUnitOverlay', 'PlanUnitOverlayBuilder',
       'PlanOverlaySize', 'PlanOverlayLayout',
+      // 3b Task 1
+      'showPlanExportDialog', 'kFileChords',
     });
+  });
+
+  test('the barrel exports the export dialog and the file chords', () {
+    const PlanExportDialog dialog = showPlanExportDialog;
+    expect(dialog, isNotNull);
+    expect(kFileChords, isNotEmpty);
   });
 
   testWidgets('ED-9b the editor\'s names, through the barrel alone',

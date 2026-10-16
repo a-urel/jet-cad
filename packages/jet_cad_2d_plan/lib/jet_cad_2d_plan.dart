@@ -23,7 +23,8 @@ export 'src/controller/plan_controller.dart'
 export 'src/editor/plan_editor.dart' show PlanEditor, PlanFileCallback;
 export 'src/editor/plan_editor_bar.dart' show PlanEditorAction, PlanEditorBar;
 export 'src/editor/plan_tool_palette.dart' show PlanToolPalette;
-export 'src/export/export_dialog.dart' show PlanExportDialog;
+export 'src/export/export_dialog.dart'
+    show PlanExportDialog, showPlanExportDialog;
 export 'src/export/page_printer.dart' show PagePrinter, PrintingPagePrinter;
 export 'src/export/registries.dart'
     show
@@ -77,6 +78,7 @@ export 'src/service/view/unit_overlays.dart'
         PlanOverlaySize,
         PlanUnitOverlay,
         PlanUnitOverlayBuilder;
+export 'src/shortcuts/chords.dart' show kFileChords;
 export 'src/shortcuts/plan_shortcut_guard.dart' show PlanShortcutGuard;
 export 'src/shortcuts/plan_shortcuts.dart' show PlanShortcuts;
 export 'src/symbols/plan_symbol.dart' show PlanSymbol;

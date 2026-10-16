@@ -53,6 +53,25 @@ void main() {
   });
 
   testWidgets(
+      'SET-2 settling with the focus in the page scale field hands it back '
+      'to the canvas and shows the stored scale', (tester) async {
+    final c = await pumpScale(tester);
+    final shown = scaleText(tester);
+    await tester.tap(scale());
+    await tester.pump();
+    await tester.enterText(scale(), '77');
+    expect(FocusManager.instance.primaryFocus, isNot(same(canvasFocus(tester))),
+        reason: 'premise: the focus is in the field');
+
+    c.settlePendingInput();
+    await tester.pump();
+    // M-SET-2: drop `_scaleFocus.handBack()` from `resyncScale`.
+    expect(FocusManager.instance.primaryFocus, same(canvasFocus(tester)));
+    expect(scaleText(tester), shown);
+    expect(c.document.commands.undoDepth, 0);
+  });
+
+  testWidgets(
       'A14 Escape in the page panel\'s scale field keeps a pending '
       'polyline (spec 05 D9: the guard covers the shell\'s Escape)',
       (tester) async {
