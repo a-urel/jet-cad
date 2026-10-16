@@ -23,8 +23,10 @@ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../support/room_plans.dart';
+import '../separator/separator_plans.dart' show addSeparator;
 import '../support/wall_fixture.dart';
 
+export '../separator/separator_plans.dart' show addSeparator;
 export '../support/canvas_rig.dart' show byKey;
 export '../support/editor_rig.dart'
     show activeTool, kitCatalog, press, pumpEditor, status;
@@ -129,22 +131,6 @@ Built buildPlanIn(DraftDocument doc, List<W> walls,
         doc, OpeningParams(wh[i], position, width, kind, swing: swing)));
   }
   return (walls: wh, seps: sh, openings: oh);
-}
-
-/// A separator from world [s] to world [e] in its own root group [at]
-/// (room_fixture.dart:165-178).
-Handle addSeparator(DraftDocument doc, Vector2 s, Vector2 e, {Transform2? at}) {
-  final h = doc.handleSeed.next();
-  final g = at ?? Transform2.identity();
-  final inv = g.invert();
-  final ls = inv.transformPoint(s), le = inv.transformPoint(e);
-  doc.commands.execute(CompoundCommand([
-    AddNodeCommand(GroupNode(
-        handle: h, parent: doc.rootHandle, transform: g, children: const [])),
-    SetComponentCommand<SeparatorParams>(
-        h, SeparatorParams(ls.x, ls.y, le.x, le.y)),
-  ], label: 'Add separator'));
-  return h;
 }
 
 /// Opening [o] in its own root group at the identity, one command

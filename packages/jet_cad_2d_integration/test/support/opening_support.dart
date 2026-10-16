@@ -8,7 +8,6 @@
 import 'dart:convert';
 import 'dart:math' as math;
 
-import 'package:flutter/gestures.dart' show PointerDeviceKind, kPrimaryButton;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
@@ -25,7 +24,17 @@ import 'wall_fixture.dart';
 // The rig's helpers (R-P14) and Task 12's wall fixture (its owner), as the
 // opening tests use them: no second copy here.
 export 'editor_rig.dart'
-    show activeTool, globalAt, globalOf, kitCatalog, press, pumpEditor, status;
+    show
+        activeTool,
+        dragWorld,
+        globalAt,
+        globalOf,
+        kitCatalog,
+        press,
+        pumpEditor,
+        select,
+        status,
+        undoKey;
 export 'wall_fixture.dart'
     show
         addWall,
@@ -99,35 +108,6 @@ Future<void> tapWorld(WidgetTester tester, PlanController c, Vector2 p,
   if (shift) await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
   await tester.tapAt(globalAt(tester, c, p));
   if (shift) await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
-  await tester.pump();
-}
-
-/// A mouse drag from world [from] to world [to], past the slop at once.
-Future<void> dragWorld(
-    WidgetTester tester, PlanController c, Vector2 from, Vector2 to) async {
-  final a = globalAt(tester, c, from), b = globalAt(tester, c, to);
-  final gesture = await tester.createGesture(
-      kind: PointerDeviceKind.mouse, buttons: kPrimaryButton);
-  await gesture.down(a);
-  await gesture.moveTo(a + const Offset(12, 0));
-  await gesture.moveTo(b);
-  await gesture.up();
-  await gesture.removePointer();
-  await tester.pump();
-}
-
-Future<void> undoKey(WidgetTester tester) async {
-  await tester.sendKeyDownEvent(LogicalKeyboardKey.meta);
-  await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
-  await tester.sendKeyUpEvent(LogicalKeyboardKey.meta);
-  await tester.pump();
-}
-
-/// Today's `view.selection.replace`, then a frame.
-Future<void> select(
-    WidgetTester tester, PlanController c, List<Handle> hs) async {
-  // ignore: invalid_use_of_internal_member
-  c.selection.replace([for (final h in hs) SelectionKey.root(h)]);
   await tester.pump();
 }
 

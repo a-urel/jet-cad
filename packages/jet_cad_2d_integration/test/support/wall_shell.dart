@@ -5,9 +5,7 @@
 // controller opens it as a file with no undo history; the pointer and key
 // gestures of today's cases; the Wall tool's settings set through the
 // property panel's settings fields. Public libraries only (R-P1).
-import 'package:flutter/gestures.dart' show PointerDeviceKind, kPrimaryButton;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
@@ -54,23 +52,9 @@ PlanController wallController(String plan) {
   return c;
 }
 
-/// A primary click at world [p] plus the raw offset `(dx, dy)` in mm.
-Future<void> clickAt(WidgetTester tester, PlanController c, Vector2 p,
-    [double dx = 0, double dy = 0]) async {
-  await tester.tapAt(globalAt(tester, c, Vector2(p.x + dx, p.y + dy)));
-  await tester.pump();
-}
-
 /// A click near [p]: 12 mm and -9 mm off, well inside the aperture.
 Future<void> clickNear(WidgetTester tester, PlanController c, Vector2 p) =>
     clickAt(tester, c, p, 12, -9);
-
-Future<void> undoKey(WidgetTester tester) async {
-  await tester.sendKeyDownEvent(LogicalKeyboardKey.meta);
-  await press(tester, LogicalKeyboardKey.keyZ);
-  await tester.sendKeyUpEvent(LogicalKeyboardKey.meta);
-  await tester.pump();
-}
 
 /// The page grid's point nearest [p], as the drag chain computes it.
 Vector2 gridOf(DraftDocument doc, Vector2 p) =>
@@ -103,20 +87,6 @@ Future<void> selectWall(WidgetTester tester, PlanController c, Handle h) async {
       .tapAt(globalAt(tester, c, w.s + (w.e - w.s) * 0.4 + n * ((l + r) / 2)));
   await tester.pump();
   expect(c.activeSelection.keys, [SelectionKey.root(h)]);
-}
-
-/// A mouse drag from world [from] to world [to], past the slop at once.
-Future<void> dragWorld(
-    WidgetTester tester, PlanController c, Vector2 from, Vector2 to) async {
-  final a = globalAt(tester, c, from), b = globalAt(tester, c, to);
-  final gesture = await tester.createGesture(
-      kind: PointerDeviceKind.mouse, buttons: kPrimaryButton);
-  await gesture.down(a);
-  await gesture.moveTo(a + const Offset(12, 0));
-  await gesture.moveTo(b);
-  await gesture.up();
-  await gesture.removePointer();
-  await tester.pump();
 }
 
 /// Wall [h]'s end [k] in world.

@@ -122,7 +122,7 @@ void main() {
       final before = roomOf(doc, f.kitchen);
       final p = f.p.at(1900.37, 2600.81);
       final want = labelFor(doc, f.kitchen, at(g), p);
-      await dragWorld(tester, c, at(g), p);
+      await dragWorld(tester, c, at(g), p, pumps: 2);
       expect(doc.commands.undoDepth, 1, reason: 'one undo step');
       final got = roomOf(doc, f.kitchen).label!;
       expect(got.$1, closeTo(want.$1, 1e-6));
@@ -154,7 +154,8 @@ void main() {
       for (final snap in [true, false]) {
         expect(osnap(tester), snap ? 'OSNAP' : 'osnap off');
         final g = objectGripsOf(c, f.kitchen).single;
-        await dragWorld(tester, c, at(g), pole + Vector2(0.4 * ap, -0.3 * ap));
+        await dragWorld(tester, c, at(g), pole + Vector2(0.4 * ap, -0.3 * ap),
+            pumps: 2);
         expect(doc.commands.undoDepth, 1, reason: 'F3 $snap: one step');
         expect(roomOf(doc, f.kitchen).label, isNull,
             reason: 'F3 $snap: auto (Ruling 10-17)');
@@ -171,7 +172,7 @@ void main() {
       final g = objectGripsOf(c, f.kitchen).single;
       final out = pole + Vector2(1.5 * ap, 0);
       final want = labelFor(doc, f.kitchen, at(g), out);
-      await dragWorld(tester, c, at(g), out);
+      await dragWorld(tester, c, at(g), out, pumps: 2);
       expect(doc.commands.undoDepth, 1);
       final got = roomOf(doc, f.kitchen).label!;
       expect(got.$1, closeTo(want.$1, 1e-6));
@@ -195,7 +196,7 @@ void main() {
     doc.commands.permissions = DraftPermissions.runtime;
     expect(c.grips.hitTest(Offset(s.x, s.y), m), -1);
     final before = enc(doc);
-    await dragWorld(tester, c, at(g), f.p.at(1900.37, 2600.81));
+    await dragWorld(tester, c, at(g), f.p.at(1900.37, 2600.81), pumps: 2);
     expect(enc(doc), before, reason: 'nothing moved');
   });
 
@@ -216,8 +217,8 @@ void main() {
       expect(c.grips.box, isNotNull);
       expect(c.grips.rotatable, isFalse, reason: 'no rotation grip');
       final before = enc(doc);
-      await dragWorld(
-          tester, c, name, name + (f.p.at(700, 300) - f.p.at(0, 0)));
+      await dragWorld(tester, c, name, name + (f.p.at(700, 300) - f.p.at(0, 0)),
+          pumps: 2);
       expect(doc.commands.undoDepth, 0, reason: 'nothing in the history');
       expect(enc(doc), before, reason: 'nothing moved');
       expect(c.activeSelection.keys, [k(f.kitchen)], reason: 'still a click');
@@ -234,7 +235,8 @@ void main() {
         f.kitchen: (roomOf(doc, f.kitchen), doc.tree[f.kitchen]),
         f.b: (roomOf(doc, f.b), doc.tree[f.b]),
       };
-      await dragWorld(tester, c, f.p.at(2950, 1200.5), f.p.at(3200, 1200.5));
+      await dragWorld(tester, c, f.p.at(2950, 1200.5), f.p.at(3200, 1200.5),
+          pumps: 2);
       expect(doc.commands.undoDepth, 1, reason: 'one step');
       final t1 = doc.tree.accumulatedTransform(f.part);
       final v = Vector2(t1.e - t0.e, t1.f - t0.f);
@@ -283,7 +285,7 @@ void main() {
       for (final on in [true, false]) {
         expect(osnap(tester), on ? 'OSNAP' : 'osnap off');
         final g = objectGripsOf(c, f.sep)[1];
-        await dragWorld(tester, c, at(g), p);
+        await dragWorld(tester, c, at(g), p, pumps: 2);
         expect(doc.commands.undoDepth, 1, reason: 'F3 $on: one step');
         final now = sepOf(doc, f.sep);
         expect((now.sx, now.sy), (stored.sx, stored.sy),

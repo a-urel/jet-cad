@@ -152,7 +152,7 @@ void main() {
     expect(doc.commands.undoDepth, depth);
 
     // One undo step takes the last door away; Esc returns to Select.
-    await undoKey(tester);
+    await undoKey(tester, pumps: 1);
     expect(openings(doc), [d1, w2, g3]);
     expect(status(tester), 'Door');
     await press(tester, LogicalKeyboardKey.escape);

@@ -80,7 +80,7 @@ void main() {
     expect(paramsOf(doc, s.door).position,
         isNot(closeTo(oracleU(f, gridOf(doc, target)), 1)),
         reason: 'not the chain\'s point');
-    await undoKey(tester);
+    await undoKey(tester, pumps: 1);
     expect(paramsOf(doc, s.door), stored, reason: 'undone, exactly');
     expect(doc.commands.undoDepth, 0);
 

@@ -13,11 +13,11 @@ import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
-    show GripCache, InteractionLayer, ViewportTransform;
+    show GripCache, InteractionLayer;
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
-import 'editor_rig.dart' show press, pumpEditor;
+import 'editor_rig.dart' show centreCamera, press, pumpEditor;
 
 export 'editor_rig.dart'
     show activeTool, globalAt, globalOf, kitCatalog, press, pumpEditor, status;
@@ -61,14 +61,7 @@ Future<void> pumpPlanEditor(WidgetTester tester, PlanController c,
 /// radians on the screen; set after the editor's first fit.
 Future<void> frameOn(WidgetTester tester, PlanController c, Vector2 centre,
     {required double scale, double turn = 0}) async {
-  final size = tester.getSize(find.byType(InteractionLayer));
-  final linear =
-      Transform2.rotation(turn).multiply(Transform2.scale(scale, -scale));
-  final mid = linear.transformPoint(centre);
-  c.camera.value = ViewportTransform(
-      worldToScreenMatrix: Transform2.translation(
-              size.width / 2 - mid.x, size.height / 2 - mid.y)
-          .multiply(linear));
+  centreCamera(tester, c, centre, scale: scale, turn: turn, yUp: true);
   await tester.pump();
 }
 

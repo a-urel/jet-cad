@@ -8,12 +8,13 @@
 // another package cannot import, over the public libraries only.
 import 'dart:async' show unawaited;
 
+import 'package:flutter/gestures.dart' show PointerDeviceKind, kPrimaryButton;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
-    show InteractionLayer, Tool, ViewportTransform;
+    show InteractionLayer, SelectionKey, Tool, ViewportTransform;
 import 'package:jet_cad_2d_integration/jet_cad_2d_integration.dart';
 import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
@@ -47,15 +48,23 @@ Future<void> pumpEditor(WidgetTester tester, PlanController c,
   await tester.pumpWidget(wrap == null ? app : wrap(app));
   await tester.pump();
   if (centre == null) return;
+  centreCamera(tester, c, centre, scale: scale, turn: turn, yUp: false);
+  await tester.pump();
+}
+
+/// Sets [c]'s camera with world [centre] in the middle of the drawing
+/// area, at [scale] px/mm, turned by [turn] rad; y up when [yUp] (the
+/// canvas rig's `frameOn`), else non-reflecting ([pumpEditor]). No pump.
+void centreCamera(WidgetTester tester, PlanController c, Vector2 centre,
+    {required double scale, required double turn, required bool yUp}) {
   final size = tester.getSize(find.byType(InteractionLayer));
-  final linear =
-      Transform2.rotation(turn).multiply(Transform2.scale(scale, scale));
+  final linear = Transform2.rotation(turn)
+      .multiply(Transform2.scale(scale, yUp ? -scale : scale));
   final mid = linear.transformPoint(centre);
   c.camera.value = ViewportTransform(
       worldToScreenMatrix: Transform2.translation(
               size.width / 2 - mid.x, size.height / 2 - mid.y)
           .multiply(linear));
-  await tester.pump();
 }
 
 /// World ([x], [y])'s global position under [c]'s camera.
@@ -77,6 +86,53 @@ Future<bool> press(WidgetTester tester, LogicalKeyboardKey key) async {
   final handled = await tester.sendKeyEvent(key);
   await tester.pump();
   return handled;
+}
+
+/// A primary click at world [p] plus the raw offset `(dx, dy)` in mm, then
+/// a frame (R-P14: the one copy of wall_shell's, room_plans' clickAt).
+Future<void> clickAt(WidgetTester tester, PlanController c, Vector2 p,
+    [double dx = 0, double dy = 0]) async {
+  await tester.tapAt(globalAt(tester, c, Vector2(p.x + dx, p.y + dy)));
+  await tester.pump();
+}
+
+/// A mouse drag from world [from] to world [to], past the slop at once,
+/// then [pumps] frames (R-P14: the one copy of wall_shell's,
+/// opening_support's and room_plans' dragWorld; the room tests pump 2).
+Future<void> dragWorld(
+    WidgetTester tester, PlanController c, Vector2 from, Vector2 to,
+    {int pumps = 1}) async {
+  final a = globalAt(tester, c, from), b = globalAt(tester, c, to);
+  final gesture = await tester.createGesture(
+      kind: PointerDeviceKind.mouse, buttons: kPrimaryButton);
+  await gesture.down(a);
+  await gesture.moveTo(a + const Offset(12, 0));
+  await gesture.moveTo(b);
+  await gesture.up();
+  await gesture.removePointer();
+  for (var i = 0; i < pumps; i++) {
+    await tester.pump();
+  }
+}
+
+/// Cmd+Z, then [pumps] frames: the document's change stream delivers
+/// after the task (R-P14: the one copy of wall_shell's, room_plans' and
+/// opening_support's undoKey; the opening tests pump 1).
+Future<void> undoKey(WidgetTester tester, {int pumps = 2}) async {
+  await tester.sendKeyDownEvent(LogicalKeyboardKey.meta);
+  await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
+  await tester.sendKeyUpEvent(LogicalKeyboardKey.meta);
+  for (var i = 0; i < pumps; i++) {
+    await tester.pump();
+  }
+}
+
+/// The design's selection replaced by [hs], as roots, then a frame (R-P14:
+/// the one copy of room_plans' and opening_support's select).
+Future<void> select(
+    WidgetTester tester, PlanController c, List<Handle> hs) async {
+  c.activeSelection.replace([for (final h in hs) SelectionKey.root(h)]);
+  await tester.pump();
 }
 
 /// The canvas's active tool, as its interaction layer holds it: a kit's

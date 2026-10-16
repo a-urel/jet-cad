@@ -11,12 +11,10 @@
 // planEditorApp, the controller's camera, selection and worldToGlobal.
 import 'dart:math' as math;
 
-import 'package:flutter/gestures.dart' show PointerDeviceKind, kPrimaryButton;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
-import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
 import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
@@ -24,7 +22,17 @@ import 'package:vector_math/vector_math_64.dart' show Vector2;
 import 'editor_rig.dart';
 import 'wall_fixture.dart';
 
-export 'editor_rig.dart' show globalAt, kitCatalog, press, pumpEditor, status;
+export 'editor_rig.dart'
+    show
+        clickAt,
+        dragWorld,
+        globalAt,
+        kitCatalog,
+        press,
+        pumpEditor,
+        select,
+        status,
+        undoKey;
 export 'wall_fixture.dart' show canon, driftOf, enc, kids, kindOf, payloadOf;
 
 // ---------------------------------------------------------------------------
@@ -429,35 +437,6 @@ Future<void> pumpAt(WidgetTester tester, PlanController c, Vector2 centre,
         {double scale = 0.15, double turn = 0.35}) =>
     pumpEditor(tester, c, centre: centre, scale: scale, turn: turn);
 
-Future<void> clickAt(WidgetTester tester, PlanController c, Vector2 p) async {
-  await tester.tapAt(globalAt(tester, c, p));
-  await tester.pump();
-}
-
-/// A mouse drag from world [from] to world [to], past the slop at once
-/// (today's `dragWorld`, room_grips_test.dart:176-188).
-Future<void> dragWorld(
-    WidgetTester tester, PlanController c, Vector2 from, Vector2 to) async {
-  final a = globalAt(tester, c, from), b = globalAt(tester, c, to);
-  final gesture = await tester.createGesture(
-      kind: PointerDeviceKind.mouse, buttons: kPrimaryButton);
-  await gesture.down(a);
-  await gesture.moveTo(a + const Offset(12, 0));
-  await gesture.moveTo(b);
-  await gesture.up();
-  await gesture.removePointer();
-  await tester.pump();
-  await tester.pump();
-}
-
-Future<void> undoKey(WidgetTester tester) async {
-  await tester.sendKeyDownEvent(LogicalKeyboardKey.meta);
-  await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
-  await tester.sendKeyUpEvent(LogicalKeyboardKey.meta);
-  await tester.pump();
-  await tester.pump();
-}
-
 Future<void> toggleF3(WidgetTester tester) async {
   await tester.sendKeyEvent(LogicalKeyboardKey.f3);
   await tester.pump();
@@ -465,10 +444,3 @@ Future<void> toggleF3(WidgetTester tester) async {
 
 String osnap(WidgetTester tester) =>
     tester.widget<Text>(find.byKey(const Key('osnap-text'))).data!;
-
-/// The design's selection replaced by [hs], as roots.
-Future<void> select(
-    WidgetTester tester, PlanController c, List<Handle> hs) async {
-  c.activeSelection.replace([for (final h in hs) SelectionKey.root(h)]);
-  await tester.pump();
-}
