@@ -295,6 +295,8 @@ void main() {
         await replace();
         await tester.pump();
         expect(c.document, isNot(same(before)), reason: 'premise: replaced');
+        expect(before.commands.isDisposed, isTrue,
+            reason: 'the replaced document is disposed');
         expect(tester.state(find.byType(PlanEditor)), same(editor),
             reason: 'the same editor');
 
@@ -324,8 +326,10 @@ void main() {
       given.removeListener(_noop);
       await tapFinder(tester, tabSymbols);
       expect(tester.widget<TextField>(searchField).controller!.text, 'sofa');
-      expect(galleryIdsOf(tester),
-          allOf(isNotEmpty, everyElement(contains('sofa'))));
+      expect(
+          galleryIdsOf(tester),
+          allOf(isNotEmpty,
+              everyElement(matches(RegExp(r'^architecture\.sofa')))));
 
       await tester.pumpWidget(const SizedBox());
       expect(() => given.addListener(_noop), throwsFlutterError,
