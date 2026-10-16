@@ -153,6 +153,13 @@ void main() {
         from2 + onRun(runB, 1500, 50) - t.transformPoint(bedBox.backCentre));
     expect(doc.commands.undoDepth, depth + 1);
     expectFlush(doc, node(), runB, 1600, mirrored: false, why: 'on B');
+    final uB = (node().transform.transformPoint(bedBox.backCentre) - runB.a)
+        .dot(runB.t);
+    // The drop point is 1500 mm along B; the page grid snaps the drag
+    // points, so the committed position is the drop's projection within a
+    // grid step (the run reads 1682 with the grid at its default here), not
+    // anywhere flush on B's face (T7-M1).
+    expect(uB, closeTo(1500, 250), reason: 'at the drop point along B');
     expect(partsOf(node().transform).take(4), isNot(partsOf(t).take(4)),
         reason: 'turned from A\'s direction to B\'s');
 
