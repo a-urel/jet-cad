@@ -1,3 +1,9 @@
+// PENDING (Task 8 of the restaurant-kit plan): the old host_chrome_test.dart, moved aside
+// unported because it cannot compile on the new API yet. Task 8 ports it per
+// docs/superpowers/specs/2026-10-16-restaurant-kit-test-audit.md and deletes
+// this file; Task 11 checks test/_pending/ is empty. Not run, not analysed: the .txt suffix keeps it out of the analyzer (the old packages are no longer deps); the name does
+// not end in _test.dart. Task 7/8 renames it back while porting. No case is dropped.
+
 // Host embedding API spec C-1 to C-8 in the demo (Slice 4): the editor's
 // three profiles (Full, Tables, Read only) with the demo's table inspector
 // under Tables; the demo's own service bar, built from the controller's

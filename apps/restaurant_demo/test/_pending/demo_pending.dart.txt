@@ -1,3 +1,9 @@
+// PENDING (Task 7 of the restaurant-kit plan): the old demo_test.dart, moved aside
+// unported because it cannot compile on the new API yet. Task 7 ports it per
+// docs/superpowers/specs/2026-10-16-restaurant-kit-test-audit.md and deletes
+// this file; Task 11 checks test/_pending/ is empty. Not run, not analysed: the .txt suffix keeps it out of the analyzer (the old packages are no longer deps); the name does
+// not end in _test.dart. Task 7/8 renames it back while porting. No case is dropped.
+
 // Spec 14b-2 H10: the demo host drives the public API end to end -- two
 // areas, the mode toggle, the service layout kept per area (spec 14d S9),
 // selection by number, save and revert in memory, the table menu, the

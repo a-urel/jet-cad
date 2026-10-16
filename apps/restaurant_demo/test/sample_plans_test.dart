@@ -1,79 +1,149 @@
-// The demo's sample plans (apps/restaurant_demo/assets/plans): built here
-// with the editor's own placement, and compared with the committed assets
-// byte for byte. `UPDATE_SAMPLES=1 flutter test test/sample_plans_test.dart`
-// rewrites them.
-import 'dart:convert';
-import 'dart:io';
-import 'dart:typed_data';
-
+// The sample plans (audit section 9 `sample_plans_test` SPLIT, and demo_test
+// D15's intent): the plans are exactly the hand-written placements below,
+// built by `PlanController(build: ...)`; the units are numbered 1-3, 4-5,
+// 6-7, 8-11 (Salon) and 1-6 (Teras) in build order; each plan opens clean
+// with nothing to undo, and saves, loads and saves again byte for byte.
+// The expected table is the old plans' (assets/plans/*.json at v0.7.2): the
+// definition and the instance's translation, copied from the JSON, not
+// derived from the code under test.
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
-import 'package:jet_cad_floor_plan/editor.dart';
-import 'package:jet_cad_restaurant_symbols/jet_cad_restaurant_symbols.dart';
-import 'package:vector_math/vector_math_64.dart' show Vector2;
+import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
+import 'package:jet_cad_2d_kit_restaurant/jet_cad_2d_kit_restaurant.dart';
+import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+import 'package:restaurant_demo/samples/salon.dart';
+import 'package:restaurant_demo/samples/teras.dart';
 
-/// The restaurant library, decoded once.
-final List<SymbolEntry> _entries = SymbolLibrary.decode(Uint8List.fromList(
-        utf8.encode(DraftDocumentCodec.encodeToString(
-            buildSymbolLibrary(restaurantCatalog)))))
-    .entries;
+import 'support/demo_rig.dart';
 
-SymbolEntry _entry(String key) => _entries.firstWhere((e) => e.key == key);
+/// (definition, translation x, translation y, label or null for a
+/// non-unit), in build order.
+typedef Placement = (String, double, double, String?);
 
-/// A plan on the default page with [placements]: (key, x, y, quarter
-/// turns), x and y in mm from the sheet's lower-left corner.
-String _plan(List<(String, double, double, int)> placements) {
-  final doc = newDocument(MetricModelMeasurer());
-  final sheet =
-      sheetWorldRect(doc.components.get<PageComponent>(doc.rootHandle)!);
-  for (final (key, x, y, turns) in placements) {
-    doc.commands.execute(placeSymbol(doc, _entry(key),
-        at: Vector2(sheet.minX + x, sheet.minY + y), quarterTurns: turns));
-  }
-  return '${const JsonEncoder.withIndent(' ').convert(jsonDecode(DraftDocumentCodec.encodeToString(doc)))}\n';
+const List<Placement> salon = [
+  ('restaurant.table.rect.four@1', -5525, 1625, '1'),
+  ('restaurant.table.rect.four@1', -3025, 1625, '2'),
+  ('restaurant.table.rect.four@1', -525, 1625, '3'),
+  ('restaurant.table.round.six@1', -5900, -2125, '4'),
+  ('restaurant.table.round.six@1', -2900, -2125, '5'),
+  ('restaurant.booth.four@1', 2975, 2200, '6'),
+  ('restaurant.booth.four@1', 2975, -500, '7'),
+  ('restaurant.bar.stool@1', 85, -2790, '8'),
+  ('restaurant.bar.stool@1', 885, -2790, '9'),
+  ('restaurant.bar.stool@1', 1685, -2790, '10'),
+  ('restaurant.bar.stool@1', 2485, -2790, '11'),
+  ('restaurant.bar.counter@1', -25, -3750, null),
+  ('restaurant.host.stand@1', 5875, -4175, null),
+];
+
+const List<Placement> teras = [
+  ('restaurant.table.round.four@1', -5450, 725, '1'),
+  ('restaurant.table.round.four@1', -2450, 725, '2'),
+  ('restaurant.table.round.four@1', -5450, -2475, '3'),
+  ('restaurant.table.round.four@1', -2450, -2475, '4'),
+  ('restaurant.bar.table.high.two@1', 1435, 1110, '5'),
+  ('restaurant.bar.table.high.two@1', 1435, -2090, '6'),
+  ('restaurant.planter.round@1', -6725, 3950, null),
+  ('restaurant.planter.round@1', 5775, 3950, null),
+  ('restaurant.planter.long@1', -725, -4450, null),
+];
+
+/// The seats of each seated definition in the plans above.
+const Map<String, int> capacities = {
+  'restaurant.table.rect.four@1': 4,
+  'restaurant.table.round.six@1': 6,
+  'restaurant.booth.four@1': 4,
+  'restaurant.bar.stool@1': 1,
+  'restaurant.bar.table.high.two@1': 2,
+  'restaurant.table.round.four@1': 4,
+};
+
+PlanController open(PlanBuild build) {
+  final c =
+      PlanController(kits: [architectureKit, restaurantKit], build: build);
+  addTearDown(c.dispose);
+  return c;
 }
 
-/// Salon: four-seat tables, round six-seat tables, two booths, a bar with
-/// four stools and a host stand. Numbered in this order: 1-3, 4-5, 6-7,
-/// 8-11.
-String salonPlan() => _plan([
-      ('restaurant.table.rect.four', 2500, 7600, 0),
-      ('restaurant.table.rect.four', 5000, 7600, 0),
-      ('restaurant.table.rect.four', 7500, 7600, 0),
-      ('restaurant.table.round.six', 2700, 4300, 0),
-      ('restaurant.table.round.six', 5700, 4300, 0),
-      ('restaurant.booth.four', 11000, 8300, 0),
-      ('restaurant.booth.four', 11000, 5600, 0),
-      ('restaurant.bar.stool', 7700, 2650, 0),
-      ('restaurant.bar.stool', 8500, 2650, 0),
-      ('restaurant.bar.stool', 9300, 2650, 0),
-      ('restaurant.bar.stool', 10100, 2650, 0),
-      ('restaurant.bar.counter', 8900, 1800, 0),
-      ('restaurant.host.stand', 13600, 1300, 0),
-    ]);
-
-/// Teras: four round four-seat tables, two high tables and planters.
-String terasPlan() => _plan([
-      ('restaurant.table.round.four', 3000, 7000, 0),
-      ('restaurant.table.round.four', 6000, 7000, 0),
-      ('restaurant.table.round.four', 3000, 3800, 0),
-      ('restaurant.table.round.four', 6000, 3800, 0),
-      ('restaurant.bar.table.high.two', 9500, 7000, 0),
-      ('restaurant.bar.table.high.two', 9500, 3800, 0),
-      ('restaurant.planter.round', 1000, 9500, 0),
-      ('restaurant.planter.round', 13500, 9500, 0),
-      ('restaurant.planter.long', 7300, 1000, 0),
-    ]);
+/// The root-level instances in draw order (ascending handle).
+List<InstanceNode> instances(PlanController c) => [
+      for (final n in c.document.tree.nodes)
+        if (n is InstanceNode) n,
+    ]..sort((a, b) => a.handle.value.compareTo(b.handle.value));
 
 void main() {
-  for (final (name, build) in [('salon', salonPlan), ('teras', terasPlan)]) {
-    test('the committed $name plan is the built one', () {
-      final file = File('assets/plans/$name.json');
-      final built = build();
-      if (Platform.environment['UPDATE_SAMPLES'] == '1') {
-        file.writeAsStringSync(built);
-      }
-      expect(file.readAsStringSync(), built);
+  TestWidgetsFlutterBinding.ensureInitialized();
+  for (final (name, build, want) in [
+    ('Salon', buildSalon, salon),
+    ('Teras', buildTeras, teras),
+  ]) {
+    group(name, () {
+      test('SP1 exactly the hand-written placements, in build order', () {
+        final c = open(build);
+        final got = [
+          for (final i in instances(c))
+            (
+              definitionName(c, i.handle),
+              i.transform.e,
+              i.transform.f,
+              i.transform.a,
+              i.transform.b,
+              i.transform.c,
+              i.transform.d,
+            ),
+        ];
+        expect(got, [
+          for (final (d, x, y, _) in want) (d, x, y, 1.0, 0.0, 0.0, 1.0),
+        ]);
+      });
+
+      test(
+          'SP2 the units are numbered in build order, once each, with the '
+          'right seats', () {
+        final c = open(build);
+        final labels = unitLabels(c);
+        final wantLabels = [
+          for (final (_, _, _, l) in want)
+            if (l != null) l,
+        ];
+        expect([for (final (_, t) in labels) t], wantLabels);
+        // The label of each unit sits on the placement that has that number.
+        for (final (instance, text) in labels) {
+          final i = want.indexWhere((p) => p.$4 == text);
+          expect(instances(c).indexWhere((n) => n.handle == instance), i,
+              reason: 'unit $text');
+        }
+        expect([for (final u in c.units) u.label], wantLabels);
+        expect([
+          for (final u in c.units) u.capacity
+        ], [
+          for (final (d, _, _, l) in want)
+            if (l != null) capacities[d]!
+        ]);
+        expect({for (final u in c.units) u.kind}, {UnitKinds.table});
+        expect(c.labelWarnings, isEmpty);
+      });
+
+      test('SP3 opens clean: nothing to undo, not dirty, no diagnostic', () {
+        final c = open(build);
+        expect(c.document.commands.canUndo, isFalse);
+        expect(c.canUndo.value, isFalse);
+        expect(c.dirty.value, isFalse);
+        expect(c.diagnostics.value, isEmpty);
+      });
+
+      test('SP4 saves, loads and saves again byte for byte', () {
+        final c = open(build);
+        final text = c.save();
+        final again =
+            PlanController(kits: [architectureKit, restaurantKit], json: text);
+        addTearDown(again.dispose);
+        expect(again.save(), text);
+        expect([for (final u in again.units) u.label],
+            [for (final u in c.units) u.label]);
+        expect(again.dirty.value, isFalse);
+      });
     });
   }
 }
