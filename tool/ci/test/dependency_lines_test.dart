@@ -6,16 +6,13 @@ import 'dart:io';
 import 'package:test/test.dart';
 
 /// The packages published on pub.dev.
-const published = ['jet_cad_2d', 'jet_cad_2d_flutter', 'jet_cad_floor_plan'];
+const published = ['jet_cad_2d', 'jet_cad_2d_flutter'];
 
 /// The live line's pubspecs, relative to tool/ci.
 const pubspecs = [
   '../../packages/jet_cad_2d/pubspec.yaml',
   '../../packages/jet_cad_2d_flutter/pubspec.yaml',
   '../../packages/jet_cad_2d_gpu/pubspec.yaml',
-  '../../packages/jet_cad_floor_plan/pubspec.yaml',
-  '../../packages/jet_cad_restaurant_symbols/pubspec.yaml',
-  '../../apps/floor_planner/pubspec.yaml',
   '../../apps/restaurant_demo/pubspec.yaml',
   '../../apps/dev_harness_2d/pubspec.yaml',
   '../../tool/screenshots/pubspec.yaml',
@@ -65,11 +62,11 @@ void main() {
     }
     expect(
       seen,
-      20,
+      11,
       reason:
-          'premise: the dependents are read; the pubspecs hold 20 '
-          'dependency lines on a published package (14, and the three each of '
-          'tool/screenshots and tool/readme_probe)',
+          'premise: the dependents are read; the pubspecs hold 11 '
+          'dependency lines on a published package (the renderer, the GPU '
+          'renderer, the two demos and the two probes)',
     );
   });
 

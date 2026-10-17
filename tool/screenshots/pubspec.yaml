@@ -1,6 +1,6 @@
 name: jet_cad_screenshots
 description: >-
-  The published packages' screenshots (package READMEs spec D4): eleven
+  The published packages' screenshots (package READMEs spec D4): five
   scenes over the packages' public widgets, written into each package's
   doc/screenshots/ with UPDATE_SCREENSHOTS=1. Not a product package.
 publish_to: none
@@ -18,16 +18,17 @@ dev_dependencies:
     sdk: flutter
   jet_cad_2d: ^0.7.2
   jet_cad_2d_flutter: ^0.7.2
-  jet_cad_floor_plan: ^0.7.2
-  jet_cad_restaurant_symbols:
-    path: ../../packages/jet_cad_restaurant_symbols
+  jet_cad_2d_plan: ^0.8.0
+  jet_cad_2d_kit: ^0.1.0
+  jet_cad_2d_kit_architecture: ^0.1.0
+  jet_cad_2d_kit_restaurant: ^0.1.0
   vector_math: ^2.2.0
 
 flutter:
   uses-material-design: true
-  # As a host declares it (host guide §2): the planner's bytes under the
-  # bare family the plans name.
+  # As a host declares it (host guide §2): the plan library's bytes under
+  # the bare family the plans name.
   fonts:
     - family: Roboto
       fonts:
-        - asset: packages/jet_cad_floor_plan/fonts/Roboto-Regular.ttf
+        - asset: packages/jet_cad_2d_plan/fonts/Roboto-Regular.ttf
