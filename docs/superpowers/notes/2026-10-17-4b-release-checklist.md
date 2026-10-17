@@ -313,5 +313,28 @@ Not blockers, but the wave should decide them:
   on pub.dev and is part of the wave itself (steps 1–6, action (a)); the
   workspace's own downgrade check passed at P4.
 - **No version change.** The versions and carets are P4's, already in `main`
-  at `a428dee7`; this note changes only Markdown (the three CHANGELOG
-  headings and the one README sentence).
+  at `a428dee7`; this branch changes only Markdown (the three `(unreleased)`
+  CHANGELOG headings, the one README sentence, this note and `STATUS.md`).
+
+## This branch's commits
+
+All on `docs/4b-release-checklist`, off `main` at `a428dee7`:
+
+- `d9dd74d7` — `release: the four new packages' headings and the plan README
+  (4b)`: drops `(unreleased)` from the three headings that carry it and the
+  plan README's stale sentence. This is the prep that makes the dry runs
+  above clean (an uncommitted change makes `pub publish --dry-run` warn and
+  exit 65).
+- `892f65c7` — `docs: the 4b release checklist (P6)`: this note.
+- `da21f390` — `docs: STATUS 4b state and the resume point (P6)`: `STATUS.md`,
+  the 4b state and the human's next step.
+
+After `da21f390` the tree is clean. `tool/ci` (`+114`) and the four script
+checks (`check_guide`, `check_readmes`, `check_screenshots`,
+`check_kit_deps`) were re-run green on that tree: none reads `STATUS.md`, so
+the transcript in [The gates run here](#the-gates-run-here) still holds. The
+three code packages' gates are P4/P5's, unchanged by this Markdown branch.
+
+**Open items:** the two in [Open items before you publish](#open-items-before-you-publish)
+— `jet_cad_2d_kit`'s missing `.pubignore` and the half-false root
+`CHANGELOG.md` index. Neither blocks the publish; both are the wave's call.
