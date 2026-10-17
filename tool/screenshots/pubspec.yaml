@@ -22,6 +22,9 @@ dev_dependencies:
   jet_cad_2d_kit: ^0.1.0
   jet_cad_2d_kit_architecture: ^0.1.0
   jet_cad_2d_kit_restaurant: ^0.1.0
+  # The Salon sample, the one source the demo and the restaurant kit's
+  # pictures share (4b P5): `package:restaurant_demo/samples/salon.dart`.
+  restaurant_demo: ^0.0.1
   vector_math: ^2.2.0
 
 flutter:

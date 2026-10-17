@@ -9,6 +9,11 @@ issue_tracker: https://github.com/a-urel/jet-cad/issues
 funding:
   - https://github.com/sponsors/a-urel
   - https://buymeacoffee.com/yazemo
+screenshots:
+  - description: 'The demo''s Salon in the plan library''s editor: the kit''s tables, booths, bar and host stand.'
+    path: doc/screenshots/restaurant_salon.png
+  - description: 'PlanSymbolGallery over the kit''s symbols, its sections listed and one of them open.'
+    path: doc/screenshots/restaurant_gallery.png
 topics:
   - cad
   - floor-plan

@@ -8,6 +8,11 @@ issue_tracker: https://github.com/a-urel/jet-cad/issues
 funding:
   - https://github.com/sponsors/a-urel
   - https://buymeacoffee.com/yazemo
+screenshots:
+  - description: 'The plan editor over the architecture kit''s sample flat: walls, rooms, doors, windows and furniture.'
+    path: doc/screenshots/plan_editor.png
+  - description: 'PlanSymbolGallery, the plan library''s symbol library, over the architecture kit''s furniture.'
+    path: doc/screenshots/plan_gallery.png
 topics:
   - cad
   - floor-plan
