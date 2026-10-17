@@ -17,7 +17,7 @@ screenshots:
     path: doc/screenshots/selection_grips.png
   - description: 'A crossing selection band, dragged right to left.'
     path: doc/screenshots/selection_band.png
-  - description: 'SymbolGallery: a furniture library in collapsible categories of thumbnails.'
+  - description: 'SymbolGallery: a library of thumbnail cells in collapsible categories.'
     path: doc/screenshots/symbol_gallery.png
 topics:
   - cad
