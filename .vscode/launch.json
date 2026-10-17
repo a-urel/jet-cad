@@ -1,5 +1,5 @@
 {
-    // The two applications, on macOS and on the web (Chrome). The 2D
+    // The applications, on macOS and on the web (Chrome). The 2D
     // harness's measurement runs (`apps/dev_harness_2d`) are no longer
     // listed here; `git log -- .vscode/launch.json` keeps them.
     //
@@ -7,22 +7,6 @@
     // wrong one, pick it once from the Run and Debug dropdown.
     "version": "0.2.0",
     "configurations": [
-        {
-            "name": "floor_planner: macOS",
-            "cwd": "apps/floor_planner",
-            "program": "lib/main.dart",
-            "request": "launch",
-            "type": "dart",
-            "deviceId": "macos"
-        },
-        {
-            "name": "floor_planner: web",
-            "cwd": "apps/floor_planner",
-            "program": "lib/main.dart",
-            "request": "launch",
-            "type": "dart",
-            "deviceId": "chrome"
-        },
         {
             "name": "restaurant_demo: macOS",
             "cwd": "apps/restaurant_demo",
