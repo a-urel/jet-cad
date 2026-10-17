@@ -59,9 +59,11 @@ A few entities selected, each with its grips, and one entity highlighted under t
 
 A crossing band, dragged right to left, mid-drag: it selects what it touches, not only what it encloses.
 
-![SymbolGallery with the Bathroom category open](https://raw.githubusercontent.com/a-urel/jet-cad/jet_cad_2d_flutter-v0.7.2/packages/jet_cad_2d_flutter/doc/screenshots/symbol_gallery.png)
+![PlanSymbolGallery, with its search field and the Bathroom category open](https://raw.githubusercontent.com/a-urel/jet-cad/jet_cad_2d_flutter-v0.7.2/packages/jet_cad_2d_flutter/doc/screenshots/symbol_gallery.png)
 
-`SymbolGallery`: a furniture library in collapsible categories of thumbnails, the Bathroom category open.
+`PlanSymbolGallery` (the plan library's gallery over `SymbolGallery`): a
+furniture library in collapsible categories of thumbnails, its search field
+above, the Bathroom category open.
 
 These pictures are made by `tool/screenshots` in the repository, with the app's own theme.
 
