@@ -35,8 +35,8 @@ dev_dependencies:
   # The tests drive the editor through the engine's types (Handle, Tool,
   # InteractionLayer, Transform2), the kit's diagnostics and world points
   # (Vector2).
-  jet_cad_2d: ^0.7.2
-  jet_cad_2d_flutter: ^0.7.2
+  jet_cad_2d: ^0.7.3
+  jet_cad_2d_flutter: ^0.7.3
   jet_cad_2d_kit: ^0.1.0
   vector_math: ^2.2.0
 
