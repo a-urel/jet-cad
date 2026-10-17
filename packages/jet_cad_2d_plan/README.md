@@ -22,6 +22,8 @@ names a kit the host did not load opens, draws and saves its objects
 unchanged, and locks them; a kit whose code fails is contained to the
 objects it broke.
 
+![The plan editor over a sample flat: walls, rooms, doors, windows and furniture](https://raw.githubusercontent.com/a-urel/jet-cad/jet_cad_2d_plan-v0.8.0/packages/jet_cad_2d_plan/doc/screenshots/plan_editor.png)
+
 ## Use
 
 ```dart
@@ -89,4 +91,48 @@ class PlanExampleAppState extends State<PlanExampleApp> {
 - `PlanPermissions` decide what the editor lets a user change.
 - The kit author's contract is `docs/kits.md` in the repository.
 
+## Screenshots
+
+![PlanSymbolGallery, the plan library's symbol library, over the architecture kit's furniture](https://raw.githubusercontent.com/a-urel/jet-cad/jet_cad_2d_plan-v0.8.0/packages/jet_cad_2d_plan/doc/screenshots/plan_gallery.png)
+
+`PlanSymbolGallery`: the plan library's symbol library, the loaded kits'
+symbols in collapsible categories of thumbnail cells, browsable with a search
+over names and tags.
+
+These pictures are made by `tool/screenshots` in the repository, with the
+plan's own theme.
+
+## The API
+
+`package:jet_cad_2d_plan/jet_cad_2d_plan.dart` is the API. Nothing under
+`src/` is.
+
 Version 0.8.0 is unreleased: it ships with the kits of the next wave.
+
+## The jet-cad packages
+
+| Package | What it is | Depends on |
+|---|---|---|
+| [`jet_cad_2d_plan`](https://pub.dev/packages/jet_cad_2d_plan) | The plan library: the editor, the widgets and the host API | the kit contract, the renderer and the engine |
+| [`jet_cad_2d_kit_architecture`](https://pub.dev/packages/jet_cad_2d_kit_architecture) | The architecture kit: walls, openings, rooms, dimensions and furniture | the kit contract, the renderer and the engine |
+| [`jet_cad_2d_kit_restaurant`](https://pub.dev/packages/jet_cad_2d_kit_restaurant) | The restaurant kit: furniture and service units | the kit contract and the engine |
+| [`jet_cad_2d_kit`](https://pub.dev/packages/jet_cad_2d_kit) | The kit contract: types, tools and the symbol library format | the renderer and the engine |
+| [`jet_cad_2d_flutter`](https://pub.dev/packages/jet_cad_2d_flutter) | Flutter rendering and interaction | the engine |
+| [`jet_cad_2d`](https://pub.dev/packages/jet_cad_2d) | The pure-Dart engine and document model | nothing of jet-cad |
+
+A host that embeds the planner adds `jet_cad_2d_plan` and the kits it loads;
+the kit contract, the renderer and the engine come with them, and a host
+should not also depend on them directly unless it uses their API itself.
+
+Embedding the floor planner in an app is walked through in the
+[host guide](https://github.com/a-urel/jet-cad/blob/main/docs/host-guide.md).
+
+## Support
+
+If jet-cad is useful to you, you can support its development through
+[GitHub Sponsors](https://github.com/sponsors/a-urel) or
+[Buy Me a Coffee](https://buymeacoffee.com/yazemo).
+
+## License
+
+Apache License 2.0. See [LICENSE](LICENSE).

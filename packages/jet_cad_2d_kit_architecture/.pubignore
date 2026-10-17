@@ -1,0 +1,6 @@
+# Left out of the pub.dev archive, at the package root only: the suites, the
+# generator that built the committed library, and the test runner's build
+# output. The example stays in.
+/test/
+/tool/
+/build/
