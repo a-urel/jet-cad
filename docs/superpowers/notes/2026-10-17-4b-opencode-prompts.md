@@ -134,7 +134,7 @@ Report: docs/superpowers/notes/2026-10-17-4b-floors-report.md.
 ## P5. README pictures
 
 ```text
-Worktree: git worktree add .claude/worktrees/4b-pictures -b chore/4b-pictures main   (after P2)
+Worktree: git worktree add .claude/worktrees/4b-pictures -b chore/4b-pictures main   (P2 is merged; can run beside P4)
 
 Context: umbrella spec A11 "README pictures show what the package itself gives". Screenshots come from
 tool/screenshots (read tool/screenshots/README.md and its tests; regenerate with
@@ -152,6 +152,10 @@ with the same pattern the existing READMEs use (absolute raw.githubusercontent U
 pattern; check jet_cad_2d's README). Remove scenes and PNGs of jet_cad_floor_plan.
 Each README's package table lists the new packages. Its "host guide" link points to docs/host-guide.md
 (which now describes jet_cad_2d_plan).
+- jet_cad_2d_flutter: its README's gallery picture (scene R5 in tool/screenshots/test/renderer_scenes_test.dart,
+  symbol_gallery.png) now shows jet_cad_2d_plan's PlanSymbolGallery, which breaks A11 (a package's pictures show
+  what the package itself gives). Either render the renderer's own public SymbolGallery (barrel only, no src/
+  imports), or drop that picture from jet_cad_2d_flutter's README and use it in jet_cad_2d_plan's. Say which and why.
 Look at every PNG you generate (open it) and describe each one in the report in one line.
 Gates: tool/screenshots tests, check_screenshots, check_readmes, tool/ci tests,
 publish --dry-run of each touched package (0 warnings).
