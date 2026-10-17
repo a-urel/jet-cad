@@ -7,10 +7,20 @@ CHANGELOG and its own git tags:
   (`jet_cad_2d-vX.Y.Z`);
 - [`jet_cad_2d_flutter`](packages/jet_cad_2d_flutter/CHANGELOG.md), the
   renderer (`jet_cad_2d_flutter-vX.Y.Z`);
-- [`jet_cad_floor_plan`](packages/jet_cad_floor_plan/CHANGELOG.md), the
-  planner a host depends on (`jet_cad_floor_plan-vX.Y.Z`).
+- [`jet_cad_2d_kit`](packages/jet_cad_2d_kit/CHANGELOG.md), the kit contract
+  (`jet_cad_2d_kit-vX.Y.Z`);
+- [`jet_cad_2d_plan`](packages/jet_cad_2d_plan/CHANGELOG.md), the plan
+  library a host depends on (`jet_cad_2d_plan-vX.Y.Z`);
+- [`jet_cad_2d_kit_architecture`](packages/jet_cad_2d_kit_architecture/CHANGELOG.md),
+  the architecture kit (`jet_cad_2d_kit_architecture-vX.Y.Z`);
+- [`jet_cad_2d_kit_restaurant`](packages/jet_cad_2d_kit_restaurant/CHANGELOG.md),
+  the restaurant kit (`jet_cad_2d_kit_restaurant-vX.Y.Z`).
 
-A host depends on the planner from pub.dev (see
+`jet_cad_floor_plan`, the planner up to 0.7.2, is replaced by
+`jet_cad_2d_plan` and the kits; its last release stays at the tag
+`jet_cad_floor_plan-v0.7.2`.
+
+A host depends on the plan library and the kits it loads from pub.dev (see
 [docs/host-guide.md](docs/host-guide.md)). Up to 0.7.0 the packages were
 released together, by git, under one version and one tag (`vX.Y.Z`); that
 shared history follows, unchanged.
