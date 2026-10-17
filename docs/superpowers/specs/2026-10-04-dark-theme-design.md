@@ -304,6 +304,11 @@ today's assumed white does.
 - **D6c.** A table status caption's ink follows what it sits on.
   - `ink = foregroundFor(over(status.color, paper))`, where `over`
     composites the status colour's alpha onto the paper's RGB.
+  - **Amended by P7.** The caption lies on the paper (P7 clamps it clear
+    of the unit's box), so its ink is taken against the paper:
+    `ink = foregroundFor(paper)`, the plan's on-paper rule. The status
+    colour's own ink survives only on the group chip, whose text lies on
+    the chip.
   - The paper is `_paperArgb()` (D4): the page background, or
     `scheme.surface` with no page.
   - **Caption colours.** Black ink draws in `kStatusCaptionOnLight =
