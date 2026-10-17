@@ -438,8 +438,8 @@ void main() {
     expect(painter.debugCached, 0);
   });
 
-  // Dark theme spec D6c: a caption's ink follows what it sits on, the
-  // status colour composited over the paper.
+  // Dark theme spec D6c, amended by P7: the caption lies on the paper, so
+  // its ink is the paper's, as the plan's other on-paper text's is.
   const white = 0xFFFFFFFF, blueprint = 0xFF1F3A5F;
   const ordered = Color(0x99FFB300), eating = Color(0x9943A047);
   const bill = Color(0x99E53935);
@@ -462,25 +462,40 @@ void main() {
   });
 
   test(
-      'SP11 the caption colour: the demo\'s statuses on White keep today\'s '
-      '0xFF202020; on Blueprint the paper decides, where the status colour '
-      'alone would not (D6c, R-5)', () {
+      'SP11 the caption colour is the paper\'s (D6c, amended by P7): White '
+      'and Ivory take today\'s 0xFF202020, Blueprint white; the status '
+      'colour never enters. A chip\'s ink is still its own colour over the '
+      'paper (S-6)', () {
     expect(kStatusCaptionOnLight, const Color(0xFF202020));
     expect(kStatusCaptionOnDark, const Color(0xFFFFFFFF));
-    for (final c in const [ordered, eating, bill]) {
-      expect(statusCaptionInk(c, white), kStatusCaptionOnLight,
-          reason: '$c on White');
+    // The plan's on-paper rule, the one ACI 7 takes: the ink flips exactly
+    // where the drafting's does.
+    expect(foregroundFor(0xFFFFFF), 0x000000);
+    expect(foregroundFor(0xFAF6EC), 0x000000);
+    expect(foregroundFor(0x1F3A5F), 0xFFFFFF);
+    for (final paper in const [white, 0xFFFAF6EC]) {
+      expect(statusCaptionInk(paper), kStatusCaptionOnLight,
+          reason:
+              'a light paper takes dark ink (0x${paper.toRadixString(16)})');
     }
-    expect(statusCaptionInk(bill, blueprint), kStatusCaptionOnDark);
-    expect(statusCaptionInk(eating, blueprint), kStatusCaptionOnDark);
-    // Amber over navy is still light: black ink.
-    expect(statusCaptionInk(ordered, blueprint), kStatusCaptionOnLight);
-    // Bill's RGB alone takes black ink: the white on Blueprint is the
-    // paper's doing.
-    expect(foregroundFor(0xE53935), 0x000000);
-    // An opaque dark status takes white ink on White too.
-    expect(
-        statusCaptionInk(const Color(0xFF1B3A1B), white), kStatusCaptionOnDark);
+    expect(statusCaptionInk(blueprint), kStatusCaptionOnDark);
+    expect(statusCaptionInk(0x001F3A5F), kStatusCaptionOnDark,
+        reason: 'the alpha byte is unread');
+    // Bill over Blueprint is dark, and would have taken white ink under the
+    // fill: the paper alone gives Blueprint the white caption, so the
+    // fill-based ink is gone from the caption.
+    expect(over(bill, blueprint), 0x963946);
+    expect(foregroundFor(over(bill, blueprint)), 0xFFFFFF);
+    // A chip's text lies on the chip: its ink is the chip colour over the
+    // paper, as before.
+    expect(chipInk(ordered, blueprint), kStatusCaptionOnLight,
+        reason: 'amber over navy is still light: black ink');
+    expect(chipInk(bill, blueprint), kStatusCaptionOnDark,
+        reason: 'the chip colour is dark over Blueprint');
+    expect(chipInk(const Color(0xFF3949AB), white), kStatusCaptionOnDark);
+    expect(chipInk(const Color(0xFFFFE082), white), kStatusCaptionOnLight);
+    expect(chipInk(const Color(0xFF1B3A1B), white), kStatusCaptionOnDark,
+        reason: 'an opaque dark chip takes white ink on White');
   });
 
   testWidgets(
