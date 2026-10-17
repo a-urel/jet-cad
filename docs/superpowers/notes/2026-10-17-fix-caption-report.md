@@ -179,6 +179,114 @@ Mutation (fix reverted, tests kept):
   caption-ink count and by the plan package's pixel-free position tests.
 - Open: whether D6c's ink should become paper-based now that the caption sits
   on the paper (see the caveat above). It is a deliberate, reasoned choice
-  here, and a reviewer may want it decided in the dark-theme spec.
+  here, and a reviewer may want it decided in the dark-theme spec. —
+  **Resolved** by the ink amendment below.
+
+Co-Authored-By: DeepSeek V4.1 Flash Free <noreply@opencode.ai>
+
+---
+
+# P7's ink amendment — the caption's ink is the paper's
+
+Follow-up to P7, same worktree and branch. P7 put the caption on the paper
+but kept D6c's fill-based ink: a dark status on White drew a white caption
+on white paper (invisible), a light status on a dark paper a dark caption on
+dark paper. This decides the open question above.
+
+## The decision
+
+The caption takes the plan's on-paper rule, the one ACI 7 and every label
+take: `foregroundFor(paper)`, mapped to `kStatusCaptionOnLight` /
+`kStatusCaptionOnDark` as D6c's conversion already did. The status colour no
+longer enters. Not invented: `plan_canvas.dart` derives the drafting's ink
+with `foregroundFor(paper)`, and `PaperPalette.forPaper` switches the
+overlays on exactly `foregroundFor`.
+
+`statusCaptionInk` now takes the paper (`int paper`). The old fill-based
+rule survives, correctly, as the new `chipInk(fill, paper)` for the group
+chip, whose text lies on the chip, not on the paper (S-6); `over` stays,
+`chipInk`'s and the tests'. The painter's rebuild key is unchanged: `paper`
+was already in its repaint merge and its rebuild condition (F-16), so a
+paper change still repaints and rebuilds, and the caption cache still keys
+on the ink the paper picks.
+
+## Tests
+
+- M-H33 (`unit_theme_painter_test.dart`) — (1): a dark fill 0xFF1B1B1B on
+  White takes the paper's dark ink, `0x202020`; the light fill on White the
+  same. No longer read on Blueprint.
+- T3-c (same file) — (2): a light fill on Blueprint takes the light ink,
+  `0xFFFFFFFF`, at `statusFillOpacity` 0.3 and 1.0 (the drawn colour's
+  opacity moves nothing); 0xFF303030 on White is dark at 0.2 and 1.0. The
+  fill-based premises are kept, labelled as what the old rule would have
+  done.
+- K12 (same file): assertion kept; its premise relabelled (the fill's own
+  ink happens to agree over Blueprint).
+- SP11 (`unit_status_painter_test.dart`): the paper's rule — White and Ivory
+  dark, Blueprint white, the alpha byte unread — with the chip's fill-based
+  ink beside it.
+- `status_caption_test.dart`: the premise is the paper's; the review-5 test
+  is re-derived — White to Ivory keeps the dark caption (both light papers),
+  the smoke fill no longer flips it, and the page change still reaches the
+  painter, now asserted by `debugRebuilds` rising.
+
+## The mutation
+
+M-P7-ink-from-the-fill: in `unit_status_painter.dart` `paint`,
+`statusCaptionInk(paperArgb)` -> `statusCaptionInk(over(drawn, paperArgb))`
+(the ink from the fill again). It reddens (1):
+
+```
+  Expected: '0x202020'
+    Actual: '0xffffff'
+  M-H33(null caption colour), amended by P7: ... the dark fill 0xFF1B1B1B on White is visible in today's dark 0x202020
+```
+
+T3-c (`Expected: '0xffffff' Actual: '0x202020'`) and the status view's
+review-5 test fall with it: `00:01 +26 -3: Some tests failed.` Reverted; the
+three files are green again.
+
+## Commits
+
+- `b1edd9ba` `fix(plan): the status caption's ink is the paper's, not the fill's`
+- `fbae5fda` `docs: D6c amended by P7 — the caption's ink is the paper's`
+
+Both individually green.
+
+## Commands, with their real last lines
+
+`packages/jet_cad_2d_plan`:
+
+- `flutter analyze` — `No issues found! (ran in 4.0s)`
+- `dart format --output=none --set-exit-if-changed .` — `Formatted 308 files (0 changed) in 0.78 seconds.`
+- `flutter test --enable-vmservice` — `02:11 +1580: All tests passed!`
+- mutation, `flutter test test/service/paint/unit_theme_painter_test.dart test/service/view/status_caption_test.dart` — `00:01 +26 -3: Some tests failed.` (above); reverted, the three caption files — `00:00 +42: All tests passed!`
+
+`apps/restaurant_demo`:
+
+- `flutter analyze` — `No issues found! (ran in 3.9s)`
+- `dart format --output=none --set-exit-if-changed .` — `Formatted 38 files (0 changed) in 0.07 seconds.`
+- `flutter test` — `00:22 +102: All tests passed!`
+
+`packages/jet_cad_2d_flutter` (touched: the two caption constants' doc
+comments):
+
+- `flutter analyze` — `No issues found! (ran in 4.3s)`
+- `dart format --output=none --set-exit-if-changed .` — `Formatted 234 files (0 changed) in 0.50 seconds.`
+- `flutter test` — `00:20 +1453 ~1 -5`: the 5 are `text_ladder_golden_test.dart`'s, exactly `tool/ci/standing_failures.txt`'s macOS text-metric goldens; nothing else red.
+
+`tool/ci`:
+
+- `dart test` — `00:41 +114: All tests passed!`
+
+## What I could not do and open questions
+
+- `packages/jet_cad_2d` and `jet_cad_2d_gpu` were not run: no file in them
+  changed.
+- `jet_cad_2d_flutter`'s 5 failures are the standing golden ones listed in
+  `tool/ci/standing_failures.txt` (macOS text metrics), not this change; the
+  diff there is two doc comments.
+- Open: none. D6c is amended in the spec; the CHANGELOG carries the change
+  under `## Unreleased` (the 0.8.1 bump is not this task's).
 
 Co-Authored-By: DeepSeek V4.1 Flash Free <noreply@opencode.ai>
