@@ -23,8 +23,10 @@ P4 has four steps. Per the task, this session does **step 1 only** and stops
 4. `flutter pub publish --dry-run` (dry-run only) for every package in the
    wave; 0 warnings each.
 
-**Nothing was changed in any package.** The only commit of this session is
-this report.
+**Nothing was changed in any package at step 1.** The only commit of that
+step is this report. The human then picked the patch ("go with recommended
+path"), and a follow-up session carried out steps 2–4; its record is
+[below](#step-2-after-the-pick-the-versions-and-the-floors).
 
 ## What I read
 
@@ -245,3 +247,256 @@ $ grep -rn -E "^\s+jet_cad_2d(_flutter)?: \^" --include=pubspec.yaml . | wc -l
 
 **STOP.** Awaiting the human's pick of patch or minor for `jet_cad_2d` and
 `jet_cad_2d_flutter`; step 2 follows on a fresh prompt.
+
+---
+
+# Step 2 (after the pick): the versions and the floors
+
+**Pick.** The human said "go with recommended path": **a patch for both**
+(`jet_cad_2d` 0.7.3, `jet_cad_2d_flutter` 0.7.3), and the DL2 `pubspecs` list
+grows to cover the eight other caret holders (the open question of step 1).
+
+Commits of this step, both local (not pushed, not merged):
+
+| Commit | What |
+|---|---|
+| `7dc082fa` | `release: jet_cad_2d and jet_cad_2d_flutter 0.7.3 and the wave's floors (4b P4)` |
+| `ed0c21d6` | `docs(jet_cad_2d_flutter): pin the README's screenshots to the 0.7.3 tag` |
+
+## Versions and CHANGELOGs
+
+- `packages/jet_cad_2d/pubspec.yaml`: `version: 0.7.2` → `0.7.3`.
+- `packages/jet_cad_2d/CHANGELOG.md`: `## Unreleased` → `## 0.7.3` (its
+  bullets are the seams the step-1 report lists). The released 0.7.2 file
+  starts directly at `## 0.7.2`, so the repo's pattern is to remove the
+  `Unreleased` heading, not to keep an empty one; the next change re-adds it.
+- `packages/jet_cad_2d_flutter/pubspec.yaml`: `version: 0.7.2` → `0.7.3`.
+- `packages/jet_cad_2d_flutter/CHANGELOG.md`: `## Unreleased` → `## 0.7.3`,
+  and a new bullet `Depends on \`jet_cad_2d: ^0.7.3\`.` (the 0.7.2 section
+  carries the same line for `^0.7.2`).
+- The four new packages keep their wave versions: `jet_cad_2d_kit` 0.1.0,
+  `jet_cad_2d_plan` 0.8.0, `jet_cad_2d_kit_architecture` 0.1.0,
+  `jet_cad_2d_kit_restaurant` 0.1.0.
+
+## Caret floors
+
+All **22** caret lines on the two published packages rise `^0.7.2` →
+`^0.7.3`, in the twelve pubspecs of the step-1 table. Nothing else in any
+pubspec changed. Order of release (A10) means the dependents' dry-runs run
+with the engine's `0.7.3` unpublished; the CI's own publishable job records
+why that is fine (spec F-2: a dependent's dry run does not need its
+dependency on pub.dev).
+
+## `tool/ci` DL2
+
+`tool/ci/test/dependency_lines_test.dart`:
+
+- the `pubspecs` list grows from 7 to 13 files: the four new packages
+  (`jet_cad_2d_kit`, `jet_cad_2d_kit_architecture`, `jet_cad_2d_kit_restaurant`,
+  `jet_cad_2d_plan`), `packages/jet_cad_2d_integration` and
+  `apps/architecture_demo` join the renderer, the GPU renderer, the two demos
+  and the two probes;
+- its expected caret becomes `'^0.7.3'`;
+- its expected `seen` becomes **22**, with the `reason:` text re-derived to
+  name every holder and its count (renderer 1, GPU renderer 2, integration
+  tests 2, contract 2, architecture kit 2, restaurant kit 1, plan library 2,
+  architecture demo 2, restaurant demo 2, dev harness 2, screenshot tool 2,
+  readme probe 2);
+- DL3's reader sample uses `^0.7.3` to match the current number.
+
+The count is pinned by a named mutation, **M-P4a**: change `seen` 22 → 21,
+DL2 goes red; restored byte-identical (`diff` empty).
+
+## The README tag (a check the bump turned red, and the fix)
+
+`tool/ci` `check_screenshots.dart` (spec D7) pins every image URL in the
+renderer's README to the package's **own** version tag, read from the
+pubspec. The 0.7.3 bump therefore turned it red:
+
+```
+jet_cad_2d_flutter: README: …/jet_cad_2d_flutter-v0.7.2/packages/…/canvas_light.png is not on the tag jet_cad_2d_flutter-v0.7.3
+…
+jet_cad_2d_flutter: doc/screenshots/canvas_light.png: not in the README
+(real exit=1)
+```
+
+It is a pure string check (no fetch), so the fix is to move the five README
+URLs to `jet_cad_2d_flutter-v0.7.3` — the tag the release lands with, as at
+0.7.2. This is commit `ed0c21d6`. After it:
+
+```
+$ dart run tool/ci/check_screenshots.dart ; echo exit=$?
+screenshots: every rule holds
+exit=0
+```
+
+The README already anticipated the number ("While the version is 0.x, a minor
+release (0.8.0) may break the API, and a patch release (0.7.3) does not"),
+which is further evidence the patch is the intended reading.
+
+# Step 3: the lower-bound check
+
+The task says, per package, `flutter pub downgrade` → tests → `flutter pub
+upgrade`, in `jet_cad_2d_plan` and each kit. The four packages resolve
+through **one workspace lock**, and `pub downgrade` in a workspace downgrades
+the whole member set under every member's constraints at once, so a downgrade
+run from any member produces the same resolution. I therefore ran one
+`flutter pub downgrade` (from `packages/jet_cad_2d_kit`), ran the four
+packages' tests against that downgraded lock, then one `flutter pub upgrade`
+(from `packages/jet_cad_2d_plan`) — the same resolution, three fewer network
+round-trips. All four pass at the floor:
+
+```
+$ (cd packages/jet_cad_2d_kit && flutter pub downgrade)      # 95 dependencies to their lowest
+$ (cd packages/jet_cad_2d_kit          && flutter test)      # 00:08 +403: All tests passed!
+$ (cd packages/jet_cad_2d_plan         && flutter test --enable-vmservice)  # 02:01 +1579: All tests passed!
+$ (cd packages/jet_cad_2d_kit_architecture && flutter test)  # 00:21 +655: All tests passed!
+$ (cd packages/jet_cad_2d_kit_restaurant   && flutter test)  # 00:03 +184: All tests passed!
+$ (cd packages/jet_cad_2d_plan && flutter pub upgrade)       # restored
+```
+
+**No floor is too low.** No failure was reported.
+
+# Step 4: the publish dry-runs
+
+`flutter pub publish --dry-run` for every package in the wave; **0 warnings**
+and exit 0 for all six:
+
+```
+jet_cad_2d                Package has 0 warnings.  exit=0
+jet_cad_2d_flutter        Package has 0 warnings.  exit=0
+jet_cad_2d_kit            Package has 0 warnings.  exit=0
+jet_cad_2d_plan           Package has 0 warnings.  exit=0
+jet_cad_2d_kit_architecture  Package has 0 warnings.  exit=0
+jet_cad_2d_kit_restaurant    Package has 0 warnings.  exit=0
+```
+
+`tool/ci`'s publishable job runs the same command as `dart pub publish
+--dry-run`; `flutter pub publish --dry-run` is the task's wording and gives
+the same verdict.
+
+# The gates (every member touched), and the checks
+
+Tests / analyze / format for every member whose pubspec this step touched,
+`dart` for pure-Dart and `flutter` otherwise, `--enable-vmservice` for
+`jet_cad_2d_plan` and `jet_cad_2d_integration` (the CI matrix's own flags):
+
+```
+### packages/jet_cad_2d (dart )
+00:06 +1343 -2: Some tests failed.        # the two standing fingerprints
+No issues found!
+Formatted 188 files (0 changed) in 0.45 seconds.
+### packages/jet_cad_2d_flutter (flutter )
+00:26 +1453 ~1 -5: Some tests failed.     # five standing text ladders
+No issues found! (ran in 3.5s)
+Formatted 234 files (0 changed) in 0.49 seconds.
+### packages/jet_cad_2d_gpu (flutter )
+00:00 +20: All tests passed!
+No issues found! (ran in 2.9s)
+Formatted 10 files (0 changed) in 0.02 seconds.
+### packages/jet_cad_2d_kit (flutter )
+00:04 +403: All tests passed!
+No issues found! (ran in 3.2s)
+Formatted 92 files (0 changed) in 0.10 seconds.
+### packages/jet_cad_2d_plan (flutter --enable-vmservice)
+02:04 +1579: All tests passed!
+No issues found! (ran in 4.0s)
+Formatted 308 files (0 changed) in 0.78 seconds.
+### packages/jet_cad_2d_kit_architecture (flutter )
+00:20 +655: All tests passed!
+No issues found! (ran in 3.0s)
+Formatted 136 files (0 changed) in 0.41 seconds.
+### packages/jet_cad_2d_kit_restaurant (flutter )
+00:01 +184: All tests passed!
+No issues found! (ran in 2.8s)
+Formatted 22 files (0 changed) in 0.03 seconds.
+### packages/jet_cad_2d_integration (flutter --enable-vmservice)
+01:02 +228: All tests passed!
+No issues found! (ran in 3.8s)
+Formatted 80 files (0 changed) in 0.26 seconds.
+### apps/architecture_demo (flutter )
+00:37 +176: All tests passed!
+No issues found! (ran in 3.8s)
+Formatted 44 files (0 changed) in 0.08 seconds.
+### apps/dev_harness_2d (flutter )
+00:14 +82: All tests passed!
+No issues found! (ran in 3.0s)
+Formatted 22 files (0 changed) in 0.05 seconds.
+### apps/restaurant_demo (flutter )
+00:23 +102: All tests passed!
+No issues found! (ran in 2.9s)
+Formatted 38 files (0 changed) in 0.07 seconds.
+### tool/screenshots (flutter )
+00:08 +8: All tests passed!
+No issues found! (ran in 3.0s)
+Formatted 4 files (0 changed) in 0.01 seconds.
+### tool/readme_probe (flutter )            # no test/ directory
+No issues found! (ran in 2.5s)
+Formatted 2 files (0 changed) in 0.00 seconds.
+```
+
+The engine's `-2` and the renderer's `~1 -5` are exactly the macOS set in
+`tool/ci/standing_failures.txt` (its `~1` is the rig suite, in
+`standing_skips.txt`), the same figures P2's gate printed at `6b9c018e`:
+**no new failure.** The renderer's `~1` skip and the two `-2` fingerprints were
+already the standing set.
+
+`tool/ci` and the script checks, at the final commit `ed0c21d6`:
+
+```
+$ (cd tool/ci && dart test)
+00:47 +114: All tests passed!
+$ dart analyze                    (tool/ci)
+No issues found!
+$ dart format --output=none --set-exit-if-changed .  (tool/ci, named paths)
+Formatted 23 files (0 changed) in 0.04 seconds.
+
+$ dart run tool/ci/check_guide.dart
+docs/host-guide.md: all 29 code blocks are in the host probe          exit=0
+$ dart run tool/ci/check_readmes.dart
+package READMEs: all 2 code blocks are in the probes                  exit=0
+$ dart run tool/ci/check_screenshots.dart
+screenshots: every rule holds                                         exit=0
+$ dart run tool/ci/check_kit_deps.dart
+kit dependencies: 3 package(s) checked, none names the plan library or another kit   exit=0
+$ bash tool/ci/host_probe.sh "file://$PWD" "$(git rev-parse HEAD)"
+host probe: no GPU renderer, no build hook; build/web is  42M         exit=0
+```
+
+The root resolve, run before the gates:
+
+```
+$ flutter pub get
+Changed 135 dependencies!
+16 packages have newer versions incompatible with dependency constraints.
+Try `flutter pub outdated` for more information.
+```
+
+The tree is clean at the end; no `analysis_options.yaml` was staged or
+committed, and no `pubspec.lock` is tracked (`*.lock` is ignored).
+
+# What I could not do, and open questions
+
+- **`tool/readme_probe` has no `test/` directory** (as P2 recorded), so its
+  line is analyze + format only: no test was skipped that could have run.
+- **`jet_cad_2d_flutter`'s `-5` and `jet_cad_2d`'s `-2` are the standing
+  failures on macOS** (the checks' fixtures are macOS values; the comment in
+  `standing_failures.txt` is written for Linux, where the renderer's ladder
+  rungs 1 and 2 also fail). They are not produced by this step.
+- **The README image URLs now name `jet_cad_2d_flutter-v0.7.3`, a tag that
+  does not exist until the human publishes and tags.** That is by design (the
+  0.7.2 release pinned `v0.7.2` the same way, and `check_screenshots` is a
+  string check), but it is worth the human's eye before merge.
+- **P5 (README pictures) will touch the same README.** If P5 regenerates the
+  gallery image it must keep the `v0.7.3` pin, or `check_screenshots` goes
+  red again.
+- **P6 (release checklist) owns `STATUS.md`.** Its "on pub.dev at 0.7.2" line
+  is still true (0.7.3 is not published); I did not touch `STATUS.md`.
+- **The `jet_cad_2d_integration` and `apps/architecture_demo` carets are now
+  `^0.7.3`** and are covered by DL2's widened list. If the human's intent for
+  the DL2 open question was the narrower "stay at six holders", revert the
+  list and the count to 11; the caret floors themselves are unaffected.
+- **Nothing was pushed, merged or tagged.** `dart pub publish` was never
+  run; only `--dry-run`.
+
+**The wave is ready for the human's publish.**
