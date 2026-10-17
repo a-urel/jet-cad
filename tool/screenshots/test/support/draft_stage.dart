@@ -32,8 +32,8 @@ class _DraftStageState extends State<DraftStage> {
   late final SpatialIndex index = SpatialIndex(widget.document);
   late final CameraController camera = CameraController(ViewportTransform.fit(
       widget.document.extents.expandedBy(widget.padding), widget.size));
-  late final StyleResolver resolver = canvasResolverFor(widget.document,
-      paper: 0xFFFFFFFF, dark: false);
+  late final StyleResolver resolver =
+      canvasResolverFor(widget.document, paper: 0xFFFFFFFF, dark: false);
 
   @override
   void dispose() {

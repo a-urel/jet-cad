@@ -61,8 +61,7 @@ void main() {
     final controller = PlanController(kits: [architectureKit]);
     addTearDown(controller.dispose);
     await _loaded(tester, controller);
-    await pumpScene(
-        tester,
+    await pumpScene(tester,
         _app(Material(child: PlanSymbolGallery(controller: controller))),
         size: kPanel);
     await settle(tester);
@@ -82,7 +81,7 @@ void main() {
     await tester.pumpAndSettle();
     // The thumbnails paint asynchronously, over settle's rounds.
     await settle(tester);
-    await shoot(tester, package: _package, file: 'plan_gallery.png',
-        size: kPanel);
+    await shoot(tester,
+        package: _package, file: 'plan_gallery.png', size: kPanel);
   });
 }

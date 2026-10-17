@@ -95,8 +95,8 @@ class _Pen {
     return h;
   }
 
-  Handle wall(double sx, double sy, double ex, double ey, double t) => _group(
-      WallParams(sx, sy, ex, ey, t, Justification.centre), 'Add wall');
+  Handle wall(double sx, double sy, double ex, double ey, double t) =>
+      _group(WallParams(sx, sy, ex, ey, t, Justification.centre), 'Add wall');
 
   void opening(OpeningParams o) => _group(o, 'Add ${o.kind.name}');
 

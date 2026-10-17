@@ -57,16 +57,14 @@ void main() {
       (tester) async {
     // The plan library's gallery (spec P2 Task 13), filtered to the
     // restaurant kit so its own section shows, one category open.
-    final controller =
-        PlanController(kits: [architectureKit, restaurantKit]);
+    final controller = PlanController(kits: [architectureKit, restaurantKit]);
     addTearDown(controller.dispose);
     await _loaded(tester, controller);
     await pumpScene(
         tester,
         _app(Material(
             child: PlanSymbolGallery(
-                controller: controller,
-                filter: (s) => s.kitId == _kit))),
+                controller: controller, filter: (s) => s.kitId == _kit))),
         size: kPanel);
     await settle(tester);
     const open = '$_kit/Outdoor and Decor';
@@ -92,7 +90,7 @@ void main() {
     await tester.pumpAndSettle();
     // The thumbnails paint asynchronously, over settle's rounds.
     await settle(tester);
-    await shoot(tester, package: _package, file: 'restaurant_gallery.png',
-        size: kPanel);
+    await shoot(tester,
+        package: _package, file: 'restaurant_gallery.png', size: kPanel);
   });
 }
