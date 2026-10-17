@@ -105,7 +105,7 @@ dart pub global run pana --no-warning /tmp/jet-cad-pana/packages/<pkg>
 
 The `.pubignore` directories to remove, per package: `jet_cad_2d`
 `test build benchmark`; `jet_cad_2d_flutter` `test build shaders`;
-`jet_cad_2d_kit` *(none — see Open items)*; `jet_cad_2d_plan` `test build`;
+`jet_cad_2d_kit` `test build`; `jet_cad_2d_plan` `test build`;
 `jet_cad_2d_kit_architecture` and `jet_cad_2d_kit_restaurant` `test tool
 build`. **What to read:** the *Support up-to-date dependencies* section's
 lower-bounds line — it must pass. **If pana is not activated:** `dart pub
@@ -285,6 +285,12 @@ one `flutter pub upgrade` — **no floor too low**
 ([2026-10-17-4b-floors-report.md](2026-10-17-4b-floors-report.md#step-3-the-lower-bound-check)).
 
 ## Open items before you publish
+
+**Both closed in `e5383f9c`** (after the merge, on the human's word): the kit
+contract gained a `.pubignore` (`/test/`, `/build/`; its archive went from
+121 KB to 51 KB, dry run 0 warnings), and the root `CHANGELOG.md` lists the
+six packages of the wave and names `jet_cad_floor_plan`'s last tag. The two
+items as first written:
 
 Not blockers, but the wave should decide them:
 
