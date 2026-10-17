@@ -25,7 +25,7 @@ import '../unit_picker.dart' show CircleTop, PolygonTop, unitTopOf;
 /// the frame reads it and creates nothing.
 final class _Fill {
   _Fill(this.instance, this.toWorld, this.path, this.paint, this.caption,
-      this.lx, this.ly, this.half, this.size);
+      this.lx, this.ly, this.half, this.size, this.box);
 
   final Handle instance;
 
@@ -42,6 +42,10 @@ final class _Fill {
 
   /// The top's smaller side, in definition space.
   final double size;
+
+  /// The symbol's box in definition space: the caption is clamped below its
+  /// bottom on screen, so it clears the chairs at any rotation (P7).
+  final Aabb2 box;
 }
 
 /// The caption's height in logical pixels (S7).
@@ -121,6 +125,12 @@ TextStyle paintedTextStyle(TextStyle style, Color ink) => style.copyWith(
 /// status colour over [paper], through [statusCaptionInk]. The host puts
 /// [paper] in [repaint] too (F-16), so a paper change repaints, and the
 /// rebuild then builds each flipped caption once.
+///
+/// A caption sits below its unit label, but never above the unit's own box
+/// on screen (P7): a status caption whose 11 px floor put it on the lower
+/// chairs now clears them however the table is turned and mirrored. The
+/// caption is drawn upright in screen space, so only the box's greatest
+/// screen y is read.
 ///
 /// The host's look, [theme] (host embedding API spec T-1, T-3), joins the
 /// rebuild key: its `statusFillOpacity` multiplies each status colour's
@@ -298,6 +308,7 @@ class UnitStatusPainter extends CustomPainter {
         label?.y ?? bounds.center.dy,
         label?.half ?? 0,
         math.min(bounds.width, bounds.height),
+        u.box,
       ));
     }
     // Draw order (ascending handle), whatever the map's order.
@@ -427,7 +438,19 @@ class UnitStatusPainter extends CustomPainter {
       final sy = b * f.lx + d * f.ly + g;
       // Below the label: its half height on screen and a gap, at least
       // one caption height from the anchor.
-      final below = math.max(_captionSize, f.half * scale + kStatusCaptionGap);
+      var below = math.max(_captionSize, f.half * scale + kStatusCaptionGap);
+      // Never above the unit's own box: the caption clears the chairs
+      // however the unit is turned (P7). The box is a parallelogram on
+      // screen, so its greatest screen y is at a corner.
+      final box = f.box;
+      if (!box.isEmpty) {
+        final y00 = b * box.minX + d * box.minY + g;
+        final y10 = b * box.maxX + d * box.minY + g;
+        final y01 = b * box.minX + d * box.maxY + g;
+        final y11 = b * box.maxX + d * box.maxY + g;
+        final bottom = math.max(math.max(y00, y10), math.max(y01, y11));
+        below = math.max(below, bottom - sy + kStatusCaptionGap);
+      }
       canvas
         ..save()
         ..translate(sx - caption.width / 2, sy + below)
