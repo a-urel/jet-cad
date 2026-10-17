@@ -1,4 +1,4 @@
-## 0.1.0 (unreleased)
+## 0.1.0
 
 The restaurant kit for the jet_cad_2d plan library (sub-project 4a): the
 restaurant symbol catalog of `jet_cad_restaurant_symbols`, ported to the kit

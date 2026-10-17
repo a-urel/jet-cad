@@ -1,4 +1,4 @@
-## 0.8.0 (unreleased)
+## 0.8.0
 
 The plan library of jet_cad_2d, in design mode (sub-project 2a).
 

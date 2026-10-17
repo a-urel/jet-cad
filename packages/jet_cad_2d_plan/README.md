@@ -107,8 +107,6 @@ plan's own theme.
 `package:jet_cad_2d_plan/jet_cad_2d_plan.dart` is the API. Nothing under
 `src/` is.
 
-Version 0.8.0 is unreleased: it ships with the kits of the next wave.
-
 ## The jet-cad packages
 
 | Package | What it is | Depends on |

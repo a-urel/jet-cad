@@ -1,4 +1,4 @@
-## 0.1.0 (unreleased)
+## 0.1.0
 
 The architecture kit for the jet_cad_2d plan library, moved from
 `jet_cad_floor_plan` unchanged in behaviour (sub-project 3a).
