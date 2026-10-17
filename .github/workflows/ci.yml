@@ -45,7 +45,7 @@ jobs:
           - package: packages/jet_cad_2d_plan
             tool: flutter
             # The pick's and the band's allocation tests (2b Task 14) read
-            # the VM's allocation profiler, as the planner's do.
+            # the VM's allocation profiler.
             test_flags: --enable-vmservice
           - package: packages/jet_cad_2d_kit_architecture
             tool: flutter
@@ -57,17 +57,6 @@ jobs:
             # C6) reads the VM's allocation profiler, as the plan
             # library's does.
             test_flags: --enable-vmservice
-          - package: packages/jet_cad_floor_plan
-            tool: flutter
-            # The pick's allocation test reads the VM's allocation profiler,
-            # which flutter_tester serves only with this flag (Slice 2's
-            # final review F-2): without it the test skips, and the
-            # comparison reads that skip as red.
-            test_flags: --enable-vmservice
-          - package: packages/jet_cad_restaurant_symbols
-            tool: flutter
-          - package: apps/floor_planner
-            tool: flutter
           - package: apps/restaurant_demo
             tool: flutter
           - package: tool/screenshots
@@ -112,14 +101,9 @@ jobs:
       - name: Resolve the workspace
         run: flutter pub get
       # GPU split spec S8 (F-9, V-7): build hooks follow the built app's own
-      # dependencies, so neither app ships flutter_scene's assets.
+      # dependencies, so the app ships none of flutter_scene's assets.
       - name: Build the restaurant demo
         working-directory: apps/restaurant_demo
-        run: |
-          flutter build web
-          test ! -e build/web/assets/packages/flutter_scene
-      - name: Build the floor planner
-        working-directory: apps/floor_planner
         run: |
           flutter build web
           test ! -e build/web/assets/packages/flutter_scene
@@ -158,11 +142,11 @@ jobs:
           ../readme_probe/lib
       # The probe is a host of its own (pubspec.yaml.in, sdk ^3.6.0); in the
       # repository it sits inside tool/ci, so its language version is named.
-      - name: Format the host probes at their own language version
+      - name: Format the host probe at its own language version
         working-directory: tool/ci
         run: >-
           dart format --language-version=3.6 --output=none --set-exit-if-changed
-          host_probe/lib old_host_probe/lib
+          host_probe/lib
       - name: The host guide's code is the probe's
         run: dart run tool/ci/check_guide.dart
       - name: The screenshots hold pub.dev's rules
@@ -189,7 +173,6 @@ jobs:
           - packages/jet_cad_2d_plan
           - packages/jet_cad_2d_kit_architecture
           - packages/jet_cad_2d_kit_restaurant
-          - packages/jet_cad_floor_plan
     steps:
       - uses: actions/checkout@v5
       - uses: subosito/flutter-action@v2
@@ -216,11 +199,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      # The whole history and its tags: the released probes are read from
-      # their tags (host embedding API spec, invariant 1).
       - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
@@ -232,23 +211,3 @@ jobs:
       # and no build hook.
       - name: Resolve, check, analyze and build the probe
         run: tool/ci/host_probe.sh "file://$GITHUB_WORKSPACE" "$(git rev-parse HEAD)"
-      # The old probe, on jet_cad_floor_plan, stays until sub-project 4b
-      # removes that package: the released hosts below are its.
-      - name: Resolve, check and analyze the old probe
-        run: tool/ci/old_host_probe_resolve.sh "file://$GITHUB_WORKSPACE" "$(git rev-parse HEAD)"
-      # Host embedding API spec, invariant 1 (P-1): each released host's
-      # code, analysed in the old probe just resolved at the commit under
-      # test, still compiles; the old probe's own main.dart is put back after
-      # each.
-      # Every release a host may still pin stays: 0.3.0 is the spec's own,
-      # 0.4.0 (the embedding API, 8367010) followed its tag, 0.5.1 is the
-      # last release that saves schema 9, and 0.6.0 (plan colours,
-      # 3bf64a7) the first that saves schema 10.
-      - name: The 0.3.0 host probe against this commit
-        run: tool/ci/old_host_probe.sh v0.3.0
-      - name: The 0.4.0 host probe against this commit
-        run: tool/ci/old_host_probe.sh v0.4.0
-      - name: The 0.5.1 host probe against this commit
-        run: tool/ci/old_host_probe.sh v0.5.1
-      - name: The 0.6.0 host probe against this commit
-        run: tool/ci/old_host_probe.sh v0.6.0

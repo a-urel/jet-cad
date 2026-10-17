@@ -10,8 +10,8 @@ version: 0.0.1
 resolution: workspace
 
 environment:
-  # The language version stays at the workspace's (see apps/floor_planner's
-  # pubspec): from 3.7 on the formatter switches to the tall style.
+  # The language version stays at the workspace's: from 3.7 on the
+  # formatter switches to the tall style.
   sdk: ^3.5.0
   flutter: ">=3.44.0"
 

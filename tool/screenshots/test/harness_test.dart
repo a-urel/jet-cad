@@ -65,12 +65,12 @@ void main() {
   testWidgets('SH3 without UPDATE_SCREENSHOTS nothing is written',
       (tester) async {
     if (updating) return; // the generator's own run writes, by design
-    final dir = Directory('../../packages/jet_cad_floor_plan/doc/screenshots');
+    final dir = Directory('../../packages/jet_cad_2d_flutter/doc/screenshots');
     final before = dir.existsSync()
         ? {for (final f in dir.listSync()) f.path: f.statSync().modified}
         : const <String, DateTime>{};
     await pumpScene(tester, const ColoredBox(color: Color(0xFFFFFFFF)));
-    await shoot(tester, package: 'jet_cad_floor_plan', file: 'probe.png');
+    await shoot(tester, package: 'jet_cad_2d_flutter', file: 'probe.png');
     expect(File('${dir.path}/probe.png').existsSync(), isFalse);
     final after = dir.existsSync()
         ? {for (final f in dir.listSync()) f.path: f.statSync().modified}

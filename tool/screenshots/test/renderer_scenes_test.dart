@@ -1,18 +1,15 @@
-// The renderer's scenes R1-R5 (package READMEs spec D5, A3): the sample
-// flat in the renderer's own widgets (`RendererStage`, no planner widget),
-// and the furniture library in `SymbolGallery`, written to
-// jet_cad_2d_flutter/doc/screenshots/ under UPDATE_SCREENSHOTS=1. Public
-// API only: the barrels, and `editor.dart` for the drawing and the
-// gallery's grouping.
+// The renderer's scenes R1-R5 (package READMEs spec D5): the sample flat in
+// the renderer's own widgets (`RendererStage`, no plan editor widget), and
+// the furniture library in the plan library's `PlanSymbolGallery`, written
+// to jet_cad_2d_flutter/doc/screenshots/ under UPDATE_SCREENSHOTS=1. Public
+// API only: the barrels.
 import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart' show BandMode;
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
-import 'package:jet_cad_floor_plan/editor.dart'
-    show startupPlan, symbolThumbnailDocument, searchSymbols, symbolIdOf;
-import 'package:jet_cad_floor_plan/jet_cad_floor_plan.dart'
-    show SymbolLibraryLoader, SymbolLibraryReady, furnitureSymbolSource;
+import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
+import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import 'support/renderer_stage.dart';
@@ -29,7 +26,11 @@ final Size _canvas =
 /// (`RulerFrame`), which the app's `Material` sets to Roboto.
 ({GlobalKey<RendererStageState> key, Widget app}) _scene({bool dark = false}) {
   final key = GlobalKey<RendererStageState>();
-  final document = startupPlan(FlutterTextMeasurer());
+  // The plan library builds the sample flat (spec 3a C1.9): the document it
+  // owns, with the kit's parametric system, is the renderer's fixture.
+  final controller =
+      PlanController(kits: [architectureKit], build: buildSampleFlat);
+  addTearDown(controller.dispose);
   return (
     key: key,
     app: MaterialApp(
@@ -39,7 +40,10 @@ final Size _canvas =
           fontFamily: 'Roboto'),
       home: Material(
         child: RendererStage(
-            key: key, document: document, dark: dark, canvas: _canvas),
+            key: key,
+            document: controller.document,
+            dark: dark,
+            canvas: _canvas),
       ),
     ),
   );
@@ -62,7 +66,7 @@ Offset _global(WidgetTester tester, RendererStageState stage, Offset world) {
   return tester.getTopLeft(find.byType(DraftCanvas)) + Offset(s.x, s.y);
 }
 
-// The sample flat's outer corner (startup_plan.dart's kPlanOriginX/Y,
+// The sample flat's outer corner (buildSampleFlat's kPlanOriginX/Y,
 // unexported): the bedrooms are its top-left quarter.
 const double _x0 = 12000, _y0 = 8000;
 
@@ -140,58 +144,37 @@ void main() {
 
   testWidgets('R5 symbol_gallery.png: the furniture library, at kPanel',
       (tester) async {
-    final loader = SymbolLibraryLoader(sources: const [furnitureSymbolSource]);
-    addTearDown(loader.dispose);
-    await tester.runAsync(loader.load);
-    final library = (loader.state as SymbolLibraryReady).library;
-    // English, the library's own words: `searchSymbols`'s default
-    // (`SymbolWords.english`, which editor.dart does not export), whose
-    // name and category are the entry's own.
-    final groups = searchSymbols(library.entries, '');
-    expect(groups, isNotEmpty);
-    final measurer = FlutterTextMeasurer();
-    final thumbnails = SymbolThumbnails(maxEntries: 128);
-    addTearDown(thumbnails.dispose);
-    final gallery = SymbolGallery(
-      categories: [
-        for (final g in groups)
-          GalleryCategory(
-            id: g.category,
-            name: g.category,
-            symbols: [
-              for (final e in g.symbols)
-                GallerySymbol(
-                  id: symbolIdOf(e),
-                  label: e.name,
-                  thumbnailKey: symbolIdOf(e),
-                  thumbnailDocument: () => symbolThumbnailDocument(e, measurer),
-                ),
-            ],
-          ),
-      ],
-      selectedId: null,
-      enabled: true,
-      onSelect: (_) {},
-      thumbnails: thumbnails,
-      foreground: 0x1F1F1F,
-      selectedForeground: 0x0B57D0,
-      cellColor: const Color(0xFFFFFFFF),
-    );
+    // The architecture kit's furniture, read through the plan library's own
+    // loader (rootBundle): real time, bounded.
+    final controller = PlanController(kits: [architectureKit]);
+    addTearDown(controller.dispose);
+    for (var i = 0;
+        i < 400 && controller.symbolsState.value != SymbolsState.ready;
+        i++) {
+      await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await tester.pump();
+    }
+    expect(controller.symbolsState.value, SymbolsState.ready,
+        reason: 'premise: the furniture library loaded');
     await pumpScene(
         tester,
         MaterialApp(
           debugShowCheckedModeBanner: false,
           theme: ThemeData(fontFamily: 'Roboto'),
-          home: Material(child: gallery),
+          home: Material(child: PlanSymbolGallery(controller: controller)),
         ),
         size: kPanel);
+    await settle(tester);
     // One category open (spec D5): every other header collapsed, so the
-    // panel shows the library's categories and one of them whole.
-    const open = 'Bathroom';
-    expect(groups.map((g) => g.category), contains(open));
-    for (final g in groups) {
-      if (g.category == open) continue;
-      final header = find.byKey(Key('symbol-group-${g.category}'));
+    // panel shows the library's categories and one of them whole. The
+    // header key carries the group id `<kit>/<English category>`.
+    const open = 'architecture/Bathroom';
+    final gallery = tester.widget<SymbolGallery>(find.byType(SymbolGallery));
+    expect([for (final c in gallery.categories) c.id], contains(open));
+    for (final c in gallery.categories) {
+      if (c.id == open) continue;
+      final header = find.byKey(Key('symbol-group-${c.id}'));
       await tester.ensureVisible(header);
       await tester.tap(header);
       await tester.pump();

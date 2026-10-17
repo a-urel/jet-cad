@@ -80,15 +80,6 @@ const List<String> probedFromCommit = [
   'jet_cad_2d_plan',
 ];
 
-/// The same for the old host probe (tool/ci/old_host_probe), which stays
-/// until sub-project 4b removes `jet_cad_floor_plan`.
-const List<String> oldProbedFromCommit = [
-  'jet_cad_2d',
-  'jet_cad_2d_flutter',
-  'jet_cad_floor_plan',
-  'jet_cad_restaurant_symbols',
-];
-
 /// The `source` and the description's `resolved-ref` of the package
 /// [name]'s entry in [lock] (keys `source` and `resolved-ref`, each only
 /// when present); empty when [lock] has no such package. Throws a
