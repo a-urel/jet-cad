@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-10-17. **`main` carries release 0.7.0** (tag
 `v0.7.0` → `0fa649e`, after `v0.6.0` →
-`3bf64a7`, `v0.5.1` → `3f8f7ad`, `v0.5.0` → `2fbb9c0`, `v0.4.0` → `8367010`, `v0.3.0` → `1b0c37a`, `v0.2.0` → `7355c00` and `v0.1.0` → `22206f5`) and everything since; the three packages are on pub.dev at 0.7.2 (published 2026-10-13); the kit architecture is in flight (below). The history of every plan
+`3bf64a7`, `v0.5.1` → `3f8f7ad`, `v0.5.0` → `2fbb9c0`, `v0.4.0` → `8367010`, `v0.3.0` → `1b0c37a`, `v0.2.0` → `7355c00` and `v0.1.0` → `22206f5`) and everything since; the three old packages are on pub.dev at 0.7.2 (published 2026-10-13); the kit architecture's sub-projects are merged and 4b, its release wave, is ready for the human's publish (below). The history of every plan
 before this point — its records, reviews and resume points — is in
 [STATUS-HISTORY.md](STATUS-HISTORY.md), unedited.
 
@@ -513,8 +513,34 @@ with 0.7.0 (below).
   sessions (the human's rule since 2026-10-16): the controller self-reviewed
   every task with its own mutation; ledger archived. The engine
   packages (`jet_cad_2d`, `jet_cad_2d_flutter`) changed for O1 and join 4b's
-  release wave. 4b (the release wave: README pictures, removing the old
-  packages and `apps/floor_planner`, CI moves, floors, the publish) follows.
+  release wave.
+
+  **4b, the release wave**, is done but for the human's publish. Its tasks
+  (each its own worktree and branch, cut from local `main`): the removal
+  inventory (P1, [2026-10-17-4b-removal-inventory.md](docs/superpowers/notes/2026-10-17-4b-removal-inventory.md));
+  the removal of `packages/jet_cad_floor_plan`,
+  `packages/jet_cad_restaurant_symbols`, `apps/floor_planner` and the old
+  host probe (P2, merged at `c9fa618e`; record
+  [2026-10-17-4b-remove-report.md](docs/superpowers/notes/2026-10-17-4b-remove-report.md));
+  the versions and the dependency floors (P4, merged at `89607a23`:
+  `jet_cad_2d` and `jet_cad_2d_flutter` at 0.7.3, all 22 carets `^0.7.3`,
+  `tool/ci` DL2 re-derived to 22, the four new packages at
+  `jet_cad_2d_kit` 0.1.0, `jet_cad_2d_plan` 0.8.0,
+  `jet_cad_2d_kit_architecture` 0.1.0, `jet_cad_2d_kit_restaurant` 0.1.0;
+  record
+  [2026-10-17-4b-floors-report.md](docs/superpowers/notes/2026-10-17-4b-floors-report.md));
+  the README pictures (P5, merged at `a428dee7`; record
+  [2026-10-17-4b-pictures-report.md](docs/superpowers/notes/2026-10-17-4b-pictures-report.md));
+  and the release checklist (P6, branch `docs/4b-release-checklist`; the
+  record
+  [2026-10-17-4b-release-checklist.md](docs/superpowers/notes/2026-10-17-4b-release-checklist.md),
+  whose prep commit `d9dd74d7` drops the three stale `(unreleased)`
+  CHANGELOG headings and the plan README's unreleased sentence, and which
+  carries all six dry runs — 0 warnings each — and the human's step-by-step
+  publish order). **P3**
+  (the optional CI matrix check) and **P7** (the status-caption look fix)
+  did not run. The wave's six packages are ready for the human's publish
+  (Resume here).
 
 - **The packages' READMEs, screenshots and funding links** (the human,
   2026-10-13), on `feat/package-readmes`, cut by hand from `main` at
@@ -644,27 +670,46 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 
 ## Resume here
 
-**In flight: the kit architecture. Sub-project 1 (`jet_cad_2d_kit`) is
-merged (PR #11 `bc705be`, PR #12 `27244bf`). Sub-project 2a (the plan library
-in design mode) is merged at `4130ebc` and 2b (the service mode) at
-`fa294563`; neither is pushed. The 2b follow-ups (F-1 of
-`chrome_change_test.dart`, the parked pins, the minor triage) are done on
-`fix/plan-library-2b-followups` (from `2b1f7a0e`) and merged at `de6abda9`,
-not pushed; the record and what is left for the human:
-[2026-10-15-plan-library-2b-followups.md](docs/superpowers/notes/2026-10-15-plan-library-2b-followups.md).
-3a (the architecture kit) is done on `feat/architecture-kit` and merged
-at `d68e79dd`, not pushed: exit gate passed, whole-branch Opus review
-clean after one fix wave, ledger archived. 3b (the architecture demo) is
-done on `feat/architecture-demo` and merged at `acb5fa11`, not pushed:
-whole-branch Sonnet review clean after one fix wave, macOS smoke integration
-test green, ledger archived. 4a (the restaurant kit) is done on
-`feat/restaurant-kit` and merged at `3909c17c`, not pushed: exit gate green,
-POS1 and the builds green, ledger archived. Resume at 4b (the release wave:
-README pictures, removing the old packages and `apps/floor_planner`, CI,
-floors, the release checklist), starting with its brainstorm.** (In flight). Where 2b stands, its gaps and rulings: the results note's
+**In flight: 4b, the kit architecture's release wave.** The kit
+architecture's sub-projects are all merged, none pushed: sub-project 1
+(`jet_cad_2d_kit`; PR #11 `bc705be`, PR #12 `27244bf`), 2a (the plan library
+in design mode, `4130ebc`), 2b (the service mode, `fa294563`) and its
+follow-ups (`de6abda9`; the record and what is left for the human:
+[2026-10-15-plan-library-2b-followups.md](docs/superpowers/notes/2026-10-15-plan-library-2b-followups.md),
+where 2b's gaps and rulings stand: the results note's
 [Spec gaps](docs/superpowers/notes/2026-10-14-plan-library-2b-results.md#spec-gaps-and-interface-problems-found-while-executing)
-section and its "Final fix wave". A14's `selectTool` difference was settled
-by the human (2b spec decision 9: true kept).
+section and its "Final fix wave"; A14's `selectTool` difference was settled
+by the human, 2b spec decision 9, true kept), 3a (the architecture kit,
+`d68e79dd`, whole-branch Opus review clean after one fix wave), 3b (the
+architecture demo, `acb5fa11`, whole-branch Sonnet review clean after one fix
+wave) and 4a (the restaurant kit, `3909c17c`, exit gate green).
+
+**4b is done but for the human's publish.** The old packages
+(`packages/jet_cad_floor_plan`, `packages/jet_cad_restaurant_symbols`) and
+`apps/floor_planner` are removed and the workspace is green on the new
+packages (P2, merged at `c9fa618e`); `jet_cad_2d` and `jet_cad_2d_flutter`
+are 0.7.3 with every caret `^0.7.3` and the four new packages at their wave
+versions (P4, `89607a23`; no floor too low); the README pictures are in (P5,
+`a428dee7`); and the checklist is written (P6, branch
+`docs/4b-release-checklist`,
+[2026-10-17-4b-release-checklist.md](docs/superpowers/notes/2026-10-17-4b-release-checklist.md)).
+P3 (the optional CI check) and P7 (the status-caption look fix) did not run.
+**The next step is the human's:** merge `docs/4b-release-checklist`, push
+`main`, CI green on the merge commit, then publish the six packages in A10's
+order — `jet_cad_2d` 0.7.3, `jet_cad_2d_flutter` 0.7.3, `jet_cad_2d_kit`
+0.1.0, then `jet_cad_2d_plan` 0.8.0, `jet_cad_2d_kit_architecture` 0.1.0 and
+`jet_cad_2d_kit_restaurant` 0.1.0 — each checked with pana's lower bounds
+once its dependencies are on pub.dev, and, after the wave, mark
+`jet_cad_floor_plan` discontinued on pub.dev, replaced by `jet_cad_2d_plan`
+(the step-by-step, with every dry run's real last lines, is the checklist).
+
+**Everything below this line is the 0.7.x line's record**: how 0.7.1 and
+0.7.2 went out and the old planner's pub-only check (D7). Its recipes name
+`packages/jet_cad_floor_plan` and `packages/jet_cad_restaurant_symbols`,
+which 4b removed, so they are history, not steps to run; the new line's
+publish is the checklist above. D11 (the restaurant software's move to the
+planner from pub.dev) is superseded by the kit architecture: a host adds
+`jet_cad_2d_plan` and the kits it loads (host guide §1).
 
 **Done 2026-10-13: 0.7.2 of the three packages**, published by the human in
 order (spec D11): `jet_cad_2d`, `jet_cad_2d_flutter`, `jet_cad_floor_plan`,
@@ -782,10 +827,15 @@ and nothing else**.
 - **The live line, the 2D floor planner:** `jet_cad_2d` (a pure-Dart 2D
   CAD engine and document model: no OCCT, no FFI, no Flutter),
   `jet_cad_2d_flutter` (rendering and interaction), `jet_cad_2d_gpu` (the
-  GPU renderer, the dev harness's only; never a host's), `jet_cad_floor_plan`
-  (the planner: shell, tools, parametric objects, panels, the host API),
-  `jet_cad_restaurant_symbols` (the restaurant library), the apps
-  `floor_planner` and `restaurant_demo`.
+  GPU renderer, the dev harness's only; never a host's), `jet_cad_2d_kit`
+  (the kit contract: types, tools and the symbol library format),
+  `jet_cad_2d_plan` (the plan library: the editor, the widgets and the host
+  API), the kits `jet_cad_2d_kit_architecture` and `jet_cad_2d_kit_restaurant`
+  (unpublished until 4b's wave), the unpublished
+  `jet_cad_2d_integration` (the cross-package test suite), and the apps
+  `architecture_demo`, `restaurant_demo` and `dev_harness_2d`. The old line's
+  `jet_cad_floor_plan`, `jet_cad_restaurant_symbols` and `apps/floor_planner`
+  were removed in 4b.
 - **The dormant line, `jet_cad`:** a Flutter package over Open CASCADE
   by FFI with a macOS viewport (`packages/jet_cad`, `apps/dev_harness`).
   Nothing is worked on there; it is outside the gates and CI.
@@ -797,18 +847,24 @@ packages/
   jet_cad_2d/                  # the engine (pure Dart)
   jet_cad_2d_flutter/          # rendering, interaction, the gallery
   jet_cad_2d_gpu/              # the GPU renderer (harness only)
-  jet_cad_floor_plan/          # the planner and its host API
-  jet_cad_restaurant_symbols/  # the restaurant symbol library
+  jet_cad_2d_kit/              # the kit contract (types, tools, .jetlib)
+  jet_cad_2d_plan/             # the plan library: editor, widgets, host API
+  jet_cad_2d_kit_architecture/ # the architecture kit (walls, openings, rooms)
+  jet_cad_2d_kit_restaurant/   # the restaurant kit (69 service symbols)
+  jet_cad_2d_integration/      # unpublished: the cross-package test suite
   jet_cad/                     # DORMANT — OCCT 3D over FFI
 apps/
-  floor_planner/               # the planner as an app (files, export, print)
+  architecture_demo/           # the plan library and the architecture kit
   restaurant_demo/             # the POS demo host, three languages
   dev_harness_2d/              # measurement harness (profile on a device)
   dev_harness/                 # DORMANT — the jet_cad viewport harness
 tool/ci/                       # CI's tools: the standing comparison, the
                                #   host guide's check, the host probe
+tool/screenshots/              # generates the README pictures
+tool/readme_probe/             # analyses the README snippets
 roadmap/                       # the product target, decomposed (inputs)
-docs/host-guide.md             # embedding the planner in a POS
+docs/host-guide.md             # embedding the plan library in a POS
+docs/kits.md                   # the contract for kit authors
 docs/superpowers/
   specs/   plans/   notes/     # binding specs, plans, results of record
   ledgers/                     # per-task records of merged plans
@@ -821,15 +877,15 @@ docs/superpowers/
 
 **The engine's own version (the human, 2026-10-13: *"Bağımsız,
 0.7.1"*; extended to every published package by Decision 4 of the host
-packages' spec, *"Her biri bağımsız"*).** Every published package
-(`jet_cad_2d`, `jet_cad_2d_flutter`, `jet_cad_floor_plan`) is versioned on
+packages' spec, *"Her biri bağımsız"*).** Every published package (4b's six:
+`jet_cad_2d`, `jet_cad_2d_flutter`, `jet_cad_2d_kit`, `jet_cad_2d_plan`,
+`jet_cad_2d_kit_architecture`, `jet_cad_2d_kit_restaurant`) is versioned on
 its own: it moves only when its own code or pubspec changes, gets an
-entry in its own `CHANGELOG.md` and a tag `jet_cad_2d-vX.Y.Z`,
-`jet_cad_2d_flutter-vX.Y.Z` or `jet_cad_floor_plan-vX.Y.Z` (pushed by the
+entry in its own `CHANGELOG.md` and a tag `<package>-vX.Y.Z` (pushed by the
 human), and is published by the human, bottom-up (D10). The shared
 `vX.Y.Z` line ended at `v0.7.0`; the root `CHANGELOG.md` is an index of
-the three, then the shared history to 0.7.0 unchanged.
-`jet_cad_2d_gpu` and `jet_cad_restaurant_symbols` are unpublished and
+the published packages, then the shared history to 0.7.0 unchanged.
+`jet_cad_2d_gpu` and `jet_cad_2d_integration` are unpublished and
 untagged; they keep their version fields. **D1's lower-bound rule:** the
 workspace enforces a caret's upper bound and never its lower bound, so
 when a dependent is released its lower bound on each sibling is raised to
@@ -852,10 +908,11 @@ install them from pub.dev instead of by git).** Specified in
 and planned in
 [2026-10-13-publish-host-packages.md](docs/superpowers/plans/2026-10-13-publish-host-packages.md);
 the spec's Decisions bind (Apache 2.0 for all, hosted constraints in the
-repository, pub.dev only for hosts). Order: `jet_cad_2d` → `jet_cad_2d_flutter`
-→ `jet_cad_floor_plan`; the second and third steps are **prepared on
-`feat/publish-host-packages`**, merged at `d2ad729` (In flight), published by the human
-(Resume here). Still binding:
+repository, pub.dev only for hosts). The 0.7.1 order was `jet_cad_2d` →
+`jet_cad_2d_flutter` → `jet_cad_floor_plan`; the second and third steps
+were **prepared on `feat/publish-host-packages`**, merged at `d2ad729`,
+published by the human. **A10 supersedes the order for the new line** (the
+six packages of 4b's wave, Resume here). Still binding:
 
 - **The restaurant symbols: the fourth step, deferred** (**superseded by the kit architecture's decision 1**, umbrella spec above; kept as the record of why; a SWOT in chat;
   the human: *"tamam yaz"*). `jet_cad_restaurant_symbols` is published only
@@ -1041,9 +1098,8 @@ dart test test/invariants/query_allocation_test.dart
 dart run benchmark/query_throughput.dart
 dart analyze && dart format --output=none --set-exit-if-changed .
 dart pub publish --dry-run              # 0 warnings; never without --dry-run
-# the same dry run, 0 warnings, in packages/jet_cad_2d_flutter and
-# packages/jet_cad_floor_plan (from the repository root:
-# dart pub -C packages/<name> publish --dry-run)
+# the same dry run, 0 warnings, in the other five published packages
+# (from the repository root: dart pub -C packages/<name> publish --dry-run)
 
 # render layer (Flutter)
 cd packages/jet_cad_2d_flutter
@@ -1064,13 +1120,17 @@ flutter drive --profile -d macos --driver=test_driver/integration_test.dart \
 
 ---
 
-More gates: `packages/jet_cad_floor_plan`, `packages/jet_cad_restaurant_symbols`,
-`apps/floor_planner`, `apps/restaurant_demo` — each `flutter test`,
-`flutter analyze`, the format check; `tool/ci` — `dart test`,
-`dart run tool/ci/check_guide.dart`; the host probe —
-`tool/ci/host_probe.sh <git url> <sha>`, then
-`tool/ci/old_host_probe.sh v0.3.0`, `tool/ci/old_host_probe.sh v0.4.0` and
-`tool/ci/old_host_probe.sh v0.5.1`.
+More gates: `packages/jet_cad_2d_kit`, `packages/jet_cad_2d_plan`,
+`packages/jet_cad_2d_kit_architecture`, `packages/jet_cad_2d_kit_restaurant`,
+`packages/jet_cad_2d_integration`, `apps/architecture_demo`,
+`apps/restaurant_demo` — each `flutter test`, `flutter analyze`, the format
+check (`--enable-vmservice` for `jet_cad_2d_plan` and
+`jet_cad_2d_integration`); `tool/ci` — `dart test`,
+`dart run tool/ci/check_guide.dart`, `check_readmes.dart`,
+`check_screenshots.dart`, `check_kit_deps.dart`; the host probe —
+`tool/ci/host_probe.sh <git url> <sha>`. The old released-host probes
+(`old_host_probe.sh`) left with 4b, when the packages they probed were
+removed.
 
 ---
 
