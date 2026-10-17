@@ -16,8 +16,8 @@ dev_dependencies:
     sdk: flutter
   flutter_test:
     sdk: flutter
-  jet_cad_2d: ^0.7.2
-  jet_cad_2d_flutter: ^0.7.2
+  jet_cad_2d: ^0.7.3
+  jet_cad_2d_flutter: ^0.7.3
   jet_cad_2d_plan: ^0.8.0
   jet_cad_2d_kit: ^0.1.0
   jet_cad_2d_kit_architecture: ^0.1.0

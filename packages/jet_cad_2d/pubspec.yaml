@@ -3,7 +3,7 @@ description: >-
   A pure-Dart 2D CAD engine and document model: a scene tree, columnar
   geometry, a spatial index with picking and snapping, undoable commands and a
   deterministic file format.
-version: 0.7.2
+version: 0.7.3
 repository: https://github.com/a-urel/jet-cad
 issue_tracker: https://github.com/a-urel/jet-cad/issues
 funding:

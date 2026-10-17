@@ -13,6 +13,12 @@ const pubspecs = [
   '../../packages/jet_cad_2d/pubspec.yaml',
   '../../packages/jet_cad_2d_flutter/pubspec.yaml',
   '../../packages/jet_cad_2d_gpu/pubspec.yaml',
+  '../../packages/jet_cad_2d_kit/pubspec.yaml',
+  '../../packages/jet_cad_2d_kit_architecture/pubspec.yaml',
+  '../../packages/jet_cad_2d_kit_restaurant/pubspec.yaml',
+  '../../packages/jet_cad_2d_plan/pubspec.yaml',
+  '../../packages/jet_cad_2d_integration/pubspec.yaml',
+  '../../apps/architecture_demo/pubspec.yaml',
   '../../apps/restaurant_demo/pubspec.yaml',
   '../../apps/dev_harness_2d/pubspec.yaml',
   '../../tool/screenshots/pubspec.yaml',
@@ -57,16 +63,19 @@ void main() {
       final constraints = hosted(File(path).readAsStringSync());
       seen += constraints.length;
       for (final c in constraints.values) {
-        expect(c, '^0.7.2', reason: path);
+        expect(c, '^0.7.3', reason: path);
       }
     }
     expect(
       seen,
-      11,
+      22,
       reason:
-          'premise: the dependents are read; the pubspecs hold 11 '
-          'dependency lines on a published package (the renderer, the GPU '
-          'renderer, the two demos and the two probes)',
+          'premise: the dependents are read; the pubspecs hold 22 '
+          'dependency lines on a published package (the renderer 1, the GPU '
+          'renderer 2, the integration tests 2, the contract 2, the '
+          'architecture kit 2, the restaurant kit 1, the plan library 2, the '
+          'architecture demo 2, the restaurant demo 2, the dev harness 2, '
+          'the screenshot tool 2 and the readme probe 2)',
     );
   });
 
@@ -74,6 +83,6 @@ void main() {
     expect(nonHosted('dependencies:\n  jet_cad_2d:\n    path: ../x\n'), [
       'jet_cad_2d: path: ../x',
     ]);
-    expect(nonHosted('dependencies:\n  jet_cad_2d: ^0.7.2\n'), isEmpty);
+    expect(nonHosted('dependencies:\n  jet_cad_2d: ^0.7.3\n'), isEmpty);
   });
 }

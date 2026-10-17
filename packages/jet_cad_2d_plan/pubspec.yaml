@@ -23,8 +23,8 @@ dependencies:
     sdk: flutter
   flutter_localizations:
     sdk: flutter
-  jet_cad_2d: ^0.7.2
-  jet_cad_2d_flutter: ^0.7.2
+  jet_cad_2d: ^0.7.3
+  jet_cad_2d_flutter: ^0.7.3
   jet_cad_2d_kit: ^0.1.0
   meta: ^1.18.0
   pdf: ^3.13.1

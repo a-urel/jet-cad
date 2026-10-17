@@ -1,10 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.7.3
 
 - `SelectTool` passes the dragged selection as `resolveDragPoint`'s new
   `exclude` while a move drag lives: a dragged object no longer snaps to
   its own pre-drag geometry.
+- Depends on `jet_cad_2d: ^0.7.3`.
 
 ## 0.7.2
 

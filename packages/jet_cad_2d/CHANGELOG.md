@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.7.3
 
 - `SpatialIndex.snapInto(…, exclude: Set<Handle>?)` and
   `resolveDragPoint(…, exclude: Set<Handle>?)`: the objects named (a leaf,
