@@ -57,6 +57,8 @@ jobs:
             # C6) reads the VM's allocation profiler, as the plan
             # library's does.
             test_flags: --enable-vmservice
+          - package: apps/architecture_demo
+            tool: flutter
           - package: apps/restaurant_demo
             tool: flutter
           - package: tool/screenshots
