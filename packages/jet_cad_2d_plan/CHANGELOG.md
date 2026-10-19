@@ -1,4 +1,4 @@
-## Unreleased
+## 0.8.1
 
 - A unit status caption is clamped clear of the unit's symbol box — its
   chairs included — so it never lands on a chair, whatever the unit's
