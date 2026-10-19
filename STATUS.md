@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-10-17. **`main` carries release 0.7.0** (tag
 `v0.7.0` → `0fa649e`, after `v0.6.0` →
-`3bf64a7`, `v0.5.1` → `3f8f7ad`, `v0.5.0` → `2fbb9c0`, `v0.4.0` → `8367010`, `v0.3.0` → `1b0c37a`, `v0.2.0` → `7355c00` and `v0.1.0` → `22206f5`) and everything since; the three old packages are on pub.dev at 0.7.2 (published 2026-10-13); the kit architecture's sub-projects are merged and 4b, its release wave, is ready for the human's publish (below). The history of every plan
+`3bf64a7`, `v0.5.1` → `3f8f7ad`, `v0.5.0` → `2fbb9c0`, `v0.4.0` → `8367010`, `v0.3.0` → `1b0c37a`, `v0.2.0` → `7355c00` and `v0.1.0` → `22206f5`) and everything since; the three old packages are on pub.dev at 0.7.2 (published 2026-10-13); the kit architecture is done: its six packages are on pub.dev (published 2026-10-19 from `6fc25f3c`) and `jet_cad_floor_plan` is discontinued, replaced by `jet_cad_2d_plan` (below). The history of every plan
 before this point — its records, reviews and resume points — is in
 [STATUS-HISTORY.md](STATUS-HISTORY.md), unedited.
 
@@ -515,7 +515,7 @@ with 0.7.0 (below).
   packages (`jet_cad_2d`, `jet_cad_2d_flutter`) changed for O1 and join 4b's
   release wave.
 
-  **4b, the release wave**, is done but for the human's publish. Its tasks
+  **4b, the release wave**, is done and published (2026-10-19). Its tasks
   (each its own worktree and branch, cut from local `main`): the removal
   inventory (P1, [2026-10-17-4b-removal-inventory.md](docs/superpowers/notes/2026-10-17-4b-removal-inventory.md));
   the removal of `packages/jet_cad_floor_plan`,
@@ -537,10 +537,15 @@ with 0.7.0 (below).
   whose prep commit `d9dd74d7` drops the three stale `(unreleased)`
   CHANGELOG headings and the plan README's unreleased sentence, and which
   carries all six dry runs — 0 warnings each — and the human's step-by-step
-  publish order). **P3**
-  (the optional CI matrix check) and **P7** (the status-caption look fix)
-  did not run. The wave's six packages are ready for the human's publish
-  (Resume here).
+  publish order). **P3** (the optional CI matrix check) became the
+  controller's own check; after the merge the kit contract gained a
+  `.pubignore` and the root `CHANGELOG.md` its package list (`e5383f9c`), a
+  CI format failure in `tool/screenshots` was fixed and `apps/architecture_demo`
+  joined the CI matrix (`69dc750a`, `6fc25f3c`; CI 21/21 green). The human
+  published the six packages from `6fc25f3c`, tagged them there, and marked
+  `jet_cad_floor_plan` discontinued. **P7** (the status-caption look fix:
+  the caption clears its unit's box and takes the paper's ink; dark-theme
+  spec D6c amended) is merged at `42129cfc` and is `jet_cad_2d_plan` 0.8.1.
 
 - **The packages' READMEs, screenshots and funding links** (the human,
   2026-10-13), on `feat/package-readmes`, cut by hand from `main` at
@@ -670,8 +675,7 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 
 ## Resume here
 
-**In flight: 4b, the kit architecture's release wave.** The kit
-architecture's sub-projects are all merged, none pushed: sub-project 1
+**Done 2026-10-19: the kit architecture.** Its sub-projects are all merged and pushed: sub-project 1
 (`jet_cad_2d_kit`; PR #11 `bc705be`, PR #12 `27244bf`), 2a (the plan library
 in design mode, `4130ebc`), 2b (the service mode, `fa294563`) and its
 follow-ups (`de6abda9`; the record and what is left for the human:
@@ -684,24 +688,26 @@ by the human, 2b spec decision 9, true kept), 3a (the architecture kit,
 architecture demo, `acb5fa11`, whole-branch Sonnet review clean after one fix
 wave) and 4a (the restaurant kit, `3909c17c`, exit gate green).
 
-**4b is done but for the human's publish.** The old packages
-(`packages/jet_cad_floor_plan`, `packages/jet_cad_restaurant_symbols`) and
-`apps/floor_planner` are removed and the workspace is green on the new
-packages (P2, merged at `c9fa618e`); `jet_cad_2d` and `jet_cad_2d_flutter`
-are 0.7.3 with every caret `^0.7.3` and the four new packages at their wave
-versions (P4, `89607a23`; no floor too low); the README pictures are in (P5,
-`a428dee7`); and the checklist is written (P6, branch
-`docs/4b-release-checklist`,
-[2026-10-17-4b-release-checklist.md](docs/superpowers/notes/2026-10-17-4b-release-checklist.md)).
-P3 (the optional CI check) and P7 (the status-caption look fix) did not run.
-**The next step is the human's:** merge `docs/4b-release-checklist`, push
-`main`, CI green on the merge commit, then publish the six packages in A10's
-order — `jet_cad_2d` 0.7.3, `jet_cad_2d_flutter` 0.7.3, `jet_cad_2d_kit`
-0.1.0, then `jet_cad_2d_plan` 0.8.0, `jet_cad_2d_kit_architecture` 0.1.0 and
-`jet_cad_2d_kit_restaurant` 0.1.0 — each checked with pana's lower bounds
-once its dependencies are on pub.dev, and, after the wave, mark
-`jet_cad_floor_plan` discontinued on pub.dev, replaced by `jet_cad_2d_plan`
-(the step-by-step, with every dry run's real last lines, is the checklist).
+**4b, the release wave, is published.** The old packages and
+`apps/floor_planner` are removed (P2, `c9fa618e`), the versions and floors set
+(P4, `89607a23`), the README pictures in (P5, `a428dee7`) and the checklist
+written ([2026-10-17-4b-release-checklist.md](docs/superpowers/notes/2026-10-17-4b-release-checklist.md)).
+On 2026-10-19 the human published, from `6fc25f3c` (CI 21/21 green) and in
+A10's order, `jet_cad_2d` 0.7.3, `jet_cad_2d_flutter` 0.7.3, `jet_cad_2d_kit`
+0.1.0, `jet_cad_2d_plan` 0.8.0, `jet_cad_2d_kit_architecture` 0.1.0 and
+`jet_cad_2d_kit_restaurant` 0.1.0, tagged each `<package>-v<version>` at
+`6fc25f3c`, and marked `jet_cad_floor_plan` discontinued on pub.dev, replaced
+by `jet_cad_2d_plan`. The wave's pana lower-bound runs were not recorded.
+
+**Next, the human's:** push `main`, CI green, then publish `jet_cad_2d_plan`
+0.8.1 (P7, merged at `42129cfc`: the status caption clears its unit's box
+and takes the paper's ink; the README images pin `jet_cad_2d_plan-v0.8.1`)
+and tag `jet_cad_2d_plan-v0.8.1` at that commit. **Then:** the restaurant
+POS (monepro) integration as its own sub-project, from a brainstorm; the
+items left for later stay open (3a's frozen-neighbour question, the liveness
+revision, 3b's open-before-picker, the A5 guard, the parametric table type,
+an example for `jet_cad_2d_kit_restaurant`, a README-block = example check
+for the plan library).
 
 **Everything below this line is the 0.7.x line's record**: how 0.7.1 and
 0.7.2 went out and the old planner's pub-only check (D7). Its recipes name
