@@ -318,12 +318,13 @@ final class FillSpy implements ui.Canvas {
     return at.isEmpty ? null : at.single;
   }
 
-  /// Whether a caption is centred below [s]'s number: on its x, its top
-  /// within 40 px below it.
-  bool captioned(Spec s) {
+  /// Whether a caption is centred on [s]'s number and clear of its unit's
+  /// box (whose lower edge is at screen y [boxBottom], P7): on the number's
+  /// x, its top at or below the box's bottom.
+  bool captioned(Spec s, double boxBottom) {
     final o = originOf(s);
     return captions
-        .any((c) => (c.x - o.x).abs() < 1 && c.y - o.y >= 0 && c.y - o.y < 40);
+        .any((c) => (c.x - o.x).abs() < 1 && c.y >= boxBottom - 1e-6);
   }
 }
 
@@ -509,9 +510,31 @@ void main() {
     expect(spy.fillOf(spec('B')), 0xFF3949AB);
     expect(spy.fillOf(spec('C')), argb(alphaDefault, teal));
     expect(spy.captions, hasLength(2));
-    expect(spy.captioned(spec('A')), isTrue, reason: 'A\'s status caption');
-    expect(spy.captioned(spec('B')), isTrue, reason: 'the group\'s caption');
-    expect(spy.captioned(spec('C')), isFalse, reason: 'a colour has none');
+    // The caption clears the unit's own box (P7): its top at or below the
+    // box's lower edge, through the unit's transform, in screen pixels.
+    final index = unitsOf(doc).current;
+    double boxBottom(String label) {
+      final u = index.units.singleWhere((u) => u.text == label);
+      final m = u.toWorld, b = u.box;
+      double at(double x, double y) {
+        final w = m.transformPoint(Vector2(x, y));
+        return painterCamera.b * w.x + painterCamera.d * w.y + painterCamera.f;
+      }
+
+      return [
+        at(b.minX, b.minY),
+        at(b.maxX, b.minY),
+        at(b.minX, b.maxY),
+        at(b.maxX, b.maxY),
+      ].reduce((p, q) => p > q ? p : q);
+    }
+
+    expect(spy.captioned(spec('A'), boxBottom('A')), isTrue,
+        reason: 'A\'s status caption');
+    expect(spy.captioned(spec('B'), boxBottom('B')), isTrue,
+        reason: 'the group\'s caption');
+    expect(spy.captioned(spec('C'), boxBottom('C')), isFalse,
+        reason: 'a colour has none');
 
     final shot = await render(tester, painter);
     expectPixel(shot, painterPixel(insideTop(spec('A'))), 0xE53935, 'A');

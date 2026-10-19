@@ -18,7 +18,7 @@ import '../service_state.dart'
 import '../unit_picker.dart' show UnitPicker;
 import 'unit_focus_painter.dart' show focusVeilColour, kUnitFocusVeilAlpha;
 import 'unit_status_painter.dart'
-    show kStatusCaptionSize, paintedTextStyle, statusCaptionInk;
+    show chipInk, kStatusCaptionSize, paintedTextStyle;
 
 /// How far the frame stands off its members' boxes, in world millimetres;
 /// also the radius of its round joins (G3).
@@ -224,8 +224,9 @@ final class _Group {
 /// resolved: S-7), text style, radius and padding; the veil's colour and
 /// opacity for a faded group (S-9). The chip's box stays centred on the
 /// frame, whatever the padding on each side; its automatic ink is the one
-/// [statusCaptionInk] picks for the chip's colour over the paper, as for a
-/// status caption (S-6). They are read at rebuild, never per frame.
+/// [chipInk] picks for the chip's colour over the paper — the chip's text
+/// lies on the chip, not on the paper, so unlike a status caption's (P7)
+/// its ink is the fill's (S-6). They are read at rebuild, never per frame.
 ///
 /// Rebuilt only when the groups map or the focus is replaced, [units]
 /// gives a new index (a state, layer or lock change), or [paper] or
@@ -369,9 +370,9 @@ class UnitGroupPainter extends CustomPainter {
               locked: c.unit.locked),
       ]);
       // The ink reads on the chip as drawn: its colour over the paper (as
-      // a status caption's, S-6). An opaque colour, `gripMove` among them,
-      // composites to its own RGB.
-      final ink = chipStyle?.color ?? statusCaptionInk(chipColour, paperArgb);
+      // a status caption's used to, S-6). An opaque colour, `gripMove`
+      // among them, composites to its own RGB.
+      final ink = chipStyle?.color ?? chipInk(chipColour, paperArgb);
       for (final MapEntry(key: id, value: group) in map.entries) {
         final members = lookup.visibleMembers(id);
         if (members.length < 2) continue;

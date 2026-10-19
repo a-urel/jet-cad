@@ -33,8 +33,16 @@ import 'package:jet_cad_2d_plan/src/service/service_state.dart'
     show UnitGroup, UnitStatus;
 import 'package:jet_cad_2d_plan/src/theme/plan_theme.dart';
 import 'package:jet_cad_2d_plan/src/units/unit_index.dart' show UnitIndexCache;
+import 'package:vector_math/vector_math_64.dart' show Vector2;
 
-import '../../support/unit_fixtures.dart' show numberedRowOfTables, unitsOf;
+import '../../support/unit_fixtures.dart'
+    show
+        addUnitLabel,
+        numberedRowOfTables,
+        placeAt,
+        raisedTable,
+        unitPlan,
+        unitsOf;
 import '../../support/unit_zone_fixture.dart'
     show TestQuad, quadsNumbered, quadsOf;
 import 'unit_focus_painter_test.dart' as fp;
@@ -230,30 +238,32 @@ ui.Rect captionBox(SpyCanvas spy) {
 }
 
 /// The glyphs of one status caption [caption] in [colour] on table 1 over
-/// White at 0.2 px/mm under [theme]. The premise: without a caption, every
-/// pixel of the caption's box is the fill (the box lies inside the top).
+/// [paper] at 0.2 px/mm under [theme]. White (the paper today) by default;
+/// the dark Blueprint reads a white ink, which P7 put on the paper, not on
+/// the fill. The premise: without a caption, every pixel of the caption's
+/// box is the paper (P7 moved the caption clear of the unit's box).
 Future<(int, int)> captionGlyphs(
     WidgetTester tester, Color colour, PlanTheme? theme,
-    {String caption = 'Bill'}) async {
+    {String caption = 'Bill', int paper = white}) async {
   const size = ui.Size(800, 600);
   final f = oneTable(0.2);
   final statuses = ValueNotifier<Map<String, UnitStatus>>(
       {'1': UnitStatus(color: colour, caption: caption)});
-  final painter = themedStatus(f.doc, f.camera, statuses, ValueNotifier(theme));
+  final painter = themedStatus(f.doc, f.camera, statuses, ValueNotifier(theme),
+      paper: ValueNotifier(paper));
   final box = captionBox(statusFrame(painter, size));
   final bare = themedStatus(f.doc, f.camera,
-      ValueNotifier({'1': UnitStatus(color: colour)}), ValueNotifier(theme));
-  final fill = await render(tester, bare, white, size);
-  final drawn = composite(colour.withValues(alpha: 1),
-      colour.a * (theme?.statusFillOpacity ?? 1), 0xFFFFFF);
+      ValueNotifier({'1': UnitStatus(color: colour)}), ValueNotifier(theme),
+      paper: ValueNotifier(paper));
+  final under = await render(tester, bare, paper, size);
   for (var y = box.top.ceil(); y < box.bottom.floor(); y++) {
     for (var x = box.left.ceil(); x < box.right.floor(); x++) {
       expect(
-          channelDistance(rgbAt(fill, 800, x, y), drawn), lessThanOrEqualTo(1),
-          reason: 'premise: ($x, $y) inside the fill');
+          channelDistance(rgbAt(under, 800, x, y), paper), lessThanOrEqualTo(1),
+          reason: 'premise: ($x, $y) on the paper, clear of the fill');
     }
   }
-  return glyphs(await render(tester, painter, white, size), 800, box);
+  return glyphs(await render(tester, painter, paper, size), 800, box);
 }
 
 /// The world corners of the boxes of the tables numbered [numbers] in
@@ -490,38 +500,60 @@ void main() {
     });
 
     testWidgets(
-        'M-H33(null caption colour): a 14 px caption style with no colour: '
-        'the dark fill 0xFF1B1B1B on White takes white ink, the light fill '
-        '0xFFFFE082 dark ink', (tester) async {
+        'M-H33(null caption colour), amended by P7: a 14 px caption style '
+        'with no colour takes the paper\'s ink, not the fill\'s: the dark '
+        'fill 0xFF1B1B1B on White is visible in today\'s dark 0x202020',
+        (tester) async {
       const style = PlanTheme(statusCaptionStyle: TextStyle(fontSize: 14));
-      final (_, onDark) = await captionGlyphs(tester, darkFill, style);
-      expect(hex(onDark), hex(0xFFFFFF),
-          reason: 'glyphs lighter than the fill: white ink');
+      final (onDark, _) = await captionGlyphs(tester, darkFill, style);
+      expect(hex(onDark), hex(rgbOf(kStatusCaptionOnLight)),
+          reason: 'the dark fill does not decide: on White the caption takes '
+              'the plan\'s dark ink');
+      // The light fill does not decide either: the paper is White in both.
       final (onLight, _) = await captionGlyphs(tester, lightFill, style);
       expect(hex(onLight), hex(rgbOf(kStatusCaptionOnLight)),
-          reason: 'dark glyphs on the light fill');
+          reason: 'dark glyphs on the light paper');
     });
 
     testWidgets(
-        'T3-c: the caption\'s ink is taken on the drawn colour: 0xFF303030 '
-        'at statusFillOpacity 0.2 on White is light, dark glyphs; at 1.0 '
-        'white glyphs (S-6)', (tester) async {
+        'T3-c, amended by P7: the caption is inked for the paper it lies on, '
+        'and the drawn colour\'s opacity does not move it: a light fill on '
+        'Blueprint is light ink at statusFillOpacity 0.3 and 1.0; on White '
+        '0xFF303030 is dark either way (S-6\'s fill rule lives on in the '
+        'group chip)', (tester) async {
+      // A light fill on the dark paper: the caption is visible in white.
+      final (_, faint) = await captionGlyphs(
+          tester, lightFill, const PlanTheme(statusFillOpacity: 0.3),
+          paper: blueprint);
+      expect(hex(faint), hex(0xFFFFFF),
+          reason: 'the paper\'s white ink on Blueprint');
+      final (_, solid) = await captionGlyphs(
+          tester, lightFill, const PlanTheme(statusFillOpacity: 1),
+          paper: blueprint);
+      expect(hex(solid), hex(0xFFFFFF),
+          reason: 'the drawn colour\'s opacity does not move the caption');
+      // The drawn colour no longer decides on White either: dimmed or
+      // opaque, the paper's dark ink.
       const grey = Color(0xFF303030);
       final (dimmed, _) = await captionGlyphs(
           tester, grey, const PlanTheme(statusFillOpacity: 0.2));
       expect(hex(dimmed), hex(rgbOf(kStatusCaptionOnLight)));
-      final (_, full) = await captionGlyphs(
+      final (full, _) = await captionGlyphs(
           tester, grey, const PlanTheme(statusFillOpacity: 1));
-      expect(hex(full), hex(0xFFFFFF));
+      expect(hex(full), hex(rgbOf(kStatusCaptionOnLight)),
+          reason: 'opaque grey on White: still the paper\'s dark ink');
+      // Premises: the old, fill-based rule would have flipped with the
+      // drawn colour.
       expect(foregroundFor(0x303030), 0xFFFFFF,
-          reason: 'premise: the undimmed colour takes white ink');
+          reason: 'premise: the undimmed colour took white ink');
       expect(foregroundFor(composite(grey, 0.2, 0xFFFFFF)), 0x000000,
           reason: 'premise: the drawn one black');
     });
 
     testWidgets(
-        'S-6 on a dark paper (K12): 0xFFFFE082 at statusFillOpacity 0.3 over '
-        'Blueprint is dark, so the caption takes white ink', (tester) async {
+        'P7: on the dark Blueprint paper the caption takes the light ink, '
+        'whatever the fill: 0xFFFFE082 at statusFillOpacity 0.3 is read '
+        'white there (K12\'s paper, its ink now the paper\'s)', (tester) async {
       const size = ui.Size(800, 600);
       final f = oneTable(0.2);
       final painter = themedStatus(
@@ -534,10 +566,12 @@ void main() {
       final (_, brightest) =
           glyphs(await render(tester, painter, blueprint, size), 800, box);
       expect(hex(brightest), hex(0xFFFFFF));
+      // K12's own fill gives white ink over Blueprint too, so it held either
+      // way; the paper is what makes it so across fills and opacities (P7).
       expect(foregroundFor(composite(lightFill, 0.3, blueprint)), 0xFFFFFF,
-          reason: 'premise: drawn over Blueprint it is dark');
+          reason: 'premise: the fill\'s own ink over Blueprint is white too');
       expect(foregroundFor(composite(lightFill, 0.3, 0xFFFFFF)), 0x000000,
-          reason: 'premise: over White it would be light');
+          reason: 'premise: over White the fill\'s own ink would be black');
     });
 
     test(
@@ -673,21 +707,33 @@ void main() {
     });
 
     test(
-        'the caption sits at least the resolved font size below the number: '
-        '14 px themed against 11 px, both clamped at 0.05 px/mm', () {
-      final f = oneTable(0.05);
-      ui.Offset at(PlanTheme? theme) => statusFrame(
+        'the caption sits at least the resolved font size below the number '
+        'when the unit\'s box leaves room: 14 px themed against 11 px, the '
+        'box above the number', () {
+      // The raised table's box sits above its base point (the label), so
+      // P7's clamp at 0.05 px/mm is 30 px above the number and the font
+      // size decides the caption's placement.
+      final doc = unitPlan();
+      final at = Vector2(40000, -27000);
+      addUnitLabel(doc, placeAt(doc, raisedTable, at), '1');
+      final camera = ValueNotifier<ViewportTransform>(ViewportTransform(
+          worldToScreenMatrix: Transform2(
+              0.05, 0, 0, -0.05, 400 - 0.05 * at.x, 300 + 0.05 * at.y)));
+      ui.Offset dy(PlanTheme? theme) => statusFrame(
               themedStatus(
-                  f.doc,
-                  f.camera,
+                  doc,
+                  camera,
                   ValueNotifier({'1': UnitStatus(color: bill, caption: 'B')}),
                   ValueNotifier(theme)),
               const ui.Size(800, 600))
           .translations
           .single;
-      final plain = at(null);
+      final plain = dy(null);
       final themed =
-          at(const PlanTheme(statusCaptionStyle: TextStyle(fontSize: 14)));
+          dy(const PlanTheme(statusCaptionStyle: TextStyle(fontSize: 14)));
+      expect(plain.dy, closeTo(300 + kStatusCaptionSize, 1e-9),
+          reason: 'the 11 px font, not the box above, decides');
+      expect(themed.dy, closeTo(300 + 14, 1e-9), reason: 'the 14 px font');
       expect(themed.dy - plain.dy, closeTo(14 - kStatusCaptionSize, 1e-9));
     });
 

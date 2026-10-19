@@ -3,6 +3,7 @@
 // tables' numbers, skip hidden tables, sit where the turned, mirrored,
 // asymmetric top is (pixels read back), and steady frames pass the same
 // objects to the canvas (the allocation bar, measured structurally).
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
@@ -293,18 +294,19 @@ void main() {
   );
 
   test(
-      'SP8 the caption sits centred below the number, clear of it at any '
-      'zoom; a table smaller than its caption has none (S7, review F-4, '
-      'F-5)', () {
+      'SP8 P7 the caption sits centred below the unit\'s box, clear of it '
+      'at any zoom; a table smaller than its caption has none (S7, review '
+      'F-4, F-5)', () {
     final doc = unitPlan();
     final at = Vector2(40000, -27000);
     addUnitLabel(doc, placeAt(doc, offCentre, at, mirrored: true), '1');
-    final node = doc.tree.nodes.whereType<InstanceNode>().single;
+    final handle = doc.tree.nodes.whereType<InstanceNode>().single.handle;
     final turn = Transform2.translation(at.x, at.y)
         .multiply(Transform2.rotation(kDeg37))
         .multiply(Transform2.translation(-at.x, -at.y));
-    doc.commands.execute(
-        TransformNodeCommand(node.handle, turn.multiply(node.transform)));
+    doc.commands.execute(TransformNodeCommand(
+        handle, turn.multiply((doc.tree[handle]! as InstanceNode).transform)));
+    final node = doc.tree[handle]! as InstanceNode;
     // The base point lands on `at`; the camera puts it at (400, 300).
     final camera = ValueNotifier(ViewportTransform(
         worldToScreenMatrix:
@@ -313,24 +315,49 @@ void main() {
       '1': UnitStatus(color: const Color(0xFFAA0000), caption: 'Bill'),
     });
     final painter = painterFor(doc, camera, statuses);
+    final box = unitsOf(doc).current.withLabel('1').single.box;
     SpyCanvas frame() {
       final spy = SpyCanvas();
       painter.paint(spy, const ui.Size(800, 600));
       return spy;
     }
 
+    // The box's greatest screen y, through the unit's world transform: the
+    // caption is clear of the whole box (its chairs, if any), whatever the
+    // zoom (P7).
+    double boxBottom(Transform2 cam) {
+      double screenY(double x, double y) {
+        final w = node.transform.transformPoint(Vector2(x, y));
+        return cam.b * w.x + cam.d * w.y + cam.f;
+      }
+
+      return [
+        screenY(box.minX, box.minY),
+        screenY(box.maxX, box.minY),
+        screenY(box.minX, box.maxY),
+        screenY(box.maxX, box.maxY),
+      ].reduce(math.max);
+    }
+
     // The label's height: min(200, 0.4 x 700) = 200, so 100 below the
-    // anchor, plus a 2 px gap, or 11 px when that is less.
-    for (final (scale, below) in [(0.1, 12.0), (0.5, 52.0), (0.07, 11.0)]) {
+    // anchor, plus a 2 px gap, or 11 px when that is less; but P7 puts the
+    // caption at or below the box's own bottom, plus the gap, when that is
+    // further down.
+    for (final scale in const [0.1, 0.5, 0.07]) {
       camera.value = ViewportTransform(
           worldToScreenMatrix: Transform2(
               scale, 0, 0, -scale, 400 - scale * at.x, 300 + scale * at.y));
       final spy = frame();
       final p = spy.paragraphs.single;
-      expect(spy.translations.single.dx, closeTo(400 - p.width / 2, 1e-6),
-          reason: 'x at $scale');
-      expect(spy.translations.single.dy, closeTo(300 + below, 1e-6),
-          reason: 'y at $scale');
+      final t = spy.translations.single;
+      final clamp =
+          boxBottom(camera.value.worldToScreenMatrix) - 300 + kStatusCaptionGap;
+      final below = math.max(
+          math.max(kStatusCaptionSize, 100 * scale + kStatusCaptionGap), clamp);
+      expect(t.dx, closeTo(400 - p.width / 2, 1e-6), reason: 'x at $scale');
+      expect(t.dy, closeTo(300 + below, 1e-6), reason: 'y at $scale');
+      expect(clamp, greaterThan(kStatusCaptionSize),
+          reason: 'premise at $scale: the box, not the floor, decides');
     }
     camera.value = ViewportTransform(
         worldToScreenMatrix: Transform2(
@@ -338,6 +365,59 @@ void main() {
     final tiny = frame();
     expect(tiny.paths, hasLength(1), reason: 'the fill stays');
     expect(tiny.paragraphs, isEmpty, reason: 'the caption does not');
+  });
+
+  test(
+      'SP13 P7: the caption clears the unit\'s own box, so it never lands on '
+      'the chairs, at the identity and turned a quarter', () {
+    // tableSymbol: a 1200 x 800 top with a 450 x 450 chair above and below,
+    // its label at the top's centre, inside the box. Before the fix the
+    // caption sat 12 px below the label, on the lower chair (the status
+    // caption's 11 px floor, 14c). The box is the symbol's, chairs and all.
+    for (final quarterTurns in const [0, 1]) {
+      final doc = unitPlan();
+      final at = Vector2(40000, -27000);
+      final h = placeAt(doc, tableSymbol(), at, quarterTurns: quarterTurns);
+      addUnitLabel(doc, h, '1');
+      final node = doc.tree[h]! as InstanceNode;
+      final box = unitsOf(doc).current.withLabel('1').single.box;
+      expect(box.isEmpty, isFalse, reason: 'premise: the symbol has a box');
+
+      // The base point, where the label sits, lands on (400, 300) at
+      // 0.1 px/mm.
+      final camera = ValueNotifier<ViewportTransform>(ViewportTransform(
+          worldToScreenMatrix:
+              Transform2(0.1, 0, 0, -0.1, 400 - 0.1 * at.x, 300 + 0.1 * at.y)));
+      final statuses = ValueNotifier<Map<String, UnitStatus>>({
+        '1': UnitStatus(color: const Color(0xFFAA0000), caption: 'Bill'),
+      });
+      final spy = SpyCanvas();
+      painterFor(doc, camera, statuses).paint(spy, const ui.Size(800, 600));
+
+      final cam = camera.value.worldToScreenMatrix;
+      double screenY(double x, double y) {
+        final w = node.transform.transformPoint(Vector2(x, y));
+        return cam.b * w.x + cam.d * w.y + cam.f;
+      }
+
+      final bottom = [
+        screenY(box.minX, box.minY),
+        screenY(box.maxX, box.minY),
+        screenY(box.minX, box.maxY),
+        screenY(box.maxX, box.maxY),
+      ].reduce(math.max);
+      // Premise: the chairs reach below the number, so the test is not
+      // degenerate.
+      expect(bottom, greaterThan(300.5),
+          reason: 'turns=$quarterTurns: the chairs sit below the number');
+
+      final p = spy.paragraphs.single;
+      final t = spy.translations.single;
+      final caption = ui.Rect.fromLTWH(t.dx, t.dy, p.width, p.height);
+      expect(caption.top, greaterThanOrEqualTo(bottom - 1e-6),
+          reason: 'turns=$quarterTurns: the caption at ${caption.top} clears '
+              'the box bottom $bottom');
+    }
   });
 
   test('SP9 captions and paints no table holds are dropped (review F-8)', () {
@@ -358,8 +438,8 @@ void main() {
     expect(painter.debugCached, 0);
   });
 
-  // Dark theme spec D6c: a caption's ink follows what it sits on, the
-  // status colour composited over the paper.
+  // Dark theme spec D6c, amended by P7: the caption lies on the paper, so
+  // its ink is the paper's, as the plan's other on-paper text's is.
   const white = 0xFFFFFFFF, blueprint = 0xFF1F3A5F;
   const ordered = Color(0x99FFB300), eating = Color(0x9943A047);
   const bill = Color(0x99E53935);
@@ -382,25 +462,40 @@ void main() {
   });
 
   test(
-      'SP11 the caption colour: the demo\'s statuses on White keep today\'s '
-      '0xFF202020; on Blueprint the paper decides, where the status colour '
-      'alone would not (D6c, R-5)', () {
+      'SP11 the caption colour is the paper\'s (D6c, amended by P7): White '
+      'and Ivory take today\'s 0xFF202020, Blueprint white; the status '
+      'colour never enters. A chip\'s ink is still its own colour over the '
+      'paper (S-6)', () {
     expect(kStatusCaptionOnLight, const Color(0xFF202020));
     expect(kStatusCaptionOnDark, const Color(0xFFFFFFFF));
-    for (final c in const [ordered, eating, bill]) {
-      expect(statusCaptionInk(c, white), kStatusCaptionOnLight,
-          reason: '$c on White');
+    // The plan's on-paper rule, the one ACI 7 takes: the ink flips exactly
+    // where the drafting's does.
+    expect(foregroundFor(0xFFFFFF), 0x000000);
+    expect(foregroundFor(0xFAF6EC), 0x000000);
+    expect(foregroundFor(0x1F3A5F), 0xFFFFFF);
+    for (final paper in const [white, 0xFFFAF6EC]) {
+      expect(statusCaptionInk(paper), kStatusCaptionOnLight,
+          reason:
+              'a light paper takes dark ink (0x${paper.toRadixString(16)})');
     }
-    expect(statusCaptionInk(bill, blueprint), kStatusCaptionOnDark);
-    expect(statusCaptionInk(eating, blueprint), kStatusCaptionOnDark);
-    // Amber over navy is still light: black ink.
-    expect(statusCaptionInk(ordered, blueprint), kStatusCaptionOnLight);
-    // Bill's RGB alone takes black ink: the white on Blueprint is the
-    // paper's doing.
-    expect(foregroundFor(0xE53935), 0x000000);
-    // An opaque dark status takes white ink on White too.
-    expect(
-        statusCaptionInk(const Color(0xFF1B3A1B), white), kStatusCaptionOnDark);
+    expect(statusCaptionInk(blueprint), kStatusCaptionOnDark);
+    expect(statusCaptionInk(0x001F3A5F), kStatusCaptionOnDark,
+        reason: 'the alpha byte is unread');
+    // Bill over Blueprint is dark, and would have taken white ink under the
+    // fill: the paper alone gives Blueprint the white caption, so the
+    // fill-based ink is gone from the caption.
+    expect(over(bill, blueprint), 0x963946);
+    expect(foregroundFor(over(bill, blueprint)), 0xFFFFFF);
+    // A chip's text lies on the chip: its ink is the chip colour over the
+    // paper, as before.
+    expect(chipInk(ordered, blueprint), kStatusCaptionOnLight,
+        reason: 'amber over navy is still light: black ink');
+    expect(chipInk(bill, blueprint), kStatusCaptionOnDark,
+        reason: 'the chip colour is dark over Blueprint');
+    expect(chipInk(const Color(0xFF3949AB), white), kStatusCaptionOnDark);
+    expect(chipInk(const Color(0xFFFFE082), white), kStatusCaptionOnLight);
+    expect(chipInk(const Color(0xFF1B3A1B), white), kStatusCaptionOnDark,
+        reason: 'an opaque dark chip takes white ink on White');
   });
 
   testWidgets(

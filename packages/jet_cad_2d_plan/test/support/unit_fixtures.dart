@@ -119,6 +119,22 @@ const CatalogSymbol trapezoidTable = CatalogSymbol(
   ],
 );
 
+/// A table whose box sits entirely above its base point, the label anchor:
+/// the symbol leaves the caption room, so its placement is the resolved
+/// font size's, not the box's (P7).
+const CatalogSymbol raisedTable = CatalogSymbol(
+  key: 'fx.table.raised',
+  name: 'Test table, box above the base',
+  category: 'Tests',
+  tags: ['table', 'test'],
+  unit: CatalogUnit(kind: UnitKinds.table, capacity: 2),
+  base: (400, 0),
+  shapes: [
+    CatalogPolyline([(0, 600), (800, 600), (800, 1400), (0, 1400)],
+        closed: true),
+  ],
+);
+
 /// [s] as a library entry, built by hand (no library rule is checked): its
 /// leaves ascending by handle in shape order, each a BYBLOCK leaf on layer
 /// 0; its unit when [CatalogSymbol.unit] is set.

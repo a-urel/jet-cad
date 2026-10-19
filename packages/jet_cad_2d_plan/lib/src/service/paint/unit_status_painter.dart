@@ -25,7 +25,7 @@ import '../unit_picker.dart' show CircleTop, PolygonTop, unitTopOf;
 /// the frame reads it and creates nothing.
 final class _Fill {
   _Fill(this.instance, this.toWorld, this.path, this.paint, this.caption,
-      this.lx, this.ly, this.half, this.size);
+      this.lx, this.ly, this.half, this.size, this.box);
 
   final Handle instance;
 
@@ -42,6 +42,10 @@ final class _Fill {
 
   /// The top's smaller side, in definition space.
   final double size;
+
+  /// The symbol's box in definition space: the caption is clamped below its
+  /// bottom on screen, so it clears the chairs at any rotation (P7).
+  final Aabb2 box;
 }
 
 /// The caption's height in logical pixels (S7).
@@ -67,16 +71,28 @@ int over(Color colour, int paper) {
   return rgb;
 }
 
-/// The caption colour for a status [colour] on [paper] (D6c): the ink
-/// [foregroundFor] picks for the colour over the paper, mapped to
-/// [kStatusCaptionOnLight] (black ink, today's caption) or
+/// The status caption's colour on [paper] (dark theme spec D6c, amended by
+/// P7): the ink [foregroundFor] picks on the paper the caption lies on,
+/// mapped to [kStatusCaptionOnLight] (dark ink, today's caption) or
 /// [kStatusCaptionOnDark] (white ink). `foregroundFor` returns `0xRRGGBB`,
 /// so this mapping is the only conversion: `Color(foregroundFor(...))`
 /// would be fully transparent.
-Color statusCaptionInk(Color colour, int paper) =>
-    foregroundFor(over(colour, paper)) == 0xFFFFFF
-        ? kStatusCaptionOnDark
-        : kStatusCaptionOnLight;
+///
+/// This is the plan's on-paper rule, the one ACI 7 and every label take:
+/// P7 moved the caption clear of its fill onto the paper, so its ink is the
+/// paper's, flipping exactly where the drafting's does. The status colour
+/// no longer enters.
+///
+/// [paper] is `0xAARRGGBB`; its alpha byte is unread, as [foregroundFor]'s
+/// and [over]'s.
+Color statusCaptionInk(int paper) => foregroundFor(paper & 0xFFFFFF) == 0xFFFFFF
+    ? kStatusCaptionOnDark
+    : kStatusCaptionOnLight;
+
+/// A group chip's text colour: the [statusCaptionInk] rule applied to the
+/// chip's own [fill] over [paper] (S-6). Unlike a status caption, a chip's
+/// text lies on the chip, not on the paper, so its ink is the fill's.
+Color chipInk(Color fill, int paper) => statusCaptionInk(over(fill, paper));
 
 /// A host's text [style] for painted text (host embedding API spec T-1,
 /// T-4, S-3) with today's values where it leaves them null: [ink] as its
@@ -117,16 +133,22 @@ TextStyle paintedTextStyle(TextStyle style, Color ink) => style.copyWith(
 /// `camera . toWorld` (the unit's world transform, captured at rebuild),
 /// composed in doubles before it reaches the canvas.
 ///
-/// A caption's ink follows what it sits on (dark theme spec D6c): the
-/// status colour over [paper], through [statusCaptionInk]. The host puts
-/// [paper] in [repaint] too (F-16), so a paper change repaints, and the
-/// rebuild then builds each flipped caption once.
+/// A caption's ink follows what it sits on (dark theme spec D6c, amended by
+/// P7): the paper, through [statusCaptionInk], as the plan's other
+/// on-paper text does. The host puts [paper] in [repaint] too (F-16), so a
+/// paper change repaints, and the rebuild then builds each flipped caption
+/// once.
+///
+/// A caption sits below its unit label, but never above the unit's own box
+/// on screen (P7): a status caption whose 11 px floor put it on the lower
+/// chairs now clears them however the table is turned and mirrored. The
+/// caption is drawn upright in screen space, so only the box's greatest
+/// screen y is read.
 ///
 /// The host's look, [theme] (host embedding API spec T-1, T-3), joins the
 /// rebuild key: its `statusFillOpacity` multiplies each status colour's
-/// alpha once, at rebuild, and the caption's ink is taken on that drawn
-/// colour (S-6); its `statusCaptionStyle` styles the captions, the null
-/// properties today's ([paintedTextStyle]).
+/// alpha once, at rebuild; its `statusCaptionStyle` styles the captions,
+/// the null properties today's ([paintedTextStyle]).
 class UnitStatusPainter extends CustomPainter {
   UnitStatusPainter({
     required this.document,
@@ -292,12 +314,13 @@ class UnitStatusPainter extends CustomPainter {
         paint,
         captioned
             ? _captionOf(caption, argb,
-                style?.color ?? statusCaptionInk(drawn, paperArgb), style)
+                style?.color ?? statusCaptionInk(paperArgb), style)
             : null,
         label?.x ?? bounds.center.dx,
         label?.y ?? bounds.center.dy,
         label?.half ?? 0,
         math.min(bounds.width, bounds.height),
+        u.box,
       ));
     }
     // Draw order (ascending handle), whatever the map's order.
@@ -427,7 +450,19 @@ class UnitStatusPainter extends CustomPainter {
       final sy = b * f.lx + d * f.ly + g;
       // Below the label: its half height on screen and a gap, at least
       // one caption height from the anchor.
-      final below = math.max(_captionSize, f.half * scale + kStatusCaptionGap);
+      var below = math.max(_captionSize, f.half * scale + kStatusCaptionGap);
+      // Never above the unit's own box: the caption clears the chairs
+      // however the unit is turned (P7). The box is a parallelogram on
+      // screen, so its greatest screen y is at a corner.
+      final box = f.box;
+      if (!box.isEmpty) {
+        final y00 = b * box.minX + d * box.minY + g;
+        final y10 = b * box.maxX + d * box.minY + g;
+        final y01 = b * box.minX + d * box.maxY + g;
+        final y11 = b * box.maxX + d * box.maxY + g;
+        final bottom = math.max(math.max(y00, y10), math.max(y01, y11));
+        below = math.max(below, bottom - sy + kStatusCaptionGap);
+      }
       canvas
         ..save()
         ..translate(sx - caption.width / 2, sy + below)

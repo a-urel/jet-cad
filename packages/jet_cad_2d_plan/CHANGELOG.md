@@ -1,3 +1,15 @@
+## Unreleased
+
+- A unit status caption is clamped clear of the unit's symbol box — its
+  chairs included — so it never lands on a chair, whatever the unit's
+  rotation.
+- The caption's ink is taken against the paper it lies on
+  (`foregroundFor(paper)`), as the plan's other on-paper text, not against
+  the status colour over that paper: a dark status on a light paper no
+  longer draws an invisible white caption. A group chip's text, which lies
+  on the chip, keeps the fill's ink (`chipInk`). (P7's amendments to
+  dark-theme spec D6c.)
+
 ## 0.8.0
 
 The plan library of jet_cad_2d, in design mode (sub-project 2a).

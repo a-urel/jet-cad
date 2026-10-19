@@ -113,6 +113,13 @@ Rect screenBox(PlanController c, String number) {
   return box;
 }
 
+/// [number]'s box on screen with the band under it where its status caption
+/// is drawn (P7, the caption sits clear of the unit's box, chairs and all).
+Rect captionBand(PlanController c, String number) {
+  final box = screenBox(c, number);
+  return Rect.fromLTRB(box.left, box.top, box.right, box.bottom + 40);
+}
+
 /// The selection overlay the shown mode painted with.
 SelectionOverlayPainter overlay(WidgetTester tester) => tester
     .widgetList<CustomPaint>(find.byType(CustomPaint))
@@ -347,10 +354,10 @@ void main() {
       bool ink(int p) => light
           ? [16, 8, 0].every((s) => ((p >> s) & 0xFF) < 120)
           : [16, 8, 0].every((s) => ((p >> s) & 0xFF) > 200);
-      final standardInk = (await shoot(tester)).count(screenBox(c, '2'), ink);
+      final standardInk = (await shoot(tester)).count(captionBand(c, '2'), ink);
       await tester.tap(byKey('look-pos'));
       await settleTheme(tester);
-      final posInk = (await shoot(tester)).count(screenBox(c, '2'), ink);
+      final posInk = (await shoot(tester)).count(captionBand(c, '2'), ink);
       // 4 glyphs of 12 x 12 against 4 of 11 x 11: 92 pixels more.
       expect(posInk - standardInk, greaterThanOrEqualTo(80),
           reason: 'the 12 px caption ($posInk against $standardInk)');

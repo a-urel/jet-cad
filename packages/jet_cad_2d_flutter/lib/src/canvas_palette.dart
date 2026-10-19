@@ -222,10 +222,12 @@ class PaperPalette {
       );
 }
 
-/// A table status caption's colour where the status colour over the paper
-/// takes black ink (dark theme spec D6c): today's caption.
+/// A table status caption's colour where the paper it lies on takes black
+/// ink (dark theme spec D6c, as amended by P7): today's caption. A group
+/// chip's text, which lies on the chip, takes the same two colours from
+/// the chip's own ink.
 const Color kStatusCaptionOnLight = Color(0xFF202020);
 
-/// A table status caption's colour where the status colour over the paper
-/// takes white ink (dark theme spec D6c).
+/// A table status caption's colour where the paper it lies on takes white
+/// ink (dark theme spec D6c, as amended by P7).
 const Color kStatusCaptionOnDark = Color(0xFFFFFFFF);
