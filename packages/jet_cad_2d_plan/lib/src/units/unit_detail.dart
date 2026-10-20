@@ -12,6 +12,8 @@ import 'package:flutter/widgets.dart' show Offset, Size;
 import 'package:jet_cad_2d/jet_cad_2d.dart' show Aabb2, Handle, Transform2;
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show PlanSwatch;
 
+import '../objects/object_detail.dart';
+
 /// One unit of the active plan, as a host sees it: never a handle.
 @immutable
 final class PlanUnit {
@@ -84,6 +86,7 @@ final class PlanUnitDetail {
     required this.locked,
     this.data = const <String, String>{},
     this.colour,
+    this.section,
   });
 
   final PlanUnit unit;
@@ -123,9 +126,32 @@ final class PlanUnitDetail {
   /// release cannot read (kept as read).
   final PlanSwatch? colour;
 
-  @override
-  bool operator ==(Object other) =>
-      other is PlanUnitDetail &&
+  /// The section the unit's centre stands in (spec D10): the smallest area
+  /// object (a room) whose outline contains it, the boundary counting as
+  /// inside; null outside every area, and for a unit that reports no
+  /// geometry. Part of `==`, but `unitChanges` ignores it: a section change
+  /// alone is `PlanController.sectionChanges`' to report.
+  final PlanObjectDetail? section;
+
+  /// This detail standing in [section] instead.
+  @internal
+  PlanUnitDetail withSection(PlanObjectDetail? section) => PlanUnitDetail(
+      unit: unit,
+      center: center,
+      size: size,
+      rotation: rotation,
+      mirrored: mirrored,
+      corners: corners,
+      layer: layer,
+      locked: locked,
+      data: data,
+      colour: colour,
+      section: section);
+
+  /// Whether [other] is this detail but for [section] (what `unitChanges`
+  /// compares).
+  @internal
+  bool sameBesidesSection(PlanUnitDetail other) =>
       other.unit == unit &&
       other.center == center &&
       other.size == size &&
@@ -136,6 +162,12 @@ final class PlanUnitDetail {
       other.locked == locked &&
       mapEquals(other.data, data) &&
       other.colour == colour;
+
+  @override
+  bool operator ==(Object other) =>
+      other is PlanUnitDetail &&
+      sameBesidesSection(other) &&
+      other.section == section;
 
   @override
   int get hashCode => Object.hash(
@@ -149,13 +181,15 @@ final class PlanUnitDetail {
       locked,
       Object.hashAllUnordered(
           [for (final e in data.entries) Object.hash(e.key, e.value)]),
-      colour);
+      colour,
+      section);
 
   @override
   String toString() => 'PlanUnitDetail($unit, center: $center, '
       'size: $size, rotation: $rotation, mirrored: $mirrored, '
       'corners: $corners, layer: $layer, locked: $locked, data: $data'
-      '${colour == null ? '' : ', colour: $colour'})';
+      '${colour == null ? '' : ', colour: $colour'}'
+      '${section == null ? '' : ', section: $section'})';
 }
 
 /// The detail of [unit], placed by [transform] over the symbol box [box],
@@ -169,7 +203,8 @@ PlanUnitDetail unitDetailOf(
     required String layer,
     required bool locked,
     Map<String, String> data = const <String, String>{},
-    PlanSwatch? colour}) {
+    PlanSwatch? colour,
+    PlanObjectDetail? section}) {
   final m = transform;
   var rotation = math.atan2(m.b, m.a);
   if (rotation <= -math.pi) rotation += 2 * math.pi;
@@ -190,6 +225,7 @@ PlanUnitDetail unitDetailOf(
     locked: locked,
     data: data,
     colour: colour,
+    section: section,
   );
 }
 
@@ -309,7 +345,7 @@ List<PlanUnitChange> diffUnitDetails(
     } else if (a == null || b < a) {
       out.add(PlanUnitAdded(after[j++]));
     } else {
-      if (before[i] != after[j]) {
+      if (!before[i].sameBesidesSection(after[j])) {
         out.add(PlanUnitChanged(before[i], after[j]));
       }
       i++;

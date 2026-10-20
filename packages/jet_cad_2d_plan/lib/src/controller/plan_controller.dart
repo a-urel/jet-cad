@@ -25,6 +25,7 @@ import '../l10n/document_separator.dart';
 import '../l10n/strings.dart';
 import '../objects/object_detail.dart';
 import '../objects/object_ref.dart';
+import '../objects/sections.dart';
 import '../export/page_flows.dart';
 import '../export/page_printer.dart';
 import '../export/registries.dart';
@@ -198,6 +199,17 @@ final class _UnitBaseline {
   final UnitIndex index;
   final List<Handle> instances;
   final List<PlanUnitDetail> details;
+
+  bool isAt(UnitIndex now) => identical(index, now);
+}
+
+/// The units' sections as last reported for `sectionChanges`: the label
+/// and section by instance, at the active unit index.
+final class _SectionBaseline {
+  const _SectionBaseline(this.index, this.sections);
+
+  final UnitIndex index;
+  final Map<Handle, (String?, PlanObjectDetail?)> sections;
 
   bool isAt(UnitIndex now) => identical(index, now);
 }
@@ -1132,6 +1144,8 @@ class PlanController extends ChangeNotifier {
     };
     final layers = d.tables.layers;
     final details = <PlanUnitDetail>[];
+    final finder = _sectionFinderOf(d);
+    final sections = <Handle, PlanObjectDetail?>{};
     for (final u in index.units) {
       final node = d.tree[u.instance];
       if (node is! InstanceNode) continue;
@@ -1159,7 +1173,39 @@ class PlanController extends ChangeNotifier {
               data: data,
               colour: colour));
     }
+    if (!finder.isEmpty) {
+      // Spec D10: the section of each unit's centre, once per rebuild.
+      for (var i = 0; i < details.length; i++) {
+        final c = details[i].center;
+        if (c == null) continue;
+        final area = finder.sectionAt(c.dx, c.dy);
+        if (area == null) continue;
+        final section =
+            sections.putIfAbsent(area, () => _objectDetailOf(d, area));
+        if (section != null) details[i] = details[i].withSection(section);
+      }
+    }
     return List.unmodifiable(details);
+  }
+
+  /// The areas of [d]: every root-level object of a kit type that declares
+  /// one, asked for its outline. The plan library names no type.
+  SectionFinder _sectionFinderOf(DraftDocument d) {
+    final root = d.tree[d.rootHandle];
+    if (root is! GroupNode) return SectionFinder(const []);
+    final areas = <SectionArea>[];
+    for (final h in root.children) {
+      final typeId = catalog.typeIdOf(d, h);
+      final type = typeId == null ? null : kits.typeOf(typeId);
+      if (type == null || !type.hasArea) continue;
+      try {
+        final ring = type.areaOf(d, h, _buildWords);
+        if (ring != null && ring.length >= 3) areas.add(SectionArea(h, ring));
+      } catch (_) {
+        // A throwing capability bounds nothing; its kit's boundary reports.
+      }
+    }
+    return SectionFinder(areas);
   }
 
   /// The active plan's labelling problems (today's `numberingWarnings`):
@@ -1702,6 +1748,61 @@ class PlanController extends ChangeNotifier {
   /// [dispose].
   Stream<PlanUnitChange> get unitChanges => _unitStream;
 
+  // ---- sectionChanges (spec D12) ----
+
+  late final StreamController<PlanSectionChange> _sectionOut =
+      StreamController<PlanSectionChange>.broadcast(
+          onListen: _watchSections, onCancel: () => _sectionBaseline = null);
+  late final Stream<PlanSectionChange> _sectionStream =
+      _sectionOut.stream.where((_) => !_disposed);
+  _SectionBaseline? _sectionBaseline;
+
+  /// The units whose section (spec D10) changed, a broadcast stream: after
+  /// every design edit, undo or redo, and in service after every layout
+  /// move, one event with the labelled units whose section differs from the
+  /// last report and the section each has now. A unit added or removed is
+  /// not a section change (`unitChanges` reports it, its detail carrying
+  /// the section). Leaving service reports the units the discarded moves
+  /// had changed. [load] and [newPlan] report nothing. Delivered
+  /// asynchronously; nothing is sent on listen; nothing is read while no
+  /// one listens; closed by [dispose].
+  Stream<PlanSectionChange> get sectionChanges => _sectionStream;
+
+  void _watchSections() {
+    if (_disposed) return;
+    _sectionBaseline = _sectionsNow();
+  }
+
+  _SectionBaseline _sectionsNow() {
+    final index = _activeUnits.current;
+    final details = unitDetails;
+    final instances = unitDetailInstances;
+    return _SectionBaseline(index, {
+      for (var i = 0; i < details.length; i++)
+        instances[i]: (details[i].unit.label, details[i].section),
+    });
+  }
+
+  /// Reports the units whose section differs from the baseline, and moves
+  /// it. O(units) per active-index change, only while someone listens.
+  void _reportSections() {
+    final before = _sectionBaseline;
+    if (before == null || _disposed || before.isAt(_activeUnits.current)) {
+      return;
+    }
+    final after = _sectionBaseline = _sectionsNow();
+    final changed = <String, PlanObjectDetail?>{};
+    for (final MapEntry(key: instance, value: now) in after.sections.entries) {
+      final was = before.sections[instance];
+      final label = now.$1;
+      if (was == null || label == null) continue;
+      if (was.$2?.ref != now.$2?.ref) changed[label] = now.$2;
+    }
+    if (changed.isNotEmpty) {
+      _sectionOut.add(PlanSectionChange(Map.unmodifiable(changed)));
+    }
+  }
+
   void _watchUnits() {
     if (_disposed) return;
     _unitBaseline = _unitsNow();
@@ -1749,6 +1850,7 @@ class PlanController extends ChangeNotifier {
     if (_inDesign) _revision.value++;
     _refreshSelected();
     _reportUnits();
+    _reportSections();
   }
 
   // ---------------------------------------------------------------------
@@ -1880,6 +1982,8 @@ class PlanController extends ChangeNotifier {
       _unitOut.add(const PlanUnitsReplaced());
       _unitBaseline = _unitsNow();
     }
+    // A load reports no section change (`PlanUnitsReplaced` covers it).
+    if (_sectionBaseline != null) _sectionBaseline = _sectionsNow();
     _atPicker = null;
     _refreshSelected();
     _revision.value++;
@@ -1969,6 +2073,7 @@ class PlanController extends ChangeNotifier {
     _select(labels);
     _refreshFlags();
     _revision.value++;
+    _reportSections();
     notifyListeners();
   }
 
@@ -2034,6 +2139,7 @@ class PlanController extends ChangeNotifier {
     _refreshFlags();
     _revision.value++;
     _refreshSelected();
+    _reportSections();
     _announceService();
   }
 
@@ -2967,6 +3073,7 @@ class PlanController extends ChangeNotifier {
     pageFlows.dispose();
     unawaited(_out.close());
     unawaited(_unitOut.close());
+    unawaited(_sectionOut.close());
     super.dispose();
   }
 }

@@ -7,6 +7,13 @@
   by 0.8.1 open unchanged. A `PlanObjectRef` is valid for the plan it was
   read from (and that plan saved and loaded again); after `newPlan` or a
   load of another plan, read the references again.
+- A unit's section: `PlanUnitDetail.section`, the smallest area object (a
+  kit type that declares an area, such as a room) whose outline contains the
+  unit's centre, the boundary counting as inside; and
+  `PlanController.sectionChanges`, one `PlanSectionChange` (labels and their
+  new sections) whenever units' sections change, in design and after a
+  layout move in service. `unitChanges` is unchanged: a section change alone
+  is not a `PlanUnitChanged`.
 
 ## 0.8.1
 

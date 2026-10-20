@@ -78,6 +78,7 @@ void main() {
       'PlanMode',
       // POS-host Task 3
       'PlanObjectRef', 'PlanObjectDetail', 'PlanObjectKind',
+      'PlanSectionChange',
       // 2b Task 12
       'UnitGroup', 'UnitStatus',
       // 2b Task 13
