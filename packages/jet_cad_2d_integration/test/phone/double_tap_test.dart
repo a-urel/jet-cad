@@ -119,14 +119,16 @@ void main() {
     expect(walls(c), hasLength(1));
   });
 
-  testWidgets('DT4 a mouse double click does not end the chain (touch only)',
-      (tester) async {
+  testWidgets(
+      'DT4 a mouse double click on the first point does not end the chain '
+      '(touch only)', (tester) async {
     final c = await rig(tester);
     final tool = activeTool(tester);
-    await tap(tester, globalAt(tester, c, a));
-    await mouseClick(tester, globalAt(tester, c, b));
-    await mouseClick(tester, globalAt(tester, c, d));
-    expect(tool.isMidShape, isTrue);
-    expect(walls(c), hasLength(2));
+    await mouseClick(tester, globalAt(tester, c, a));
+    await tester.pump(_quick);
+    await mouseClick(tester, globalAt(tester, c, a));
+    expect(tool.isMidShape, isTrue,
+        reason: 'the zero-length second click is refused, the chain goes on');
+    expect(walls(c), isEmpty);
   });
 }
