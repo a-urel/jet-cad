@@ -37,13 +37,26 @@ final class PlanSectionChange {
 final class SectionArea {
   SectionArea(this.owner, List<Vector2> ring)
       : ring = List.unmodifiable(ring),
-        size = _shoelace(ring).abs();
+        size = _shoelace(ring).abs(),
+        perimeter = _perimeter(ring);
 
   final Handle owner;
   final List<Vector2> ring;
 
   /// The outline's area (shoelace), square millimetres.
   final double size;
+
+  /// The outline's length, millimetres: scales the band within which two
+  /// areas are equal.
+  final double perimeter;
+
+  static double _perimeter(List<Vector2> ring) {
+    var sum = 0.0;
+    for (var i = 0; i < ring.length; i++) {
+      sum += ring[i].distanceTo(ring[(i + 1) % ring.length]);
+    }
+    return sum;
+  }
 
   static double _shoelace(List<Vector2> ring) {
     var sum = 0.0;
@@ -102,7 +115,12 @@ final class SectionFinder {
       if (!area.contains(x, y, tolerance)) continue;
       // Ascending handle: a strictly smaller area wins, an equal one keeps
       // the lower handle.
-      if (best == null || tolerance.compare(area.size, best.size) < 0) {
+      // Equal within the linear tolerance's squared-unit band (a length
+      // times the two perimeters), not 1e-9 mm^2 of float noise.
+      if (best == null ||
+          (area.size < best.size &&
+              best.size - area.size >
+                  tolerance.linear * (area.perimeter + best.perimeter))) {
         best = area;
       }
     }

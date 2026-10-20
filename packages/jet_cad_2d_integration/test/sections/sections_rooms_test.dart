@@ -16,6 +16,9 @@ import '../support/units.dart';
 const Placement turned = Placement(
     'off origin, 23 deg, own groups', 40000, -30000, 23,
     groups: true);
+const Placement turned37 = Placement(
+    'off origin, 37 deg, own groups', 40000, -30000, 37,
+    groups: true);
 const Placement axis = Placement(
     'off origin, axis aligned, own groups', 40000, -30000, 0,
     groups: true);
@@ -96,6 +99,25 @@ void main() {
       layout = buildPlan(d, boxWalls,
           seps: const [(4000, 100, 4000, 3900)], place: axis);
       // Right half first: the lower handle is the right room.
+      lower = addRoom(d, layout.at(6000, 2000), 'Right');
+      higher = addRoom(d, layout.at(2000, 2000), 'Left');
+      table(d, layout, 'B', 4000, 2000);
+      d.commands.clearHistory();
+    });
+    final c = open(json);
+    expectSection(c, 'B', lower);
+    expect(unit(c, 'B').section!.ref, isNot(refOf(higher)));
+    expectSection(open(c.save()), 'B', lower);
+  });
+
+  test(
+      'SC4b two equal rooms rotated 37 deg side by side sharing a separator, '
+      'a table centred on the shared boundary: the lower handle, in plan and '
+      'after save and load', () {
+    late Handle lower, higher;
+    final json = planWith((d) {
+      layout = buildPlan(d, boxWalls,
+          seps: const [(4000, 100, 4000, 3900)], place: turned37);
       lower = addRoom(d, layout.at(6000, 2000), 'Right');
       higher = addRoom(d, layout.at(2000, 2000), 'Left');
       table(d, layout, 'B', 4000, 2000);

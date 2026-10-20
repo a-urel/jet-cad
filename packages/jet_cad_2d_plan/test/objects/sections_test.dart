@@ -317,6 +317,17 @@ void main() {
         SectionArea(Handle(9), [v(0, 0), v(10, 0), v(10, 10), v(0, 10)]);
     final small = SectionArea(Handle(7), [v(2, 2), v(4, 2), v(4, 4), v(2, 4)]);
     final twin = SectionArea(Handle(3), [v(2, 2), v(4, 2), v(4, 4), v(2, 4)]);
+    // 10 m squares: areas differing by 5e-5 mm^2 (float noise, inside the
+    // 1e-9 x perimeters band of 8e-5) are equal; a real difference is not.
+    final square = SectionArea(
+        Handle(2), [v(0, 0), v(10000, 0), v(10000, 10000), v(0, 10000)]);
+    final noisy = SectionArea(Handle(5),
+        [v(0, 0), v(10000, 0), v(10000, 10000 - 5e-9), v(0, 10000 - 5e-9)]);
+    final smaller = SectionArea(
+        Handle(9), [v(0, 0), v(10000, 0), v(10000, 9999.99), v(0, 9999.99)]);
+    expect(SectionFinder([square, noisy]).sectionAt(5, 5), Handle(2));
+    expect(SectionFinder([noisy, square]).sectionAt(5, 5), Handle(2));
+    expect(SectionFinder([noisy, smaller]).sectionAt(5, 5), Handle(9));
     expect(SectionFinder([big, small]).sectionAt(3, 3), Handle(7));
     expect(SectionFinder([big, small, twin]).sectionAt(3, 3), Handle(3));
     expect(SectionFinder([twin, small, big]).sectionAt(3, 3), Handle(3));
