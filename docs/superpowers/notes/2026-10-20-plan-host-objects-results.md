@@ -64,7 +64,8 @@ Garden sections, real Roboto).
 | 10 demo | e7899f06, 147b0bc8 |
 | 10c name capability, sectionDetails | 8d8d60ca, 32701b77 (import fixup), dd1f2c06, 847ccd16, df384066, 109853a0, e6b3b064 (guide) |
 | 10b touch double tap | e42a1307, 29617430 |
-| 11 close | this commit |
+| 11 close | ea002d52 |
+| 12 fix wave: first fit | the fit fix commit: a host `build` that changes the page left the page notifier stale at the canvas's first fit, so the A4 sheet the build replaced was framed (phone screenshot regenerated) |
 
 ## Rulings and what each costs if wrong
 

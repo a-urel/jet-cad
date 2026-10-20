@@ -68,13 +68,18 @@ final class Shot {
       ];
 }
 
+/// The window of these tests. The first fit shows the whole A3 sheet (it
+/// framed the A4 sheet the build replaced before the fit fix): the window is
+/// as much larger as the tables were once drawn larger than the sheet.
+const Size kWindow = Size(2300, 1450);
+
 /// The window as it is now: the route's boundary, the whole screen.
 Future<Shot> shoot(WidgetTester tester) async {
   final boundary = tester.renderObject<RenderRepaintBoundary>(find
       .ancestor(
           of: find.byType(Scaffold), matching: find.byType(RepaintBoundary))
       .first);
-  expect(boundary.size, const Size(1600, 1000), reason: 'premise: the window');
+  expect(boundary.size, kWindow, reason: 'premise: the window');
   return (await tester.runAsync(() async {
     final image = await boundary.toImage();
     final raw = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
@@ -183,7 +188,7 @@ void main() {
         tester.platformDispatcher.platformBrightnessTestValue = Brightness.dark;
         addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
       }
-      final demo = await pumpDemo(tester);
+      final demo = await pumpDemo(tester, size: kWindow);
       final c = demo.area.controller;
       final light = brightness == Brightness.light;
       final pos = posPlanTheme(brightness);

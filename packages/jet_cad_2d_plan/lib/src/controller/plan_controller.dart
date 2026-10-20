@@ -1953,7 +1953,15 @@ class PlanController extends ChangeNotifier {
     // Spec 3a C1.9: the host's build, over this session's system, before
     // the views listen, the change tracker takes its baseline and the save
     // point is taken.
-    if (build != null) _runBuild(document, build);
+    if (build != null) {
+      _runBuild(document, build);
+      // The session's page notifier was seeded before the build and hears
+      // the build's page only from its change stream, after the frame in
+      // which the canvas makes its first fit: seed it again, or that fit
+      // frames the page the plan had before the build.
+      session.page.value =
+          document.components.get<PageComponent>(document.rootHandle);
+    }
     session.tools.addListener(_onTools);
     session.history = document.commands.changes.listen((_) {
       if (!_disposed) _onDesignChange();
