@@ -173,6 +173,13 @@ StreamSubscription<PlanSectionChange> watchSections(
       }
     });
 
+/// The plan's sections by name, whether or not they carry data: a room's own
+/// name is its label, so a host can find "VIP" without a table in it.
+Map<String, PlanObjectRef> sectionRefsByName(PlanController c) => {
+      for (final section in c.sectionDetails)
+        if (section.label case final name?) name: section.ref,
+    };
+
 /// A combo over the POS's records for the one selected object: choosing one
 /// writes its id on the object, the object's other data kept.
 Widget recordPicker(

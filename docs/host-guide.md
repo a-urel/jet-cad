@@ -935,7 +935,9 @@ bool linkObject(PlanController c, PlanObjectRef ref, String posId) {
   `objectDetailOf(ref)` reads one object whether it carries data or not. A
   `PlanObjectDetail` has its `ref`, its `kind` (`PlanObjectKind.unit`,
   `symbol` or `type`), the `typeId` of a kit's type, the `symbolKey`, a
-  `label` (a unit's label, a room's name) and the `data`.
+  `label` and the `data`. The `label` is a unit's label; for an object of a
+  kit's type, the object's own name when the kit declares one (a room's
+  "VIP"), else the type's title word ("Room"); null for a placed symbol.
 - `setObjectData(ref, data)` and `setObjectsData({ref: data})` write what
   `setUnitData` writes, with the same limits, errors and one undoable step.
   They return false, changing nothing, when the reference names no object or
@@ -993,6 +995,26 @@ StreamSubscription<PlanSectionChange> watchSections(
     });
 ```
 
+To list the sections themselves, not the tables in them, read
+`sectionDetails`:
+
+```dart
+/// The plan's sections by name, whether or not they carry data: a room's own
+/// name is its label, so a host can find "VIP" without a table in it.
+Map<String, PlanObjectRef> sectionRefsByName(PlanController c) => {
+      for (final section in c.sectionDetails)
+        if (section.label case final name?) name: section.ref,
+    };
+```
+
+- `sectionDetails` lists every object whose kit type declares an area, in draw
+  order, whether it carries data or not (`objectDetails` lists only the
+  objects that do). A room whose walls are open right now is still listed. It
+  is how a host links its sections: match each `label` to a record of its own,
+  then `setObjectData`.
+- A room is selected by tapping its label; tapping its floor picks nothing.
+  The host never needs to select a room to link it: it holds the `ref` from
+  `sectionDetails`.
 - `sectionChanges` sends one `PlanSectionChange` after every design edit, undo
   or redo that moves some table's section, and in service after a layout move;
   `byLabel` holds only the tables that changed, each with its new section
