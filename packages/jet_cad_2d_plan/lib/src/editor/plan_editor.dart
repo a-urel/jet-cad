@@ -349,7 +349,25 @@ class _PlanEditorState extends State<PlanEditor> {
   void initState() {
     super.initState();
     widget.controller.addListener(_onController);
+    _listenPicks(widget.controller);
     _bind();
+  }
+
+  void _listenPicks(PlanController c) {
+    c.activeTool.addListener(_onPick);
+    c.armedSymbol.addListener(_onPick);
+  }
+
+  void _unlistenPicks(PlanController c) {
+    c.activeTool.removeListener(_onPick);
+    c.armedSymbol.removeListener(_onPick);
+  }
+
+  /// A tool or a symbol picked while the left drawer is open (phone and
+  /// tablet) closes it, so the next touch on the canvas draws or places.
+  void _onPick() {
+    if (_drawer != PlanDrawerSide.left || !mounted) return;
+    setState(() => _drawer = null);
   }
 
   @override
@@ -367,7 +385,9 @@ class _PlanEditorState extends State<PlanEditor> {
       // The new controller's camera is its own (floor_plan_view.dart:568).
       _laidOutMode = null;
       oldWidget.controller.removeListener(_onController);
+      _unlistenPicks(oldWidget.controller);
       widget.controller.addListener(_onController);
+      _listenPicks(widget.controller);
       _flows.dispose();
       _flows = _flowsFor(widget.controller);
       _bind();
@@ -378,6 +398,7 @@ class _PlanEditorState extends State<PlanEditor> {
   @override
   void dispose() {
     widget.controller.removeListener(_onController);
+    _unlistenPicks(widget.controller);
     _flows.dispose();
     _unbind();
     _symbolQuery.dispose();

@@ -4,11 +4,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
+import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show PlanKit;
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 
 import '../support/editor_host.dart'
     show editorPlanJson, embeddingCamera, slowSymbolsKit;
 import '../support/mark_kit.dart';
+import '../support/symbol_fixtures.dart' show demoKit;
 
 Finder k(String key) => find.byKey(Key(key));
 
@@ -16,9 +18,11 @@ Future<PlanController> pump(WidgetTester tester, double w, double h,
     {PlanLayoutBreakpoints? breakpoints,
     PlanEditorLayout? layout,
     bool gallery = true,
-    bool symbols = true}) async {
+    bool symbols = true,
+    PlanKit? symbolKit}) async {
   final c = PlanController(
-      kits: [markKit(), if (symbols) slowSymbolsKit()], json: editorPlanJson());
+      kits: [markKit(), if (symbols) symbolKit ?? slowSymbolsKit()],
+      json: editorPlanJson());
   addTearDown(c.dispose);
   await tester.binding.setSurfaceSize(Size(w, h));
   addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -295,5 +299,51 @@ void main() {
         tester.getRect(k('chrome-right-button')).right, lessThanOrEqualTo(320));
     expect(k('status-text'), findsNothing, reason: 'hidden on the phone');
     expect(k('zoom-text'), findsNothing);
+  });
+
+  testWidgets(
+      'EL8 phone: picking Wall in the left drawer closes it; picking a symbol '
+      'in the gallery drawer closes it; a tab switch and a search do not',
+      (tester) async {
+    final c = await pump(tester, 375, 812, symbolKit: demoKit());
+    await tester.runAsync(() async {
+      for (var i = 0;
+          i < 50 && c.symbolsState.value == SymbolsState.loading;
+          i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+    });
+    await tester.pump();
+    await tester.tap(k('chrome-left-button'));
+    await tester.pump();
+    expect(shown('chrome-left-drawer'), isTrue);
+    await tester.tap(k('tab-symbols'));
+    await tester.pump();
+    await tester.enterText(k('symbol-search'), 'sofa');
+    await tester.pump();
+    expect(shown('chrome-left-drawer'), isTrue,
+        reason: 'a tab and a search pick nothing');
+    await tester.tap(k('tab-tools'));
+    await tester.pump();
+    await tester.tap(k('tool-plan.line'));
+    await tester.pump();
+    expect(c.activeTool.value, 'plan.line');
+    expect(shown('chrome-left-drawer'), isFalse);
+
+    await tester.tap(k('chrome-left-button'));
+    await tester.pump();
+    await tester.tap(k('tab-symbols'));
+    await tester.pump();
+    await tester.tap(k('symbol-cell-demo.sofa.three@1'));
+    await tester.pump();
+    expect(c.activeTool.value, PlanToolIds.symbol);
+    expect(shown('chrome-left-drawer'), isFalse);
+
+    // The right drawer is not closed by a pick.
+    await tester.tap(k('chrome-right-button'));
+    await tester.pump();
+    c.selectTool('plan.rectangle');
+    await tester.pump();
+    expect(shown('chrome-right-drawer'), isTrue);
   });
 }
