@@ -1,6 +1,6 @@
 # The plan library for a real POS: any object linkable, sections, every device
 
-**Date:** 2026-10-20. **Status:** draft for the human's approval.
+**Date:** 2026-10-20. **Status:** approved by the human ("onaylıyorum", 2026-10-20).
 **Packages:** `jet_cad_2d_plan` (0.8.1 on pub.dev), `jet_cad_2d_kit` (0.1.0),
 `jet_cad_2d_kit_architecture` (0.1.0), `jet_cad_2d_kit_restaurant` (0.1.0);
 `apps/restaurant_demo`, `apps/architecture_demo`, `docs/host-guide.md`.
