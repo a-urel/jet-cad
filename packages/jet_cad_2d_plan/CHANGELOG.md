@@ -11,6 +11,13 @@
   opening one never moves the camera. Behaviour change for existing hosts: a
   `PlanEditor` narrower than 1000 px now gets the tablet or phone layout
   unless `layout: PlanEditorLayout.desktop` is passed.
+- The service mode on phones and tablets: `PlanEditor.serviceSidePanel` (and
+  the same parameter, with `breakpoints` and `layout`, on `PlanServiceView`)
+  takes the host's panel (orders, a table's detail). On a desktop layout it
+  is docked on the right, 320 logical pixels wide; on a phone or a tablet it
+  opens as a drawer over the plan from the service bar's last button
+  (`Key('service-right-button')`). Without a panel there is no button and no
+  column. The service bar scrolls instead of overflowing on a narrow screen.
 - Host data on any placed object, not only units: `PlanController.
   objectDetails`, `objectDetailOf`, `setObjectData` and `setObjectsData`,
   naming an object by the opaque `PlanObjectRef` (`PlanObjectDetail`,

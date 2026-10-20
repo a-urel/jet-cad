@@ -87,6 +87,9 @@ abstract class PlanStrings {
   /// The bar's right button: "Properties".
   String get openPropertiesPanel;
 
+  /// The service bar's right button: the host's side panel ("Details").
+  String get openServicePanel;
+
   /// "OSNAP".
   String get objectSnapOn;
 

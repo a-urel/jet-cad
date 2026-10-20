@@ -77,6 +77,9 @@ class PlanStringsTr extends PlanStrings {
   String get openPropertiesPanel => 'Özellikler';
 
   @override
+  String get openServicePanel => 'Ayrıntılar';
+
+  @override
   String get objectSnapOn => 'OSNAP';
 
   @override

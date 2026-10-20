@@ -78,6 +78,9 @@ class RecordingPlanStrings implements PlanStrings {
   String get openPropertiesPanel => record(inner.openPropertiesPanel);
 
   @override
+  String get openServicePanel => record(inner.openServicePanel);
+
+  @override
   String get objectSnapOn => record(inner.objectSnapOn);
 
   @override

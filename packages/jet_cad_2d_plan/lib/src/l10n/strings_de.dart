@@ -78,6 +78,9 @@ class PlanStringsDe extends PlanStrings {
   String get openPropertiesPanel => 'Eigenschaften';
 
   @override
+  String get openServicePanel => 'Details';
+
+  @override
   String get objectSnapOn => 'OSNAP';
 
   @override

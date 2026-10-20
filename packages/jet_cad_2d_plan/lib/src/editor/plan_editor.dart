@@ -119,6 +119,7 @@ class PlanEditor extends StatefulWidget {
     this.unitOverlayModes = const {PlanMode.service},
     this.breakpoints = const PlanLayoutBreakpoints(),
     this.layout,
+    this.serviceSidePanel,
   });
 
   final PlanController controller;
@@ -132,6 +133,13 @@ class PlanEditor extends StatefulWidget {
   /// (one at a time; a tap on the plan, the same button or Escape closes
   /// it) and opening one never moves the camera.
   final PlanEditorLayout? layout;
+
+  /// The host's panel beside the plan in service mode (orders, a table's
+  /// detail): docked on the right, 320 logical pixels wide
+  /// (`Key('service-side-panel')`), on a desktop layout; behind the service
+  /// bar's last button (`Key('service-right-button')`) as a drawer over the
+  /// plan on a phone or a tablet. Null: no panel and no button.
+  final Widget? serviceSidePanel;
 
   /// Whether the left column offers the tool palette.
   final bool toolPalette;
@@ -774,6 +782,9 @@ class _PlanEditorState extends State<PlanEditor> {
 
   PlanServiceView _serviceView() => _service ??= PlanServiceView(
         controller: widget.controller,
+        breakpoints: widget.breakpoints,
+        layout: widget.layout,
+        serviceSidePanel: widget.serviceSidePanel,
         bar: widget.serviceBar,
         onUnitTap: widget.onUnitTap,
         onUnitDoubleTap: widget.onUnitDoubleTap,
@@ -971,6 +982,8 @@ class _PlanEditorState extends State<PlanEditor> {
     final c = widget.controller;
     final mode = c.mode.value;
     _shown = mode;
+    // Design's drawer does not outlive design (SL4).
+    if (mode == PlanMode.service) _drawer = null;
     _measureAfterFrame(mode, c.activeDocument);
     _keepPlanInPlace();
     return mode == PlanMode.service ? _serviceView() : _editor(context);
