@@ -4,7 +4,9 @@
   objectDetails`, `objectDetailOf`, `setObjectData` and `setObjectsData`,
   naming an object by the opaque `PlanObjectRef` (`PlanObjectDetail`,
   `PlanObjectKind`). A unit's data is the same data either way; plans saved
-  by 0.8.1 open unchanged.
+  by 0.8.1 open unchanged. A `PlanObjectRef` is valid for the plan it was
+  read from (and that plan saved and loaded again); after `newPlan` or a
+  load of another plan, read the references again.
 
 ## 0.8.1
 

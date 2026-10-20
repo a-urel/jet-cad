@@ -27,7 +27,9 @@ final class PlanObjectDetail {
     this.data = const <String, String>{},
   });
 
-  /// The object's name.
+  /// The object's name. Valid for the plan it was read from (and that plan
+  /// saved and loaded again); drop it after `newPlan` or a load of another
+  /// plan, and read it again.
   final PlanObjectRef ref;
 
   final PlanObjectKind kind;

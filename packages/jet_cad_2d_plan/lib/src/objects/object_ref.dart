@@ -8,10 +8,14 @@ import 'package:meta/meta.dart';
 /// kit's type. Read from `PlanController.objectDetails` or a
 /// `PlanObjectDetail`, never made by a host.
 ///
-/// It names the object by its persisted handle, so it survives a save and a
-/// load, and two references to one object are `==`. It carries no handle a
-/// host can read. A reference whose object is gone (deleted, or the plan
-/// replaced) names nothing: the controller answers it with null or false.
+/// It names the object by its persisted handle, so it stays valid for the
+/// plan it was read from, and for that plan saved and loaded again; two
+/// references to one object are `==`. It carries no handle a host can read.
+/// A reference whose object was deleted names nothing: the controller
+/// answers it with null or false. After `newPlan` or a `load` of another
+/// plan a host must drop its references and read them again
+/// (`objectDetails`, the inspector): the controller cannot tell an old
+/// reference from a new one with the same handle.
 @immutable
 final class PlanObjectRef {
   /// The reference to [handle]. For the library only.
