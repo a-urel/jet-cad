@@ -61,6 +61,8 @@ export 'src/l10n/strings.dart' show PlanStrings;
 export 'src/l10n/strings_de.dart' show PlanStringsDe;
 export 'src/l10n/strings_en.dart' show PlanStringsEn;
 export 'src/l10n/strings_tr.dart' show PlanStringsTr;
+export 'src/objects/object_detail.dart' show PlanObjectDetail, PlanObjectKind;
+export 'src/objects/object_ref.dart' show PlanObjectRef;
 export 'src/panels/plan_layer_panel.dart' show PlanLayerPanel;
 export 'src/panels/plan_page_panel.dart' show PlanPagePanel;
 export 'src/panels/plan_property_panel.dart' show PlanPropertyPanel;

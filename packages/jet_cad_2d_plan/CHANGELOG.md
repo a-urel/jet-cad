@@ -1,3 +1,11 @@
+## Unreleased
+
+- Host data on any placed object, not only units: `PlanController.
+  objectDetails`, `objectDetailOf`, `setObjectData` and `setObjectsData`,
+  naming an object by the opaque `PlanObjectRef` (`PlanObjectDetail`,
+  `PlanObjectKind`). A unit's data is the same data either way; plans saved
+  by 0.8.1 open unchanged.
+
 ## 0.8.1
 
 - A unit status caption is clamped clear of the unit's symbol box — its

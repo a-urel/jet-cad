@@ -76,6 +76,8 @@ void main() {
       'PlanUnitsReplaced', 'Unlabelled', 'UnitLabelProblem', 'UnitLabelWarning',
       // 2b Task 11
       'PlanMode',
+      // POS-host Task 3
+      'PlanObjectRef', 'PlanObjectDetail', 'PlanObjectKind',
       // 2b Task 12
       'UnitGroup', 'UnitStatus',
       // 2b Task 13
