@@ -339,6 +339,17 @@ void main() {
     expect(c.activeTool.value, PlanToolIds.symbol);
     expect(shown('chrome-left-drawer'), isFalse);
 
+    // A second symbol with the symbol tool already active: only the armed
+    // symbol changes, and that alone closes the drawer.
+    expect(c.armedSymbol.value!.id, 'demo.sofa.three@1');
+    await tester.tap(k('chrome-left-button'));
+    await tester.pump();
+    expect(shown('chrome-left-drawer'), isTrue);
+    await tester.tap(k('symbol-cell-demo.sofa.two@1'));
+    await tester.pump();
+    expect(c.armedSymbol.value!.id, 'demo.sofa.two@1');
+    expect(shown('chrome-left-drawer'), isFalse);
+
     // The right drawer is not closed by a pick.
     await tester.tap(k('chrome-right-button'));
     await tester.pump();
