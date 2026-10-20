@@ -68,11 +68,10 @@ void main() {
     await frameOn(tester, c, Vector2(2000, 1500), scale: 0.05);
     final doc = c.document;
 
-    // The wall: left drawer, Wall, two taps 4 m apart.
+    // The wall: left drawer, Wall, two taps 4 m apart (the pick closes the drawer).
     await touch(tester, k('chrome-left-button'));
     await touch(tester, k('tool-architecture.wall'));
     expect(c.activeTool.value, 'architecture.wall');
-    await touch(tester, k('chrome-left-button'));
     expect(k('chrome-left-drawer').hitTestable(), findsNothing);
     final a = Vector2(0, 1000), b = Vector2(4000, 1000);
     await finger(tester, globalAt(tester, c, a));
@@ -85,7 +84,7 @@ void main() {
         isTrue,
         reason: 'the wall is 4 m: ${p.start} to ${p.end}');
 
-    // The table: left drawer, Symbols tab, the cell, close, tap the canvas.
+    // The table: left drawer, Symbols tab, the cell (the pick closes the drawer), tap the canvas.
     await touch(tester, k('chrome-left-button'));
     await touch(tester, k('tab-symbols'));
     await tester.enterText(k('symbol-search'), 'rectangular table');
@@ -93,7 +92,7 @@ void main() {
     final cell = k('symbol-cell-restaurant.table.rect.four@1');
     await touch(tester, cell);
     expect(c.activeTool.value, PlanToolIds.symbol);
-    await touch(tester, k('chrome-left-button'));
+    expect(k('chrome-left-drawer').hitTestable(), findsNothing);
     final at = Vector2(2000, 2500);
     await finger(tester, globalAt(tester, c, at));
     final units = doc.tree.nodes.whereType<InstanceNode>().toList();
@@ -104,7 +103,6 @@ void main() {
     await touch(tester, k('chrome-left-button'));
     await touch(tester, k('tab-tools'));
     await touch(tester, k('tool-plan.select'));
-    await touch(tester, k('chrome-left-button'));
     final centre = table.transform.transformPoint(Vector2.zero());
     await finger(tester, globalAt(tester, c, centre));
     expect(c.activeSelection.keys, hasLength(1));
