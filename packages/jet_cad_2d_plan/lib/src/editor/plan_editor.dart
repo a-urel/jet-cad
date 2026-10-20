@@ -139,6 +139,11 @@ class PlanEditor extends StatefulWidget {
   /// (`Key('service-side-panel')`), on a desktop layout; behind the service
   /// bar's last button (`Key('service-right-button')`) as a drawer over the
   /// plan on a phone or a tablet. Null: no panel and no button.
+  ///
+  /// The button is in the service bar: with `serviceBar.visible` false on a
+  /// phone or a tablet there is no button and the panel cannot be opened (a
+  /// host that hides the bar there has no way to open it; keep the bar, or
+  /// show its own panel).
   final Widget? serviceSidePanel;
 
   /// Whether the left column offers the tool palette.

@@ -150,6 +150,37 @@ void main() {
   });
 
   testWidgets(
+      'SL7 the service side panel open on the phone, the surface resized to '
+      '1440 x 900 and back: no exception, no drawer left open, the panel '
+      'docked at desktop, and the unit selection/statuses kept',
+      (tester) async {
+    final c = await pump(tester, 375);
+    final label = c.unitDetails.first.unit.label!;
+    c.select({label});
+    c.setUnitStatus({label: UnitStatus(color: const Color(0xFFE53935))});
+    await tester.pump();
+    await tester.tap(byKey('service-right-button'));
+    await tester.pump();
+    expect(hit('host-panel'), isTrue, reason: 'premise');
+    await tester.binding.setSurfaceSize(const Size(1440, 900));
+    await tester.pump();
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    expect(byKey('service-right-button'), findsNothing);
+    expect(byKey('chrome-drawer-barrier'), findsNothing);
+    expect(tester.getSize(byKey('service-side-panel')).width, 320);
+    expect(hit('host-panel'), isTrue);
+    await tester.binding.setSurfaceSize(const Size(375, 700));
+    await tester.pump();
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    expect(hit('host-panel'), isFalse);
+    expect(byKey('chrome-drawer-barrier'), findsNothing);
+    expect(c.selectedUnits.value, {label});
+    expect(c.unitStatuses.value.keys, [label]);
+  });
+
+  testWidgets(
       'SL4 switching design to service with a design drawer open '
       'closes it', (tester) async {
     final c = rowsController();

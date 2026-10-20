@@ -98,6 +98,11 @@ class PlanServiceView extends StatefulWidget {
   /// (`Key('service-side-panel')`); on a phone or a tablet it opens as a
   /// drawer over the plan from the bar's last button
   /// (`Key('service-right-button')`). Null: no panel and no button.
+  ///
+  /// The button is in the service bar: with `serviceBar.visible` false on a
+  /// phone or a tablet there is no button and the panel cannot be opened (a
+  /// host that hides the bar there has no way to open it; keep the bar, or
+  /// show its own panel).
   final Widget? serviceSidePanel;
 
   /// The widths at which the layout changes, as `PlanEditor.breakpoints`.
