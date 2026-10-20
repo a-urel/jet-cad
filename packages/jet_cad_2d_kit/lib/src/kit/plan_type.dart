@@ -13,6 +13,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
     show ObjectGripProvider;
 import 'package:meta/meta.dart';
+import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../model/kit_ids.dart';
 import '../model/plan_words.dart';
@@ -66,10 +67,12 @@ final class PlanType<T extends Component> {
     PropertySectionBuilder<T>? section,
     String Function(T)? title,
     ColourTarget<T>? colour,
+    List<Vector2>? Function(T value, PlanObject object)? area,
     this.exported = true,
   })  : _section = section,
         _title = title,
-        _colour = colour;
+        _colour = colour,
+        _area = area;
 
   /// `<kit id>.<type>`, equal to the component's codec type id: the
   /// manifest finds the plan's kits by it.
@@ -94,8 +97,12 @@ final class PlanType<T extends Component> {
   final PropertySectionBuilder<T>? _section;
   final String Function(T)? _title;
   final ColourTarget<T>? _colour;
+  final List<Vector2>? Function(T value, PlanObject object)? _area;
 
   bool get hasColour => _colour != null;
+
+  /// True when the type declares its objects' area (see [areaOf]).
+  bool get hasArea => _area != null;
   bool get hasSection => _section != null;
 
   /// Registers this type into [catalog] under [id], with `T` kept: through
@@ -136,6 +143,16 @@ final class PlanType<T extends Component> {
     final colour = _colour;
     if (value == null || colour == null) return null;
     return colour.read(value);
+  }
+
+  /// [group]'s area: its closed outline in world millimetres, anticlockwise,
+  /// without a closing duplicate. Null without an area capability, a `T`, or
+  /// when the object has no area now (the capability returned null).
+  List<Vector2>? areaOf(DraftDocument document, Handle group, PlanWords words) {
+    final value = document.components.get<T>(group);
+    final area = _area;
+    if (value == null || area == null) return null;
+    return area(value, DocumentPlanObject(document, group, words));
   }
 
   /// The one command that gives [group] [swatch] (null clears it); null

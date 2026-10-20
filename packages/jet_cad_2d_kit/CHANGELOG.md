@@ -1,3 +1,8 @@
+## Unreleased
+
+- `PlanType` gains an optional `area` capability (a closed outline in world
+  millimetres, anticlockwise), with `hasArea` and `areaOf`.
+
 ## 0.1.0
 
 - The kit contract's symbol side: the plan components (`jetcad.symbol`
