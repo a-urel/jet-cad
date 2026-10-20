@@ -1,5 +1,9 @@
 ## Unreleased
 
+- `PlanController.sectionDetails` lists every object of a kit type that
+  declares an area, in draw order, with or without host data. A type object's
+  `PlanObjectDetail.label` is its own name when the kit's type declares one
+  (a room's name), else its title word as before.
 - `PlanEditor` lays its design mode out by its own width: phone below 600
   logical pixels, tablet below 1000, desktop from 1000 (as before).
   `PlanEditor.breakpoints` (`PlanLayoutBreakpoints`) moves the limits and

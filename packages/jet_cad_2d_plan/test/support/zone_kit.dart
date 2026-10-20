@@ -10,27 +10,36 @@ import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 @immutable
 final class ZoneComponent implements Component {
-  const ZoneComponent(this.w, this.h);
+  const ZoneComponent(this.w, this.h, [this.name = '']);
 
   static const String componentTypeId = 'zone.area';
 
   final double w, h;
 
+  /// The zone's own name; empty for none.
+  final String name;
+
   @override
   String get typeId => componentTypeId;
 
   @override
-  Map<String, Object?> toJson() => {'h': h, 'w': w};
+  Map<String, Object?> toJson() =>
+      {'h': h, if (name.isNotEmpty) 'name': name, 'w': w};
 
   static ZoneComponent fromJson(Map<String, Object?> json) => ZoneComponent(
-      (json['w']! as num).toDouble(), (json['h']! as num).toDouble());
+      (json['w']! as num).toDouble(),
+      (json['h']! as num).toDouble(),
+      (json['name'] as String?) ?? '');
 
   @override
   bool operator ==(Object other) =>
-      other is ZoneComponent && other.w == w && other.h == h;
+      other is ZoneComponent &&
+      other.w == w &&
+      other.h == h &&
+      other.name == name;
 
   @override
-  int get hashCode => Object.hash(w, h);
+  int get hashCode => Object.hash(w, h, name);
 }
 
 final class ZoneType extends ParametricType<ZoneComponent> {
@@ -71,8 +80,11 @@ final PlanType<ZoneComponent> zoneType = PlanType<ZoneComponent>(
   id: ZoneComponent.componentTypeId,
   fromJson: ZoneComponent.fromJson,
   parametric: const ZoneType(),
+  name: (z) => z.name,
   area: (z, o) {
     zoneAreaCalls++;
+    // A zone with no width has no area now.
+    if (z.w <= 0) return null;
     final ring = [
       for (final c in [
         Vector2(0, 0),
@@ -98,7 +110,8 @@ final PlanKit zoneKit = PlanKit(
 
 /// A [ZoneComponent] of [w] x [h] in a root group placed by [world], on the
 /// drawing layer: one step; its handle.
-Handle addZone(DraftDocument d, double w, double h, Transform2 world) {
+Handle addZone(DraftDocument d, double w, double h, Transform2 world,
+    [String name = '']) {
   final handle = d.handleSeed.next();
   d.commands.execute(CompoundCommand([
     AddNodeCommand(GroupNode(
@@ -106,7 +119,7 @@ Handle addZone(DraftDocument d, double w, double h, Transform2 world) {
         parent: d.rootHandle,
         transform: world,
         children: const [])),
-    SetComponentCommand<ZoneComponent>(handle, ZoneComponent(w, h)),
+    SetComponentCommand<ZoneComponent>(handle, ZoneComponent(w, h, name)),
     SetComponentCommand<ObjectLayer>(handle, ObjectLayer(drawingLayer(d))),
   ], label: 'Add zone'));
   return handle;

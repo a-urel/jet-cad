@@ -1629,6 +1629,30 @@ class PlanController extends ChangeNotifier {
     ]);
   }
 
+  /// Every object of a kit type that declares an area (a room, a zone), in
+  /// draw order, with its host data (empty when it has none). Unlike
+  /// [objectDetails] it lists an object that carries no data, and one whose
+  /// area is empty right now. Read at call time, O(root children).
+  List<PlanObjectDetail> get sectionDetails {
+    final d = _activeDocument;
+    final root = d.tree[d.rootHandle];
+    if (root is! GroupNode) return const <PlanObjectDetail>[];
+    final handles = [
+      for (final h in root.children)
+        if (_hasAreaType(d, h)) h,
+    ]..sort((a, b) => a.value.compareTo(b.value));
+    return List.unmodifiable([
+      for (final h in handles)
+        if (_objectDetailOf(d, h) case final detail?) detail,
+    ]);
+  }
+
+  bool _hasAreaType(DraftDocument d, Handle h) {
+    final typeId = catalog.typeIdOf(d, h);
+    final type = typeId == null ? null : kits.typeOf(typeId);
+    return type != null && type.hasArea;
+  }
+
   /// What the object named by [ref] is, with its host data (empty when it
   /// has none); null when [ref] names no object of the active plan (it is
   /// gone, or it was never an object).
@@ -1663,7 +1687,7 @@ class PlanController extends ChangeNotifier {
           ref: ref,
           kind: PlanObjectKind.type,
           typeId: typeId,
-          label: _titleOf(d, h, typeId, type),
+          label: _nameOf(d, h, type) ?? _titleOf(d, h, typeId, type),
           data: data);
     }
     if (node is InstanceNode &&
@@ -1676,6 +1700,18 @@ class PlanController extends ChangeNotifier {
           data: data);
     }
     return null;
+  }
+
+  /// [group]'s own name when [type] declares one and it is not empty; null
+  /// otherwise, or when the capability throws.
+  String? _nameOf(DraftDocument d, Handle group, PlanType<Component> type) {
+    if (!type.hasName) return null;
+    try {
+      final name = type.nameOf(d, group);
+      return name == null || name.isEmpty ? null : name;
+    } catch (_) {
+      return null;
+    }
   }
 
   /// [type]'s title word for [group], in the plan's words; null when the
