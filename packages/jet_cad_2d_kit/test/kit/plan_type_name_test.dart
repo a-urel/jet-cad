@@ -1,6 +1,5 @@
 // The name capability of PlanType: an object's own name from its component.
 import 'package:flutter_test/flutter_test.dart';
-import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
 
 import '../support/code_fixtures.dart';
