@@ -133,6 +133,7 @@ void main() {
     expect(demo.log.first, 'Salon: bar counter is B-02');
 
     await tapWorld(tester, c, kVipLabel);
+    expect(textOf(tester, 'object-name'), 'VIP');
     await pickRecord(tester, 'S-VIP');
     expect(demo.log.first, 'Salon: room is S-VIP');
 
@@ -143,7 +144,8 @@ void main() {
     final want = {
       'unit:7': 'T-07',
       'symbol:restaurant.bar.counter': 'B-02',
-      'type:Room': 'S-VIP',
+      // Decided: a room's label is its own name now, not the type word.
+      'type:VIP': 'S-VIP',
     };
     expect(linkedNow(), want);
 

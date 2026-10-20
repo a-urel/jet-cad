@@ -39,15 +39,6 @@ const List<FakeRecord> kFakeSections = [
   FakeRecord('S-GARDEN', 'Garden'),
 ];
 
-/// A table of the Salon that stands in each section by design: "Link
-/// sections" finds the room by the section of this table, so the demo never
-/// names a room by anything the plan keeps private.
-const Map<String, String> kSectionProbeTable = {
-  'S-SALON': '1',
-  'S-VIP': '6',
-  'S-GARDEN': '2',
-};
-
 /// The records [object] may be linked to: the tables for a table, the bars
 /// for a bar counter, the sections for a room; none for any other object.
 List<FakeRecord> recordsFor(PlanObjectDetail object) {

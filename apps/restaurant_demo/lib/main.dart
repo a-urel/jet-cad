@@ -619,11 +619,22 @@ class DemoHomeState extends State<DemoHome> {
     final records = recordsFor(object);
     if (records.isEmpty) return null;
     final a = area;
-    return RecordPicker(
+    final picker = RecordPicker(
         key: ValueKey(object.ref),
         id: object.data['id'],
         records: records,
         onChanged: (id) => _linkObject(a, object, id));
+    // A room is told apart by its own name, which the detail's label carries.
+    final name = object.kind == PlanObjectKind.type ? object.label : null;
+    if (name == null) return picker;
+    return Column(mainAxisSize: MainAxisSize.min, children: [
+      Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+          child: Align(
+              alignment: AlignmentDirectional.centerStart,
+              child: Text(name, key: const Key('object-name')))),
+      picker,
+    ]);
   }
 
   /// Links [object] of [a] to record [id], its other data kept; an empty

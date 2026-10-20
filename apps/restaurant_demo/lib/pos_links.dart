@@ -70,22 +70,25 @@ String? idOf(Area a, String number) {
   return tables.length == 1 ? tables.single.data['id'] : null;
 }
 
-/// "Link sections": every room that holds a probe table (`kSectionProbeTable`)
-/// and is not linked yet gets that section's record id, beside the data it
-/// carries, in one undo step. The room is found by the section of the probe
-/// table, never by a handle. Design mode only. Returns how many were linked.
+/// "Link sections": every room whose name is a section record's name
+/// (`kFakeSections`) and that is not linked yet gets that record's id, beside
+/// the data it carries, in one undo step. The rooms come from
+/// `sectionDetails`, each named by its own label; no table and no handle is
+/// consulted. A name two rooms share links neither. Design mode only.
+/// Returns how many were linked.
 int linkSections(Area a) {
   final c = a.controller;
+  final sections = c.sectionDetails;
   final byRef = <PlanObjectRef, Map<String, String>>{};
-  for (final MapEntry(key: id, value: probe) in kSectionProbeTable.entries) {
-    final tables = [
-      for (final d in c.unitDetails)
-        if (d.unit.label == probe) d,
+  for (final record in kFakeSections) {
+    final named = [
+      for (final s in sections)
+        if (s.label == record.name) s,
     ];
-    if (tables.length != 1) continue;
-    final section = tables.single.section;
-    if (section == null || section.data.containsKey('id')) continue;
-    byRef[section.ref] = {...section.data, 'id': id};
+    if (named.length != 1) continue;
+    final section = named.single;
+    if (section.data.containsKey('id')) continue;
+    byRef[section.ref] = {...section.data, 'id': record.id};
   }
   if (byRef.isNotEmpty) c.setObjectsData(byRef);
   return byRef.length;
