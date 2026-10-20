@@ -75,6 +75,24 @@ void expectSection(PlanController c, String label, Handle? room) {
 PlanObjectRef refOf(Handle h) => PlanObjectRef.of(h);
 
 void main() {
+  test('SD3 a Salon/VIP/Garden plan: sectionDetails labels are the three names',
+      () {
+    final c = open(planWith((d) {
+      layout = buildPlan(d, twoRoomWalls,
+          seps: const [(6250.5, 100, 6250.5, 3900)], place: turned);
+      addRoom(d, layout.at(1500, 2000), 'Salon');
+      addRoom(d, layout.at(4700, 2000), 'VIP');
+      addRoom(d, layout.at(7000, 2000), 'Garden');
+      d.commands.clearHistory();
+    }));
+    final details = c.sectionDetails;
+    expect([for (final d in details) d.label], ['Salon', 'VIP', 'Garden']);
+    expect(details.every((d) => d.typeId == 'architecture.room'), isTrue);
+    expect(c.objectDetailOf(details[1].ref)!.label, 'VIP');
+    // Rooms carry no data yet: objectDetails lists none of them.
+    expect(c.objectDetails, isEmpty);
+  });
+
   test(
       'SC1 SC2 SC4 real rooms: each table in its room, one outside none, '
       'the separator line goes to the smaller room', () {
