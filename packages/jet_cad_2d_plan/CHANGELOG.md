@@ -14,6 +14,10 @@
   new sections) whenever units' sections change, in design and after a
   layout move in service. `unitChanges` is unchanged: a section change alone
   is not a `PlanUnitChanged`.
+- `PlanEditor.objectInspectorBuilder`: the host's widget in the property pane
+  for any one selected object (a unit, a placed symbol, an object of a kit's
+  type such as a room), built with its `PlanObjectDetail`. With
+  `unitInspectorBuilder` also given, units keep going to that one.
 
 ## 0.8.1
 

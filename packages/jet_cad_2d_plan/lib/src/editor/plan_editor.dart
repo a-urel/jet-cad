@@ -25,6 +25,7 @@ import '../export/registries.dart';
 import '../l10n/locale_scope.dart';
 import '../l10n/number_text.dart';
 import '../l10n/strings.dart';
+import '../objects/object_detail.dart';
 import '../panels/frame_safe_relay.dart';
 import '../panels/plan_layer_panel.dart';
 import '../panels/plan_page_panel.dart';
@@ -41,6 +42,7 @@ import '../symbols/plan_symbol.dart';
 import '../theme/plan_theme.dart';
 import '../tools/generic_tools.dart';
 import '../units/unit_detail.dart';
+import 'object_inspector.dart';
 import 'plan_editor_bar.dart';
 import 'plan_tool_palette.dart';
 import 'unit_inspector.dart';
@@ -96,6 +98,7 @@ class PlanEditor extends StatefulWidget {
     this.autofocus = true,
     this.theme,
     this.unitInspectorBuilder,
+    this.objectInspectorBuilder,
     this.serviceBar = const PlanServiceBar(),
     this.onUnitTap,
     this.onUnitDoubleTap,
@@ -141,6 +144,21 @@ class PlanEditor extends StatefulWidget {
   /// here, with `PlanController.setUnitData`.
   final Widget? Function(BuildContext context, PlanUnitDetail unit)?
       unitInspectorBuilder;
+
+  /// The host's inspector for any one selected object (a unit, a placed
+  /// symbol, an object of a kit's type such as a room): built under the
+  /// property panel, in design mode, for exactly one selected root object
+  /// that is not locked, with its [PlanObjectDetail] as
+  /// `PlanController.objectDetailOf` reads it; null from it shows nothing.
+  /// When [unitInspectorBuilder] is also given it keeps the units and this
+  /// gets every other object; with only this one, it gets units too. Built
+  /// when the selection becomes such an object and at each change of the
+  /// plan; never on pan, zoom or hover. Hidden with the property panel. A
+  /// host links the object to its own record here, with
+  /// `PlanController.setObjectData`. A unit's section is read from
+  /// `PlanController.unitDetails`.
+  final Widget? Function(BuildContext context, PlanObjectDetail object)?
+      objectInspectorBuilder;
 
   /// Whether the Layers section shows.
   final bool layerPanel;
@@ -985,6 +1003,14 @@ class _PlanEditorState extends State<PlanEditor> {
                                 UnitInspector(
                                     key: const Key('unit-inspector'),
                                     controller: c,
+                                    builder: inspect),
+                              if (widget.objectInspectorBuilder
+                                  case final inspect? when widget.propertyPanel)
+                                ObjectInspector(
+                                    key: const Key('object-inspector'),
+                                    controller: c,
+                                    unitsElsewhere:
+                                        widget.unitInspectorBuilder != null,
                                     builder: inspect),
                               _kept(widget.layerPanel,
                                   PlanLayerPanel(controller: c)),
