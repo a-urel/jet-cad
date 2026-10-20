@@ -820,7 +820,11 @@ void main() {
     // editor_words_test.dart:190 (the OV-$code cases: "no overflow from 704 px
     // down to 656 px", the library bar without host widgets).
     // The width is the old 800 px: the name is bounded at 144 px.
-    final rig = await pumpApp(tester, size: const Size(800, 600));
+    // Decided: this test pins the desktop top bar below 1000 px (an editor
+    // narrower than 1000 px has the tablet layout by default now, ruling
+    // R6), so it forces the desktop layout.
+    final rig = await pumpApp(tester,
+        size: const Size(800, 600), layout: PlanEditorLayout.desktop);
     final c = rig.controller;
     const long = 'the ground floor of the house by the lake, third revision, '
         'with the new kitchen and the long hallway to the garden';
@@ -883,7 +887,10 @@ void main() {
     // to 656 px: the host widgets
     // (the name and Open sample) add 200 px to the 576 px the library's bar
     // needs by itself, so 656 px would leave the name 40 px.
-    final rig = await pumpApp(tester, size: const Size(1000, 600));
+    // Decided: forced desktop, as DC12: the test pins the desktop top bar's
+    // width range below 1000 px (ruling R6).
+    final rig = await pumpApp(tester,
+        size: const Size(1000, 600), layout: PlanEditorLayout.desktop);
     final c = rig.controller;
     const long = 'the ground floor of the house by the lake, third revision';
     rig.files.scriptOpen(

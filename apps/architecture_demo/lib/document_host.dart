@@ -63,7 +63,8 @@ class DocumentHost extends StatefulWidget {
       required this.session,
       required this.files,
       this.exitGuard,
-      this.printer = const PrintingPagePrinter()});
+      this.printer = const PrintingPagePrinter(),
+      this.layout});
 
   final PlanController controller;
   final DocumentSession session;
@@ -75,6 +76,9 @@ class DocumentHost extends StatefulWidget {
 
   /// Where Print hands the page's PDF.
   final PagePrinter printer;
+
+  /// Forces the editor's design layout; null lets the width decide.
+  final PlanEditorLayout? layout;
 
   @override
   State<DocumentHost> createState() => DocumentHostState();
@@ -411,6 +415,7 @@ class DocumentHostState extends State<DocumentHost> {
         builder: (context, _) => Scaffold(
           body: PlanEditor(
             controller: _controller,
+            layout: widget.layout,
             onNew: _idle(newFlow),
             onOpen: _idle(openFlow),
             onSave: _idle(saveStep),
