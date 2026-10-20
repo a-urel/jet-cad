@@ -395,6 +395,11 @@ with 0.7.0 (below).
   the branch, not merged**. Results, rulings R1-R8, the deferred minors and
   the proposed versions:
   [2026-10-20-plan-host-objects-results.md](docs/superpowers/notes/2026-10-20-plan-host-objects-results.md).
+  A final fix wave (`8d015200`) fixed a 0.8.x bug the phone screenshot
+  showed: the first fit framed the page a plan had before a host build
+  (every layout). No reviewer sessions (the human's rule): the controller
+  self-reviewed every task with its own mutation; the ledger is archived in
+  [docs/superpowers/ledgers/2026-10-20-plan-host-objects-responsive/](docs/superpowers/ledgers/2026-10-20-plan-host-objects-responsive/).
   Resume: the human's merge word, then the release of the proposed versions
   (`jet_cad_2d_kit` 0.1.1, `jet_cad_2d_kit_architecture` 0.1.1,
   `jet_cad_2d_plan` 0.9.0, floors raised), then monepro's integration.
