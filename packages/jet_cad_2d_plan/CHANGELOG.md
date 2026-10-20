@@ -1,5 +1,8 @@
 ## Unreleased
 
+- A touch double tap on the canvas ends a pending chain (a wall or polyline
+  chain) as Enter does: the first tap of the pair is the chain's last point,
+  the second adds nothing. A mouse is unchanged.
 - `PlanController.sectionDetails` lists every object of a kit type that
   declares an area, in draw order, with or without host data. A type object's
   `PlanObjectDetail.label` is its own name when the kit's type declares one

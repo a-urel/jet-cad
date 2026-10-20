@@ -19,13 +19,16 @@ Finder k(String key) => find.byKey(Key(key));
 int _pointer = 100;
 
 /// A finger's tap at [at]: down, held past the touch hold-back, up.
-Future<void> finger(WidgetTester tester, Offset at) async {
+Future<void> finger(WidgetTester tester, Offset at,
+    {Duration after = const Duration(milliseconds: 300)}) async {
   final g = await tester.startGesture(at,
       pointer: _pointer++, kind: PointerDeviceKind.touch);
   await tester.pump(const Duration(milliseconds: 150));
   await g.up();
-  await tester.pump(const Duration(milliseconds: 300));
+  await tester.pump(after);
 }
+
+const _quick = Duration(milliseconds: 80);
 
 /// A tap on the widget [f] by a finger.
 Future<void> touch(WidgetTester tester, Finder f) async {
@@ -75,7 +78,12 @@ void main() {
     expect(k('chrome-left-drawer').hitTestable(), findsNothing);
     final a = Vector2(0, 1000), b = Vector2(4000, 1000);
     await finger(tester, globalAt(tester, c, a));
+    // The second point is a double tap: its first tap is the wall's end, its
+    // second ends the chain (the phone has no Enter key).
+    await finger(tester, globalAt(tester, c, b), after: _quick);
     await finger(tester, globalAt(tester, c, b));
+    expect(activeTool(tester).isMidShape, isFalse,
+        reason: 'the double tap ended the chain');
     final wall = doc.components.withComponent<WallParams>().single;
     final p = doc.components.get<WallParams>(wall)!;
     const tol = Tolerance(linear: 1e-6, angular: 1e-9);

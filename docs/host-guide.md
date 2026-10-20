@@ -1419,9 +1419,11 @@ The design mode follows the width of the **editor itself**, not the device's:
   Opening a drawer never moves the camera.
 - **A pick closes the left drawer.** Choosing a tool or a symbol in the left
   drawer closes it, so the plan is in front again to place the pick.
-- **A wall chain ends by picking another tool.** On a phone the walls the staff
-  are drawing end when they pick another tool; a host that wants a visible
-  way to finish says so in its own help text.
+- **A double tap ends a chain.** A phone has no Enter key, so a quick second
+  tap at the same spot ends a wall or polyline chain as Enter does: the first
+  tap of the pair is the chain's last point and the second adds nothing.
+  Picking another tool still ends it too. A mouse double click keeps meaning
+  two clicks; a host's help text can mention the gesture.
 - **A behaviour change from 0.8.x.** A `PlanEditor` narrower than 1000 px used
   to keep the desktop columns; it now gets the tablet or phone layout. A host
   that wants the desktop chrome at any width passes
