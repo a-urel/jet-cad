@@ -102,6 +102,14 @@ int over(Color colour, double alpha, int paper) {
       channel(colour.b, 0);
 }
 
+/// [rgb] seen through a room's tint over the White page: each channel
+/// scaled by 0xE5/0xFF (measured: Bill's 0xEF8886 over White reads 0xD77A78
+/// on the Garden's table).
+int inRoom(int rgb) {
+  int channel(int shift) => ((((rgb >> shift) & 0xFF) * 0xE5) / 0xFF).round();
+  return (channel(16) << 16) | (channel(8) << 8) | channel(0);
+}
+
 /// Table [number]'s bounding box on the screen, from its world corners
 /// through the public `worldToGlobal`.
 Rect screenBox(PlanController c, String number) {
@@ -232,11 +240,14 @@ void main() {
       final box2 = screenBox(c, '2');
       final billFill = kStatuses['Bill']!.color;
       if (light) {
+        // Decided: table 2 stands in the Garden (spec D14), whose room tints
+        // everything under it by 0xE5/0xFF per channel (the fill, Bill's
+        // included), so Bill's 0.6 over White is read through that tint.
         expect(
-            standardService.shot
-                .count(box2, (p) => p == over(billFill, billFill.a, 0xFFFFFF)),
+            standardService.shot.count(
+                box2, (p) => p == inRoom(over(billFill, billFill.a, 0xFFFFFF))),
             greaterThan(1000),
-            reason: 'premise: Bill at its own 0.6 over White');
+            reason: 'premise: Bill at its own 0.6 over the Garden\'s tint');
       }
 
       // Standard, the design.
@@ -302,11 +313,12 @@ void main() {
       if (light) {
         // The POS look's fill opacity is 0.8 (the plan's), not read back.
         final drawn = billFill.a * 0.8;
+        // Decided: over the Garden's tint, as above.
         expect(
-            posService.shot.count(
-                screenBox(c, '2'), (p) => p == over(billFill, drawn, 0xFFFFFF)),
+            posService.shot.count(screenBox(c, '2'),
+                (p) => p == inRoom(over(billFill, drawn, 0xFFFFFF))),
             greaterThan(1000),
-            reason: 'Bill at 0.6 x 0.8 over White');
+            reason: 'Bill at 0.6 x 0.8 over the Garden\'s tint');
       }
       final caption = pos.statusCaptionStyle!;
       expect((

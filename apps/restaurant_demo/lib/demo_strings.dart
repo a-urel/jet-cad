@@ -162,11 +162,29 @@ abstract class DemoStrings {
 
   String get posId;
 
+  /// The side panel's heading over each table's section.
+  String get sections;
+
+  /// A room no record is linked to.
+  String get notLinked;
+
+  String get linkSections;
+
+  /// What a linked object is called in the log.
+  String get roomWord;
+
+  String get barCounterWord;
+
   String logPageFlowError(String area, Object error);
 
   String logKey(String area, String key);
 
   String logLinkedTable(String area, String number, String? id);
+
+  /// [what] is [roomWord] or [barCounterWord]; a null [id] is an unlink.
+  String logLinkedObject(String area, String what, String? id);
+
+  String logLinkedSections(String area, int count);
 
   String logFound(String area, String number);
 
@@ -406,6 +424,21 @@ final class _En extends DemoStrings {
   String get posId => 'POS id';
 
   @override
+  String get sections => 'Sections';
+
+  @override
+  String get notLinked => 'not linked';
+
+  @override
+  String get linkSections => 'Link sections';
+
+  @override
+  String get roomWord => 'room';
+
+  @override
+  String get barCounterWord => 'bar counter';
+
+  @override
   String logPageFlowError(String area, Object error) =>
       '$area: export or print failed ($error)';
 
@@ -416,6 +449,14 @@ final class _En extends DemoStrings {
   String logLinkedTable(String area, String number, String? id) => id == null
       ? '$area: table $number unlinked'
       : '$area: table $number is $id';
+
+  @override
+  String logLinkedObject(String area, String what, String? id) =>
+      id == null ? '$area: $what unlinked' : '$area: $what is $id';
+
+  @override
+  String logLinkedSections(String area, int count) =>
+      '$area: $count sections linked';
 
   @override
   String logFound(String area, String number) => '$area: table $number found';
@@ -657,6 +698,21 @@ final class _De extends DemoStrings {
   String get posId => 'Kassen-ID';
 
   @override
+  String get sections => 'Abschnitte';
+
+  @override
+  String get notLinked => 'nicht verknüpft';
+
+  @override
+  String get linkSections => 'Abschnitte verknüpfen';
+
+  @override
+  String get roomWord => 'Raum';
+
+  @override
+  String get barCounterWord => 'Theke';
+
+  @override
   String logPageFlowError(String area, Object error) =>
       '$area: Export oder Druck fehlgeschlagen ($error)';
 
@@ -667,6 +723,14 @@ final class _De extends DemoStrings {
   String logLinkedTable(String area, String number, String? id) => id == null
       ? '$area: Tisch $number nicht mehr verknüpft'
       : '$area: Tisch $number ist $id';
+
+  @override
+  String logLinkedObject(String area, String what, String? id) =>
+      id == null ? '$area: $what nicht mehr verknüpft' : '$area: $what ist $id';
+
+  @override
+  String logLinkedSections(String area, int count) =>
+      '$area: $count Abschnitte verknüpft';
 
   @override
   String logFound(String area, String number) =>
@@ -908,6 +972,21 @@ final class _Tr extends DemoStrings {
   String get posId => 'Kasa kimliği';
 
   @override
+  String get sections => 'Bölümler';
+
+  @override
+  String get notLinked => 'bağlı değil';
+
+  @override
+  String get linkSections => 'Bölümleri bağla';
+
+  @override
+  String get roomWord => 'oda';
+
+  @override
+  String get barCounterWord => 'bar tezgâhı';
+
+  @override
   String logPageFlowError(String area, Object error) =>
       '$area: dışa aktarma veya yazdırma başarısız ($error)';
 
@@ -918,6 +997,14 @@ final class _Tr extends DemoStrings {
   String logLinkedTable(String area, String number, String? id) => id == null
       ? '$area: masa $number bağlantısı kaldırıldı'
       : '$area: masa $number, $id';
+
+  @override
+  String logLinkedObject(String area, String what, String? id) =>
+      id == null ? '$area: $what bağlantısı kaldırıldı' : '$area: $what, $id';
+
+  @override
+  String logLinkedSections(String area, int count) =>
+      '$area: $count bölüm bağlandı';
 
   @override
   String logFound(String area, String number) => '$area: masa $number bulundu';

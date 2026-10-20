@@ -1,10 +1,12 @@
 // The editor's profiles the side panel offers, as `PlanPermissions` and the
-// editor's options, and the table inspector that links a table to the POS's
-// id through the host data (`setUnitData`).
+// editor's options, and the inspector that links a table, a bar counter or a
+// room to a record of the demo's database through the host data
+// (`setObjectData`).
 import 'package:flutter/material.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 
 import 'demo_strings.dart';
+import 'fake_records.dart';
 
 /// The editor's profiles: the full editor, a floor whose staff place and
 /// arrange tables only, and a plan only looked at.
@@ -42,46 +44,61 @@ enum DemoEditor {
       : const PlanEditorBar();
 }
 
-/// The demo's table inspector: the POS's id of the one table selected in
-/// the editor, written by `PlanController.setUnitData` on Enter (an empty
-/// field unlinks).
-class PosIdField extends StatefulWidget {
-  const PosIdField({super.key, required this.id, required this.onSubmitted});
+/// The demo's inspector: a combo over the fake records that fit the one
+/// selected object, written as the object's `data['id']` by
+/// `PlanController.setObjectData` (the object's other data kept). Choosing
+/// the empty entry unlinks the object.
+class RecordPicker extends StatelessWidget {
+  const RecordPicker(
+      {super.key,
+      required this.id,
+      required this.records,
+      required this.onChanged});
 
-  /// The table's `data['id']`, null when it has none.
+  /// The object's `data['id']`, null when it has none.
   final String? id;
-  final void Function(String id) onSubmitted;
+
+  /// What the object may be linked to.
+  final List<FakeRecord> records;
+
+  /// The chosen record's id; empty for none.
+  final void Function(String id) onChanged;
 
   @override
-  State<PosIdField> createState() => _PosIdFieldState();
-}
-
-class _PosIdFieldState extends State<PosIdField> {
-  late final TextEditingController _text =
-      TextEditingController(text: widget.id ?? '');
-
-  @override
-  void didUpdateWidget(PosIdField old) {
-    super.didUpdateWidget(old);
-    // Linked elsewhere (an undo): shown at once.
-    if (widget.id != old.id) _text.text = widget.id ?? '';
-  }
-
-  @override
-  void dispose() {
-    _text.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-        child: TextField(
-          key: const Key('pos-id'),
-          controller: _text,
-          decoration: InputDecoration(
-              labelText: DemoStrings.of(context).posId, isDense: true),
-          onSubmitted: widget.onSubmitted,
+  Widget build(BuildContext context) {
+    final words = DemoStrings.of(context);
+    // An id the list does not hold (written by "Link tables", say) is shown
+    // as it is: a dropdown asserts on a value it has no item for.
+    final known = recordOf(records, id) != null;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+      child: InputDecorator(
+        decoration: InputDecoration(labelText: words.posId, isDense: true),
+        child: DropdownButtonHideUnderline(
+          child: DropdownButton<String>(
+            key: const Key('pos-id'),
+            isExpanded: true,
+            isDense: true,
+            value: id ?? '',
+            items: [
+              DropdownMenuItem(
+                  value: '',
+                  key: const Key('pos-id-none'),
+                  child: Text(words.none)),
+              if (id != null && !known)
+                DropdownMenuItem(value: id, child: Text(id!)),
+              for (final r in records)
+                DropdownMenuItem(
+                    value: r.id,
+                    key: Key('pos-id-${r.id}'),
+                    child: Text('${r.id}  ${r.name}')),
+            ],
+            onChanged: (v) {
+              if (v != null) onChanged(v);
+            },
+          ),
         ),
-      );
+      ),
+    );
+  }
 }

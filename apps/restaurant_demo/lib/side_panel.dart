@@ -143,6 +143,21 @@ class DemoSidePanel extends StatelessWidget {
           Text(PlanStrings.of(context).labelWarning(w),
               key: Key('numbering-warning-$i'),
               style: TextStyle(color: Theme.of(context).colorScheme.error)),
+        const SizedBox(height: 16),
+        Text(words.sections, style: title),
+        // Each table's section, read from the details: the record the room
+        // is linked to, so it follows a table moved into another room.
+        Text(
+            key: const Key('table-sections'),
+            [
+              for (final (label, section) in tableSections(a, words.notLinked))
+                '$label: ${section ?? words.none}'
+            ].join(', ')),
+        if (!service)
+          OutlinedButton(
+              key: const Key('link-sections'),
+              onPressed: () => home.linkAreaSections(a),
+              child: Text(words.linkSections)),
         // Only an area with zones; below the lines the tests read, above the
         // host's choices.
         if (a.zones.isNotEmpty) ...[

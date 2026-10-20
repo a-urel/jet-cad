@@ -115,19 +115,18 @@ void main() {
     await clickAt(tester, centreOf(c, '2'));
     expect(c.selectedUnits.value, {'2'});
     expect(byKey('pos-id'), findsOneWidget);
-    await tester.enterText(byKey('pos-id'), ' salon-2 ');
-    await tester.testTextInput.receiveAction(TextInputAction.done);
+    // Decided: the inspector is a combo over the demo's records now (D14),
+    // not a text field: a record is picked, and the empty entry unlinks.
+    await pickRecord(tester, 'T-02');
     await settle(tester);
-    expect(dataByLabel(c)['2'], {'seats_note': 'window', 'id': 'salon-2'});
-    expect(demo.log.first, 'Salon: table 2 is salon-2');
-    // Another table: its own field, empty; emptied, a table is unlinked.
+    expect(dataByLabel(c)['2'], {'seats_note': 'window', 'id': 'T-02'});
+    expect(demo.log.first, 'Salon: table 2 is T-02');
+    // Another table: its own combo, empty; emptied, a table is unlinked.
     await clickAt(tester, centreOf(c, '3'));
-    expect(tester.widget<TextField>(byKey('pos-id')).controller!.text, '');
+    expect(pickedId(tester), '');
     await clickAt(tester, centreOf(c, '2'));
-    expect(
-        tester.widget<TextField>(byKey('pos-id')).controller!.text, 'salon-2');
-    await tester.enterText(byKey('pos-id'), '');
-    await tester.testTextInput.receiveAction(TextInputAction.done);
+    expect(pickedId(tester), 'T-02');
+    await pickRecord(tester, '');
     await settle(tester);
     expect(dataByLabel(c)['2'], {'seats_note': 'window'});
     expect(demo.log.first, 'Salon: table 2 unlinked');
@@ -399,15 +398,19 @@ void main() {
     await chord(tester, LogicalKeyboardKey.escape);
     expect(c.selectedUnits.value, isEmpty);
 
-    // A field inside the view keeps its keys: Backspace edits the
-    // inspector's text and deletes no table.
+    // A field inside the view keeps its keys: Backspace edits the symbol
+    // search's text and deletes no table. Decided: the inspector is a combo
+    // now (D14), with no text; the Tables profile's symbol search is the
+    // text field of the view.
     await pressInPanel(tester, 'editor-tables');
     await clickAt(tester, centreOf(c, '5'));
-    await tester.enterText(byKey('pos-id'), 'salon-55');
+    await tester.tap(byKey('tab-symbols'));
+    await tester.pump();
+    await tester.enterText(byKey('symbol-search'), 'table5');
     await chord(tester, LogicalKeyboardKey.backspace);
     expect(labels(), contains('5'));
-    expect(
-        tester.widget<TextField>(byKey('pos-id')).controller!.text, 'salon-5');
+    expect(tester.widget<TextField>(byKey('symbol-search')).controller!.text,
+        'table');
   });
 
   testWidgets(
