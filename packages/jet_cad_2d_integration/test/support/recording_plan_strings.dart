@@ -70,6 +70,15 @@ class RecordingPlanStrings implements PlanStrings {
   String get tabSymbols => record(inner.tabSymbols);
 
   @override
+  String get openToolsPanel => record(inner.openToolsPanel);
+
+  @override
+  String get openPropertiesPanel => record(inner.openPropertiesPanel);
+
+  @override
+  String get openServicePanel => record(inner.openServicePanel);
+
+  @override
   String get objectSnapOn => record(inner.objectSnapOn);
 
   @override
