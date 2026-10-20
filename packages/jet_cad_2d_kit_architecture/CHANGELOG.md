@@ -3,6 +3,8 @@
 - The room declares its area: `roomPlanType` carries the new `PlanType.area`
   capability, the room's traced outer ring in world millimetres (null for a
   seed in a wall or an unbounded face).
+- The room declares its own name: `roomPlanType` carries the new
+  `PlanType.name` capability, the room's `name`.
 
 ## 0.1.0
 

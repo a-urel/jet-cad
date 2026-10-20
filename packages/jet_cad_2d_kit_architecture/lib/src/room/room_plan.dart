@@ -56,6 +56,7 @@ final PlanType<RoomParams> roomPlanType = PlanType<RoomParams>(
     write: (p, swatch) => p.copyWith(color: swatch),
   ),
   area: (p, o) => _roomArea(o, p),
+  name: (p) => p.name,
 );
 
 /// The traces taken per document and state, and the one [RoomInputs] they
