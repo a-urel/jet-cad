@@ -20,6 +20,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show SymbolsState;
 import 'package:jet_cad_2d_plan/src/controller/plan_controller.dart';
+import 'package:jet_cad_2d_plan/src/editor/editor_layout.dart';
 import 'package:jet_cad_2d_plan/src/editor/plan_editor.dart';
 import 'package:jet_cad_2d_plan/src/l10n/localizations.dart';
 import 'package:jet_cad_2d_plan/src/l10n/strings.dart';
@@ -239,7 +240,10 @@ void main() {
           locale: Locale(code),
           supportedLocales: planSupportedLocales,
           localizationsDelegates: planLocalizationsDelegates,
-          home: Scaffold(body: PlanEditor(controller: c))));
+          // Desktop chrome at a sub-desktop test surface (POS-host D4).
+          home: Scaffold(
+              body: PlanEditor(
+                  controller: c, layout: PlanEditorLayout.desktop))));
       await tester.pump();
       final doc = c.document;
       // The root's groups (the marks) and its entities (the line).
@@ -273,7 +277,10 @@ void main() {
           locale: Locale(code),
           supportedLocales: planSupportedLocales,
           localizationsDelegates: planLocalizationsDelegates,
-          home: Scaffold(body: PlanEditor(controller: c))));
+          // Desktop chrome at a sub-desktop test surface (POS-host D4).
+          home: Scaffold(
+              body: PlanEditor(
+                  controller: c, layout: PlanEditorLayout.desktop))));
       await tester.pump();
       for (final n in ['1', null, '7']) {
         c.selection.replace([SelectionKey.root(tableOf(c, n))]);

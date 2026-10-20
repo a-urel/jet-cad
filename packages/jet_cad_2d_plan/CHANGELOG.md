@@ -1,5 +1,16 @@
 ## Unreleased
 
+- `PlanEditor` lays its design mode out by its own width: phone below 600
+  logical pixels, tablet below 1000, desktop from 1000 (as before).
+  `PlanEditor.breakpoints` (`PlanLayoutBreakpoints`) moves the limits and
+  `PlanEditor.layout` (`PlanEditorLayout`) forces one. On a phone the tools
+  and symbols and the properties, layers and page open as drawers over the
+  plan from buttons in the bar; a tablet docks an icon-only tool strip, with
+  the symbols as a drawer and the right panel behind the bar's button. One
+  drawer at a time; a tap on the plan, the same button or Escape closes it;
+  opening one never moves the camera. Behaviour change for existing hosts: a
+  `PlanEditor` narrower than 1000 px now gets the tablet or phone layout
+  unless `layout: PlanEditorLayout.desktop` is passed.
 - Host data on any placed object, not only units: `PlanController.
   objectDetails`, `objectDetailOf`, `setObjectData` and `setObjectsData`,
   naming an object by the opaque `PlanObjectRef` (`PlanObjectDetail`,

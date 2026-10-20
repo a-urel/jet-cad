@@ -20,6 +20,8 @@ export 'src/controller/plan_change.dart'
         PlanReplaced;
 export 'src/controller/plan_controller.dart'
     show PlanController, kPlanThumbnailCapacity;
+export 'src/editor/editor_layout.dart'
+    show PlanEditorLayout, PlanLayoutBreakpoints;
 export 'src/editor/plan_editor.dart' show PlanEditor, PlanFileCallback;
 export 'src/editor/plan_editor_bar.dart' show PlanEditorAction, PlanEditorBar;
 export 'src/editor/plan_tool_palette.dart' show PlanToolPalette;

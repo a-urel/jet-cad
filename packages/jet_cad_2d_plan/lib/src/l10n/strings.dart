@@ -81,6 +81,12 @@ abstract class PlanStrings {
   /// "Symbols".
   String get tabSymbols;
 
+  /// The phone bar's left button: "Tools and symbols".
+  String get openToolsPanel;
+
+  /// The bar's right button: "Properties".
+  String get openPropertiesPanel;
+
   /// "OSNAP".
   String get objectSnapOn;
 

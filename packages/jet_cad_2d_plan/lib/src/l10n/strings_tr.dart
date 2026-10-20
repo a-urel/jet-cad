@@ -71,6 +71,12 @@ class PlanStringsTr extends PlanStrings {
   String get tabSymbols => 'Semboller';
 
   @override
+  String get openToolsPanel => 'Araçlar ve semboller';
+
+  @override
+  String get openPropertiesPanel => 'Özellikler';
+
+  @override
   String get objectSnapOn => 'OSNAP';
 
   @override

@@ -12,6 +12,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
     show PolylineTool, SelectionKey, kLogicalPixelsPerMm;
 import 'package:jet_cad_2d_plan/src/controller/plan_controller.dart';
+import 'package:jet_cad_2d_plan/src/editor/editor_layout.dart';
 import 'package:jet_cad_2d_plan/src/editor/plan_editor.dart';
 
 import '../support/canvas_fixture.dart';
@@ -79,7 +80,9 @@ void main() {
 
   testWidgets('the three chrome slots are laid out', (tester) async {
     final c = editorController();
-    await tester.pumpWidget(MaterialApp(home: PlanEditor(controller: c)));
+    // Desktop chrome at a sub-desktop test surface (POS-host D4).
+    await tester.pumpWidget(MaterialApp(
+        home: PlanEditor(controller: c, layout: PlanEditorLayout.desktop)));
     await tester.pump();
     for (final key in const [
       Key('chrome-top'),

@@ -269,6 +269,8 @@ void main() {
         theme: ThemeData(extensions: const [ambient]),
         home: barrel.PlanEditor(
             controller: c,
+            // Desktop chrome at a sub-desktop test surface (POS-host D4).
+            layout: barrel.PlanEditorLayout.desktop,
             theme: const barrel.PlanTheme(
                 selectionOnLight: Color(0xFFD81B60), selectionWidth: 3))));
     await tester.pump();
