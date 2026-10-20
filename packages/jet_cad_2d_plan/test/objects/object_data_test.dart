@@ -160,6 +160,8 @@ void main() {
         reason: 'all or nothing');
     expect(c.save(), before);
     expect(c.canUndo.value, isFalse);
+    expect(c.lockHint.value, isFalse,
+        reason: 'refused up front, not by the engine (no lock hint)');
 
     // An object on a locked layer takes data.
     expect(c.setObjectData(ref(unitLocked), {'id': 'locked-layer'}), isTrue);
