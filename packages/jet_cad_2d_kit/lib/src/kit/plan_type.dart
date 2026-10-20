@@ -68,11 +68,13 @@ final class PlanType<T extends Component> {
     String Function(T)? title,
     ColourTarget<T>? colour,
     List<Vector2>? Function(T value, PlanObject object)? area,
+    String? Function(T value)? name,
     this.exported = true,
   })  : _section = section,
         _title = title,
         _colour = colour,
-        _area = area;
+        _area = area,
+        _name = name;
 
   /// `<kit id>.<type>`, equal to the component's codec type id: the
   /// manifest finds the plan's kits by it.
@@ -98,11 +100,15 @@ final class PlanType<T extends Component> {
   final String Function(T)? _title;
   final ColourTarget<T>? _colour;
   final List<Vector2>? Function(T value, PlanObject object)? _area;
+  final String? Function(T value)? _name;
 
   bool get hasColour => _colour != null;
 
   /// True when the type declares its objects' area (see [areaOf]).
   bool get hasArea => _area != null;
+
+  /// True when the type declares its objects' own name (see [nameOf]).
+  bool get hasName => _name != null;
   bool get hasSection => _section != null;
 
   /// Registers this type into [catalog] under [id], with `T` kept: through
@@ -153,6 +159,15 @@ final class PlanType<T extends Component> {
     final area = _area;
     if (value == null || area == null) return null;
     return area(value, DocumentPlanObject(document, group, words));
+  }
+
+  /// [group]'s own name (a room's "VIP"); null without a name capability, a
+  /// `T`, or when the object has no name (the capability returned null).
+  String? nameOf(DraftDocument document, Handle group) {
+    final value = document.components.get<T>(group);
+    final name = _name;
+    if (value == null || name == null) return null;
+    return name(value);
   }
 
   /// The one command that gives [group] [swatch] (null clears it); null

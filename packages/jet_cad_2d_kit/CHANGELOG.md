@@ -2,6 +2,8 @@
 
 - `PlanType` gains an optional `area` capability (a closed outline in world
   millimetres, anticlockwise), with `hasArea` and `areaOf`.
+- `PlanType` gains an optional `name` capability (the object's own name),
+  with `hasName` and `nameOf`.
 
 ## 0.1.0
 
