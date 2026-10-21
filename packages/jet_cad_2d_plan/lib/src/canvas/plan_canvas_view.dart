@@ -6,6 +6,7 @@ import 'package:meta/meta.dart' show internal;
 import '../controller/camera_bounds.dart';
 import '../controller/plan_controller.dart';
 import 'text_entry_overlay.dart';
+import 'touch_double_tap.dart';
 
 /// The rulers around the drawing area: a [RulerFrame] whose child is a
 /// [CameraGestureDetector] over the page chrome, the [DraftCanvas] and the
@@ -401,62 +402,64 @@ class _PlanCanvasViewState extends State<PlanCanvasView> {
                 )
               else
                 const SizedBox.shrink(),
-              _userCamera(KeyedSubtree(
-                key: _area,
-                child: InteractionLayer(
+              _userCamera(TouchDoubleTapFinish(
                   tools: widget.tools,
-                  autofocus: widget.autofocus,
-                  child: Stack(
-                    children: [
-                      Positioned.fill(
-                        child: RepaintBoundary(
-                          child: CustomPaint(
-                            painter: PageChromePainter(
-                              camera: widget.camera,
-                              page: widget.page,
-                              grid: widget.grid,
-                              chrome: widget.chrome,
-                              paper: widget.paper,
-                              sheetArgb: widget.sheetArgb,
-                              repaint: _chromeRepaint,
+                  child: KeyedSubtree(
+                    key: _area,
+                    child: InteractionLayer(
+                      tools: widget.tools,
+                      autofocus: widget.autofocus,
+                      child: Stack(
+                        children: [
+                          Positioned.fill(
+                            child: RepaintBoundary(
+                              child: CustomPaint(
+                                painter: PageChromePainter(
+                                  camera: widget.camera,
+                                  page: widget.page,
+                                  grid: widget.grid,
+                                  chrome: widget.chrome,
+                                  paper: widget.paper,
+                                  sheetArgb: widget.sheetArgb,
+                                  repaint: _chromeRepaint,
+                                ),
+                              ),
                             ),
                           ),
-                        ),
-                      ),
-                      if (widget.underlay case final under?)
-                        Positioned.fill(child: under),
-                      DraftCanvas(
-                        document: widget.document,
-                        index: widget.index,
-                        camera: widget.camera,
-                        resolver: widget.resolver,
-                        tiles: false,
-                      ), // already inside its own RepaintBoundary
-                      if (widget.overlay case final over?)
-                        Positioned.fill(child: over),
-                      Positioned.fill(
-                        child: RepaintBoundary(
-                          child: CustomPaint(
-                            painter: SelectionOverlayPainter(
-                              selection: widget.selection,
-                              tools: widget.tools,
-                              camera: widget.camera,
-                              outlines: widget.outlines,
-                              paper: widget.paper,
-                              selectionStrokePixels:
-                                  widget.selectionStrokePixels,
-                              repaint: _repaint,
+                          if (widget.underlay case final under?)
+                            Positioned.fill(child: under),
+                          DraftCanvas(
+                            document: widget.document,
+                            index: widget.index,
+                            camera: widget.camera,
+                            resolver: widget.resolver,
+                            tiles: false,
+                          ), // already inside its own RepaintBoundary
+                          if (widget.overlay case final over?)
+                            Positioned.fill(child: over),
+                          Positioned.fill(
+                            child: RepaintBoundary(
+                              child: CustomPaint(
+                                painter: SelectionOverlayPainter(
+                                  selection: widget.selection,
+                                  tools: widget.tools,
+                                  camera: widget.camera,
+                                  outlines: widget.outlines,
+                                  paper: widget.paper,
+                                  selectionStrokePixels:
+                                      widget.selectionStrokePixels,
+                                  repaint: _repaint,
+                                ),
+                                size: Size.infinite,
+                              ),
                             ),
-                            size: Size.infinite,
                           ),
-                        ),
+                          if (widget.unitOverlays case final layer?)
+                            Positioned.fill(child: ClipRect(child: layer)),
+                        ],
                       ),
-                      if (widget.unitOverlays case final layer?)
-                        Positioned.fill(child: ClipRect(child: layer)),
-                    ],
-                  ),
-                ),
-              )),
+                    ),
+                  ))),
             ],
           );
         },

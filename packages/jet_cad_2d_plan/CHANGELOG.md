@@ -1,3 +1,49 @@
+## Unreleased
+
+- A touch double tap on the canvas ends a pending chain (a wall or polyline
+  chain) as Enter does: the first tap of the pair is the chain's last point,
+  the second adds nothing. A mouse is unchanged.
+- `PlanController.sectionDetails` lists every object of a kit type that
+  declares an area, in draw order, with or without host data. A type object's
+  `PlanObjectDetail.label` is its own name when the kit's type declares one
+  (a room's name), else its title word as before.
+- `PlanEditor` lays its design mode out by its own width: phone below 600
+  logical pixels, tablet below 1000, desktop from 1000 (as before).
+  `PlanEditor.breakpoints` (`PlanLayoutBreakpoints`) moves the limits and
+  `PlanEditor.layout` (`PlanEditorLayout`) forces one. On a phone the tools
+  and symbols and the properties, layers and page open as drawers over the
+  plan from buttons in the bar; a tablet docks an icon-only tool strip, with
+  the symbols as a drawer and the right panel behind the bar's button. One
+  drawer at a time; a tap on the plan, the same button or Escape closes it;
+  opening one never moves the camera. Behaviour change for existing hosts: a
+  `PlanEditor` narrower than 1000 px now gets the tablet or phone layout
+  unless `layout: PlanEditorLayout.desktop` is passed.
+- The service mode on phones and tablets: `PlanEditor.serviceSidePanel` (and
+  the same parameter, with `breakpoints` and `layout`, on `PlanServiceView`)
+  takes the host's panel (orders, a table's detail). On a desktop layout it
+  is docked on the right, 320 logical pixels wide; on a phone or a tablet it
+  opens as a drawer over the plan from the service bar's last button
+  (`Key('service-right-button')`). Without a panel there is no button and no
+  column. The service bar scrolls instead of overflowing on a narrow screen.
+- Host data on any placed object, not only units: `PlanController.
+  objectDetails`, `objectDetailOf`, `setObjectData` and `setObjectsData`,
+  naming an object by the opaque `PlanObjectRef` (`PlanObjectDetail`,
+  `PlanObjectKind`). A unit's data is the same data either way; plans saved
+  by 0.8.1 open unchanged. A `PlanObjectRef` is valid for the plan it was
+  read from (and that plan saved and loaded again); after `newPlan` or a
+  load of another plan, read the references again.
+- A unit's section: `PlanUnitDetail.section`, the smallest area object (a
+  kit type that declares an area, such as a room) whose outline contains the
+  unit's centre, the boundary counting as inside; and
+  `PlanController.sectionChanges`, one `PlanSectionChange` (labels and their
+  new sections) whenever units' sections change, in design and after a
+  layout move in service. `unitChanges` is unchanged: a section change alone
+  is not a `PlanUnitChanged`.
+- `PlanEditor.objectInspectorBuilder`: the host's widget in the property pane
+  for any one selected object (a unit, a placed symbol, an object of a kit's
+  type such as a room), built with its `PlanObjectDetail`. With
+  `unitInspectorBuilder` also given, units keep going to that one.
+
 ## 0.8.1
 
 - A unit status caption is clamped clear of the unit's symbol box — its

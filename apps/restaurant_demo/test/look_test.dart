@@ -68,13 +68,18 @@ final class Shot {
       ];
 }
 
+/// The window of these tests. The first fit shows the whole A3 sheet (it
+/// framed the A4 sheet the build replaced before the fit fix): the window is
+/// as much larger as the tables were once drawn larger than the sheet.
+const Size kWindow = Size(2300, 1450);
+
 /// The window as it is now: the route's boundary, the whole screen.
 Future<Shot> shoot(WidgetTester tester) async {
   final boundary = tester.renderObject<RenderRepaintBoundary>(find
       .ancestor(
           of: find.byType(Scaffold), matching: find.byType(RepaintBoundary))
       .first);
-  expect(boundary.size, const Size(1600, 1000), reason: 'premise: the window');
+  expect(boundary.size, kWindow, reason: 'premise: the window');
   return (await tester.runAsync(() async {
     final image = await boundary.toImage();
     final raw = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
@@ -100,6 +105,14 @@ int over(Color colour, double alpha, int paper) {
   return (channel(colour.r, 16) << 16) |
       (channel(colour.g, 8) << 8) |
       channel(colour.b, 0);
+}
+
+/// [rgb] seen through a room's tint over the White page: each channel
+/// scaled by 0xE5/0xFF (measured: Bill's 0xEF8886 over White reads 0xD77A78
+/// on the Garden's table).
+int inRoom(int rgb) {
+  int channel(int shift) => ((((rgb >> shift) & 0xFF) * 0xE5) / 0xFF).round();
+  return (channel(16) << 16) | (channel(8) << 8) | channel(0);
 }
 
 /// Table [number]'s bounding box on the screen, from its world corners
@@ -175,7 +188,7 @@ void main() {
         tester.platformDispatcher.platformBrightnessTestValue = Brightness.dark;
         addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
       }
-      final demo = await pumpDemo(tester);
+      final demo = await pumpDemo(tester, size: kWindow);
       final c = demo.area.controller;
       final light = brightness == Brightness.light;
       final pos = posPlanTheme(brightness);
@@ -232,11 +245,14 @@ void main() {
       final box2 = screenBox(c, '2');
       final billFill = kStatuses['Bill']!.color;
       if (light) {
+        // Decided: table 2 stands in the Garden (spec D14), whose room tints
+        // everything under it by 0xE5/0xFF per channel (the fill, Bill's
+        // included), so Bill's 0.6 over White is read through that tint.
         expect(
-            standardService.shot
-                .count(box2, (p) => p == over(billFill, billFill.a, 0xFFFFFF)),
+            standardService.shot.count(
+                box2, (p) => p == inRoom(over(billFill, billFill.a, 0xFFFFFF))),
             greaterThan(1000),
-            reason: 'premise: Bill at its own 0.6 over White');
+            reason: 'premise: Bill at its own 0.6 over the Garden\'s tint');
       }
 
       // Standard, the design.
@@ -302,11 +318,12 @@ void main() {
       if (light) {
         // The POS look's fill opacity is 0.8 (the plan's), not read back.
         final drawn = billFill.a * 0.8;
+        // Decided: over the Garden's tint, as above.
         expect(
-            posService.shot.count(
-                screenBox(c, '2'), (p) => p == over(billFill, drawn, 0xFFFFFF)),
+            posService.shot.count(screenBox(c, '2'),
+                (p) => p == inRoom(over(billFill, drawn, 0xFFFFFF))),
             greaterThan(1000),
-            reason: 'Bill at 0.6 x 0.8 over White');
+            reason: 'Bill at 0.6 x 0.8 over the Garden\'s tint');
       }
       final caption = pos.statusCaptionStyle!;
       expect((

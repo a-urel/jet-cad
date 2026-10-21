@@ -13,6 +13,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
     show ObjectGripProvider;
 import 'package:meta/meta.dart';
+import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../model/kit_ids.dart';
 import '../model/plan_words.dart';
@@ -66,10 +67,14 @@ final class PlanType<T extends Component> {
     PropertySectionBuilder<T>? section,
     String Function(T)? title,
     ColourTarget<T>? colour,
+    List<Vector2>? Function(T value, PlanObject object)? area,
+    String? Function(T value)? name,
     this.exported = true,
   })  : _section = section,
         _title = title,
-        _colour = colour;
+        _colour = colour,
+        _area = area,
+        _name = name;
 
   /// `<kit id>.<type>`, equal to the component's codec type id: the
   /// manifest finds the plan's kits by it.
@@ -94,8 +99,16 @@ final class PlanType<T extends Component> {
   final PropertySectionBuilder<T>? _section;
   final String Function(T)? _title;
   final ColourTarget<T>? _colour;
+  final List<Vector2>? Function(T value, PlanObject object)? _area;
+  final String? Function(T value)? _name;
 
   bool get hasColour => _colour != null;
+
+  /// True when the type declares its objects' area (see [areaOf]).
+  bool get hasArea => _area != null;
+
+  /// True when the type declares its objects' own name (see [nameOf]).
+  bool get hasName => _name != null;
   bool get hasSection => _section != null;
 
   /// Registers this type into [catalog] under [id], with `T` kept: through
@@ -136,6 +149,25 @@ final class PlanType<T extends Component> {
     final colour = _colour;
     if (value == null || colour == null) return null;
     return colour.read(value);
+  }
+
+  /// [group]'s area: its closed outline in world millimetres, anticlockwise,
+  /// without a closing duplicate. Null without an area capability, a `T`, or
+  /// when the object has no area now (the capability returned null).
+  List<Vector2>? areaOf(DraftDocument document, Handle group, PlanWords words) {
+    final value = document.components.get<T>(group);
+    final area = _area;
+    if (value == null || area == null) return null;
+    return area(value, DocumentPlanObject(document, group, words));
+  }
+
+  /// [group]'s own name (a room's "VIP"); null without a name capability, a
+  /// `T`, or when the object has no name (the capability returned null).
+  String? nameOf(DraftDocument document, Handle group) {
+    final value = document.components.get<T>(group);
+    final name = _name;
+    if (value == null || name == null) return null;
+    return name(value);
   }
 
   /// The one command that gives [group] [swatch] (null clears it); null

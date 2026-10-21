@@ -8,13 +8,17 @@ import 'package:flutter/material.dart' show Icons;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
 import 'package:meta/meta.dart' show visibleForTesting;
+import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../ids.dart';
 import '../live.dart';
+import '../separator/separator.dart';
+import '../wall/wall.dart';
 import 'room.dart';
 import 'room_grips.dart';
 import 'room_inputs.dart';
 import 'room_tool.dart';
+import 'room_trace.dart';
 
 /// The room type (spec 3a C3.5).
 ///
@@ -51,7 +55,65 @@ final PlanType<RoomParams> roomPlanType = PlanType<RoomParams>(
     read: (p) => p.color,
     write: (p, swatch) => p.copyWith(color: swatch),
   ),
+  area: (p, o) => _roomArea(o, p),
+  name: (p) => p.name,
 );
+
+/// The traces taken per document and state, and the one [RoomInputs] they
+/// are taken among.
+final class _AreaCache {
+  _AreaCache(DraftDocument document)
+      : inputs = RoomInputs(document, _liveByComponent(document));
+
+  final RoomInputs inputs;
+  int state = -1;
+  final Map<Handle, List<Vector2>?> rings = {};
+}
+
+final Expando<_AreaCache> _areaCache = Expando('roomArea');
+
+/// How many room traces [roomPlanType]'s area has taken (not its memo).
+/// Never reset by the library.
+@visibleForTesting
+int debugRoomAreaTraces = 0;
+
+/// The live rule of a document that has no plan services at hand: a wall is
+/// the live object carrying a [WallParams], a separator one carrying a
+/// [SeparatorParams]. A plan's frozen objects (session state, not document
+/// state) are not known here, so a frozen wall still bounds the area.
+LiveTypeOf _liveByComponent(DraftDocument document) => (h) {
+      if (document.components.get<WallParams>(h) != null) {
+        return ArchitectureTypes.wall;
+      }
+      if (document.components.get<SeparatorParams>(h) != null) {
+        return ArchitectureTypes.separator;
+      }
+      return null;
+    };
+
+/// The room's face as the plan's area: [Traced.ring] (the outer contour, in
+/// world millimetres, anticlockwise) of the trace around the room's world
+/// seed, among the document's walls and separators; null when the seed
+/// stands in a wall or the face is unbounded. Taken from the document
+/// (the same trace [RoomType.generate] takes, among the same contributors)
+/// and memoised per room and document state (`commands.stateId`), as
+/// [roomAreaText] is; it is not on the frame path.
+List<Vector2>? _roomArea(PlanObject object, RoomParams params) {
+  final doc = object.document;
+  final cache = _areaCache[doc] ??= _AreaCache(doc);
+  final state = doc.commands.stateId;
+  if (cache.state != state) {
+    cache.state = state;
+    cache.rings.clear();
+    cache.inputs.invalidate();
+  }
+  final room = object.handle;
+  if (cache.rings.containsKey(room)) return cache.rings[room];
+  debugRoomAreaTraces++;
+  final result =
+      traceRoomAmong(object.world.transformPoint(params.seed), cache.inputs);
+  return cache.rings[room] = result is Traced ? result.ring : null;
+}
 
 /// How many times [roomAreaText] read the document (not its memo). Never
 /// reset by the library.

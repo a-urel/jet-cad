@@ -65,14 +65,16 @@ Future<AppRig> pumpApp(WidgetTester tester,
     {FakeDocumentFiles? files,
     FakeExitGuard? guard,
     PagePrinter? printer,
-    Size size = const Size(1440, 900)}) async {
+    Size size = const Size(1440, 900),
+    PlanEditorLayout? layout}) async {
   await tester.binding.setSurfaceSize(size);
   addTearDown(() => tester.binding.setSurfaceSize(null));
   final fakeFiles = files ?? FakeDocumentFiles();
   await tester.pumpWidget(ArchitectureDemoApp(
       files: fakeFiles,
       exitGuard: guard,
-      printer: printer ?? const PrintingPagePrinter()));
+      printer: printer ?? const PrintingPagePrinter(),
+      layout: layout));
   await tester.pump();
   return AppRig._(tester, fakeFiles, guard);
 }

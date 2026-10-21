@@ -8,6 +8,7 @@ import 'dart:ui' show Offset;
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 
 import 'area.dart';
+import 'fake_records.dart';
 
 /// The POS's own tables by area, by the id it links each to a table of the
 /// plan with: `<area>-<number>`, lower case, as "Link tables" writes it.
@@ -67,4 +68,47 @@ String? idOf(Area a, String number) {
       if (detail.unit.label == number) detail,
   ];
   return tables.length == 1 ? tables.single.data['id'] : null;
+}
+
+/// "Link sections": every room whose name is a section record's name
+/// (`kFakeSections`) and that is not linked yet gets that record's id, beside
+/// the data it carries, in one undo step. The rooms come from
+/// `sectionDetails`, each named by its own label; no table and no handle is
+/// consulted. A name two rooms share links neither. Design mode only.
+/// Returns how many were linked.
+int linkSections(Area a) {
+  final c = a.controller;
+  final sections = c.sectionDetails;
+  final byRef = <PlanObjectRef, Map<String, String>>{};
+  for (final record in kFakeSections) {
+    final named = [
+      for (final s in sections)
+        if (s.label == record.name) s,
+    ];
+    if (named.length != 1) continue;
+    final section = named.single;
+    if (section.data.containsKey('id')) continue;
+    byRef[section.ref] = {...section.data, 'id': record.id};
+  }
+  if (byRef.isNotEmpty) c.setObjectsData(byRef);
+  return byRef.length;
+}
+
+/// Each table's section, by label in ascending numeric order: the name of
+/// the record the section is linked to, [unlinked] for a room with none, and
+/// null for a table in no section.
+List<(String label, String? section)> tableSections(Area a, String unlinked) {
+  final rows = <(String, String?)>[];
+  for (final d in a.controller.unitDetails) {
+    final s = d.section;
+    rows.add((
+      d.unit.label ?? '—',
+      s == null ? null : sectionRecordName(s) ?? unlinked,
+    ));
+  }
+  rows.sort((x, y) {
+    final nx = int.tryParse(x.$1), ny = int.tryParse(y.$1);
+    return nx != null && ny != null ? nx.compareTo(ny) : x.$1.compareTo(y.$1);
+  });
+  return rows;
 }

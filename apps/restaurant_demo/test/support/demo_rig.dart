@@ -239,3 +239,19 @@ Map<String, Map<String, String>> dataByLabel(PlanController c) => {
       for (final d in c.unitDetails)
         if (d.data.isNotEmpty) d.unit.label ?? '—': d.data,
     };
+
+/// Picks record [id] in the inspector's combo (an empty [id] is the "none"
+/// entry, which unlinks), the menu opened and closed.
+Future<void> pickRecord(WidgetTester tester, String id) async {
+  await tester.tap(byKey('pos-id'));
+  await tester.pumpAndSettle();
+  await tester.tap(byKey(id.isEmpty ? 'pos-id-none' : 'pos-id-$id').last);
+  await tester.pumpAndSettle();
+}
+
+/// The id the inspector's combo shows: the text of its selected entry's
+/// first word, empty for none.
+String pickedId(WidgetTester tester) {
+  final d = tester.widget<DropdownButton<String>>(byKey('pos-id'));
+  return d.value ?? '';
+}

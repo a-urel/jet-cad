@@ -15,6 +15,7 @@ import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
 import 'package:jet_cad_2d_kit_restaurant/jet_cad_2d_kit_restaurant.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
+import 'package:restaurant_demo/samples/place_tables.dart' show kSheetMin;
 import 'package:restaurant_demo/samples/salon.dart';
 import 'package:restaurant_demo/samples/teras.dart';
 
@@ -26,8 +27,10 @@ typedef Placement = (String, double, double, String?);
 
 const List<Placement> salon = [
   ('restaurant.table.rect.four@1', -5525, 1625, '1'),
-  ('restaurant.table.rect.four@1', -3025, 1625, '2'),
-  ('restaurant.table.rect.four@1', -525, 1625, '3'),
+  // Decided: tables 2 and 3 stand in the Garden, outside the south wall
+  // (spec D14), at y -1250 mm from the sheet's lower-left corner.
+  ('restaurant.table.rect.four@1', -4025, -7225, '2'),
+  ('restaurant.table.rect.four@1', 2475, -7225, '3'),
   ('restaurant.table.round.six@1', -5900, -2125, '4'),
   ('restaurant.table.round.six@1', -2900, -2125, '5'),
   ('restaurant.booth.four@1', 2975, 2200, '6'),
@@ -214,11 +217,30 @@ void main() {
               .map((e) => e.sy > e.ey ? e.sy : e.ey)
               .reduce((a, b) => a > b ? a : b) -
           half;
+      // Decided: tables 2 and 3 stand in the Garden, outside the south wall
+      // (spec D14): they lie between the wall's outer face and the Garden's
+      // south separator, clear of both by 100 mm, and inside the side walls'
+      // lines; every other table keeps the room's 1200 mm.
+      final garden = {unitInstance(c, '2')!, unitInstance(c, '3')!};
+      final gardenSouth = kSheetMin.y + kGardenSouth;
+      final gardenNorth = bottom - 2 * half;
       var minMargin = double.infinity;
       for (final i in instances(c)) {
         final b = boxOfDefinition(c.document, i.definition)!;
         for (final (x, y) in [(b.left, b.front), (b.right, b.back)]) {
           final p = i.transform.transformPoint(Vector2(x, y));
+          if (garden.contains(i.handle)) {
+            for (final m in [
+              p.x - left,
+              right - p.x,
+              p.y - gardenSouth,
+              gardenNorth - p.y,
+            ]) {
+              expect(m, greaterThanOrEqualTo(100),
+                  reason: '${definitionName(c, i.handle)} at ${p.x},${p.y}');
+            }
+            continue;
+          }
           for (final m in [p.x - left, right - p.x, p.y - bottom, top - p.y]) {
             if (m < minMargin) minMargin = m;
             expect(m, greaterThan(0),

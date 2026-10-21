@@ -39,7 +39,8 @@ class ArchitectureDemoApp extends StatefulWidget {
       this.files,
       this.createFiles = createDocumentFiles,
       this.exitGuard,
-      this.printer = const PrintingPagePrinter()});
+      this.printer = const PrintingPagePrinter(),
+      this.layout});
 
   /// The files, a test seam: when null the app makes the platform's through
   /// [createFiles].
@@ -57,6 +58,10 @@ class ArchitectureDemoApp extends StatefulWidget {
   /// Where Print hands the page's PDF: the platform's dialog unless a test
   /// gives a fake.
   final PagePrinter printer;
+
+  /// Forces the editor's design layout whatever the window's width (a test
+  /// seam: null lets the width decide, as it does for a user).
+  final PlanEditorLayout? layout;
 
   @override
   State<ArchitectureDemoApp> createState() => ArchitectureDemoAppState();
@@ -141,6 +146,7 @@ class ArchitectureDemoAppState extends State<ArchitectureDemoApp> {
             session: _session,
             files: _files,
             exitGuard: widget.exitGuard,
-            printer: widget.printer),
+            printer: widget.printer,
+            layout: widget.layout),
       );
 }

@@ -42,11 +42,15 @@ String planToolLabel(
   };
 }
 
-/// The tools of [controller] and the Fill toggle.
+/// The tools of [controller] and the Fill toggle. With [compact] the same
+/// tools show as icon buttons (the tablet's tool strip), labelled by their
+/// tooltips; the keys are the rows'.
 class PlanToolPalette extends StatefulWidget {
-  const PlanToolPalette({super.key, required this.controller});
+  const PlanToolPalette(
+      {super.key, required this.controller, this.compact = false});
 
   final PlanController controller;
+  final bool compact;
 
   @override
   State<PlanToolPalette> createState() => _PlanToolPaletteState();
@@ -104,6 +108,16 @@ class _PlanToolPaletteState extends State<PlanToolPalette> {
                 rows.add(Divider(key: Key('tool-group-${e.kitId}')));
               }
               group = e.kitId;
+              if (widget.compact) {
+                rows.add(IconButton(
+                  key: Key('tool-${e.id}'),
+                  tooltip: planToolLabel(context, c, e.id),
+                  icon: Icon(e.icon, size: 20),
+                  isSelected: active == e.id,
+                  onPressed: _enabled(c, e) ? () => c.selectTool(e.id) : null,
+                ));
+                continue;
+              }
               rows.add(ListTile(
                 key: Key('tool-${e.id}'),
                 dense: true,
@@ -115,7 +129,18 @@ class _PlanToolPaletteState extends State<PlanToolPalette> {
                 onTap: () => c.selectTool(e.id),
               ));
             }
-            if (fillOffered(c)) {
+            if (fillOffered(c) && widget.compact) {
+              rows
+                ..add(const Divider())
+                ..add(IconButton(
+                  key: const Key('tool-fill'),
+                  tooltip: strings.fill,
+                  icon: const Icon(Icons.format_color_fill, size: 20),
+                  isSelected: c.fill.value,
+                  onPressed:
+                      geometry ? () => c.fill.value = !c.fill.value : null,
+                ));
+            } else if (fillOffered(c)) {
               rows
                 ..add(const Divider())
                 ..add(CheckboxListTile(

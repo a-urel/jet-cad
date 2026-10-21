@@ -16,6 +16,7 @@ import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../../canvas/plan_canvas_view.dart';
 import '../../controller/plan_controller.dart';
+import '../../editor/editor_layout.dart';
 import '../../export/editor_page_flows.dart';
 import '../../export/export_dialog.dart';
 import '../../export/page_printer.dart';
@@ -85,9 +86,30 @@ class PlanServiceView extends StatefulWidget {
     this.printer,
     this.exportName = 'plan',
     this.theme,
+    this.serviceSidePanel,
+    this.breakpoints = const PlanLayoutBreakpoints(),
+    this.layout,
   });
 
   final PlanController controller;
+
+  /// The host's panel beside the plan in service (orders, a table's detail).
+  /// On a desktop layout it is docked on the right, 320 logical pixels wide
+  /// (`Key('service-side-panel')`); on a phone or a tablet it opens as a
+  /// drawer over the plan from the bar's last button
+  /// (`Key('service-right-button')`). Null: no panel and no button.
+  ///
+  /// The button is in the service bar: with `serviceBar.visible` false on a
+  /// phone or a tablet there is no button and the panel cannot be opened (a
+  /// host that hides the bar there has no way to open it; keep the bar, or
+  /// show its own panel).
+  final Widget? serviceSidePanel;
+
+  /// The widths at which the layout changes, as `PlanEditor.breakpoints`.
+  final PlanLayoutBreakpoints breakpoints;
+
+  /// Forces one layout whatever the width, as `PlanEditor.layout`.
+  final PlanEditorLayout? layout;
 
   /// The bar, read at each build.
   final PlanServiceBar bar;
@@ -287,6 +309,10 @@ class _PlanServiceViewState extends State<PlanServiceView> {
     return _fit;
   }
 
+  // The side panel's drawer, open on a phone or a tablet only.
+  bool _panelOpen = false;
+  PlanEditorLayout? _builtLayout;
+
   @override
   Widget build(BuildContext context) {
     validatePlanServiceBar(widget.bar);
@@ -300,37 +326,60 @@ class _PlanServiceViewState extends State<PlanServiceView> {
       child: PlanThemeScope(
         view: widget.theme,
         child: session == null
-            ? const SizedBox.shrink()
-            : _ServiceCanvas(
-                key: ObjectKey(session.document),
-                controller: c,
-                session: session,
-                flows: _flows,
-                fitOnStart: _fitOnStartFor(session.document),
-                startFitIsRequest: _fitIsRequest,
-                callbacks: () => (
-                  onUnitTap: widget.onUnitTap,
-                  onLayoutChanged: widget.onLayoutChanged,
-                  onGroupTap: widget.onGroupTap,
-                  onMergeRequested: widget.onMergeRequested,
-                  onSplitRequested: widget.onSplitRequested,
-                ),
-                options: () => (
-                  longPress: widget.longPress,
-                  onUnitContextMenu: widget.onUnitContextMenu,
-                  floorDrag: widget.floorDrag,
-                ),
-                userCamera: () => widget.userCamera,
-                events: _serviceEvents,
-                overlays: overlays,
-                bar: widget.bar,
-                shortcuts: widget.shortcuts,
-                autofocus: widget.autofocus,
-              ),
+            ? _closedPanel()
+            : LayoutBuilder(builder: (context, constraints) {
+                final layout = widget.layout ??
+                    widget.breakpoints.layoutFor(constraints.maxWidth);
+                // A layout change closes the drawer, as the editor's does.
+                if (layout != _builtLayout) {
+                  _builtLayout = layout;
+                  _panelOpen = false;
+                }
+                return _ServiceCanvas(
+                  key: ObjectKey(session.document),
+                  controller: c,
+                  session: session,
+                  flows: _flows,
+                  fitOnStart: _fitOnStartFor(session.document),
+                  startFitIsRequest: _fitIsRequest,
+                  callbacks: () => (
+                    onUnitTap: widget.onUnitTap,
+                    onLayoutChanged: widget.onLayoutChanged,
+                    onGroupTap: widget.onGroupTap,
+                    onMergeRequested: widget.onMergeRequested,
+                    onSplitRequested: widget.onSplitRequested,
+                  ),
+                  options: () => (
+                    longPress: widget.longPress,
+                    onUnitContextMenu: widget.onUnitContextMenu,
+                    floorDrag: widget.floorDrag,
+                  ),
+                  userCamera: () => widget.userCamera,
+                  events: _serviceEvents,
+                  overlays: overlays,
+                  bar: widget.bar,
+                  shortcuts: widget.shortcuts,
+                  autofocus: widget.autofocus,
+                  layout: layout,
+                  sidePanel: widget.serviceSidePanel,
+                  panelOpen: _panelOpen,
+                  onTogglePanel: () => setState(() => _panelOpen = !_panelOpen),
+                  onClosePanel: () => setState(() => _panelOpen = false),
+                );
+              }),
       ),
     );
   }
+
+  // Leaving service closes the drawer: it is not open when service returns.
+  Widget _closedPanel() {
+    _panelOpen = false;
+    _builtLayout = null;
+    return const SizedBox.shrink();
+  }
 }
+
+const double _kSidePanelWidth = 320;
 
 /// The canvas over one service copy: today's ServiceView
 /// (service_view.dart:38-712), keyed by the copy.
@@ -350,6 +399,11 @@ class _ServiceCanvas extends StatefulWidget {
     required this.bar,
     required this.shortcuts,
     required this.autofocus,
+    required this.layout,
+    required this.sidePanel,
+    required this.panelOpen,
+    required this.onTogglePanel,
+    required this.onClosePanel,
   });
 
   final PlanController controller;
@@ -365,6 +419,11 @@ class _ServiceCanvas extends StatefulWidget {
   final PlanServiceBar bar;
   final bool shortcuts;
   final bool autofocus;
+  final PlanEditorLayout layout;
+  final Widget? sidePanel;
+  final bool panelOpen;
+  final VoidCallback onTogglePanel;
+  final VoidCallback onClosePanel;
 
   @override
   State<_ServiceCanvas> createState() => _ServiceCanvasState();
@@ -647,93 +706,119 @@ class _ServiceCanvasState extends State<_ServiceCanvas> {
             children: [
               if (widget.bar.visible)
                 _bar(widget.bar, scheme, strings, flows, callbacks),
-              Expanded(
-                child: ColoredBox(
-                  color: _canvasColour(scheme),
-                  child: Listener(
-                    key: _canvas,
-                    onPointerDown: _onSecondaryDown,
-                    onPointerUp: _onSecondaryUp,
-                    onPointerCancel: _onSecondaryCancel,
-                    child: PlanCanvasView(
-                      controller: _c,
-                      document: _document,
-                      index: _s.index,
-                      resolver: _resolver,
-                      camera: _c.camera,
-                      page: _s.page,
-                      policy: _policy,
-                      selection: _s.selection,
-                      tools: _s.tools,
-                      outlines: _s.outlines,
-                      chrome: ChromePalette.of(theme.brightness),
-                      paper: planPaperPaletteFor(paper, _theme.value),
-                      selectionStrokePixels: _theme.value?.selectionWidth ??
-                          kSelectionStrokePixels,
-                      sheetArgb: _darkCanvas ? paper : null,
-                      fitRequests: _c.fitRequests,
-                      fitOnStart: _fitOnStart,
-                      startFitIsRequest: _startFitIsRequest,
-                      onFitted: _c.fitted,
-                      framing: _c.framingFor,
-                      cameraEpoch: () => _c.cameraEpoch,
-                      userCamera: widget.userCamera(),
-                      onCanvasPlaced: _c.canvasPlaced,
-                      rulers: false,
-                      grid: false,
-                      autofocus: widget.autofocus,
-                      // Today's order (spec S4 "Painting"): the group
-                      // frames, then the colours and statuses, under the
-                      // drafting; the focus veil, then the chips, above it.
-                      underlay: Stack(
-                        fit: StackFit.expand,
-                        children: [
-                          RepaintBoundary(
-                            child: CustomPaint(
-                              key: const Key('unit-group-layer'),
-                              painter: _framePainter,
-                              size: Size.infinite,
-                            ),
-                          ),
-                          RepaintBoundary(
-                            child: CustomPaint(
-                              key: const Key('unit-status-layer'),
-                              painter: _statusPainter,
-                              size: Size.infinite,
-                            ),
-                          ),
-                        ],
-                      ),
-                      overlay: Stack(
-                        fit: StackFit.expand,
-                        children: [
-                          RepaintBoundary(
-                            child: CustomPaint(
-                              key: const Key('unit-focus-layer'),
-                              painter: _focusPainter,
-                              size: Size.infinite,
-                            ),
-                          ),
-                          RepaintBoundary(
-                            child: CustomPaint(
-                              key: const Key('unit-group-chips'),
-                              painter: _chipPainter,
-                              size: Size.infinite,
-                            ),
-                          ),
-                        ],
-                      ),
-                      unitOverlays: widget.overlays,
-                    ),
-                  ),
-                ),
-              ),
+              Expanded(child: _body(scheme, _canvasOf(theme, scheme, paper))),
             ],
           ),
         ),
       ),
     );
   }
+
+  /// The canvas, with the host's panel docked beside it (desktop) or as a
+  /// drawer over it (phone, tablet); the plan fills what is left.
+  Widget _body(ColorScheme scheme, Widget canvas) {
+    final panel = widget.sidePanel;
+    if (panel == null) return canvas;
+    if (widget.layout == PlanEditorLayout.desktop) {
+      return Row(
+        children: [
+          Expanded(child: canvas),
+          SizedBox(
+            key: const Key('service-side-panel'),
+            width: _kSidePanelWidth,
+            child: ColoredBox(color: scheme.surfaceContainerLow, child: panel),
+          ),
+        ],
+      );
+    }
+    return PlanDrawerHost(
+      canvas: canvas,
+      open: widget.panelOpen ? PlanDrawerSide.right : null,
+      onClose: widget.onClosePanel,
+      right: KeyedSubtree(key: const Key('service-side-panel'), child: panel),
+    );
+  }
+
+  Widget _canvasOf(ThemeData theme, ColorScheme scheme, int paper) =>
+      ColoredBox(
+        color: _canvasColour(scheme),
+        child: Listener(
+          key: _canvas,
+          onPointerDown: _onSecondaryDown,
+          onPointerUp: _onSecondaryUp,
+          onPointerCancel: _onSecondaryCancel,
+          child: PlanCanvasView(
+            controller: _c,
+            document: _document,
+            index: _s.index,
+            resolver: _resolver,
+            camera: _c.camera,
+            page: _s.page,
+            policy: _policy,
+            selection: _s.selection,
+            tools: _s.tools,
+            outlines: _s.outlines,
+            chrome: ChromePalette.of(theme.brightness),
+            paper: planPaperPaletteFor(paper, _theme.value),
+            selectionStrokePixels:
+                _theme.value?.selectionWidth ?? kSelectionStrokePixels,
+            sheetArgb: _darkCanvas ? paper : null,
+            fitRequests: _c.fitRequests,
+            fitOnStart: _fitOnStart,
+            startFitIsRequest: _startFitIsRequest,
+            onFitted: _c.fitted,
+            framing: _c.framingFor,
+            cameraEpoch: () => _c.cameraEpoch,
+            userCamera: widget.userCamera(),
+            onCanvasPlaced: _c.canvasPlaced,
+            rulers: false,
+            grid: false,
+            autofocus: widget.autofocus,
+            // Today's order (spec S4 "Painting"): the group
+            // frames, then the colours and statuses, under the
+            // drafting; the focus veil, then the chips, above it.
+            underlay: Stack(
+              fit: StackFit.expand,
+              children: [
+                RepaintBoundary(
+                  child: CustomPaint(
+                    key: const Key('unit-group-layer'),
+                    painter: _framePainter,
+                    size: Size.infinite,
+                  ),
+                ),
+                RepaintBoundary(
+                  child: CustomPaint(
+                    key: const Key('unit-status-layer'),
+                    painter: _statusPainter,
+                    size: Size.infinite,
+                  ),
+                ),
+              ],
+            ),
+            overlay: Stack(
+              fit: StackFit.expand,
+              children: [
+                RepaintBoundary(
+                  child: CustomPaint(
+                    key: const Key('unit-focus-layer'),
+                    painter: _focusPainter,
+                    size: Size.infinite,
+                  ),
+                ),
+                RepaintBoundary(
+                  child: CustomPaint(
+                    key: const Key('unit-group-chips'),
+                    painter: _chipPainter,
+                    size: Size.infinite,
+                  ),
+                ),
+              ],
+            ),
+            unitOverlays: widget.overlays,
+          ),
+        ),
+      );
 
   /// service_view.dart:610-636: the host's leading, the actions, the
   /// host's trailing; the host's widgets under the shortcut guard.
@@ -746,14 +831,41 @@ class _ServiceCanvasState extends State<_ServiceCanvas> {
         ...bar.trailing,
       ],
     );
+    final guarded = bar.leading.isEmpty && bar.trailing.isEmpty
+        ? row
+        : PlanShortcutGuard(controller: _c, child: row);
+    // Off the desktop the bar may be wider than the screen: the buttons
+    // scroll and the side panel's button stays pinned at the end.
+    final compact = widget.layout != PlanEditorLayout.desktop;
+    final panelButton = compact && widget.sidePanel != null
+        ? ExcludeFocus(
+            child: IconButton(
+              key: const Key('service-right-button'),
+              tooltip: strings.openServicePanel,
+              icon: const Icon(Icons.tune),
+              isSelected: widget.panelOpen,
+              onPressed: widget.onTogglePanel,
+            ),
+          )
+        : null;
     return Container(
       key: const Key('service-bar'),
       height: _theme.value?.serviceBarHeight ?? kServiceBarHeight,
       color: scheme.surfaceContainer,
       padding: const EdgeInsets.symmetric(horizontal: 12),
-      child: bar.leading.isEmpty && bar.trailing.isEmpty
-          ? row
-          : PlanShortcutGuard(controller: _c, child: row),
+      child: !compact
+          ? guarded
+          : Row(
+              children: [
+                Expanded(
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: guarded,
+                  ),
+                ),
+                if (panelButton != null) panelButton,
+              ],
+            ),
     );
   }
 

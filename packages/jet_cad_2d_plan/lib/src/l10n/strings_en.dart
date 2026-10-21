@@ -72,6 +72,15 @@ class PlanStringsEn extends PlanStrings {
   String get tabSymbols => 'Symbols';
 
   @override
+  String get openToolsPanel => 'Tools and symbols';
+
+  @override
+  String get openPropertiesPanel => 'Properties';
+
+  @override
+  String get openServicePanel => 'Details';
+
+  @override
   String get objectSnapOn => 'OSNAP';
 
   @override

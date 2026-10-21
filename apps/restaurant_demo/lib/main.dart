@@ -30,10 +30,12 @@ import 'demo_strings.dart';
 import 'demo_theme.dart';
 import 'editor_profiles.dart';
 import 'export_flow.dart';
+import 'fake_records.dart';
 import 'groups.dart' as groups;
 import 'own_bar.dart';
 import 'pos_links.dart' as pos_links;
-import 'pos_links.dart' show PointerLine, idOf, kDemoTableIds, linkTables;
+import 'pos_links.dart'
+    show PointerLine, idOf, kDemoTableIds, linkSections, linkTables;
 import 'side_panel.dart';
 import 'statuses.dart' as statuses;
 import 'table_menu.dart';
@@ -62,6 +64,10 @@ Future<void> main() async {
   if (kIsWeb) await BrowserContextMenu.disableContextMenu();
   runApp(const RestaurantDemo());
 }
+
+/// The window width from which the side panel docks beside the editor: the
+/// editor then has 1000 logical px, the plan's desktop breakpoint.
+const double kDockedSidePanel = 1300;
 
 /// The demo's theme seed, for the light and the dark theme alike.
 const Color _seed = Colors.teal;
@@ -164,6 +170,8 @@ class DemoHomeState extends State<DemoHome> {
 
   int _area = 0;
 
+  final GlobalKey<ScaffoldState> _scaffold = GlobalKey<ScaffoldState>();
+
   late final math.Random _random = widget.random ?? math.Random();
   final TextEditingController _number = TextEditingController();
   final TextEditingController _search = TextEditingController();
@@ -202,6 +210,10 @@ class DemoHomeState extends State<DemoHome> {
 
   /// Each area's subscription to its design's unit changes.
   final List<StreamSubscription<PlanUnitChange>> _changes = [];
+
+  /// Each area's subscription to its tables' section changes: the side
+  /// panel names each table's section.
+  final List<StreamSubscription<PlanSectionChange>> _sectionChanges = [];
 
   /// Minutes since the demo started, one tick a minute. The badges' minute
   /// counters read it through a `ValueListenableBuilder` inside the badge:
@@ -251,6 +263,9 @@ class DemoHomeState extends State<DemoHome> {
         if (c.serviceJson() case final json?) a.layout = json;
       });
       _changes.add(c.unitChanges.listen((e) => _unitsChanged(a, e)));
+      _sectionChanges.add(c.sectionChanges.listen((_) {
+        if (mounted) setState(() {});
+      }));
       c.permissions = editor.compose(moves: moves);
     }
   }
@@ -261,6 +276,9 @@ class DemoHomeState extends State<DemoHome> {
     minutes.dispose();
     pointer.dispose();
     for (final s in _changes) {
+      unawaited(s.cancel());
+    }
+    for (final s in _sectionChanges) {
       unawaited(s.cancel());
     }
     for (final a in areas) {
@@ -591,36 +609,68 @@ class DemoHomeState extends State<DemoHome> {
     _log(_words.logNotFound(a.name, number));
   }
 
-  /// The table inspector (the Tables profile): the one placed table
-  /// selected in the editor, linked to the POS's id.
-  Widget? _inspector(BuildContext context, PlanUnitDetail table) {
-    final number = table.unit.label!;
+  /// The inspector: a combo over the fake records that fit the one selected
+  /// object, a table's (the Tables profile; the Full one leaves the tables
+  /// to the plan's own panels), a bar counter's or a room's.
+  Widget? _inspector(BuildContext context, PlanObjectDetail object) {
+    if (object.kind == PlanObjectKind.unit && editor != DemoEditor.tables) {
+      return null;
+    }
+    final records = recordsFor(object);
+    if (records.isEmpty) return null;
     final a = area;
-    return PosIdField(
-        key: ValueKey(number),
-        id: table.data['id'],
-        onSubmitted: (id) => _linkTable(a, number, id));
+    final picker = RecordPicker(
+        key: ValueKey(object.ref),
+        id: object.data['id'],
+        records: records,
+        onChanged: (id) => _linkObject(a, object, id));
+    // A room is told apart by its own name, which the detail's label carries.
+    final name = object.kind == PlanObjectKind.type ? object.label : null;
+    if (name == null) return picker;
+    return Column(mainAxisSize: MainAxisSize.min, children: [
+      Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+          child: Align(
+              alignment: AlignmentDirectional.centerStart,
+              child: Text(name, key: const Key('object-name')))),
+      picker,
+    ]);
   }
 
-  /// Links table [number] of [a] to [id], its other data kept; an empty [id]
-  /// unlinks it.
-  void _linkTable(Area a, String number, String id) {
+  /// Links [object] of [a] to record [id], its other data kept; an empty
+  /// [id] unlinks it.
+  void _linkObject(Area a, PlanObjectDetail object, String id) {
     final c = a.controller;
-    final tables = [
-      for (final d in c.unitDetails)
-        if (d.unit.label == number) d,
-    ];
-    if (tables.length != 1) return;
-    final data = {...tables.single.data};
+    // Read again: the details the builder got are the selection's moment.
+    final now = c.objectDetailOf(object.ref);
+    if (now == null) return;
+    final data = {...now.data};
     final trimmed = id.trim();
     if (trimmed.isEmpty) {
       data.remove('id');
     } else {
       data['id'] = trimmed;
     }
-    if (c.setUnitData(number, data)) {
-      _log(_words.logLinkedTable(a.name, number, data['id']));
-    }
+    if (!c.setObjectData(now.ref, data)) return;
+    final words = _words;
+    final linked = data['id'];
+    _log(switch (now.kind) {
+      PlanObjectKind.unit =>
+        words.logLinkedTable(a.name, now.label ?? '—', linked),
+      PlanObjectKind.type =>
+        words.logLinkedObject(a.name, words.roomWord, linked),
+      PlanObjectKind.symbol =>
+        words.logLinkedObject(a.name, words.barCounterWord, linked),
+    });
+    // The side panel's sections follow the link.
+    if (mounted) setState(() {});
+  }
+
+  /// "Link sections": see [linkSections].
+  void linkAreaSections(Area a) {
+    final n = linkSections(a);
+    _log(_words.logLinkedSections(a.name, n));
+    if (mounted) setState(() {});
   }
 
   /// [zone] of [a], or all of them when null.
@@ -682,7 +732,8 @@ class DemoHomeState extends State<DemoHome> {
         pagePanel: editor.showsLayersAndPage,
         symbolFilter: editor.symbolFilter,
         bar: editor.bar,
-        unitInspectorBuilder: editor == DemoEditor.tables ? _inspector : null,
+        objectInspectorBuilder:
+            editor == DemoEditor.readOnly ? null : _inspector,
         onUnitTap: (n) => _log(_words.logTapped(a.name, n)),
         onLayoutChanged: () => _log(_words.logLayoutChanged(a.name)),
         longPress: longPressMenu
@@ -695,96 +746,134 @@ class DemoHomeState extends State<DemoHome> {
         onSplitRequested: (id) => _split(a, id),
       );
 
+  /// The window decides, not the device: a LayoutBuilder over the whole
+  /// scaffold.
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => LayoutBuilder(
+      builder: (context, box) =>
+          _scaffoldFor(context, docked: box.maxWidth >= kDockedSidePanel));
+
+  Widget _scaffoldFor(BuildContext context, {required bool docked}) {
     final words = _words;
     final a = area;
     final c = a.controller;
+    // The side panel docks beside an editor that keeps the desktop chrome
+    // (1300 - 300 = 1000 logical px, the plan's own breakpoint); below it
+    // the panel is the end drawer and the bar's controls scroll under the
+    // title.
+    final controls = <Widget>[
+      // A field of the host's beside the plan: Enter selects the table
+      // and brings it to the middle of the view.
+      SizedBox(
+        width: 160,
+        child: TextField(
+          key: const Key('find-table'),
+          controller: _search,
+          decoration: InputDecoration(
+              hintText: words.findTable,
+              isDense: true,
+              prefixIcon: const Icon(Icons.search, size: 18)),
+          onTapOutside: (_) {},
+          onEditingComplete: () {},
+          onSubmitted: _find,
+        ),
+      ),
+      const SizedBox(width: 16),
+      SegmentedButton<String>(
+        key: const Key('language-toggle'),
+        showSelectedIcon: false,
+        segments: [
+          for (final code in const ['en', 'de', 'tr'])
+            ButtonSegment(
+                value: code,
+                label: Text(code.toUpperCase(), key: Key('lang-$code'))),
+        ],
+        selected: {Localizations.localeOf(context).languageCode},
+        onSelectionChanged: (s) => widget.onLocale?.call(Locale(s.single)),
+      ),
+      const SizedBox(width: 16),
+      Tooltip(
+        message: words.look,
+        child: SegmentedButton<DemoLook>(
+          key: const Key('look-toggle'),
+          showSelectedIcon: false,
+          segments: [
+            ButtonSegment(
+                value: DemoLook.standard,
+                label:
+                    Text(words.lookStandard, key: const Key('look-standard'))),
+            ButtonSegment(
+                value: DemoLook.pos,
+                label: Text(words.lookPos, key: const Key('look-pos'))),
+          ],
+          selected: {widget.look},
+          onSelectionChanged: (s) => widget.onLook?.call(s.single),
+        ),
+      ),
+      const SizedBox(width: 16),
+      SegmentedButton<int>(
+        key: const Key('area-toggle'),
+        showSelectedIcon: false,
+        segments: [
+          for (var i = 0; i < areas.length; i++)
+            ButtonSegment(
+                value: i, label: Text(areas[i].name, key: Key('area-$i'))),
+        ],
+        selected: {_area},
+        onSelectionChanged: (s) => setArea(s.single),
+      ),
+      const SizedBox(width: 16),
+      ValueListenableBuilder<PlanMode>(
+        valueListenable: c.mode,
+        builder: (_, mode, __) => SegmentedButton<PlanMode>(
+          key: const Key('mode-toggle'),
+          showSelectedIcon: false,
+          segments: [
+            ButtonSegment(
+                value: PlanMode.design,
+                label: Text(words.design, key: const Key('mode-design'))),
+            ButtonSegment(
+                value: PlanMode.service,
+                label: Text(words.service, key: const Key('mode-service'))),
+          ],
+          selected: {mode},
+          onSelectionChanged: (s) => setMode(s.single),
+        ),
+      ),
+      const SizedBox(width: 16),
+    ];
     return Scaffold(
+      key: _scaffold,
       appBar: AppBar(
         title: Text(words.title),
-        actions: [
-          // A field of the host's beside the plan: Enter selects the table
-          // and brings it to the middle of the view.
-          SizedBox(
-            width: 160,
-            child: TextField(
-              key: const Key('find-table'),
-              controller: _search,
-              decoration: InputDecoration(
-                  hintText: words.findTable,
-                  isDense: true,
-                  prefixIcon: const Icon(Icons.search, size: 18)),
-              onTapOutside: (_) {},
-              onEditingComplete: () {},
-              onSubmitted: _find,
-            ),
-          ),
-          const SizedBox(width: 16),
-          SegmentedButton<String>(
-            key: const Key('language-toggle'),
-            showSelectedIcon: false,
-            segments: [
-              for (final code in const ['en', 'de', 'tr'])
-                ButtonSegment(
-                    value: code,
-                    label: Text(code.toUpperCase(), key: Key('lang-$code'))),
-            ],
-            selected: {Localizations.localeOf(context).languageCode},
-            onSelectionChanged: (s) => widget.onLocale?.call(Locale(s.single)),
-          ),
-          const SizedBox(width: 16),
-          Tooltip(
-            message: words.look,
-            child: SegmentedButton<DemoLook>(
-              key: const Key('look-toggle'),
-              showSelectedIcon: false,
-              segments: [
-                ButtonSegment(
-                    value: DemoLook.standard,
-                    label: Text(words.lookStandard,
-                        key: const Key('look-standard'))),
-                ButtonSegment(
-                    value: DemoLook.pos,
-                    label: Text(words.lookPos, key: const Key('look-pos'))),
+        actions: docked
+            ? controls
+            : [
+                IconButton(
+                    key: const Key('side-panel-button'),
+                    tooltip: words.hostChoices,
+                    icon: const Icon(Icons.tune),
+                    onPressed: () => _scaffold.currentState?.openEndDrawer()),
               ],
-              selected: {widget.look},
-              onSelectionChanged: (s) => widget.onLook?.call(s.single),
-            ),
-          ),
-          const SizedBox(width: 16),
-          SegmentedButton<int>(
-            key: const Key('area-toggle'),
-            showSelectedIcon: false,
-            segments: [
-              for (var i = 0; i < areas.length; i++)
-                ButtonSegment(
-                    value: i, label: Text(areas[i].name, key: Key('area-$i'))),
-            ],
-            selected: {_area},
-            onSelectionChanged: (s) => setArea(s.single),
-          ),
-          const SizedBox(width: 16),
-          ValueListenableBuilder<PlanMode>(
-            valueListenable: c.mode,
-            builder: (_, mode, __) => SegmentedButton<PlanMode>(
-              key: const Key('mode-toggle'),
-              showSelectedIcon: false,
-              segments: [
-                ButtonSegment(
-                    value: PlanMode.design,
-                    label: Text(words.design, key: const Key('mode-design'))),
-                ButtonSegment(
-                    value: PlanMode.service,
-                    label: Text(words.service, key: const Key('mode-service'))),
-              ],
-              selected: {mode},
-              onSelectionChanged: (s) => setMode(s.single),
-            ),
-          ),
-          const SizedBox(width: 16),
-        ],
+        bottom: docked
+            ? null
+            : PreferredSize(
+                preferredSize: const Size.fromHeight(52),
+                child: SingleChildScrollView(
+                  key: const Key('app-controls'),
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: Row(children: controls),
+                ),
+              ),
       ),
+      endDrawer: docked
+          ? null
+          : Drawer(
+              key: const Key('side-panel-drawer'),
+              width: 320,
+              child: SafeArea(child: DemoSidePanel(home: this)),
+            ),
       body: Row(children: [
         Expanded(
           child: Theme(
@@ -814,7 +903,7 @@ class DemoHomeState extends State<DemoHome> {
             ]),
           ),
         ),
-        SizedBox(width: 300, child: DemoSidePanel(home: this)),
+        if (docked) SizedBox(width: 300, child: DemoSidePanel(home: this)),
       ]),
     );
   }

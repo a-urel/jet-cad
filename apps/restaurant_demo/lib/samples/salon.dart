@@ -8,7 +8,10 @@
 // (14850 x 10500 mm), so the build sets an A3 sheet at 1:50 (21000 x 14850
 // mm) over the same centre: the scale, the walls and every placement stay
 // as they are, and only the paper grows. Numbered in build order: tables
-// 1-3, 4-5, the booths 6-7, the stools 8-11.
+// 1-3, 4-5, the booths 6-7, the stools 8-11. Three rooms divide the floor
+// (spec D14): the Salon, the VIP corner in the north-east (the booths 6 and
+// 7) and the Garden outside the south wall (tables 2 and 3, which stand there
+// rather than in the room; the round tables would not fit the sheet).
 
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show KitWords;
@@ -29,8 +32,8 @@ void buildSalon(DraftDocument document, KitWords words) {
   _room(document);
   final p = TablePlacer(document);
   p.place('restaurant.table.rect.four', 2500, 7600);
-  p.place('restaurant.table.rect.four', 5000, 7600);
-  p.place('restaurant.table.rect.four', 7500, 7600);
+  p.place('restaurant.table.rect.four', 4000, kGardenTableY);
+  p.place('restaurant.table.rect.four', 10500, kGardenTableY);
   p.place('restaurant.table.round.six', 2700, 4300);
   p.place('restaurant.table.round.six', 5700, 4300);
   p.place('restaurant.booth.four', 11000, 8300);
@@ -42,6 +45,21 @@ void buildSalon(DraftDocument document, KitWords words) {
   p.place('restaurant.bar.counter', 8900, 1800);
   p.place('restaurant.host.stand', 13600, 1300);
 }
+
+/// The VIP corner: bounded by the north and east walls, a separator from
+/// the north wall down at [kVipWest] and one from there to the east wall at
+/// [kVipSouth]. It holds the booths 6 and 7 (x 11000, y 8300 and 5600).
+const double kVipWest = 9800, kVipSouth = 4300;
+
+/// The Garden, outside the south wall: bounded by it and a separator at
+/// [kGardenSouth] (the room's wall stands at [kRoomBottom]) and one at each
+/// side wall's line. The sheet is A3 centred on the origin, whose lowest
+/// edge is 1925 mm under the room's south wall centre line.
+const double kGardenSouth = -2100;
+
+/// The y of the Garden's tables (2 and 3), midway between the south wall's
+/// outer face and [kGardenSouth].
+const double kGardenTableY = -1250;
 
 /// The Salon's sheet: A3 landscape at 1:50, centred on the world origin as
 /// the default A4 sheet is, so [kSheetMin] still measures the placements
@@ -74,8 +92,14 @@ void _room(DraftDocument doc) {
       switch (c) {
         final WallParams w => SetComponentCommand<WallParams>(h, w),
         final OpeningParams o => SetComponentCommand<OpeningParams>(h, o),
+        final SeparatorParams s => SetComponentCommand<SeparatorParams>(h, s),
+        final RoomParams r => SetComponentCommand<RoomParams>(h, r),
         _ => throw ArgumentError.value(c),
       },
+      // A separator and a room are objects of the drawing layer, as the
+      // tools add them.
+      if (c is SeparatorParams || c is RoomParams)
+        SetComponentCommand<ObjectLayer>(h, ObjectLayer(drawingLayer(doc))),
     ], label: label));
     return h;
   }
@@ -92,4 +116,25 @@ void _room(DraftDocument doc) {
   // The north wall runs east to west: positions are from its east end.
   group(OpeningParams(north, 3500, 1800, OpeningKind.window), 'Add window');
   group(OpeningParams(north, 9500, 1800, OpeningKind.window), 'Add window');
+  _sections(group, x0, x1, y0, y1);
+}
+
+/// The Salon (the whole floor but the two below, seeded west of the VIP
+/// corner), the VIP corner and the Garden, as rooms the tools would make.
+void _sections(Handle Function(Component, String) group, double x0, double x1,
+    double y0, double y1) {
+  Handle sep(double sx, double sy, double ex, double ey) =>
+      group(SeparatorParams(sx, sy, ex, ey), 'Add separator');
+  final vx = kSheetMin.x + kVipWest, vy = kSheetMin.y + kVipSouth;
+  sep(vx, y1, vx, vy);
+  sep(vx, vy, x1, vy);
+  final gy = kSheetMin.y + kGardenSouth;
+  sep(x0, gy, x1, gy);
+  sep(x1, y0, x1, gy);
+  sep(x0, y0, x0, gy);
+  group(
+      RoomParams(kSheetMin.x + 5000, kSheetMin.y + 6000, 'Salon'), 'Add room');
+  group(RoomParams(kSheetMin.x + 12500, kSheetMin.y + 7000, 'VIP'), 'Add room');
+  group(
+      RoomParams(kSheetMin.x + 7000, kSheetMin.y - 1100, 'Garden'), 'Add room');
 }

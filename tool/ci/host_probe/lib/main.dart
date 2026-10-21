@@ -133,6 +133,93 @@ bool linkTable(PlanController c, String label, String posId) {
 Set<String> unlinked(PlanController c, Set<String> posIds) =>
     posIds.difference(labelsByPosId(c).keys.toSet());
 
+/// The plan's objects of any kind (a table, a placed symbol, a room) by the
+/// POS id they are linked by.
+Map<String, PlanObjectRef> objectsByPosId(PlanController c) => {
+      for (final detail in c.objectDetails)
+        if (detail.data['id'] case final id?) id: detail.ref,
+    };
+
+/// Links the object [ref] to the POS record [posId]. The object's other data
+/// is kept. False when [ref] names no object, or the object is locked.
+bool linkObject(PlanController c, PlanObjectRef ref, String posId) {
+  final detail = c.objectDetailOf(ref);
+  if (detail == null) return false;
+  return c.setObjectData(ref, {...detail.data, 'id': posId});
+}
+
+/// The section each linked table stands in, by the table's POS id: the
+/// section's own POS id, or its name when it is not linked.
+Map<String, String?> sectionsByPosId(PlanController c) => {
+      for (final detail in c.unitDetails)
+        if (detail.data['id'] case final id?)
+          id: detail.section?.data['id'] ?? detail.section?.label,
+    };
+
+/// Writes a table's section to the POS's database whenever the plan moves
+/// the table into another section, or the section's walls move.
+StreamSubscription<PlanSectionChange> watchSections(
+  PlanController c,
+  void Function(String posTableId, String? section) write,
+) =>
+    c.sectionChanges.listen((change) {
+      final posIdOf = {
+        for (final MapEntry(:key, :value) in labelsByPosId(c).entries)
+          value: key,
+      };
+      for (final MapEntry(key: label, value: section)
+          in change.byLabel.entries) {
+        if (posIdOf[label] case final id?) write(id, section?.label);
+      }
+    });
+
+/// The plan's sections by name, whether or not they carry data: a room's own
+/// name is its label, so a host can find "VIP" without a table in it.
+Map<String, PlanObjectRef> sectionRefsByName(PlanController c) => {
+      for (final section in c.sectionDetails)
+        if (section.label case final name?) name: section.ref,
+    };
+
+/// A combo over the POS's records for the one selected object: choosing one
+/// writes its id on the object, the object's other data kept.
+Widget recordPicker(
+  PlanController c,
+  PlanObjectDetail object,
+  List<String> records,
+) =>
+    DropdownButton<String>(
+      value: records.contains(object.data['id']) ? object.data['id'] : null,
+      hint: const Text('Record'),
+      items: [
+        for (final record in records)
+          DropdownMenuItem(value: record, child: Text(record)),
+      ],
+      onChanged: (id) {
+        if (id != null) c.setObjectData(object.ref, {...object.data, 'id': id});
+      },
+    );
+
+/// An editor with both inspectors: the units go to the unit inspector, every
+/// other object (a room, a placed symbol) to the object inspector.
+Widget inspectedEditor(PlanController c, List<String> records) => PlanEditor(
+      controller: c,
+      unitInspectorBuilder: (context, unit) => Text('${unit.unit.label}'),
+      objectInspectorBuilder: (context, object) =>
+          recordPicker(c, object, records),
+    );
+
+/// An editor whose design layout is the desktop's at any width, as in 0.8.x.
+Widget desktopEditor(PlanController c) =>
+    PlanEditor(controller: c, layout: PlanEditorLayout.desktop);
+
+/// An editor that docks its columns from 900 logical pixels and uses the
+/// tablet layout from 500, with the POS's orders beside the service.
+Widget editorWithOrders(PlanController c, Widget orders) => PlanEditor(
+      controller: c,
+      breakpoints: const PlanLayoutBreakpoints(tablet: 500, desktop: 900),
+      serviceSidePanel: orders,
+    );
+
 /// Draws the POS's states. The maps are the whole truth: the controller's
 /// own are replaced at each call. A group's status fills its tables over
 /// their own.

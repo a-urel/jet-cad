@@ -387,6 +387,23 @@ with 0.7.0 (below).
 
 ## In flight
 
+- **The POS-host sub-project** (host data on any object, the inspector for
+  any object, sections, phone and tablet layout; spec
+  [2026-10-20-plan-host-objects-responsive-design.md](docs/superpowers/specs/2026-10-20-plan-host-objects-responsive-design.md),
+  plan [2026-10-20-plan-host-objects-responsive.md](docs/superpowers/plans/2026-10-20-plan-host-objects-responsive.md)):
+  branch `feat/pos-host` (worktree `.claude/worktrees/pos-host`), **done on
+  the branch, not merged**. Results, rulings R1-R8, the deferred minors and
+  the proposed versions:
+  [2026-10-20-plan-host-objects-results.md](docs/superpowers/notes/2026-10-20-plan-host-objects-results.md).
+  A final fix wave (`8d015200`) fixed a 0.8.x bug the phone screenshot
+  showed: the first fit framed the page a plan had before a host build
+  (every layout). No reviewer sessions (the human's rule): the controller
+  self-reviewed every task with its own mutation; the ledger is archived in
+  [docs/superpowers/ledgers/2026-10-20-plan-host-objects-responsive/](docs/superpowers/ledgers/2026-10-20-plan-host-objects-responsive/).
+  Resume: the human's merge word, then the release of the proposed versions
+  (`jet_cad_2d_kit` 0.1.1, `jet_cad_2d_kit_architecture` 0.1.1,
+  `jet_cad_2d_plan` 0.9.0, floors raised), then monepro's integration.
+
 - **The kit architecture** (umbrella spec
   [2026-10-13-kit-architecture-design.md](docs/superpowers/specs/2026-10-13-kit-architecture-design.md),
   approved by the human): a ground-up rewrite with no backward
@@ -674,6 +691,8 @@ values), and the render package's paint micro-benchmark rig (skipped,
 run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 
 ## Resume here
+
+**POS-host sub-project (2026-10-20): done on `feat/pos-host`, not merged.** Next: the human's merge word, then the release of the versions proposed in the [results note](docs/superpowers/notes/2026-10-20-plan-host-objects-results.md), then monepro's integration.
 
 **Done 2026-10-19: the kit architecture.** Its sub-projects are all merged and pushed: sub-project 1
 (`jet_cad_2d_kit`; PR #11 `bc705be`, PR #12 `27244bf`), 2a (the plan library

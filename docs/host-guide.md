@@ -30,8 +30,11 @@ the dependency, [2](#2-fonts) fonts, [3](#3-languages) languages,
 permissions, [8](#8-a-host-kit-your-own-symbols) your own symbols,
 [9](#9-two-views-of-one-floor) two views, [10](#10-themes-and-your-own-widgets)
 themes, [11](#11-touch), [12](#12-from-jet_cad_floor_plan) the move from the
-old planner, and [13](#13-what-a-host-must-never-assume) what a host must
-never assume.
+old planner, [13](#13-what-a-host-must-never-assume) what a host must
+never assume, and [14](#14-phones-and-tablets) phones and tablets. Inside the
+POS section, [6.10](#610-linking-any-object) links any object,
+[6.11](#611-sections) reads sections and [6.12](#612-the-inspector) builds
+the inspectors.
 
 ## 1. The dependency
 
@@ -901,6 +904,182 @@ Widget exportButton(PlanController c, VoidCallback onExport) =>
   to `deleteSelection()`. `kFileChords` lists the file commands' chords for a
   host that binds them itself.
 
+### 6.10 Linking any object
+
+A table is not the only thing a POS links. A room is a section of the floor
+(a terrace, a bar), a placed symbol may stand for a till or a printer, and the
+host wants its own record on each. Host data is not limited to units: every
+**root-level object** of the plan can carry it, a placed unit, a placed symbol
+or an object of a kit's type (a room). The host names such an object by a
+`PlanObjectRef`, an opaque reference read from the plan, never made by the
+host.
+
+```dart
+/// The plan's objects of any kind (a table, a placed symbol, a room) by the
+/// POS id they are linked by.
+Map<String, PlanObjectRef> objectsByPosId(PlanController c) => {
+      for (final detail in c.objectDetails)
+        if (detail.data['id'] case final id?) id: detail.ref,
+    };
+
+/// Links the object [ref] to the POS record [posId]. The object's other data
+/// is kept. False when [ref] names no object, or the object is locked.
+bool linkObject(PlanController c, PlanObjectRef ref, String posId) {
+  final detail = c.objectDetailOf(ref);
+  if (detail == null) return false;
+  return c.setObjectData(ref, {...detail.data, 'id': posId});
+}
+```
+
+- `objectDetails` lists the objects that carry data, in draw order;
+  `objectDetailOf(ref)` reads one object whether it carries data or not. A
+  `PlanObjectDetail` has its `ref`, its `kind` (`PlanObjectKind.unit`,
+  `symbol` or `type`), the `typeId` of a kit's type, the `symbolKey`, a
+  `label` and the `data`. The `label` is a unit's label; for an object of a
+  kit's type, the object's own name when the kit declares one (a room's
+  "VIP"), else the type's title word ("Room"); null for a placed symbol.
+- `setObjectData(ref, data)` and `setObjectsData({ref: data})` write what
+  `setUnitData` writes, with the same limits, errors and one undoable step.
+  They return false, changing nothing, when the reference names no object or
+  the object sits under a lock. A unit's data is one and the same either way:
+  `setUnitData` and `setObjectData` read each other's writes, and a plan saved
+  before objects carried data opens with its unit data intact.
+- A `PlanObjectRef` is **valid for its plan only**: for the plan it was read
+  from, and for that plan saved and loaded again. After `newPlan`, or a `load`
+  of another plan, drop every reference you kept and read them again; the
+  controller cannot tell an old reference from a new one that happens to name
+  the same object. A reference whose object was deleted names nothing, and the
+  controller answers it with null or false.
+
+### 6.11 Sections
+
+A **section** is the area of the floor a table stands in: the terrace, the bar,
+the upstairs room. The plan finds it for every unit:
+`PlanUnitDetail.section` is the `PlanObjectDetail` of the section (its `label`
+is the room's name, its `data` the host's link), or null when the table stands
+in none.
+
+- **What a section is.** A *room* of the architecture kit: the area its walls
+  or separators enclose. A kit may declare other area objects, and they count
+  the same. Walls that are frozen (locked) still bound an area.
+- **The rule.** The unit's **centre** decides. Among the sections whose
+  outline holds the centre, the one with the **smallest area** wins (a booth
+  room inside a hall is the booth's). A centre on a boundary counts as inside.
+  Two areas of equal size (within the tolerance) are a tie, and the tie goes
+  to the lower, older object, so the answer never flips.
+
+```dart
+/// The section each linked table stands in, by the table's POS id: the
+/// section's own POS id, or its name when it is not linked.
+Map<String, String?> sectionsByPosId(PlanController c) => {
+      for (final detail in c.unitDetails)
+        if (detail.data['id'] case final id?)
+          id: detail.section?.data['id'] ?? detail.section?.label,
+    };
+
+/// Writes a table's section to the POS's database whenever the plan moves
+/// the table into another section, or the section's walls move.
+StreamSubscription<PlanSectionChange> watchSections(
+  PlanController c,
+  void Function(String posTableId, String? section) write,
+) =>
+    c.sectionChanges.listen((change) {
+      final posIdOf = {
+        for (final MapEntry(:key, :value) in labelsByPosId(c).entries)
+          value: key,
+      };
+      for (final MapEntry(key: label, value: section)
+          in change.byLabel.entries) {
+        if (posIdOf[label] case final id?) write(id, section?.label);
+      }
+    });
+```
+
+To list the sections themselves, not the tables in them, read
+`sectionDetails`:
+
+```dart
+/// The plan's sections by name, whether or not they carry data: a room's own
+/// name is its label, so a host can find "VIP" without a table in it.
+Map<String, PlanObjectRef> sectionRefsByName(PlanController c) => {
+      for (final section in c.sectionDetails)
+        if (section.label case final name?) name: section.ref,
+    };
+```
+
+- `sectionDetails` lists every object whose kit type declares an area, in draw
+  order, whether it carries data or not (`objectDetails` lists only the
+  objects that do). A room whose walls are open right now is still listed. It
+  is how a host links its sections: match each `label` to a record of its own,
+  then `setObjectData`.
+- A room is selected by tapping its label; tapping its floor picks nothing.
+  The host never needs to select a room to link it: it holds the `ref` from
+  `sectionDetails`.
+- `sectionChanges` sends one `PlanSectionChange` after every design edit, undo
+  or redo that moves some table's section, and in service after a layout move;
+  `byLabel` holds only the tables that changed, each with its new section
+  (null: none any more). A table added or removed is not a section change:
+  `unitChanges` reports it, and its detail already carries the section. A
+  `load` or `newPlan` reports nothing: read `sectionsByPosId` once afterwards.
+- A change of a room's **data alone** (a `setObjectData` on the room) reports
+  no section change: no table moved between rooms. Read the tables' sections
+  again yourself after you relink a room.
+- `unitChanges` is unchanged: a section change alone is not a
+  `PlanUnitChanged`.
+
+### 6.12 The inspector
+
+The editor's right column shows the property panel, and under it the host's
+own widget for the selected object, so the staff link an object to a record
+without leaving the plan. There are two builders, and the editor routes the
+selection by one rule:
+
+- `unitInspectorBuilder` takes a placed **unit**, with its `PlanUnitDetail`.
+- `objectInspectorBuilder` takes **any one selected root object** (a unit, a
+  placed symbol, a room), with its `PlanObjectDetail`.
+- **The rule.** A selected unit goes to `unitInspectorBuilder` when it is
+  given, else to `objectInspectorBuilder`. Every other object goes to
+  `objectInspectorBuilder`. Give both and the units keep their own, with the
+  units' fields; give only the object one and it serves everything.
+
+Both are built for exactly one selected object that is not locked, in design
+mode only, when the selection becomes it and at each change of the plan; a
+null from a builder shows nothing. A combo over the host's records is the
+usual body, writing the record's id on the object and keeping the object's
+other data, as 6.2 does:
+
+```dart
+/// A combo over the POS's records for the one selected object: choosing one
+/// writes its id on the object, the object's other data kept.
+Widget recordPicker(
+  PlanController c,
+  PlanObjectDetail object,
+  List<String> records,
+) =>
+    DropdownButton<String>(
+      value: records.contains(object.data['id']) ? object.data['id'] : null,
+      hint: const Text('Record'),
+      items: [
+        for (final record in records)
+          DropdownMenuItem(value: record, child: Text(record)),
+      ],
+      onChanged: (id) {
+        if (id != null) c.setObjectData(object.ref, {...object.data, 'id': id});
+      },
+    );
+
+/// An editor with both inspectors: the units go to the unit inspector, every
+/// other object (a room, a placed symbol) to the object inspector.
+Widget inspectedEditor(PlanController c, List<String> records) => PlanEditor(
+      controller: c,
+      unitInspectorBuilder: (context, unit) => Text('${unit.unit.label}'),
+      objectInspectorBuilder: (context, object) =>
+          recordPicker(c, object, records),
+    );
+```
+
+Hiding the property panel (`propertyPanel: false`) hides the inspectors too.
+
 ## 7. Permissions
 
 `PlanPermissions` decides what the editor offers its user: which tools, and
@@ -1220,3 +1399,64 @@ Not carried over, on purpose:
   show the design canvas once.
 - **A disposed controller.** Widgets do not dispose a controller they were
   given; the host disposes it, after the widgets that show it are gone.
+
+## 14. Phones and tablets
+
+The design mode follows the width of the **editor itself**, not the device's:
+
+| Editor width | Layout | Shape |
+| --- | --- | --- |
+| below 600 | `PlanEditorLayout.phone` | no docked column |
+| 600 to below 1000 | `PlanEditorLayout.tablet` | a docked icon-only tool strip |
+| 1000 and up | `PlanEditorLayout.desktop` | both columns docked, as always |
+
+- **The drawers.** On a phone the bar's left button (a menu icon) opens the
+  tools and symbols over the plan, and its right button (a tune icon) the
+  properties, layers and page. A tablet docks the tool strip, with a symbols
+  icon at its foot that opens the symbols as a drawer, and keeps the right
+  button. One drawer is open at a time. A tap on the plan, the same button or
+  **Escape** closes it (Escape is left to a text field that has the focus).
+  Opening a drawer never moves the camera.
+- **A pick closes the left drawer.** Choosing a tool or a symbol in the left
+  drawer closes it, so the plan is in front again to place the pick.
+- **A double tap ends a chain.** A phone has no Enter key, so a quick second
+  tap at the same spot ends a wall or polyline chain as Enter does: the first
+  tap of the pair is the chain's last point and the second adds nothing.
+  Picking another tool still ends it too. A mouse double click keeps meaning
+  two clicks; a host's help text can mention the gesture.
+- **A behaviour change from 0.8.x.** A `PlanEditor` narrower than 1000 px used
+  to keep the desktop columns; it now gets the tablet or phone layout. A host
+  that wants the desktop chrome at any width passes
+  `layout: PlanEditorLayout.desktop`, which forces one layout whatever the
+  width:
+
+```dart
+/// An editor whose design layout is the desktop's at any width, as in 0.8.x.
+Widget desktopEditor(PlanController c) =>
+    PlanEditor(controller: c, layout: PlanEditorLayout.desktop);
+```
+
+- **The breakpoints** are the host's to move, `PlanLayoutBreakpoints(tablet:,
+  desktop:)`, and are read against the editor's own width, so an editor in a
+  split view gets the layout of its pane. The service side panel is in the same
+  block:
+
+```dart
+/// An editor that docks its columns from 900 logical pixels and uses the
+/// tablet layout from 500, with the POS's orders beside the service.
+Widget editorWithOrders(PlanController c, Widget orders) => PlanEditor(
+      controller: c,
+      breakpoints: const PlanLayoutBreakpoints(tablet: 500, desktop: 900),
+      serviceSidePanel: orders,
+    );
+```
+
+- **The service side panel.** `serviceSidePanel` is the host's panel beside the
+  plan in service (orders, a table's detail). On a desktop layout it is docked
+  on the right, 320 logical pixels wide. On a phone or a tablet it opens as a
+  drawer over the plan from the **last button of the service bar**. Without a
+  panel there is no button and no column. With `serviceBar.visible` false
+  there is **no button** on a phone or a tablet and the panel cannot be
+  opened: keep the bar, or show your own panel. `PlanServiceView` takes the
+  same `serviceSidePanel`, `breakpoints` and `layout`. The service bar scrolls
+  instead of overflowing on a narrow screen.

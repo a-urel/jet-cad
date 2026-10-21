@@ -25,6 +25,7 @@ import '../export/registries.dart';
 import '../l10n/locale_scope.dart';
 import '../l10n/number_text.dart';
 import '../l10n/strings.dart';
+import '../objects/object_detail.dart';
 import '../panels/frame_safe_relay.dart';
 import '../panels/plan_layer_panel.dart';
 import '../panels/plan_page_panel.dart';
@@ -41,6 +42,8 @@ import '../symbols/plan_symbol.dart';
 import '../theme/plan_theme.dart';
 import '../tools/generic_tools.dart';
 import '../units/unit_detail.dart';
+import 'editor_layout.dart';
+import 'object_inspector.dart';
 import 'plan_editor_bar.dart';
 import 'plan_tool_palette.dart';
 import 'unit_inspector.dart';
@@ -96,6 +99,7 @@ class PlanEditor extends StatefulWidget {
     this.autofocus = true,
     this.theme,
     this.unitInspectorBuilder,
+    this.objectInspectorBuilder,
     this.serviceBar = const PlanServiceBar(),
     this.onUnitTap,
     this.onUnitDoubleTap,
@@ -113,9 +117,34 @@ class PlanEditor extends StatefulWidget {
     this.unitOverlayBuilder,
     this.unitOverlayLayout = const PlanOverlayLayout(),
     this.unitOverlayModes = const {PlanMode.service},
+    this.breakpoints = const PlanLayoutBreakpoints(),
+    this.layout,
+    this.serviceSidePanel,
   });
 
   final PlanController controller;
+
+  /// The widths at which the design mode changes layout (spec D4): the
+  /// editor's own width decides, not the device's.
+  final PlanLayoutBreakpoints breakpoints;
+
+  /// Forces one layout whatever the width; null: [breakpoints] decide. On a
+  /// phone or a tablet the left and right columns are drawers over the plan
+  /// (one at a time; a tap on the plan, the same button or Escape closes
+  /// it) and opening one never moves the camera.
+  final PlanEditorLayout? layout;
+
+  /// The host's panel beside the plan in service mode (orders, a table's
+  /// detail): docked on the right, 320 logical pixels wide
+  /// (`Key('service-side-panel')`), on a desktop layout; behind the service
+  /// bar's last button (`Key('service-right-button')`) as a drawer over the
+  /// plan on a phone or a tablet. Null: no panel and no button.
+  ///
+  /// The button is in the service bar: with `serviceBar.visible` false on a
+  /// phone or a tablet there is no button and the panel cannot be opened (a
+  /// host that hides the bar there has no way to open it; keep the bar, or
+  /// show its own panel).
+  final Widget? serviceSidePanel;
 
   /// Whether the left column offers the tool palette.
   final bool toolPalette;
@@ -141,6 +170,21 @@ class PlanEditor extends StatefulWidget {
   /// here, with `PlanController.setUnitData`.
   final Widget? Function(BuildContext context, PlanUnitDetail unit)?
       unitInspectorBuilder;
+
+  /// The host's inspector for any one selected object (a unit, a placed
+  /// symbol, an object of a kit's type such as a room): built under the
+  /// property panel, in design mode, for exactly one selected root object
+  /// that is not locked, with its [PlanObjectDetail] as
+  /// `PlanController.objectDetailOf` reads it; null from it shows nothing.
+  /// When [unitInspectorBuilder] is also given it keeps the units and this
+  /// gets every other object; with only this one, it gets units too. Built
+  /// when the selection becomes such an object and at each change of the
+  /// plan; never on pan, zoom or hover. Hidden with the property panel. A
+  /// host links the object to its own record here, with
+  /// `PlanController.setObjectData`. A unit's section is read from
+  /// `PlanController.unitDetails`.
+  final Widget? Function(BuildContext context, PlanObjectDetail object)?
+      objectInspectorBuilder;
 
   /// Whether the Layers section shows.
   final bool layerPanel;
@@ -261,6 +305,10 @@ class _PlanEditorState extends State<PlanEditor> {
 
   _LeftTab _leftTab = _LeftTab.tools;
 
+  /// The layout last built and the drawer open in it (phone, tablet).
+  PlanEditorLayout? _builtLayout;
+  PlanDrawerSide? _drawer;
+
   /// The document the relays and flags below are built over.
   Object? _bound;
   FrameSafeRelay? _status;
@@ -301,7 +349,25 @@ class _PlanEditorState extends State<PlanEditor> {
   void initState() {
     super.initState();
     widget.controller.addListener(_onController);
+    _listenPicks(widget.controller);
     _bind();
+  }
+
+  void _listenPicks(PlanController c) {
+    c.activeTool.addListener(_onPick);
+    c.armedSymbol.addListener(_onPick);
+  }
+
+  void _unlistenPicks(PlanController c) {
+    c.activeTool.removeListener(_onPick);
+    c.armedSymbol.removeListener(_onPick);
+  }
+
+  /// A tool or a symbol picked while the left drawer is open (phone and
+  /// tablet) closes it, so the next touch on the canvas draws or places.
+  void _onPick() {
+    if (_drawer != PlanDrawerSide.left || !mounted) return;
+    setState(() => _drawer = null);
   }
 
   @override
@@ -319,7 +385,9 @@ class _PlanEditorState extends State<PlanEditor> {
       // The new controller's camera is its own (floor_plan_view.dart:568).
       _laidOutMode = null;
       oldWidget.controller.removeListener(_onController);
+      _unlistenPicks(oldWidget.controller);
       widget.controller.addListener(_onController);
+      _listenPicks(widget.controller);
       _flows.dispose();
       _flows = _flowsFor(widget.controller);
       _bind();
@@ -330,6 +398,7 @@ class _PlanEditorState extends State<PlanEditor> {
   @override
   void dispose() {
     widget.controller.removeListener(_onController);
+    _unlistenPicks(widget.controller);
     _flows.dispose();
     _unbind();
     _symbolQuery.dispose();
@@ -543,8 +612,13 @@ class _PlanEditorState extends State<PlanEditor> {
   /// and the status line, flexible; the read-outs; the host's trailing
   /// widgets. The host's widgets sit under the shortcut guard, never in
   /// the toolbar's `ExcludeFocus`.
+  ///
+  /// [first] and [last] are the compact layouts' drawer buttons, the bar's
+  /// first and last items. With [phone] the status line and the read-outs
+  /// are left out and the toolbar scrolls, so the bar fits 320 px.
   Widget _topBar(ColorScheme scheme, PlanStrings strings,
-      List<_BarCommand> file, List<_BarCommand> edit) {
+      List<_BarCommand> file, List<_BarCommand> edit,
+      {Widget? first, Widget? last, bool phone = false}) {
     final c = widget.controller;
     final bar = widget.bar;
     final toolbar = listEquals(bar.actions, PlanEditorAction.values)
@@ -573,51 +647,70 @@ class _PlanEditorState extends State<PlanEditor> {
       if (readOuts.isNotEmpty) readOuts.add(const SizedBox(width: 16));
       readOuts.add(readOut);
     }
-    final row = Row(
-      children: [
-        ...bar.leading,
-        if (toolbar != null) ...[toolbar, const SizedBox(width: 16)],
-        Expanded(
-          child: LayoutBuilder(builder: (_, constraints) {
-            // In a narrow window the 16 px before the read-outs shrinks
-            // with the free width, down to 0, so it never overflows.
-            final tail = math.min(16.0, constraints.maxWidth);
-            return Row(
-              children: [
-                ValueListenableBuilder<bool>(
-                  valueListenable: c.damaged,
-                  builder: (_, damaged, __) => damaged
-                      ? Padding(
-                          padding: const EdgeInsets.only(right: 8),
-                          child: Tooltip(
-                            message: strings.planDamaged,
-                            child: Icon(Icons.warning_amber,
-                                key: const Key('plan-damaged'),
-                                size: 18,
-                                color: scheme.error),
-                          ),
-                        )
-                      : const SizedBox.shrink(),
-                ),
-                Expanded(
-                  child: ListenableBuilder(
-                    listenable: _status!,
-                    builder: (_, __) => Text(_statusLine(strings),
-                        key: const Key('status-text'),
-                        maxLines: 1,
-                        softWrap: false,
-                        overflow: TextOverflow.ellipsis),
-                  ),
-                ),
-                SizedBox(width: tail),
-              ],
-            );
-          }),
-        ),
-        ...readOuts,
-        ...bar.trailing,
-      ],
+    final damagedIcon = ValueListenableBuilder<bool>(
+      valueListenable: c.damaged,
+      builder: (_, damaged, __) => damaged
+          ? Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: Tooltip(
+                message: strings.planDamaged,
+                child: Icon(Icons.warning_amber,
+                    key: const Key('plan-damaged'),
+                    size: 18,
+                    color: scheme.error),
+              ),
+            )
+          : const SizedBox.shrink(),
     );
+    final row = phone
+        ? Row(
+            children: [
+              if (first != null) first,
+              ...bar.leading,
+              damagedIcon,
+              Expanded(
+                child: toolbar == null
+                    ? const SizedBox.shrink()
+                    : SingleChildScrollView(
+                        scrollDirection: Axis.horizontal, child: toolbar),
+              ),
+              ...bar.trailing,
+              if (last != null) last,
+            ],
+          )
+        : Row(
+            children: [
+              if (first != null) first,
+              ...bar.leading,
+              if (toolbar != null) ...[toolbar, const SizedBox(width: 16)],
+              Expanded(
+                child: LayoutBuilder(builder: (_, constraints) {
+                  // In a narrow window the 16 px before the read-outs shrinks
+                  // with the free width, down to 0, so it never overflows.
+                  final tail = math.min(16.0, constraints.maxWidth);
+                  return Row(
+                    children: [
+                      damagedIcon,
+                      Expanded(
+                        child: ListenableBuilder(
+                          listenable: _status!,
+                          builder: (_, __) => Text(_statusLine(strings),
+                              key: const Key('status-text'),
+                              maxLines: 1,
+                              softWrap: false,
+                              overflow: TextOverflow.ellipsis),
+                        ),
+                      ),
+                      SizedBox(width: tail),
+                    ],
+                  );
+                }),
+              ),
+              ...readOuts,
+              ...bar.trailing,
+              if (last != null) last,
+            ],
+          );
     return Container(
       key: const Key('chrome-top'),
       height: 44,
@@ -715,6 +808,9 @@ class _PlanEditorState extends State<PlanEditor> {
 
   PlanServiceView _serviceView() => _service ??= PlanServiceView(
         controller: widget.controller,
+        breakpoints: widget.breakpoints,
+        layout: widget.layout,
+        serviceSidePanel: widget.serviceSidePanel,
         bar: widget.serviceBar,
         onUnitTap: widget.onUnitTap,
         onUnitDoubleTap: widget.onUnitDoubleTap,
@@ -912,13 +1008,175 @@ class _PlanEditorState extends State<PlanEditor> {
     final c = widget.controller;
     final mode = c.mode.value;
     _shown = mode;
+    // Design's drawer does not outlive design (SL4).
+    if (mode == PlanMode.service) _drawer = null;
     _measureAfterFrame(mode, c.activeDocument);
     _keepPlanInPlace();
     return mode == PlanMode.service ? _serviceView() : _editor(context);
   }
 
-  /// 2a's editor: the shortcuts, the bar, the columns and the canvas.
+  /// The design mode in the layout the editor's width (or `layout`) gives.
+  /// Desktop is 2a's docked tree, unchanged; phone and tablet are in
+  /// editor_layout.dart's terms (spec D1-D5).
   Widget _editor(BuildContext context) {
+    final forced = widget.layout;
+    if (forced == PlanEditorLayout.desktop) return _docked(context);
+    return LayoutBuilder(builder: (context, constraints) {
+      final layout =
+          forced ?? widget.breakpoints.layoutFor(constraints.maxWidth);
+      // A layout change closes the drawer (EL6); the selection is not
+      // touched.
+      if (layout != _builtLayout) {
+        _builtLayout = layout;
+        _drawer = null;
+      }
+      return layout == PlanEditorLayout.desktop
+          ? _docked(context)
+          : _compact(context, layout);
+    });
+  }
+
+  void _toggleDrawer(PlanDrawerSide side) =>
+      setState(() => _drawer = _drawer == side ? null : side);
+
+  bool get _rightShown =>
+      widget.propertyPanel || widget.layerPanel || widget.pagePanel;
+
+  /// The phone's and the tablet's editor: the bar, the canvas under the
+  /// drawers, and on a tablet the tool strip docked at the left.
+  Widget _compact(BuildContext context, PlanEditorLayout layout) {
+    final c = widget.controller;
+    final scheme = Theme.of(context).colorScheme;
+    final strings = PlanStrings.of(context);
+    final file = _fileCommands(strings);
+    final edit = _editCommands(strings);
+    final phone = layout == PlanEditorLayout.phone;
+    Widget button(String key, IconData icon, String tip, PlanDrawerSide side) =>
+        ExcludeFocus(
+          child: IconButton(
+            key: Key(key),
+            tooltip: tip,
+            icon: Icon(icon),
+            iconSize: 20,
+            visualDensity: VisualDensity.compact,
+            isSelected: _drawer == side,
+            onPressed: () => _toggleDrawer(side),
+          ),
+        );
+    final strip = !phone && _leftShown;
+    return PlanShortcuts(
+      controller: c,
+      shortcuts: widget.shortcuts,
+      onNew: _chord(_byId(file, 'new')),
+      onOpen: _chord(_byId(file, 'open')),
+      onSave: _chord(_byId(file, 'save')),
+      onSaveAs: _chord(_byId(file, 'save-as')),
+      onExport: _chord(_byId(file, 'export')),
+      onPrint: _chord(_byId(file, 'print')),
+      child: Scaffold(
+        body: Column(
+          children: [
+            if (widget.bar.visible)
+              _topBar(scheme, strings, file, edit,
+                  phone: phone,
+                  first: phone && _leftShown
+                      ? button('chrome-left-button', Icons.menu,
+                          strings.openToolsPanel, PlanDrawerSide.left)
+                      : null,
+                  last: _rightShown
+                      ? button('chrome-right-button', Icons.tune,
+                          strings.openPropertiesPanel, PlanDrawerSide.right)
+                      : null),
+            Expanded(
+              child: Row(
+                children: [
+                  if (strip)
+                    Container(
+                      key: const Key('chrome-tool-strip'),
+                      width: 56,
+                      color: scheme.surfaceContainerLow,
+                      child: Column(
+                        children: [
+                          Expanded(
+                              child: widget.toolPalette
+                                  ? PlanToolPalette(
+                                      controller: c, compact: true)
+                                  : const SizedBox.shrink()),
+                          if (_gallery)
+                            ExcludeFocus(
+                              child: IconButton(
+                                key: const Key('chrome-symbols-button'),
+                                tooltip: strings.tabSymbols,
+                                icon: const Icon(Icons.category_outlined),
+                                isSelected: _drawer == PlanDrawerSide.left,
+                                onPressed: () =>
+                                    _toggleDrawer(PlanDrawerSide.left),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  Expanded(
+                    key: const Key('chrome-canvas'),
+                    child: PlanDrawerHost(
+                      open: _drawer,
+                      onClose: () => setState(() => _drawer = null),
+                      left: phone
+                          ? (_leftShown ? _leftPanel(strings) : null)
+                          : (_gallery ? _galleryOf(c) : null),
+                      right: _rightShown ? _rightColumn(c) : null,
+                      canvas: PlanCanvas(
+                        controller: c,
+                        rulers: widget.rulers,
+                        grid: widget.grid,
+                        snapping: widget.snapping,
+                        autofocus: widget.autofocus,
+                        unitOverlays: _designOverlays(),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// The right column's content, docked or in its drawer.
+  Widget _rightColumn(PlanController c) => PlanShortcutGuard(
+        controller: c,
+        child: SingleChildScrollView(
+          key: const Key('chrome-right-scroll'),
+          child: Column(
+            children: [
+              _kept(widget.propertyPanel, PlanPropertyPanel(controller: c)),
+              // Spec S4: the host's inspector under the panel's fields,
+              // with the panel. Keyed, so adding or removing it keeps the
+              // panels below.
+              if (widget.unitInspectorBuilder case final inspect?
+                  when widget.propertyPanel)
+                UnitInspector(
+                    key: const Key('unit-inspector'),
+                    controller: c,
+                    builder: inspect),
+              if (widget.objectInspectorBuilder case final inspect?
+                  when widget.propertyPanel)
+                ObjectInspector(
+                    key: const Key('object-inspector'),
+                    controller: c,
+                    unitsElsewhere: widget.unitInspectorBuilder != null,
+                    builder: inspect),
+              _kept(widget.layerPanel, PlanLayerPanel(controller: c)),
+              _kept(widget.pagePanel, PlanPagePanel(controller: c)),
+            ],
+          ),
+        ),
+      );
+
+  /// 2a's editor: the shortcuts, the bar, the columns and the canvas.
+  Widget _docked(BuildContext context) {
     final c = widget.controller;
     final scheme = Theme.of(context).colorScheme;
     final strings = PlanStrings.of(context);
@@ -961,39 +1219,12 @@ class _PlanEditorState extends State<PlanEditor> {
                       unitOverlays: _designOverlays(),
                     ),
                   ),
-                  if (widget.propertyPanel ||
-                      widget.layerPanel ||
-                      widget.pagePanel)
+                  if (_rightShown)
                     Container(
                       key: const Key('chrome-right'),
                       width: 280,
                       color: scheme.surfaceContainerLow,
-                      child: PlanShortcutGuard(
-                        controller: c,
-                        child: SingleChildScrollView(
-                          key: const Key('chrome-right-scroll'),
-                          child: Column(
-                            children: [
-                              _kept(widget.propertyPanel,
-                                  PlanPropertyPanel(controller: c)),
-                              // Spec S4: the host's inspector under the
-                              // panel's fields, with the panel. Keyed, so
-                              // adding or removing it keeps the panels
-                              // below.
-                              if (widget.unitInspectorBuilder
-                                  case final inspect? when widget.propertyPanel)
-                                UnitInspector(
-                                    key: const Key('unit-inspector'),
-                                    controller: c,
-                                    builder: inspect),
-                              _kept(widget.layerPanel,
-                                  PlanLayerPanel(controller: c)),
-                              _kept(widget.pagePanel,
-                                  PlanPagePanel(controller: c)),
-                            ],
-                          ),
-                        ),
-                      ),
+                      child: _rightColumn(c),
                     ),
                 ],
               ),

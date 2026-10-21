@@ -104,17 +104,17 @@ void main() {
     expect(byKey('pos-id'), findsOneWidget);
     expect(c.setUnitData('1', {'zone': 'terrace'}), isTrue);
     await tester.pump();
-    await tester.enterText(byKey('pos-id'), ' pos-17 ');
-    await tester.testTextInput.receiveAction(TextInputAction.done);
+    // Decided: the inspector is a combo over the demo's records now (D14),
+    // not a text field: a record is picked, and the empty entry unlinks.
+    await pickRecord(tester, 'T-01');
     await tester.pump();
     Map<String, String> dataOf(String l) =>
         c.unitDetails.singleWhere((d) => d.unit.label == l).data;
-    expect(dataOf('1'), {'id': 'pos-17', 'zone': 'terrace'});
+    expect(dataOf('1'), {'id': 'T-01', 'zone': 'terrace'});
     expect(dataOf('2'), isEmpty, reason: 'only the selected table');
-    expect(demo.log.first, 'Salon: table 1 is pos-17');
+    expect(demo.log.first, 'Salon: table 1 is T-01');
 
-    await tester.enterText(byKey('pos-id'), '');
-    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await pickRecord(tester, '');
     await tester.pump();
     expect(dataOf('1'), {'zone': 'terrace'});
   });
