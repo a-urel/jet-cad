@@ -5,7 +5,7 @@ room separators, rooms, dimensions, boxes, a furniture library and the
 attachment of furniture to wall faces, as one `PlanKit` on the kit contract
 (`jet_cad_2d_kit`).
 
-![A sample flat: walls, openings, rooms, dimensions and furniture](https://raw.githubusercontent.com/a-urel/jet-cad/jet_cad_2d_kit_architecture-v0.1.0/packages/jet_cad_2d_kit_architecture/doc/screenshots/architecture_flat.png)
+![A sample flat: walls, openings, rooms, dimensions and furniture](https://raw.githubusercontent.com/a-urel/jet-cad/jet_cad_2d_kit_architecture-v0.1.1/packages/jet_cad_2d_kit_architecture/doc/screenshots/architecture_flat.png)
 
 ## What it holds
 
@@ -36,7 +36,7 @@ and the renderer, never on the plan library.
 
 ## Screenshots
 
-![One of each of the kit's types: walls, a door, a window, a gap, rooms, a separator, a dimension and boxes](https://raw.githubusercontent.com/a-urel/jet-cad/jet_cad_2d_kit_architecture-v0.1.0/packages/jet_cad_2d_kit_architecture/doc/screenshots/architecture_types.png)
+![One of each of the kit's types: walls, a door, a window, a gap, rooms, a separator, a dimension and boxes](https://raw.githubusercontent.com/a-urel/jet-cad/jet_cad_2d_kit_architecture-v0.1.1/packages/jet_cad_2d_kit_architecture/doc/screenshots/architecture_types.png)
 
 One of each of the kit's types: walls enclosing a room, a door, a window and
 a gap in them, a separator splitting the room into two named rooms, a

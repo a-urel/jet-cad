@@ -3,7 +3,7 @@
 This guide is for a Flutter point-of-sale application (a **host**) that
 embeds the plan library: staff design the restaurant's floors in the
 **design** mode, and during **service** they see the tables, colour them by
-status, group them and pick them. It covers `jet_cad_2d_plan` **0.8.0**
+status, group them and pick them. It covers `jet_cad_2d_plan` **0.9.0**
 ([CHANGELOG](../packages/jet_cad_2d_plan/CHANGELOG.md)), with the kits
 `jet_cad_2d_kit_restaurant` and `jet_cad_2d_kit_architecture` **0.1.0**.
 
@@ -45,10 +45,10 @@ or in your pubspec:
 dependencies:
   flutter:
     sdk: flutter
-  jet_cad_2d_kit: ^0.1.0
-  jet_cad_2d_kit_architecture: ^0.1.0
+  jet_cad_2d_kit: ^0.1.1
+  jet_cad_2d_kit_architecture: ^0.1.1
   jet_cad_2d_kit_restaurant: ^0.1.0
-  jet_cad_2d_plan: ^0.8.0
+  jet_cad_2d_plan: ^0.9.0
 ```
 
 - `jet_cad_2d_plan` is the controller, the views and the editor.
@@ -69,7 +69,7 @@ Import only the packages' barrels, `package:jet_cad_2d_plan/jet_cad_2d_plan.dart
 and the kits' own. Anything under `src/` is not API.
 
 The packages need Flutter 3.44 or later (the Dart that comes with it);
-0.8.0 is built and tested with Flutter 3.47.6. They bring no build hook and
+0.9.0 is built and tested with Flutter 3.47.6. They bring no build hook and
 no GPU renderer: nothing runs at build time beyond Flutter's own.
 
 The imports the snippets below need:
