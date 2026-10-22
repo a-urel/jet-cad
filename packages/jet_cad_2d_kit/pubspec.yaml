@@ -2,7 +2,7 @@ name: jet_cad_2d_kit
 description: >-
   The kit contract for jet_cad_2d plans: plan components, the .jetlib symbol
   library format and validator, kit words, and a pure-Dart authoring toolkit.
-version: 0.1.0
+version: 0.1.1
 repository: https://github.com/a-urel/jet-cad
 issue_tracker: https://github.com/a-urel/jet-cad/issues
 funding:

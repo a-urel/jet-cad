@@ -1,4 +1,6 @@
-## Unreleased
+## 0.1.1
+
+- Depends on `jet_cad_2d_kit: ^0.1.1`.
 
 - The room declares its area: `roomPlanType` carries the new `PlanType.area`
   capability, the room's traced outer ring in world millimetres (null for a

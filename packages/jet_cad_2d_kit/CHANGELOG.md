@@ -1,4 +1,4 @@
-## Unreleased
+## 0.1.1
 
 - `PlanType` gains an optional `area` capability (a closed outline in world
   millimetres, anticlockwise), with `hasArea` and `areaOf`.

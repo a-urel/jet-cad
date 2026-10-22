@@ -1,4 +1,6 @@
-## Unreleased
+## 0.9.0
+
+- Depends on `jet_cad_2d_kit: ^0.1.1`.
 
 - A touch double tap on the canvas ends a pending chain (a wall or polyline
   chain) as Enter does: the first tap of the pair is the chain's last point,
