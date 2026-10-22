@@ -15,7 +15,7 @@ void main() {
     final lines = describeArchitectureKit();
     expect(
         lines.first,
-        'architecture 0.1.0: ${architectureKit.types.length} types, '
+        'architecture 0.1.1: ${architectureKit.types.length} types, '
         '${architectureKit.tools.length} tools');
     for (final tool in architectureKit.tools) {
       expect(lines, contains('${tool.id} (${tool.letter})'));
