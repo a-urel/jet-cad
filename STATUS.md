@@ -399,9 +399,12 @@ with 0.7.0 (below).
   (every layout). No reviewer sessions (the human's rule): the controller
   self-reviewed every task with its own mutation; the ledger is archived in
   [docs/superpowers/ledgers/2026-10-20-plan-host-objects-responsive/](docs/superpowers/ledgers/2026-10-20-plan-host-objects-responsive/).
-  Resume: push and CI, then the release of the proposed versions
-  (`jet_cad_2d_kit` 0.1.1, `jet_cad_2d_kit_architecture` 0.1.1,
-  `jet_cad_2d_plan` 0.9.0, floors raised), then monepro's integration.
+  **Released 2026-10-22** from `9c015005` (CI 20/20 green):
+  `jet_cad_2d_kit` 0.1.1, `jet_cad_2d_kit_architecture` 0.1.1 and
+  `jet_cad_2d_plan` 0.9.0 on pub.dev, tagged `<package>-v<version>` at
+  `9c015005`; dependents' floors raised (the restaurant kit keeps
+  `jet_cad_2d_kit: ^0.1.0`). Resume: monepro's integration, from a
+  brainstorm.
 
 - **The kit architecture** (umbrella spec
   [2026-10-13-kit-architecture-design.md](docs/superpowers/specs/2026-10-13-kit-architecture-design.md),
@@ -691,7 +694,7 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 
 ## Resume here
 
-**POS-host sub-project (2026-10-20): merged at `4aabcb48`, not pushed.** Next: push and CI, then the release of the versions proposed in the [results note](docs/superpowers/notes/2026-10-20-plan-host-objects-results.md), then monepro's integration.
+**POS-host sub-project (2026-10-20): merged at `4aabcb48`, released 2026-10-22** (`jet_cad_2d_kit` 0.1.1, `jet_cad_2d_kit_architecture` 0.1.1, `jet_cad_2d_plan` 0.9.0, from `9c015005`; [results note](docs/superpowers/notes/2026-10-20-plan-host-objects-results.md)). Next: monepro's integration, from a brainstorm.
 
 **Done 2026-10-19: the kit architecture.** Its sub-projects are all merged and pushed: sub-project 1
 (`jet_cad_2d_kit`; PR #11 `bc705be`, PR #12 `27244bf`), 2a (the plan library
