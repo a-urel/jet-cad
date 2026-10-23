@@ -1,6 +1,6 @@
 # jet-cad — project status
 
-**Last updated:** 2026-10-23 (alignment guides merged into `main` at `c5da0931`, not pushed; the shadcn chrome merged into `main` at `f8d56f3f`, not pushed). **`main` carries release 0.7.0** (tag
+**Last updated:** 2026-10-24 (alignment guides at `c5da0931` and the shadcn chrome at `f8d56f3f` merged and pushed, `origin/main` at `8f9a444b`; the example apps in shadcn merged into `main` at `1f8b6586`, not pushed). **`main` carries release 0.7.0** (tag
 `v0.7.0` → `0fa649e`, after `v0.6.0` →
 `3bf64a7`, `v0.5.1` → `3f8f7ad`, `v0.5.0` → `2fbb9c0`, `v0.4.0` → `8367010`, `v0.3.0` → `1b0c37a`, `v0.2.0` → `7355c00` and `v0.1.0` → `22206f5`) and everything since; the three old packages are on pub.dev at 0.7.2 (published 2026-10-13); the kit architecture is done: its six packages are on pub.dev (published 2026-10-19 from `6fc25f3c`) and `jet_cad_floor_plan` is discontinued, replaced by `jet_cad_2d_plan` (below). The history of every plan
 before this point — its records, reviews and resume points — is in
@@ -392,13 +392,13 @@ with 0.7.0 (below).
   [2026-10-24-demos-shadcn-design.md](docs/superpowers/specs/2026-10-24-demos-shadcn-design.md)
   rev 2, plan [2026-10-24-demos-shadcn.md](docs/superpowers/plans/2026-10-24-demos-shadcn.md),
   results [2026-10-24-demos-shadcn-results.md](docs/superpowers/notes/2026-10-24-demos-shadcn-results.md)):
-  branch `claude/shadcn-ui-75d8dc` (cut from `main`), tasks 1-6 done, **not
-  merged, not pushed**. Both demos root in a plain `ShadApp` (zinc); the
+  branch `claude/shadcn-ui-75d8dc` (cut from `main`), tasks 1-6 done, **merged into
+  `main` at `1f8b6586`** (not pushed) on the human's *"evet, main'e merge et"*. Both demos root in a plain `ShadApp` (zinc); the
   restaurant demo's look toggle changes only the canvas side; no Material and
   no `Icons.` in either `lib/` (guarded); no change under `packages/`. Executed
   with Sonnet implementers and no reviewer sessions; ledger in
   [docs/superpowers/ledgers/2026-10-24-demos-shadcn/](docs/superpowers/ledgers/2026-10-24-demos-shadcn/).
-  Resume: the human's word to merge into `main`.
+  Resume: push on the human's word.
 
 - **The plan library's chrome in shadcn** (the human, 2026-10-23: monepro
   shows Material beside shadcn; spec
@@ -407,14 +407,14 @@ with 0.7.0 (below).
   results [2026-10-23-plan-shadcn-chrome-results.md](docs/superpowers/notes/2026-10-23-plan-shadcn-chrome-results.md)):
   branch `claude/shadcn-ui-75d8dc` (cut from `main` at `46e95ed9`, local
   `main` with the alignment guides merged in at `6b026d8e`), tasks 1-14
-  done, **merged into `main` at `f8d56f3f`** (not pushed) on the human's
+  done, **merged into `main` at `f8d56f3f`** (pushed, `origin/main` `8f9a444b`) on the human's
   *"evet, main'e merge et"*. `shadcn_ui ^0.57.1`; the host's
   `ShadTheme` is used, else one is derived from its `ThemeData`; no public
   signature change (`tool/ci/check_api_boundary.dart`); Lucide icons; the
   host probe allows `objective_c`'s build hook. Executed with Sonnet
   implementers and no reviewer sessions; ledger in
   [docs/superpowers/ledgers/2026-10-23-plan-shadcn-chrome/](docs/superpowers/ledgers/2026-10-23-plan-shadcn-chrome/).
-  Resume: push and the 1.0 release on the human's word; monepro moves to
+  Resume: the 1.0 release on the human's word; monepro moves to
   `shadcn_ui ^0.57.1`.
 
 - **Alignment guides (smart guides)** in design and service mode (edges,
