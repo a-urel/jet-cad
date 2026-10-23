@@ -1,6 +1,6 @@
 # The plan library's chrome in shadcn
 
-**Date:** 2026-10-23. **Status:** rev 2, for the human's approval. Rev 1
+**Date:** 2026-10-23. **Status:** rev 2, approved by the human ("onaylıyorum, planı yaz", 2026-10-23). Rev 1
 was reviewed by OpenCode (GPT-6.1-sol, the human's request); its 18
 findings are folded in (Appendix A), and the human decided the two that
 were theirs: the gallery (decision 9) and the version floor (decision 8).
