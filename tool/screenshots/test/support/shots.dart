@@ -31,7 +31,10 @@ Future<void> loadManifestFonts() async {
   for (final family in manifest.cast<Map<String, dynamic>>()) {
     final loader = FontLoader(family['family'] as String);
     for (final font in (family['fonts'] as List).cast<Map<String, dynamic>>()) {
-      loader.addFont(rootBundle.load(font['asset'] as String));
+      // The manifest lists an asset URL-encoded (shadcn_ui's
+      // `Geist[wght].ttf` as `Geist%5Bwght%5D.ttf`); the bundle encodes the
+      // key itself.
+      loader.addFont(rootBundle.load(Uri.decodeFull(font['asset'] as String)));
     }
     await loader.load();
   }
