@@ -34,7 +34,8 @@ old planner, [13](#13-what-a-host-must-never-assume) what a host must
 never assume, and [14](#14-phones-and-tablets) phones and tablets. Inside the
 POS section, [6.10](#610-linking-any-object) links any object,
 [6.11](#611-sections) reads sections and [6.12](#612-the-inspector) builds
-the inspectors.
+the inspectors. [10.1](#101-alignment-guides) covers
+alignment guides.
 
 ## 1. The dependency
 
@@ -1281,6 +1282,87 @@ A `PlanUnitOverlay` carries the table's `detail`, whether it is `selected` or
 `focused`, its `status` and the `detailLevel`. The builder runs on a change of
 the table, never on a pan or a zoom: live data (a minute counter) belongs in
 a `ValueListenableBuilder` inside the widget.
+
+### 10.1 Alignment guides
+
+While a movable object is dragged or placed, a thin line shows where its
+edges or its centre line up with a nearby object, and the object snaps there.
+Where two gaps become equal, small marks across the gaps say so; nothing is
+written on them. They are on by default.
+
+- **What counts.** Edges (left, right, top, bottom), centres and **equal
+  spacing**. Only movable objects count, as the moved object and as a
+  reference: placed symbols, that is tables, the bar, fixed furniture and kit
+  symbols. Walls, rooms and lines do not (object snap serves them), and a
+  table's own seats are not references. A rotated or mirrored object aligns
+  by its axis-aligned bounding box, not by its slanted edges. A selection of
+  several objects aligns by the outer box of the group.
+- **Both modes.** In design mode guides work when a selection of symbols is
+  moved and when a symbol is placed (the ghost). In service mode a waiter
+  dragging tables, or a whole group, gets them too. A selection that includes
+  a wall, a room or a line moves as before.
+- **Alt.** Holding Alt (Option on macOS) suspends the guides for the drag.
+- **Reach.** A guide captures within 6 screen pixels of a mouse, 10 of a
+  finger, at any zoom. A guide beats the grid and a pointer object-snap hit
+  (a wall's corner under the pointer) while the drag is eligible; an
+  attachment (a symbol that clings to a wall) still wins over a guide.
+
+A host that does not want guides says so on the view. `PlanEditor`,
+`PlanServiceView` and `PlanCanvas` take `alignmentGuides`, true by default;
+false hides the bar's button and turns guides off in that view:
+
+```dart
+/// A floor editor that never offers alignment guides.
+Widget plainEditor(PlanController c) =>
+    PlanEditor(controller: c, alignmentGuides: false);
+```
+
+`PlanEditor` hands its value to the canvas and to the service view it mounts.
+Two standalone views over one controller with different values: the one
+mounted last wins.
+
+The user's choice lives on the controller, as a `PlanGuideSettings`
+(a `ChangeNotifier`): `on` is what the tools obey (the host's allowance and
+the user's choice together), `userOn` the user's choice alone, `allowed` the
+host's, and `toggle()` flips the user's. The choice is kept in memory for the
+controller's life, shared by both modes, and not saved in the plan file.
+
+```dart
+/// Follow the guides' switch in the POS's own chrome, and flip it from code.
+void watchGuides(PlanController c) {
+  c.alignmentGuides.addListener(() {
+    debugPrint('guides: ${c.alignmentGuides.on}');
+  });
+  c.alignmentGuides.toggle();
+}
+```
+
+Both bars have a toggle button: `PlanEditorAction.guides` in the editor's bar
+(after Redo, and also on the default path) and `PlanServiceAction.guides` in
+the service bar (after Redo). Their widget keys are `toolbar-guides` and
+`service-guides`. Two things follow for a host that was already built:
+
+- a host that lists `actions` explicitly adds `guides` where it wants the
+  button; a host whose `actions` equal `PlanEditorAction.values` or
+  `PlanServiceAction.values` now gets the toggle;
+- a `switch` over either enum without a fallback needs the new `guides` case.
+
+The look comes from the theme. `PlanTheme.guideOnLight` and `guideOnDark` are
+the line colours on a light and on a dark paper (the built-in magenta when
+null), and `guideWidth` is the stroke in logical pixels (1 by default):
+
+```dart
+/// Guides in the brand's blue, twice as thick as the default.
+const PlanTheme planLookGuides = PlanTheme(
+  guideOnLight: Color(0xFF2563EB),
+  guideOnDark: Color(0xFF60A5FA),
+  guideWidth: 2,
+);
+```
+
+A test of the host that pins where a dragged table lands should turn guides
+off first (`controller.alignmentGuides.toggle()`, or `alignmentGuides: false`
+on the view), because a drag near a neighbour now lands aligned.
 
 ## 11. Touch
 
