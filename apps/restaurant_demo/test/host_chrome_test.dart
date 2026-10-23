@@ -451,7 +451,13 @@ void main() {
     for (final keys in [false, true]) {
       if (keys) await pressInPanel(tester, 'plan-keys');
       expect(demo.planKeys, keys, reason: 'premise');
-      await tester.tap(byKey('find-table'));
+      // A mouse click on the field (a second touch tap on a focused field
+      // opens the text selection toolbar over it); focus starts off it, so
+      // the click is what focuses it.
+      FocusManager.instance.primaryFocus?.unfocus();
+      await tester.pump();
+      expect(searchFocused(tester), isFalse, reason: 'premise: unfocused');
+      await tester.tap(byKey('find-table'), kind: PointerDeviceKind.mouse);
       await settle(tester);
       expect(searchFocused(tester), isTrue, reason: 'premise');
       await tester.tap(byKey('mode-service'), kind: PointerDeviceKind.mouse);
@@ -463,7 +469,7 @@ void main() {
       expect(searchFocused(tester), isTrue, reason: 'keys $keys');
     }
 
-    await tester.tap(byKey('find-table'));
+    await tester.tap(byKey('find-table'), kind: PointerDeviceKind.mouse);
     await tester.enterText(byKey('find-table'), '7');
     await tester.testTextInput.receiveAction(TextInputAction.done);
     await settle(tester);
