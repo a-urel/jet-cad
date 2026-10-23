@@ -1,6 +1,6 @@
 # The example apps in shadcn
 
-**Date:** 2026-10-24. **Status:** rev 2, for the human's approval. Rev 1
+**Date:** 2026-10-24. **Status:** rev 2, approved by the human ("onaylıyorum, planı yaz", 2026-10-24). Rev 1
 followed monepro's skeleton; the human then ruled (2026-10-24): *"monepro'da
 hatalar olmuş. mümkün olan her durumda shadcn tercih et."* monepro is now a
 reference, not a template: wherever shadcn can do it, shadcn does it.
