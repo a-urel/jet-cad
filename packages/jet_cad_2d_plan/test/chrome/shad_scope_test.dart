@@ -21,6 +21,9 @@ const _lightScheme = ColorScheme(
   onError: Color(0xFFFFFFFF),
   surface: Color(0xFFFAF0E6),
   onSurface: Color(0xFF1A2B3C),
+  // Distinct, so a mapping that swaps border and input goes red.
+  outline: Color(0xFF707880),
+  outlineVariant: Color(0xFFC8CCD4),
 );
 
 const _darkScheme = ColorScheme(
@@ -86,6 +89,19 @@ void main() {
     expect(s.popover, _lightScheme.surfaceContainerLow);
     expect(s.secondary, _lightScheme.secondaryContainer);
     expect(s.secondaryForeground, _lightScheme.onSecondaryContainer);
+  });
+
+  testWidgets(
+      'SC10 the derived theme fills an unchecked checkbox and an off switch '
+      "with the scheme's outlineVariant, not shadcn's default input "
+      '(the outline, a dark fill on a Material scheme)', (tester) async {
+    await tester.pumpWidget(_material(
+        ThemeData(colorScheme: _lightScheme), PlanShadScope(child: _probe)));
+    final t = _seen!;
+    expect(_lightScheme.outlineVariant, isNot(_lightScheme.outline),
+        reason: 'premise');
+    expect(t.checkboxTheme.uncheckedColor, _lightScheme.outlineVariant);
+    expect(t.switchTheme.uncheckedTrackColor, _lightScheme.outlineVariant);
   });
 
   testWidgets(

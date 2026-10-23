@@ -13,6 +13,7 @@ import 'package:flutter_test/flutter_test.dart';
 const List<String> kAllowedShad = [
   'ShadButton',
   'ShadCheckbox',
+  'ShadCheckboxTheme',
   'ShadColorScheme',
   'ShadContextMenu',
   'ShadContextMenuController',
@@ -29,6 +30,7 @@ const List<String> kAllowedShad = [
   'ShadSelectController',
   'ShadSeparator',
   'ShadSwitch',
+  'ShadSwitchTheme',
   'ShadTextTheme',
   'ShadTheme',
   'ShadThemeData',

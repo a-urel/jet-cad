@@ -66,6 +66,12 @@ ShadThemeData planShadThemeFrom(ThemeData theme) {
       selection: s.primary.withValues(alpha: 0.25),
     ),
     textTheme: ShadTextTheme(family: theme.textTheme.bodyMedium?.fontFamily),
+    // shadcn fills an unchecked checkbox and an off switch with `input`, a
+    // light border tone in its own palettes; here `input` is the Material
+    // outline (fields and the paper swatches need its contrast), so the two
+    // toggles take the lighter outlineVariant.
+    checkboxTheme: ShadCheckboxTheme(uncheckedColor: s.outlineVariant),
+    switchTheme: ShadSwitchTheme(uncheckedTrackColor: s.outlineVariant),
   );
 }
 
