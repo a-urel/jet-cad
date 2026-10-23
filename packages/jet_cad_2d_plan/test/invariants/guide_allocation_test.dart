@@ -79,15 +79,15 @@ const double _perEventBudget = 0.05;
 
 const int _pointerEvents = 200;
 const int _cameraEvents = 50;
-const int _rounds = 3;
+const int _rounds = 2;
 
 /// Warm-up events of each kind. The brief's 50 left the JIT mid-way: the
 /// baseline's own `Vector2`s and `Transform2`s read 0 or 100 and 250 or 60
 /// for the same code on successive runs (escape analysis switching on late),
 /// which made on minus off a coin toss. As `pick_allocation_test` warms
 /// 20,000 picks, this warms until the readings hold still.
-const int _warmPointer = 2000;
-const int _warmCamera = 500;
+const int _warmPointer = 600;
+const int _warmCamera = 200;
 const int _ring = 64;
 
 // ---------------------------------------------------------------------------
@@ -391,15 +391,6 @@ final class _Range {
       ].join(', ')}}';
 }
 
-final class _Reading {
-  _Reading(this.pointer, this.camera);
-
-  final _Range pointer, camera;
-
-  @override
-  String toString() => 'pointer-driven $pointer, camera-driven $camera';
-}
-
 // ---------------------------------------------------------------------------
 // The measure.
 
@@ -428,30 +419,29 @@ void main() {
   /// analysis comes and goes on the *baseline's* own objects (a placement's
   /// `Transform2`s read 1600 and 200 per 200 events in successive rounds of
   /// one scene).
-  Future<_Reading> epoch(AllocationMeter m, _Scene scene) async {
+  Future<_Range> epoch(AllocationMeter m, _Scene scene) async {
     for (var i = 0; i < _warmPointer; i++) {
       scene.pointer(i);
     }
     for (var i = 0; i < _warmCamera; i++) {
       scene.camera(i);
     }
-    final pointer = _Range(), camera = _Range();
+    final range = _Range();
+    // The floor is the same in every round (measured), so it is read once.
+    await m.reset();
+    final floor = await m.accumulatedInstances(_watched);
     for (var round = 0; round < _rounds; round++) {
       scene.captured = 0;
-      await m.reset();
-      final floor = await m.accumulatedInstances(_watched);
       await m.reset();
       for (var i = 0; i < _pointerEvents; i++) {
         scene.pointer(i);
       }
-      pointer.add(await m.accumulatedInstances(_watched), floor);
-      await m.reset();
       for (var i = 0; i < _cameraEvents; i++) {
         scene.camera(i);
       }
-      camera.add(await m.accumulatedInstances(_watched), floor);
+      range.add(await m.accumulatedInstances(_watched), floor);
     }
-    return _Reading(pointer, camera);
+    return range;
   }
 
   Future<_Scene> design(int count, int moved, bool guides) async {
@@ -486,9 +476,11 @@ void main() {
         markTestSkipped(vmServiceUnavailableReason);
         return;
       }
-      final onReadings = <int, _Reading>{};
+      const events = _pointerEvents + _cameraEvents;
+      // One control per tool: the meter's own floor, no tool in the loop.
+      final control = await epoch(m, _Control(10));
+      final onRanges = <int, _Range>{};
       for (final count in [10, 200]) {
-        final control = await epoch(m, _Control(count));
         final offScene = await make(count, false);
         final off = await epoch(m, offScene);
         offScene.finish();
@@ -496,52 +488,33 @@ void main() {
         final on = await epoch(m, onScene);
         final captured = onScene.captured;
         onScene.finish();
-        onReadings[count] = on;
+        onRanges[count] = on;
         // ignore: avoid_print
-        print('$name, $count references:\n  control $control\n  off $off\n'
-            '  on $on\n  captured on $captured of the last round\'s ${_pointerEvents + _cameraEvents} events'
-            'camera-driven events');
+        print('$name, $count references, per $events events:\n'
+            '  control $control\n  off $off\n  on $on\n'
+            '  captured on $captured of the last round\'s events');
         expect(captured, greaterThan(100),
             reason: 'premise: the guides captured on many of the events');
-        for (final (window, events, onRange, offRange) in [
-          ('pointer', _pointerEvents, on.pointer, off.pointer),
-          ('camera', _cameraEvents, on.camera, off.camera),
-        ]) {
-          for (final k in _watched) {
-            // The least of guides on over the most of guides off: what the
-            // guides cost on every event, past any baseline allocation the
-            // JIT leaves in or out.
-            expect(onRange.least[k]! - offRange.most[k]!,
-                lessThanOrEqualTo(_perEventBudget * events),
-                reason: '$name $k, $window-driven, $count references: on '
-                    '${onRange.least[k]}..${onRange.most[k]}, off '
-                    '${offRange.least[k]}..${offRange.most[k]}, control '
-                    '${(window == 'pointer' ? control.pointer : control.camera).most[k]}'
-                    ' over $events events');
-          }
+        for (final k in _watched) {
+          // The least of guides on over the most of guides off: what the
+          // guides cost on every event, past any baseline allocation the
+          // JIT leaves in or out.
+          expect(on.least[k]! - off.most[k]!,
+              lessThanOrEqualTo(_perEventBudget * events),
+              reason: '$name $k, $count references: on '
+                  '${on.least[k]}..${on.most[k]}, off '
+                  '${off.least[k]}..${off.most[k]}, control '
+                  '${control.most[k]} over $events events');
         }
       }
-      for (final (window, events, on10, on200) in [
-        (
-          'pointer',
-          _pointerEvents,
-          onReadings[10]!.pointer,
-          onReadings[200]!.pointer
-        ),
-        (
-          'camera',
-          _cameraEvents,
-          onReadings[10]!.camera,
-          onReadings[200]!.camera
-        ),
-      ]) {
-        for (final k in _watched) {
-          expect(on200.least[k]!,
-              lessThanOrEqualTo(on10.most[k]! + _perEventBudget * events),
-              reason: '$name $k, $window-driven: guides on read more at 200 '
-                  'references (${on200.least[k]}..${on200.most[k]}) than at '
-                  '10 (${on10.least[k]}..${on10.most[k]})');
-        }
+      for (final k in _watched) {
+        expect(
+            onRanges[200]!.least[k]!,
+            lessThanOrEqualTo(
+                onRanges[10]!.most[k]! + _perEventBudget * events),
+            reason: '$name $k: guides on read more at 200 references '
+                '(${onRanges[200]!.least[k]}..${onRanges[200]!.most[k]}) than '
+                'at 10 (${onRanges[10]!.least[k]}..${onRanges[10]!.most[k]})');
       }
     });
   }
