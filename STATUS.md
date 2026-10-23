@@ -1,6 +1,6 @@
 # jet-cad — project status
 
-**Last updated:** 2026-10-23 (alignment guides done on their branch, not merged). **`main` carries release 0.7.0** (tag
+**Last updated:** 2026-10-23 (alignment guides merged into `main` at `c5da0931`, not pushed). **`main` carries release 0.7.0** (tag
 `v0.7.0` → `0fa649e`, after `v0.6.0` →
 `3bf64a7`, `v0.5.1` → `3f8f7ad`, `v0.5.0` → `2fbb9c0`, `v0.4.0` → `8367010`, `v0.3.0` → `1b0c37a`, `v0.2.0` → `7355c00` and `v0.1.0` → `22206f5`) and everything since; the three old packages are on pub.dev at 0.7.2 (published 2026-10-13); the kit architecture is done: its six packages are on pub.dev (published 2026-10-19 from `6fc25f3c`) and `jet_cad_floor_plan` is discontinued, replaced by `jet_cad_2d_plan` (below). The history of every plan
 before this point — its records, reviews and resume points — is in
@@ -393,11 +393,14 @@ with 0.7.0 (below).
   plan [2026-10-23-alignment-guides.md](docs/superpowers/plans/2026-10-23-alignment-guides.md),
   results [2026-10-23-alignment-guides-results.md](docs/superpowers/notes/2026-10-23-alignment-guides-results.md)):
   branch `claude/alignment-guides-50cacb` (cut from `main` at `46e95ed9`),
-  tasks 1-11 done, **not merged, not pushed**; the human approves. Executed
+  tasks 1-11 done, **merged into `main` at `c5da0931`** (not pushed) on the
+  human's *"evet, main'e merge et"*. Executed
   with Sonnet implementers and no reviewer sessions (the controller
-  self-reviewed every task with its own mutation); the ledger is in
-  `.superpowers/sdd/2026-10-23-alignment-guides/` (git-ignored, archive it on
-  the branch before the merge). Exit gate green apart from the standing
+  self-reviewed every task with its own mutation); the ledger is archived in
+  [docs/superpowers/ledgers/2026-10-23-alignment-guides/](docs/superpowers/ledgers/2026-10-23-alignment-guides/).
+  The spec was reviewed by the OpenCode and Copilot CLIs and the plan by the
+  Copilot CLI at the human's request
+  ([review record](docs/superpowers/notes/2026-10-23-alignment-guides-spec-review.md)). Exit gate green apart from the standing
   failures; host guide section 10.1, the probe, the restaurant demo and the
   CHANGELOGs are in. **Release order:** `jet_cad_2d_flutter` (new
   `SelectTool.moveAdjuster`, `PaperPalette.guide`) must be published before
