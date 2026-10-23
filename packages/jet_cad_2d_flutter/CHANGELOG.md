@@ -2,10 +2,27 @@
 
 ## Unreleased
 
-- `SelectTool.moveAdjuster` (`MoveAdjuster`): a generic seam to replace a
-  body move's target after the snap chain.
-- `PaperPalette.guide` (and `withGuide`, `guideColor`): the alignment
-  guides' colour; the built-in sets carry a magenta.
+- `SelectTool.moveAdjuster` (`MoveAdjuster`, null by default): a generic seam
+  for a body move drag. It is told when a drag of a set begins (`begin`) and
+  ends (`end`); on every retarget, after the snap chain and before the move,
+  `adjust` may replace the target point (it gets the raw point, the drag's
+  base, the ortho base while Shift pins an axis, whether the chain's point
+  came from object snap, the pointer kind and Alt); it paints into the
+  tool's overlay above the selection preview (`paint`); `suppress` tells it an
+  attachment replaced the event's move; its `changes` listenable makes the
+  tool re-target from the last screen point. The tool keeps the last pointer
+  kind and Alt state for camera-driven re-targets. With no adjuster the tool
+  behaves, and allocates, exactly as before.
+- `PaperPalette.guide` (an optional constructor argument, null by default),
+  `guideColor` (the effective colour: `guide`, else the built-in magenta for
+  the paper, `lightGuide` `0xFFE0218A` on a light paper, `darkGuide`
+  `0xFFFF5CB0` on a dark one) and `withGuide`. `==`, `hashCode` and the
+  copies carry the field, so existing callers compile unchanged. It is the
+  alignment guides' colour, distinct from `preview` (the move's base-to-target
+  line).
+- Release note: `jet_cad_2d_plan` depends on `jet_cad_2d_flutter: ^0.7.3` and
+  its alignment guides use this seam and the palette colour, so publish this
+  package before the plan library's floor is raised to it.
 
 ## 0.7.3
 
