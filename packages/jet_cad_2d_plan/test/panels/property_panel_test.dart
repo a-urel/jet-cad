@@ -384,7 +384,7 @@ void main() {
   bool swatchMarked(WidgetTester tester, String name) =>
       tester
           .widget<Semantics>(find
-              .ancestor(
+              .descendant(
                   of: byKey('color-swatch-$name'),
                   matching: find.byWidgetPredicate(
                       (w) => w is Semantics && w.properties.label != null))

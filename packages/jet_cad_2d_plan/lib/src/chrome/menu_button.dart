@@ -10,17 +10,24 @@ import 'icon_button.dart';
 import 'words_carrier.dart';
 
 /// One entry of a [PlanMenuButton]: a [value], its [label], whether it can
-/// be picked now. [key] is put on the rendered entry.
+/// be picked now. [key] is put on the rendered entry; [swatch], if given, is
+/// drawn before the label (a colour's sample).
 class PlanMenuEntry<T> {
-  const PlanMenuEntry(this.value, this.label, {this.enabled = true, this.key});
+  const PlanMenuEntry(this.value, this.label,
+      {this.enabled = true, this.key, this.swatch});
 
   final T value;
   final String label;
   final bool enabled;
   final Key? key;
+  final Widget? swatch;
 }
 
-/// An icon button with a menu.
+/// A button with a menu: an icon button, or, with [child], a button that
+/// shows [child] (a layer's colour sample; the layer picker's current
+/// layer). [compact] makes a [child] button a 28 px square; [expanded] makes
+/// it as wide as it is given. [label] is the accessible name and the tooltip.
+/// A disabled button ([enabled] false) opens nothing.
 ///
 /// [entries] is called on every build, so an entry whose permission changes
 /// while the menu is open is enabled or disabled at once. The entry equal to
@@ -29,14 +36,22 @@ class PlanMenuEntry<T> {
 class PlanMenuButton<T> extends StatefulWidget implements PlanWordsCarrier {
   const PlanMenuButton({
     super.key,
-    required this.icon,
+    this.icon,
+    this.child,
+    this.compact = false,
+    this.expanded = false,
+    this.enabled = true,
     required this.label,
     required this.entries,
     required this.onSelected,
     this.selected,
-  });
+  }) : assert(icon != null || child != null);
 
-  final IconData icon;
+  final IconData? icon;
+  final Widget? child;
+  final bool compact;
+  final bool expanded;
+  final bool enabled;
   final String label;
   final List<PlanMenuEntry<T>> Function() entries;
   final ValueChanged<T> onSelected;
@@ -57,6 +72,10 @@ class _PlanMenuButtonState<T> extends State<PlanMenuButton<T>> {
   final FocusNode _trigger =
       FocusNode(canRequestFocus: false, skipTraversal: true);
   bool _open = false;
+
+  /// Keeps a [PlanMenuButton.child] button's state (its focus, its hover)
+  /// when its tooltip comes and goes.
+  final GlobalKey _childKey = GlobalKey();
 
   @override
   void initState() {
@@ -125,7 +144,13 @@ class _PlanMenuButtonState<T> extends State<PlanMenuButton<T>> {
             onPressed: () => widget.onSelected(entry.value),
             child: Semantics(
               selected: entry.value == widget.selected,
-              child: Text(entry.label),
+              child: entry.swatch == null
+                  ? Text(entry.label)
+                  : Row(mainAxisSize: MainAxisSize.min, children: [
+                      entry.swatch!,
+                      const SizedBox(width: 8),
+                      Text(entry.label),
+                    ]),
             ),
           ),
       ],
@@ -135,14 +160,49 @@ class _PlanMenuButtonState<T> extends State<PlanMenuButton<T>> {
           listenable: _controller,
           builder: (context, _) => PlanTooltipSuppressor(
             suppressed: _controller.isOpen,
-            child: PlanIconButton(
-              icon: widget.icon,
-              label: widget.label,
-              onPressed: _controller.toggle,
-            ),
+            child: widget.child == null
+                ? PlanIconButton(
+                    icon: widget.icon!,
+                    label: widget.label,
+                    onPressed: widget.enabled ? _controller.toggle : null,
+                  )
+                : Builder(builder: _childButton),
           ),
         ),
       ),
+    );
+  }
+
+  /// The button that shows [PlanMenuButton.child].
+  Widget _childButton(BuildContext context) {
+    final onPressed = widget.enabled ? _controller.toggle : null;
+    final child = widget.child!;
+    final shape = widget.compact
+        ? ShadButton.ghost(
+            width: 28,
+            height: 28,
+            padding: EdgeInsets.zero,
+            onPressed: onPressed,
+            child: child,
+          )
+        : ShadButton.outline(
+            width: widget.expanded ? double.infinity : null,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            onPressed: onPressed,
+            trailing: const Icon(LucideIcons.chevronDown),
+            child: Flexible(child: child),
+          );
+    final button = KeyedSubtree(key: _childKey, child: shape);
+    return Semantics(
+      button: true,
+      label: widget.label,
+      enabled: widget.enabled,
+      focusable: widget.enabled,
+      onTap: onPressed,
+      excludeSemantics: true,
+      child: PlanTooltipSuppressor.of(context)
+          ? button
+          : PlanTooltip(message: widget.label, child: button),
     );
   }
 }

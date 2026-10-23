@@ -32,6 +32,7 @@ import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
+import 'package:jet_cad_2d_plan/src/chrome/text_field.dart';
 import 'package:jet_cad_2d_plan/src/chrome/icon_button.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
@@ -85,8 +86,8 @@ double scaleOf(DraftDocument doc) =>
 
 /// The text in the page panel's scale field.
 String scaleField(WidgetTester tester) => tester
-    .widget<TextField>(find.byKey(const Key('page-scale')))
-    .controller!
+    .widget<PlanTextField>(find.byKey(const Key('page-scale')))
+    .controller
     .text;
 
 Finder get entry => find.byKey(const Key('text-entry'));

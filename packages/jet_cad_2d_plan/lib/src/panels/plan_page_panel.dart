@@ -4,7 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show PageNotifier;
 
+import '../chrome/pick.dart';
+import '../chrome/rows.dart';
+import '../chrome/segmented.dart';
+import '../chrome/select.dart';
 import '../chrome/shad_scope.dart';
+import '../chrome/text_field.dart';
 import '../controller/plan_controller.dart';
 import '../l10n/locale_scope.dart';
 import '../l10n/number_text.dart';
@@ -186,15 +191,6 @@ class PlanPagePanelState extends State<PlanPagePanel> {
     }
   }
 
-  /// The panel sits in a [PlanShortcutGuard], as the property panel and
-  /// a layer's rename field do: the scale field keeps its keys (spec P2,
-  /// "Text fields keep their keys") wherever a host puts the panel.
-  /// A segment label that stays on one line: the segment is narrower than
-  /// "Landscape" or "Querformat" beside the selected-check icon, so the
-  /// text shrinks to its segment instead of breaking mid-word (spec R2 O2).
-  Widget _oneLine(String text, Key key) => FittedBox(
-      fit: BoxFit.scaleDown, child: Text(text, key: key, maxLines: 1));
-
   @override
   Widget build(BuildContext context) => PlanShadScope(child: _body(context));
 
@@ -206,14 +202,12 @@ class PlanPagePanelState extends State<PlanPagePanel> {
           if (page == null) return const SizedBox.shrink();
           // Spec C-5: with `editPage` false, every control is disabled.
           final editable = _editable;
-          // Dark theme spec D6a: the swatch border is the scheme's, read at
-          // build so a theme switch follows.
-          final scheme = Theme.of(context).colorScheme;
+          // The swatch border is the theme's, read at build so a theme
+          // switch follows (dark theme spec D6a).
+          final colours = planShadThemeOf(context).colorScheme;
           // The shell's `chrome-right` slot is a `Container` with its own
-          // background color (a `ColoredBox`); without a `Material` of its
-          // own in between, the checkboxes' `ListTile` ink surface has no
-          // Material to paint on and Flutter raises "background color or
-          // ink splashes may be invisible" on every frame.
+          // background color (a `ColoredBox`); the transparent `Material`
+          // is the host slot of whatever a host puts in the panel.
           return Material(
             color: Colors.transparent,
             // Laid out whole: the shell's right column scrolls (review
@@ -227,58 +221,46 @@ class PlanPagePanelState extends State<PlanPagePanel> {
                 Text(_strings.pageTitle,
                     style: const TextStyle(fontWeight: FontWeight.bold)),
                 const SizedBox(height: 8),
-                DropdownButton<SheetSize?>(
+                // A custom size is no option: it is the placeholder, which
+                // reads "Custom" while the page's size is none of the
+                // presets (the old closed button's hint).
+                PlanSelect<SheetSize>(
                   key: const Key('page-preset'),
-                  isExpanded: true,
+                  expanded: true,
                   value: page.preset,
-                  // `DropdownButton` shows `hint` (never an item lookup) when
-                  // `value` is null, so a custom size needs this to read
-                  // "Custom" while closed; the disabled entry below is what
-                  // makes it read "Custom" in the opened list too.
-                  hint: Text(_strings.customSize),
-                  items: [
+                  placeholder: _strings.customSize,
+                  enabled: editable,
+                  options: [
                     for (final s in SheetSize.presets)
-                      DropdownMenuItem(value: s, child: Text(s.name)),
-                    if (page.preset == null)
-                      DropdownMenuItem<SheetSize?>(
-                          value: null,
-                          enabled: false,
-                          child: Text(_strings.customSize)),
+                      PlanOption<SheetSize>(s, s.name),
                   ],
-                  onChanged: !editable
-                      ? null
-                      : (s) {
-                          if (s != null) {
-                            _set(page.copyWith(
-                                widthMm: s.widthMm, heightMm: s.heightMm));
-                          }
-                        },
+                  onChanged: (s) => _set(
+                      page.copyWith(widthMm: s.widthMm, heightMm: s.heightMm)),
                 ),
                 const SizedBox(height: 8),
-                SegmentedButton<PageOrientation>(
+                // A segment label stays on one line: the segment is
+                // narrower than "Landscape" or "Querformat" beside its
+                // neighbour, so the text ellipsizes to its segment instead
+                // of breaking mid-word (spec R2 O2).
+                PlanSegmented<PageOrientation>(
+                  value: page.orientation,
+                  enabled: editable,
                   segments: [
-                    ButtonSegment(
-                        value: PageOrientation.portrait,
-                        label: _oneLine(_strings.portrait,
-                            const Key('page-orientation-portrait'))),
-                    ButtonSegment(
-                        value: PageOrientation.landscape,
-                        label: _oneLine(_strings.landscape,
-                            const Key('page-orientation-landscape'))),
+                    PlanSegment(PageOrientation.portrait, _strings.portrait,
+                        key: const Key('page-orientation-portrait')),
+                    PlanSegment(PageOrientation.landscape, _strings.landscape,
+                        key: const Key('page-orientation-landscape')),
                   ],
-                  selected: {page.orientation},
-                  onSelectionChanged: !editable
-                      ? null
-                      : (s) => _set(page.copyWith(orientation: s.single)),
+                  onChanged: (o) => _set(page.copyWith(orientation: o)),
                 ),
                 const SizedBox(height: 8),
-                TextField(
+                PlanTextField(
                   key: const Key('page-scale'),
                   controller: _scale,
                   focusNode: _scaleFocus,
                   enabled: editable,
-                  decoration: InputDecoration(
-                      prefixText: '1:', labelText: _strings.scale),
+                  label: _strings.scale,
+                  prefix: '1:',
                   keyboardType:
                       const TextInputType.numberWithOptions(decimal: true),
                   onSubmitted: (text) => _submitScale(page, text),
@@ -293,27 +275,19 @@ class PlanPagePanelState extends State<PlanPagePanel> {
                   onTapOutside: _onScaleTapOutside,
                 ),
                 const SizedBox(height: 8),
-                DropdownButton<DisplayUnit>(
+                PlanSelect<DisplayUnit>(
                   key: const Key('page-unit'),
-                  isExpanded: true,
+                  expanded: true,
                   value: page.displayUnit,
-                  items: const [
-                    DropdownMenuItem(
-                        value: DisplayUnit.millimeters, child: Text('mm')),
-                    DropdownMenuItem(
-                        value: DisplayUnit.centimeters, child: Text('cm')),
-                    DropdownMenuItem(
-                        value: DisplayUnit.meters, child: Text('m')),
-                    DropdownMenuItem(
-                        value: DisplayUnit.inches, child: Text('in')),
-                    DropdownMenuItem(
-                        value: DisplayUnit.feetInches, child: Text('ft-in')),
+                  enabled: editable,
+                  options: const [
+                    PlanOption(DisplayUnit.millimeters, 'mm'),
+                    PlanOption(DisplayUnit.centimeters, 'cm'),
+                    PlanOption(DisplayUnit.meters, 'm'),
+                    PlanOption(DisplayUnit.inches, 'in'),
+                    PlanOption(DisplayUnit.feetInches, 'ft-in'),
                   ],
-                  onChanged: !editable
-                      ? null
-                      : (u) {
-                          if (u != null) _set(page.copyWith(displayUnit: u));
-                        },
+                  onChanged: (u) => _set(page.copyWith(displayUnit: u)),
                 ),
                 // Spec Q0 P1: the page's own separator, the one its text
                 // prints with. It shows the page's value, never the UI's
@@ -322,56 +296,65 @@ class PlanPagePanelState extends State<PlanPagePanel> {
                 const SizedBox(height: 8),
                 Text(_strings.pageDecimalSeparator),
                 const SizedBox(height: 4),
-                SegmentedButton<DecimalSeparator>(
+                PlanSegmented<DecimalSeparator>(
                   key: const Key('page-decimal-separator'),
+                  value: page.decimalSeparator,
+                  enabled: editable,
                   segments: const [
-                    ButtonSegment(
-                        value: DecimalSeparator.point,
-                        label: Text('1.5',
-                            key: Key('page-decimal-separator-point'))),
-                    ButtonSegment(
-                        value: DecimalSeparator.comma,
-                        label: Text('1,5',
-                            key: Key('page-decimal-separator-comma'))),
+                    PlanSegment(DecimalSeparator.point, '1.5',
+                        key: Key('page-decimal-separator-point')),
+                    PlanSegment(DecimalSeparator.comma, '1,5',
+                        key: Key('page-decimal-separator-comma')),
                   ],
-                  selected: {page.decimalSeparator},
-                  onSelectionChanged: !editable
-                      ? null
-                      : (s) => _set(page.copyWith(decimalSeparator: s.single)),
+                  onChanged: (s) => _set(page.copyWith(decimalSeparator: s)),
                 ),
-                CheckboxListTile(
-                  key: const Key('page-grid'),
-                  title: Text(_strings.grid),
-                  value: page.gridVisible,
-                  onChanged: !editable
-                      ? null
-                      : (v) => _set(page.copyWith(gridVisible: v)),
+                const SizedBox(height: 4),
+                Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: PlanCheckRow(
+                    key: const Key('page-grid'),
+                    label: _strings.grid,
+                    value: page.gridVisible,
+                    onChanged: !editable
+                        ? null
+                        : (v) => _set(page.copyWith(gridVisible: v)),
+                  ),
                 ),
-                CheckboxListTile(
-                  key: const Key('page-snap'),
-                  title: Text(_strings.snapToGrid),
-                  value: page.snapToGrid,
-                  onChanged: !editable
-                      ? null
-                      : (v) => _set(page.copyWith(snapToGrid: v)),
+                const SizedBox(height: 4),
+                Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: PlanCheckRow(
+                    key: const Key('page-snap'),
+                    label: _strings.snapToGrid,
+                    value: page.snapToGrid,
+                    onChanged: !editable
+                        ? null
+                        : (v) => _set(page.copyWith(snapToGrid: v)),
+                  ),
                 ),
-                CheckboxListTile(
-                  key: const Key('page-breaks'),
-                  title: Text(_strings.pageBreaks),
-                  value: page.pageBreaks,
-                  onChanged: !editable
-                      ? null
-                      : (v) => _set(page.copyWith(pageBreaks: v)),
+                const SizedBox(height: 4),
+                Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: PlanCheckRow(
+                    key: const Key('page-breaks'),
+                    label: _strings.pageBreaks,
+                    value: page.pageBreaks,
+                    onChanged: !editable
+                        ? null
+                        : (v) => _set(page.copyWith(pageBreaks: v)),
+                  ),
                 ),
                 const SizedBox(height: 8),
                 Text(_strings.paper),
+                const SizedBox(height: 4),
                 Row(
                   children: [
                     for (var i = 0; i < _swatches.length; i++)
                       Padding(
                         padding: const EdgeInsets.only(right: 8),
-                        child: InkWell(
+                        child: PlanSwatchButton(
                           key: Key('page-swatch-$i'),
+                          selected: page.background == _swatches[i].$2,
                           onTap: !editable
                               ? null
                               : () => _set(
@@ -383,8 +366,8 @@ class PlanPagePanelState extends State<PlanPagePanel> {
                               color: Color(_swatches[i].$2),
                               border: Border.all(
                                   color: page.background == _swatches[i].$2
-                                      ? scheme.primary
-                                      : scheme.outline,
+                                      ? colours.primary
+                                      : colours.input,
                                   width: page.background == _swatches[i].$2
                                       ? 2
                                       : 1),

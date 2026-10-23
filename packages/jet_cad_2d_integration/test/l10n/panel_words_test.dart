@@ -37,13 +37,8 @@ import '../support/plans.dart' show addWall, planWith;
 /// The editor over [c] in [locale]: the integration package's app.
 Widget app(PlanController c, Locale locale) => planEditorApp(c, locale: locale);
 
-String fieldText(WidgetTester tester, Finder f) {
-  final field = tester.widget(f);
-  // The wall's fields are PlanTextFields, the page panel's scale a TextField.
-  return field is PlanTextField
-      ? field.controller.text
-      : (field as TextField).controller!.text;
-}
+String fieldText(WidgetTester tester, Finder f) =>
+    tester.widget<PlanTextField>(f).controller.text;
 
 WallParams wallOf(PlanController c, Handle h) =>
     c.document.components.get<WallParams>(h)!;

@@ -10,7 +10,10 @@ import 'package:flutter/material.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../chrome/pick.dart';
+import '../chrome/shad_scope.dart';
 import '../controller/plan_controller.dart';
 import '../kits/guard.dart' show KitHookFailure;
 import '../l10n/strings.dart';
@@ -170,38 +173,34 @@ class ColourRow extends StatelessWidget {
     // The sentinel stands for "mixed": it equals no swatch's name, so no
     // swatch is marked. A stored unknown name equals none either.
     final common = colors.toSet().length == 1 ? colors.first : '\u0000';
-    final scheme = Theme.of(context).colorScheme;
+    final colours = planShadThemeOf(context).colorScheme;
     Widget swatch(String key, String label, Color? fill, bool marked,
             VoidCallback onTap) =>
-        Tooltip(
-          message: blocked ?? label,
-          child: Semantics(
-            button: true,
-            selected: marked,
-            enabled: blocked == null,
-            label: label,
-            child: InkWell(
-              key: Key('color-swatch-$key'),
-              onTap: blocked == null ? onTap : null,
-              customBorder: const CircleBorder(),
-              child: Container(
-                width: 24,
-                height: 24,
-                decoration: BoxDecoration(
-                  color: fill,
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                      color: marked ? scheme.primary : scheme.outline,
-                      width: marked ? 3 : 1),
-                ),
-                child: fill == null
-                    ? Icon(Icons.block, size: 14, color: scheme.outline)
-                    : null,
-              ),
+        // The name stays the label; a block is the tooltip.
+        PlanSwatchButton(
+          key: Key('color-swatch-$key'),
+          label: label,
+          tooltip: blocked ?? label,
+          selected: marked,
+          circle: true,
+          onTap: blocked == null ? onTap : null,
+          child: Container(
+            width: 24,
+            height: 24,
+            decoration: BoxDecoration(
+              color: fill,
+              shape: BoxShape.circle,
+              border: Border.all(
+                  color: marked ? colours.primary : colours.input,
+                  width: marked ? 3 : 1),
             ),
+            child: fill == null
+                ? Icon(LucideIcons.ban, size: 14, color: colours.input)
+                : null,
           ),
         );
-    return Column(
+    return PlanShadScope(
+        child: Column(
       key: const Key('color-picker'),
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -219,6 +218,6 @@ class ColourRow extends StatelessWidget {
                 () => _choose(c, strings)),
         ]),
       ],
-    );
+    ));
   }
 }

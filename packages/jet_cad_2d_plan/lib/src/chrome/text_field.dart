@@ -53,10 +53,12 @@ class PlanTextField extends StatelessWidget implements PlanWordsCarrier {
     required this.controller,
     this.focusNode,
     this.label,
+    this.prefix,
     this.suffix,
     this.errorText,
     this.placeholder,
     this.readOnly = false,
+    this.enabled = true,
     this.keyboardType,
     this.inputFormatters,
     this.onChanged,
@@ -68,10 +70,17 @@ class PlanTextField extends StatelessWidget implements PlanWordsCarrier {
   final TextEditingController controller;
   final FocusNode? focusNode;
   final String? label;
+
+  /// Shown inside the input, before the text (the page scale's `1:`).
+  final String? prefix;
   final String? suffix;
   final String? errorText;
   final String? placeholder;
   final bool readOnly;
+
+  /// Whether the field takes the focus and edits at all (a disabled field
+  /// is greyed and out of the Tab order; [readOnly] is not).
+  final bool enabled;
   final TextInputType? keyboardType;
   final List<TextInputFormatter>? inputFormatters;
   final ValueChanged<String>? onChanged;
@@ -81,7 +90,7 @@ class PlanTextField extends StatelessWidget implements PlanWordsCarrier {
 
   @override
   Iterable<String> get visibleWords => [
-        for (final word in [label, suffix, errorText, placeholder])
+        for (final word in [label, prefix, suffix, errorText, placeholder])
           if (word != null) word,
       ];
 
@@ -89,6 +98,7 @@ class PlanTextField extends StatelessWidget implements PlanWordsCarrier {
   Widget build(BuildContext context) {
     final theme = planShadThemeOf(context);
     final label = this.label, suffix = this.suffix, error = errorText;
+    final prefix = this.prefix;
     final placeholder = this.placeholder;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -102,7 +112,11 @@ class PlanTextField extends StatelessWidget implements PlanWordsCarrier {
         ShadInput(
           controller: controller,
           focusNode: focusNode,
+          enabled: enabled,
           placeholder: placeholder == null ? null : Text(placeholder),
+          leading: prefix == null
+              ? null
+              : Text(prefix, style: theme.textTheme.muted),
           trailing: suffix == null
               ? null
               : Text(suffix, style: theme.textTheme.muted),

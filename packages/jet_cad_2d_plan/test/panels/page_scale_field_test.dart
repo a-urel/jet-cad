@@ -12,6 +12,7 @@ import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+import 'package:jet_cad_2d_plan/src/chrome/text_field.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 
 import '../support/canvas_fixture.dart';
@@ -30,7 +31,7 @@ void main() {
   Finder scale() => find.byKey(const Key('page-scale'));
 
   String scaleText(WidgetTester tester) =>
-      tester.widget<TextField>(scale()).controller!.text;
+      tester.widget<PlanTextField>(scale()).controller.text;
 
   testWidgets(
       'A9 letters and cmd+Z in the page panel\'s scale field neither '
@@ -123,7 +124,7 @@ void main() {
     await tester.enterText(scale(), '75');
     // Every text the field shows from Enter on: none. The field already
     // shows 75, Enter does not re-sync it, and the page listener finds 75.
-    final controller = tester.widget<TextField>(scale()).controller!;
+    final controller = tester.widget<PlanTextField>(scale()).controller;
     final shown = <String>[];
     void record() => shown.add(controller.text);
     controller.addListener(record);
@@ -236,7 +237,7 @@ void main() {
     await tester.pump();
     await tester.enterText(scale(), '75');
     await tester.pump();
-    final node = tester.widget<TextField>(scale()).focusNode!;
+    final node = tester.widget<PlanTextField>(scale()).focusNode!;
     expect(node.hasFocus, isTrue);
     // Resumed, as on web until the window's own blur: a lifecycle guard
     // (f5920de's) lets a focus-loss re-sync through here.

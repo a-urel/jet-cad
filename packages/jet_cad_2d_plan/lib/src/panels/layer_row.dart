@@ -6,7 +6,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../chrome/icon_button.dart';
+import '../chrome/menu_button.dart';
+import '../chrome/pick.dart';
+import '../chrome/shad_scope.dart';
+import '../chrome/text_field.dart';
 import '../controller/plan_controller.dart';
 import '../l10n/strings.dart';
 import '../shortcuts/plan_shortcut_guard.dart';
@@ -195,85 +201,68 @@ class _LayerRowState extends State<LayerRow> {
     final strings = PlanStrings.of(context);
     final r = widget.record;
     final enabled = widget.enabled;
-    final scheme = Theme.of(context).colorScheme;
     final hideBlocked = r.visible && widget.current;
     final swatch =
         Color(0xFF000000 | layerSwatchRgb(r.color, widget.foreground));
-    return Material(
+    return PlanHoverRow(
       key: Key('layer-row-$_hex'),
-      color: widget.selected ? scheme.secondaryContainer : Colors.transparent,
-      child: InkWell(
-        onTap: widget.onSelect,
-        child: ConstrainedBox(
-          // The field's error line makes an editing row taller.
-          constraints: const BoxConstraints(minHeight: kLayerRowHeight),
-          child: Row(
-            children: [
-              _icon(
-                key: 'layer-current-$_hex',
-                icon: widget.current
-                    ? Icons.radio_button_checked
-                    : Icons.radio_button_unchecked,
-                tooltip: !r.visible
-                    ? strings.hiddenLayerNotCurrent
-                    : widget.current
-                        ? strings.currentLayer
-                        : strings.makeCurrent,
-                onPressed: enabled && r.visible ? widget.onMakeCurrent : null,
-              ),
-              _icon(
-                key: 'layer-eye-$_hex',
-                icon: r.visible ? Icons.visibility : Icons.visibility_off,
-                tooltip: hideBlocked
-                    ? strings.currentLayerNotHidden
-                    : r.visible
-                        ? strings.hideLayer
-                        : strings.showLayer,
-                onPressed:
-                    enabled && !hideBlocked ? widget.onToggleVisible : null,
-              ),
-              _icon(
-                key: 'layer-lock-$_hex',
-                icon: r.locked ? Icons.lock : Icons.lock_open,
-                tooltip: r.locked ? strings.unlockLayer : strings.lockLayer,
-                onPressed: enabled ? widget.onToggleLocked : null,
-              ),
-              // Tight, so the button's own minimum size does not make the
-              // row taller than the icons.
-              SizedBox(
-                width: 28,
-                height: 28,
-                child: PopupMenuButton<int>(
-                  key: Key('layer-colour-$_hex'),
-                  enabled: enabled,
-                  tooltip: strings.layerColour,
-                  padding: EdgeInsets.zero,
-                  // A menu open across a change to disabled picks nothing:
-                  // `PopupMenuButton` calls the current `onSelected`.
-                  onSelected: enabled ? widget.onColour : null,
-                  itemBuilder: (context) => [
-                    for (final aci in kLayerColours)
-                      PopupMenuItem<int>(
-                        key: Key('layer-colour-item-$aci'),
-                        value: aci,
-                        height: 32,
-                        child: Row(children: [
-                          _Swatch(Color(0xFF000000 |
-                              layerSwatchRgb(
-                                  IndexedColor(aci), widget.foreground))),
-                          const SizedBox(width: 8),
-                          Text(strings.colourName(aci)),
-                        ]),
-                      ),
-                  ],
-                  child: Center(child: _Swatch(swatch)),
-                ),
-              ),
-              const SizedBox(width: 4),
-              Expanded(child: widget.editing ? _field() : _name()),
-            ],
+      selected: widget.selected,
+      onTap: widget.onSelect,
+      // The field's error line makes an editing row taller.
+      minHeight: kLayerRowHeight,
+      child: Row(
+        children: [
+          _icon(
+            key: 'layer-current-$_hex',
+            icon: widget.current ? LucideIcons.circleDot : LucideIcons.circle,
+            tooltip: !r.visible
+                ? strings.hiddenLayerNotCurrent
+                : widget.current
+                    ? strings.currentLayer
+                    : strings.makeCurrent,
+            onPressed: enabled && r.visible ? widget.onMakeCurrent : null,
           ),
-        ),
+          _icon(
+            key: 'layer-eye-$_hex',
+            icon: r.visible ? LucideIcons.eye : LucideIcons.eyeOff,
+            tooltip: hideBlocked
+                ? strings.currentLayerNotHidden
+                : r.visible
+                    ? strings.hideLayer
+                    : strings.showLayer,
+            onPressed: enabled && !hideBlocked ? widget.onToggleVisible : null,
+          ),
+          _icon(
+            key: 'layer-lock-$_hex',
+            icon: r.locked ? LucideIcons.lock : LucideIcons.lockOpen,
+            tooltip: r.locked ? strings.unlockLayer : strings.lockLayer,
+            onPressed: enabled ? widget.onToggleLocked : null,
+          ),
+          PlanMenuButton<int>(
+            key: Key('layer-colour-$_hex'),
+            compact: true,
+            enabled: enabled,
+            label: strings.layerColour,
+            // A menu open across a change to disabled picks nothing.
+            onSelected: (aci) {
+              if (widget.enabled) widget.onColour(aci);
+            },
+            entries: () => [
+              for (final aci in kLayerColours)
+                PlanMenuEntry<int>(
+                  aci,
+                  strings.colourName(aci),
+                  key: Key('layer-colour-item-$aci'),
+                  enabled: widget.enabled,
+                  swatch: _Swatch(Color(0xFF000000 |
+                      layerSwatchRgb(IndexedColor(aci), widget.foreground))),
+                ),
+            ],
+            child: _Swatch(swatch),
+          ),
+          const SizedBox(width: 4),
+          Expanded(child: widget.editing ? _field() : _name()),
+        ],
       ),
     );
   }
@@ -283,21 +272,12 @@ class _LayerRowState extends State<LayerRow> {
           required IconData icon,
           required String tooltip,
           required VoidCallback? onPressed}) =>
-      // Tight, as the colour button: a Material 3 icon button's minimum
-      // size would otherwise make the row 40 high and leave the name less
-      // room at 280 px.
-      SizedBox(
-        width: 28,
-        height: 28,
-        child: IconButton(
-          key: Key(key),
-          icon: Icon(icon),
-          iconSize: 18,
-          tooltip: tooltip,
-          padding: EdgeInsets.zero,
-          visualDensity: VisualDensity.compact,
-          onPressed: onPressed,
-        ),
+      PlanIconButton(
+        key: Key(key),
+        icon: icon,
+        label: tooltip,
+        compact: true,
+        onPressed: onPressed,
       );
 
   Widget _name() {
@@ -328,27 +308,18 @@ class _LayerRowState extends State<LayerRow> {
           bindings: <ShortcutActivator, VoidCallback>{
             const SingleActivator(LogicalKeyboardKey.escape): _escape,
           },
-          child: TextField(
+          child: PlanTextField(
             key: Key('layer-name-field-$_hex'),
             controller: _text,
             focusNode: _focus,
-            maxLines: 1,
-            style: const TextStyle(fontSize: 13),
             // Enter is handled here, and does not unfocus by itself: an
             // invalid name keeps the field open.
             onEditingComplete: _enter,
             onTapOutside: (_) => _focus.handBack(),
-            decoration: InputDecoration(
-              isDense: true,
-              border: const OutlineInputBorder(),
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-              errorText: switch (_refused) {
-                null => null,
-                final name => widget.validate(name),
-              },
-              errorMaxLines: 3,
-            ),
+            errorText: switch (_refused) {
+              null => null,
+              final name => widget.validate(name),
+            },
           ),
         ),
       );
@@ -368,7 +339,7 @@ class _Swatch extends StatelessWidget {
         height: 16,
         decoration: BoxDecoration(
           color: color,
-          border: Border.all(color: Theme.of(context).colorScheme.outline),
+          border: Border.all(color: planShadThemeOf(context).colorScheme.input),
           borderRadius: BorderRadius.circular(3),
         ),
       );

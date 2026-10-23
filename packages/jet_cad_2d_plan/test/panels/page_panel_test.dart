@@ -3,6 +3,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
+import 'package:jet_cad_2d_plan/src/chrome/segmented.dart';
+import 'package:jet_cad_2d_plan/src/chrome/rows.dart';
 import 'package:jet_cad_2d_plan/src/controller/plan_controller.dart';
 import 'package:jet_cad_2d_plan/src/l10n/localizations.dart';
 import 'package:jet_cad_2d_plan/src/panels/plan_page_panel.dart';
@@ -50,10 +52,10 @@ void main() {
       expect(read(pageOf(doc)), !before, reason: key);
       expect(doc.commands.undoDepth, depth + 1, reason: key);
       doc.commands.undo();
+      await tester.idle();
       await tester.pump();
       expect(read(pageOf(doc)), before);
-      expect(
-          tester.widget<CheckboxListTile>(find.byKey(Key(key))).value, before);
+      expect(tester.widget<PlanCheckRow>(find.byKey(Key(key))).value, before);
     }
   });
 
@@ -127,10 +129,10 @@ void main() {
                 body: SizedBox(
                     width: 280, child: PlanPagePanel(controller: c)))));
 
-    Set<DecimalSeparator> shown(WidgetTester tester) => tester
-        .widget<SegmentedButton<DecimalSeparator>>(
+    DecimalSeparator shown(WidgetTester tester) => tester
+        .widget<PlanSegmented<DecimalSeparator>>(
             find.byKey(const Key('page-decimal-separator')))
-        .selected;
+        .value;
 
     testWidgets(
         'PS1 an English UI on a comma page shows 1,5 selected; a tap on 1.5 '
@@ -142,7 +144,7 @@ void main() {
       expect(find.text('Decimal separator'), findsOneWidget);
       expect(find.text('1.5'), findsOneWidget);
       expect(find.text('1,5'), findsOneWidget);
-      expect(shown(tester), {DecimalSeparator.comma});
+      expect(shown(tester), DecimalSeparator.comma);
       // P1's place: after the unit menu, the caption above the control,
       // the grid's check box below (the Task 3 review's finding 2).
       final unit = tester.getRect(find.byKey(const Key('page-unit')));
@@ -158,16 +160,17 @@ void main() {
       await tester.pump();
       expect(pageOf(doc).decimalSeparator, DecimalSeparator.point);
       expect(doc.commands.undoDepth, 1, reason: 'one command');
-      expect(shown(tester), {DecimalSeparator.point});
+      expect(shown(tester), DecimalSeparator.point);
       expect(pageOf(doc).displayUnit, DisplayUnit.centimeters);
       expect(pageOf(doc).scaleDenominator, 20);
       expect(pageOf(doc).originX, 7350);
 
       doc.commands.undo();
+      await tester.idle();
       await tester.pump();
       expect(pageOf(doc).decimalSeparator, DecimalSeparator.comma);
       expect(doc.commands.undoDepth, 0);
-      expect(shown(tester), {DecimalSeparator.comma});
+      expect(shown(tester), DecimalSeparator.comma);
     });
 
     testWidgets(
@@ -180,13 +183,15 @@ void main() {
       doc.commands.execute(SetComponentCommand<PageComponent>(doc.rootHandle,
           pageOf(doc).copyWith(decimalSeparator: DecimalSeparator.point)));
       await tester.pump();
-      expect(shown(tester), {DecimalSeparator.point});
+      expect(shown(tester), DecimalSeparator.point);
       doc.commands.undo();
+      await tester.idle();
       await tester.pump();
-      expect(shown(tester), {DecimalSeparator.comma});
+      expect(shown(tester), DecimalSeparator.comma);
       doc.commands.redo();
+      await tester.idle();
       await tester.pump();
-      expect(shown(tester), {DecimalSeparator.point});
+      expect(shown(tester), DecimalSeparator.point);
     });
 
     testWidgets(
@@ -199,7 +204,7 @@ void main() {
       expect(find.text('Dezimaltrennzeichen'), findsOneWidget);
       expect(find.text('1.5'), findsOneWidget);
       expect(find.text('1,5'), findsOneWidget);
-      expect(shown(tester), {DecimalSeparator.point});
+      expect(shown(tester), DecimalSeparator.point);
       expect(doc.commands.undoDepth, 0, reason: 'nothing written on open');
 
       await tester.tap(find.text('1,5'));
@@ -211,7 +216,7 @@ void main() {
       expect(pageOf(doc).decimalSeparator, DecimalSeparator.point,
           reason: 'the segment tapped, against the UI\'s comma');
       expect(doc.commands.undoDepth, 2);
-      expect(shown(tester), {DecimalSeparator.point});
+      expect(shown(tester), DecimalSeparator.point);
     });
   });
 

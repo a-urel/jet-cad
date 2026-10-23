@@ -18,6 +18,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
+import 'package:jet_cad_2d_plan/src/chrome/text_field.dart';
+import 'package:jet_cad_2d_plan/src/chrome/menu_button.dart';
+import 'package:jet_cad_2d_plan/src/chrome/icon_button.dart';
 import 'package:jet_cad_2d_plan/src/panels/layer_row.dart';
 import 'package:jet_cad_2d_plan/src/panels/plan_layer_panel.dart';
 import 'package:jet_cad_2d_plan/src/shortcuts/plan_shortcut_guard.dart';
@@ -102,23 +105,25 @@ bool shownCurrent(WidgetTester tester, Handle h) =>
     tester.widget<LayerRow>(find.byKey(ValueKey<Handle>(h))).current;
 
 bool enabled(WidgetTester tester, String key) =>
-    tester.widget<IconButton>(byKey(key)).onPressed != null;
+    tester.widget<PlanIconButton>(byKey(key)).onPressed != null;
 
 String tooltipOf(WidgetTester tester, String key) {
-  // An IconButton's own tooltip sits inside it; delete's wraps it.
-  final inside =
-      find.descendant(of: byKey(key), matching: find.byType(Tooltip));
-  final tip = inside.evaluate().isNotEmpty
-      ? inside
-      : find.ancestor(of: byKey(key), matching: find.byType(Tooltip));
-  return tester.widget<Tooltip>(tip.first).message!;
+  final button = tester.widget<PlanIconButton>(byKey(key));
+  return button.tooltip ?? button.label;
 }
 
 /// The colour row [h]'s swatch is drawn in.
 Color swatchOf(WidgetTester tester, Handle h) {
-  final box = tester.widget<Container>(find.descendant(
-      of: byKey('layer-colour-${hx(h)}'), matching: find.byType(Container)));
-  return (box.decoration! as BoxDecoration).color!;
+  // The button around the swatch is a shadcn one: the swatch is the one
+  // Container under the key that carries a colour.
+  return tester
+      .widgetList<Container>(find.descendant(
+          of: byKey('layer-colour-${hx(h)}'), matching: find.byType(Container)))
+      .map((c) => c.decoration)
+      .whereType<BoxDecoration>()
+      .map((d) => d.color)
+      .whereType<Color>()
+      .single;
 }
 
 /// The top of row [h] on screen.
@@ -695,7 +700,10 @@ void main() {
           added.handle);
       expect(fieldOf(added.handle), findsOneWidget, reason: 'its name field');
       expect(
-          tester.widget<TextField>(fieldOf(added.handle)).focusNode!.hasFocus,
+          tester
+              .widget<PlanTextField>(fieldOf(added.handle))
+              .focusNode!
+              .hasFocus,
           isTrue);
       return added;
     }
@@ -746,7 +754,7 @@ void main() {
         expect(enabled(tester, key), isFalse, reason: key);
       }
       expect(
-          tester.widget<PopupMenuButton<int>>(byKey('layer-colour-$a')).enabled,
+          tester.widget<PlanMenuButton<int>>(byKey('layer-colour-$a')).enabled,
           isFalse);
       // Neutral wording: under runtime the picker still moves things
       // (Task 10 review info 6).

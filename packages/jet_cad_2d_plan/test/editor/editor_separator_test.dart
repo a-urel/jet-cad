@@ -9,6 +9,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
+import 'package:jet_cad_2d_plan/src/chrome/segmented.dart';
 import 'package:jet_cad_2d_plan/src/controller/plan_controller.dart';
 import 'package:jet_cad_2d_plan/src/editor/plan_editor.dart';
 import 'package:jet_cad_2d_plan/src/l10n/localizations.dart';
@@ -29,10 +30,10 @@ DecimalSeparator separatorOf(DraftDocument doc) =>
     doc.components.get<PageComponent>(doc.rootHandle)!.decimalSeparator;
 
 /// What the Page panel's control shows selected.
-Set<DecimalSeparator> panelShows(WidgetTester tester) => tester
-    .widget<SegmentedButton<DecimalSeparator>>(
+DecimalSeparator panelShows(WidgetTester tester) => tester
+    .widget<PlanSegmented<DecimalSeparator>>(
         find.byKey(const Key('page-decimal-separator')))
-    .selected;
+    .value;
 
 /// A design edit before any view: a layer added, one command.
 void addLayer(PlanController c) {
@@ -66,7 +67,7 @@ void main() {
     expect(identical(c.document, made), isTrue);
     expect(separatorOf(made), DecimalSeparator.point,
         reason: 'settled by the first language, already point (N2)');
-    expect(panelShows(tester), {DecimalSeparator.point});
+    expect(panelShows(tester), DecimalSeparator.point);
     expect(made.commands.undoDepth, 0);
     expect(c.canUndo.value, isFalse);
     expect(c.dirty.value, isFalse);
@@ -89,7 +90,7 @@ void main() {
     expect(identical(c.document, made), isTrue,
         reason: 'the plan is settled in place, not replaced');
     expect(separatorOf(made), DecimalSeparator.comma);
-    expect(panelShows(tester), {DecimalSeparator.comma},
+    expect(panelShows(tester), DecimalSeparator.comma,
         reason: 'the shell is built over the settled page');
     expect(made.commands.undoDepth, 0);
     expect(made.commands.canRedo, isFalse);
@@ -123,14 +124,14 @@ void main() {
     expect(identical(c.document, english), isTrue);
     expect(separatorOf(english), DecimalSeparator.point,
         reason: 'settled when made: a later language does not change it');
-    expect(panelShows(tester), {DecimalSeparator.point});
+    expect(panelShows(tester), DecimalSeparator.point);
 
     // And in Turkish, comma, with no undo step and clean.
     c.newPlan();
     await tester.pump();
     await tester.pump();
     expect(separatorOf(c.document), DecimalSeparator.comma);
-    expect(panelShows(tester), {DecimalSeparator.comma});
+    expect(panelShows(tester), DecimalSeparator.comma);
     expect(c.document.commands.undoDepth, 0);
     expect(c.canUndo.value, isFalse);
     expect(c.dirty.value, isFalse);
@@ -158,6 +159,6 @@ void main() {
     expect(separatorOf(b.document), DecimalSeparator.comma);
     expect(b.document.commands.undoDepth, 0);
     expect(b.dirty.value, isFalse);
-    expect(panelShows(tester), {DecimalSeparator.comma});
+    expect(panelShows(tester), DecimalSeparator.comma);
   });
 }

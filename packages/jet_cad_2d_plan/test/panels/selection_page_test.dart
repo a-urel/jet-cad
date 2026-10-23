@@ -140,7 +140,7 @@ void main() {
     await tester.tap(width);
     await tester.pump();
     final widthNode = tester.widget<PlanTextField>(width).focusNode!;
-    final scaleNode = tester.widget<TextField>(pageScale()).focusNode!;
+    final scaleNode = tester.widget<PlanTextField>(pageScale()).focusNode!;
     // No frame: Width's tap-outside is still armed from its last build,
     // and the scale's is not armed yet.
     await tester.tap(pageScale());

@@ -9,6 +9,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
     show InteractionLayer, SelectionKey;
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show SymbolsState;
+import 'package:jet_cad_2d_plan/src/chrome/menu_button.dart';
 import 'package:jet_cad_2d_plan/src/canvas/plan_canvas.dart';
 import 'package:jet_cad_2d_plan/src/chrome/icon_button.dart';
 import 'package:jet_cad_2d_plan/src/controller/permissions.dart';
@@ -296,8 +297,8 @@ void main() {
     expect(byKey('layer-picker'), findsNothing, reason: 'nothing selected');
     c.selection.replace([SelectionKey.root(fx.marks.first)]);
     await tester.pump();
-    PopupMenuButton<Handle> picker() =>
-        tester.widget<PopupMenuButton<Handle>>(byKey('layer-picker'));
+    PlanMenuButton<Handle> picker() =>
+        tester.widget<PlanMenuButton<Handle>>(byKey('layer-picker'));
     expect(picker().enabled, isTrue);
     expect(tester.widget<Text>(byKey('layer-picker-value')).data, 'A');
 
@@ -314,12 +315,7 @@ void main() {
     c.lockBroken({fx.marks.first});
     await tester.pump();
     expect(picker().enabled, isFalse);
-    expect(
-        tester
-            .widget<Tooltip>(find.ancestor(
-                of: byKey('layer-picker'), matching: find.byType(Tooltip)))
-            .message,
-        _en.lockedNoLayer);
+    expect(picker().label, _en.lockedNoLayer);
 
     // A swap to another plan: its selection is empty; then its mark on its
     // own layer D (no layer D in the first plan) shows D, enabled as

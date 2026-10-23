@@ -25,6 +25,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+import 'package:jet_cad_2d_plan/src/chrome/menu_button.dart';
 import 'package:jet_cad_2d_plan/src/controller/plan_controller.dart';
 import 'package:jet_cad_2d_plan/src/l10n/strings_en.dart';
 import 'package:jet_cad_2d_plan/src/panels/layer_picker.dart';
@@ -180,12 +181,10 @@ String valueOf(WidgetTester tester) =>
     tester.widget<Text>(byKey('layer-picker-value')).data!;
 
 bool pickerEnabled(WidgetTester tester) =>
-    tester.widget<PopupMenuButton<Handle>>(byKey('layer-picker')).enabled;
+    tester.widget<PlanMenuButton<Handle>>(byKey('layer-picker')).enabled;
 
-String pickerTooltip(WidgetTester tester) => tester
-    .widget<Tooltip>(find.ancestor(
-        of: byKey('layer-picker'), matching: find.byType(Tooltip)))
-    .message!;
+String pickerTooltip(WidgetTester tester) =>
+    tester.widget<PlanMenuButton<Handle>>(byKey('layer-picker')).label;
 
 /// Every entity record the parametric object [group] owns (its generated
 /// children), with their layers.

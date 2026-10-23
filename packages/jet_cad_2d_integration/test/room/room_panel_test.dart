@@ -504,6 +504,7 @@ void main() {
         doc.rootHandle,
         page.copyWith(
             displayUnit: DisplayUnit.feetInches, scaleDenominator: 100)));
+    await tester.idle();
     await tester.pump();
     // 12,161,900 / (304.8 × 304.8) = 12,161,900 / 92,903.04 ≈ 130.9096
     // (the tie 130.905 is 0.0046 away).
@@ -533,6 +534,7 @@ void main() {
     final e = inv.transformPoint(place.at(3300.5, 4000));
     doc.commands.execute(SetComponentCommand<WallParams>(
         r.w, WallParams(s.x, s.y, e.x, e.y, w.thickness, w.justification)));
+    await tester.idle();
     await tester.pump();
     expect(areaText(tester), '11.97 m²');
     expect(areaText(tester), textOf(doc, labelsOf(doc, r.a)[1]));

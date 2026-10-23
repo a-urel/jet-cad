@@ -61,6 +61,7 @@ class PlanIconButton extends StatefulWidget implements PlanWordsCarrier {
     this.onPressed,
     this.selected,
     this.tooltip,
+    this.compact = false,
   });
 
   final IconData icon;
@@ -68,6 +69,10 @@ class PlanIconButton extends StatefulWidget implements PlanWordsCarrier {
   final VoidCallback? onPressed;
   final bool? selected;
   final String? tooltip;
+
+  /// A 28 px square with a 16 px glyph, for the rows of a list (a layer's
+  /// eye and lock), instead of the toolbar's size.
+  final bool compact;
 
   @override
   Iterable<String> get visibleWords {
@@ -88,11 +93,23 @@ class _PlanIconButtonState extends State<PlanIconButton> {
   Widget build(BuildContext context) {
     final glyph = Icon(widget.icon);
     final onPressed = widget.onPressed;
+    final size = widget.compact ? 28.0 : null;
+    final padding = widget.compact ? EdgeInsets.zero : null;
     final button = KeyedSubtree(
       key: _button,
       child: widget.selected == true
-          ? ShadIconButton.secondary(icon: glyph, onPressed: onPressed)
-          : ShadIconButton.ghost(icon: glyph, onPressed: onPressed),
+          ? ShadIconButton.secondary(
+              icon: glyph,
+              width: size,
+              height: size,
+              padding: padding,
+              onPressed: onPressed)
+          : ShadIconButton.ghost(
+              icon: glyph,
+              width: size,
+              height: size,
+              padding: padding,
+              onPressed: onPressed),
     );
     return Semantics(
       button: true,

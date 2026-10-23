@@ -23,6 +23,7 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
     show SelectionKey, darkCanvasTone, kDarkCanvasPaper;
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show PlanSwatch;
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+import 'package:jet_cad_2d_plan/src/chrome/icon_button.dart' show PlanTooltip;
 import 'package:jet_cad_2d_plan/src/panels/colour_row.dart';
 import 'package:jet_cad_2d_plan/src/units/unit_components.dart' show UnitColour;
 import 'package:jet_cad_2d_plan/src/units/unit_index.dart' show UnitIndex;
@@ -37,11 +38,11 @@ import '../support/unit_fixtures.dart'
 Finder swatch(String name) => find.byKey(Key('color-swatch-$name'));
 Finder get picker => find.byKey(const Key('color-picker'));
 
-/// The Semantics node of swatch [name] (the nearest above its InkWell that
-/// carries the label).
+/// The Semantics of swatch [name] (the outermost below its key that carries
+/// the label).
 Semantics semanticsOf(WidgetTester tester, String name) =>
     tester.widget<Semantics>(find
-        .ancestor(
+        .descendant(
             of: swatch(name),
             matching: find.byWidgetPredicate(
                 (w) => w is Semantics && w.properties.label != null))
@@ -49,9 +50,9 @@ Semantics semanticsOf(WidgetTester tester, String name) =>
 
 /// The tooltip text of swatch [name].
 String tooltipOf(WidgetTester tester, String name) => tester
-    .widget<Tooltip>(
-        find.ancestor(of: swatch(name), matching: find.byType(Tooltip)).first)
-    .message!;
+    .widget<PlanTooltip>(
+        find.descendant(of: swatch(name), matching: find.byType(PlanTooltip)))
+    .message;
 
 /// The marked swatch's name, or null for none.
 String? marked(WidgetTester tester) {

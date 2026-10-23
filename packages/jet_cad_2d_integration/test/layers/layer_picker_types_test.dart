@@ -19,6 +19,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
 import 'package:jet_cad_2d_integration/jet_cad_2d_integration.dart';
 import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
+import 'package:jet_cad_2d_plan/src/chrome/menu_button.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 
 import '../support/canvas_rig.dart';
@@ -34,12 +35,10 @@ List<Handle> childLayers(DraftDocument doc, Handle group) => [
     ];
 
 bool pickerEnabled(WidgetTester tester) =>
-    tester.widget<PopupMenuButton<Handle>>(byKey('layer-picker')).enabled;
+    tester.widget<PlanMenuButton<Handle>>(byKey('layer-picker')).enabled;
 
-String pickerTooltip(WidgetTester tester) => tester
-    .widget<Tooltip>(find.ancestor(
-        of: byKey('layer-picker'), matching: find.byType(Tooltip)))
-    .message!;
+String pickerTooltip(WidgetTester tester) =>
+    tester.widget<PlanMenuButton<Handle>>(byKey('layer-picker')).label;
 
 String valueOf(WidgetTester tester) =>
     tester.widget<Text>(byKey('layer-picker-value')).data!;

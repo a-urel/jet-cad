@@ -14,6 +14,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
+import 'package:jet_cad_2d_plan/src/chrome/text_field.dart';
 import 'package:jet_cad_2d_plan/src/controller/plan_controller.dart';
 import 'package:jet_cad_2d_plan/src/l10n/localizations.dart';
 import 'package:jet_cad_2d_plan/src/l10n/strings_de.dart';
@@ -111,7 +112,7 @@ Widget app(PlanController c, Locale locale) => MaterialApp(
                 ]))))));
 
 String fieldText(WidgetTester tester, String key) =>
-    tester.widget<TextField>(find.byKey(Key(key))).controller!.text;
+    tester.widget<PlanTextField>(find.byKey(Key(key))).controller.text;
 
 /// [wallPlan] pumped in [locale], its mark selected (the source selected
 /// the wall).
@@ -179,7 +180,7 @@ Future<ValueNotifier<Locale>> pumpLayers(
 }
 
 String? errorOf(WidgetTester tester, String key) =>
-    tester.widget<TextField>(find.byKey(Key(key))).decoration!.errorText;
+    tester.widget<PlanTextField>(find.byKey(Key(key))).errorText;
 
 void main() {
   test('NN1 a layer\'s N is counted over every language (M-14d-k)', () {
