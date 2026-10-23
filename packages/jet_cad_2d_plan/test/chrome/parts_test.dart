@@ -32,6 +32,37 @@ Widget _host(Widget child, {ThemeData? theme}) => MaterialApp(
 
 Widget _box(Widget child) => SizedBox(width: 280, child: child);
 
+/// [child] under counted outer shortcuts (Cmd+S, Ctrl+Z, the letter L): what
+/// an editor or a host binds above the chrome.
+class _Outer {
+  int fired = 0;
+
+  Widget wrap(Widget child) => CallbackShortcuts(
+        bindings: {
+          const SingleActivator(LogicalKeyboardKey.keyS, meta: true): () =>
+              fired++,
+          const SingleActivator(LogicalKeyboardKey.keyZ, control: true): () =>
+              fired++,
+          const SingleActivator(LogicalKeyboardKey.keyL): () => fired++,
+        },
+        child: Focus(autofocus: true, child: child),
+      );
+
+  /// Presses the three chords; how many reached the outer shortcuts.
+  Future<int> pressAll(WidgetTester tester) async {
+    final before = fired;
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyS);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyL);
+    await tester.pump();
+    return fired - before;
+  }
+}
+
 Future<void> _mouseClick(WidgetTester tester, Finder finder) async {
   final g = await tester.createGesture(kind: PointerDeviceKind.mouse);
   await g.addPointer(location: tester.getCenter(finder));
@@ -178,6 +209,28 @@ void main() {
     });
 
     testWidgets(
+        'CP12 an open PlanSelect consumes Cmd+S, Ctrl+Z and a tool letter: '
+        'the outer Shortcuts\' handlers are not called; arrows and Enter '
+        'still pick', (tester) async {
+      final outer = _Outer();
+      final picked = <String>[];
+      await tester.pumpWidget(outer.wrap(_host(_box(PlanSelect<String>(
+          value: 'a', options: options(), onChanged: picked.add)))));
+      await tester.pump();
+      expect(await outer.pressAll(tester), 3,
+          reason: 'premise: closed, all three reach the outer shortcuts');
+      await tester.tap(find.text('Alpha'));
+      await tester.pumpAndSettle();
+      expect(find.text('Beta'), findsOneWidget, reason: 'premise: open');
+      expect(await outer.pressAll(tester), 0, reason: 'open: consumed');
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(picked, isNotEmpty, reason: 'navigation still picks');
+      expect(await outer.pressAll(tester), 3, reason: 'closed again');
+    });
+
+    testWidgets(
         'a PlanSelect closed by Escape gives the focus to its focusNode; '
         'expanded, it fills the width it is given', (tester) async {
       final node = FocusNode();
@@ -303,6 +356,24 @@ void main() {
             onSelected: onSelected ?? (_) {},
           ),
         ])));
+
+    testWidgets(
+        'CP13 an open PlanMenuButton consumes Cmd+S, Ctrl+Z and a tool '
+        'letter: the outer Shortcuts\' handlers are not called; Escape '
+        'closes it', (tester) async {
+      final outer = _Outer();
+      await tester.pumpWidget(outer.wrap(menu()));
+      await tester.pump();
+      expect(await outer.pressAll(tester), 3, reason: 'premise: closed');
+      await _mouseClick(tester, find.byKey(const Key('menu')));
+      await tester.pumpAndSettle();
+      expect(find.text('Item one'), findsOneWidget, reason: 'premise: open');
+      expect(await outer.pressAll(tester), 0, reason: 'open: consumed');
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(find.text('Item one'), findsNothing);
+      expect(await outer.pressAll(tester), 3, reason: 'closed again');
+    });
 
     testWidgets(
         'CP6 opens on a primary mouse click on desktop and on a tap on '

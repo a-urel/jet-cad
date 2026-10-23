@@ -7,6 +7,7 @@ import 'package:flutter/widgets.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 import 'icon_button.dart';
+import 'modal_keys.dart';
 import 'words_carrier.dart';
 
 /// One entry of a [PlanMenuButton]: a [value], its [label], whether it can
@@ -131,46 +132,48 @@ class _PlanMenuButtonState<T> extends State<PlanMenuButton<T>> {
 
   @override
   Widget build(BuildContext context) {
-    return ShadContextMenu(
-      controller: _controller,
-      items: [
-        for (final entry in widget.entries())
-          ShadContextMenuItem(
-            key: entry.key,
-            enabled: entry.enabled,
-            leading: entry.value == widget.selected
-                ? const Icon(LucideIcons.check)
-                : const SizedBox.square(dimension: 16),
-            onPressed: () => widget.onSelected(entry.value),
-            child: Semantics(
-              selected: entry.value == widget.selected,
-              child: entry.swatch == null
-                  ? Text(entry.label)
-                  : Row(mainAxisSize: MainAxisSize.min, children: [
-                      entry.swatch!,
-                      const SizedBox(width: 8),
-                      Text(entry.label),
-                    ]),
+    return PlanModalKeys(
+        isOpen: () => _controller.isOpen,
+        child: ShadContextMenu(
+          controller: _controller,
+          items: [
+            for (final entry in widget.entries())
+              ShadContextMenuItem(
+                key: entry.key,
+                enabled: entry.enabled,
+                leading: entry.value == widget.selected
+                    ? const Icon(LucideIcons.check)
+                    : const SizedBox.square(dimension: 16),
+                onPressed: () => widget.onSelected(entry.value),
+                child: Semantics(
+                  selected: entry.value == widget.selected,
+                  child: entry.swatch == null
+                      ? Text(entry.label)
+                      : Row(mainAxisSize: MainAxisSize.min, children: [
+                          entry.swatch!,
+                          const SizedBox(width: 8),
+                          Text(entry.label),
+                        ]),
+                ),
+              ),
+          ],
+          child: Focus(
+            focusNode: _trigger,
+            child: ListenableBuilder(
+              listenable: _controller,
+              builder: (context, _) => PlanTooltipSuppressor(
+                suppressed: _controller.isOpen,
+                child: widget.child == null
+                    ? PlanIconButton(
+                        icon: widget.icon!,
+                        label: widget.label,
+                        onPressed: widget.enabled ? _controller.toggle : null,
+                      )
+                    : Builder(builder: _childButton),
+              ),
             ),
           ),
-      ],
-      child: Focus(
-        focusNode: _trigger,
-        child: ListenableBuilder(
-          listenable: _controller,
-          builder: (context, _) => PlanTooltipSuppressor(
-            suppressed: _controller.isOpen,
-            child: widget.child == null
-                ? PlanIconButton(
-                    icon: widget.icon!,
-                    label: widget.label,
-                    onPressed: widget.enabled ? _controller.toggle : null,
-                  )
-                : Builder(builder: _childButton),
-          ),
-        ),
-      ),
-    );
+        ));
   }
 
   /// The button that shows [PlanMenuButton.child].

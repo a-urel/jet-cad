@@ -3,6 +3,7 @@
 import 'package:flutter/widgets.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
+import 'modal_keys.dart';
 import 'shad_scope.dart';
 import 'words_carrier.dart';
 
@@ -131,26 +132,28 @@ class _PlanSelectState<T> extends State<PlanSelect<T>> {
             padding: const EdgeInsets.only(bottom: 4),
             child: Text(label, style: theme.textTheme.small),
           ),
-        ShadSelect<T>(
-          controller: _controller,
-          focusNode: widget.focusNode,
-          popoverController: _popover,
-          enabled: widget.enabled,
-          minWidth: 0,
-          placeholder: placeholder == null ? null : Text(placeholder),
-          options: [
-            for (final option in widget.options)
-              ShadOption<T>(
-                  value: option.value,
-                  child: Text(option.label, key: option.key)),
-          ],
-          selectedOptionBuilder: (context, value) => Text(_labelOf(value)),
-          onChanged: (picked) {
-            if (picked != null) widget.onChanged(picked);
-            // The model is the authority, not the pick.
-            _syncToModel();
-          },
-        ),
+        PlanModalKeys(
+            isOpen: () => _popover.isOpen,
+            child: ShadSelect<T>(
+              controller: _controller,
+              focusNode: widget.focusNode,
+              popoverController: _popover,
+              enabled: widget.enabled,
+              minWidth: 0,
+              placeholder: placeholder == null ? null : Text(placeholder),
+              options: [
+                for (final option in widget.options)
+                  ShadOption<T>(
+                      value: option.value,
+                      child: Text(option.label, key: option.key)),
+              ],
+              selectedOptionBuilder: (context, value) => Text(_labelOf(value)),
+              onChanged: (picked) {
+                if (picked != null) widget.onChanged(picked);
+                // The model is the authority, not the pick.
+                _syncToModel();
+              },
+            )),
       ],
     );
   }
