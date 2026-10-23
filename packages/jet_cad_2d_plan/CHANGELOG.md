@@ -1,5 +1,23 @@
 ## Unreleased
 
+- **The chrome is shadcn.** Bars, panels, buttons, fields, selects, menus,
+  tooltips and the export dialog are `shadcn_ui` (`^0.57.1`) widgets, and the
+  icons are Lucide. A host's `ShadTheme` above the view is used as is; a
+  Material host needs nothing, the chrome is derived from its `ThemeData`
+  (colours, brightness, font family). `PlanTheme` is unchanged (the canvas
+  look; `serviceBarHeight` still sizes the service bar), the `IconData` API
+  is unchanged, and the package's SDK floor stays `^3.6.0`.
+- **Requirements.** Dart 3.11 through `shadcn_ui`; a host that uses
+  `shadcn_ui` moves to `^0.57.1`. `shadcn_ui` brings `objective_c`'s
+  native-assets build hook (through `universal_image`, `extended_image_library`
+  and `path_provider_foundation`).
+- **Behaviour changes for existing hosts.** A widget test that found Material
+  types inside the planner (`IconButton`, `TextField`, `DropdownButton`,
+  `SegmentedButton`, `Tooltip`, `ListTile`, `AlertDialog`) finds the library's
+  own parts now; keys are unchanged. An open select or menu keeps the
+  keyboard, as a Material route did. Icon buttons are 40 px (were 48), the
+  service bar is painted with the shadcn background, and the export dialog is
+  a shadcn dialog.
 - **Alignment guides** (smart guides), in both modes. While a movable object
   is dragged or placed, lines show where its edges or its centre line up with
   a nearby object, or where its gap equals another gap (small gap marks, no
