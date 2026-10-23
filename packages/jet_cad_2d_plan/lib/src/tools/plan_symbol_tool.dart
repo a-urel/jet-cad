@@ -16,6 +16,7 @@ import 'package:flutter/services.dart'
         HardwareKeyboard,
         KeyDownEvent,
         KeyEvent,
+        KeyRepeatEvent,
         KeyUpEvent,
         LogicalKeyboardKey,
         MouseCursor,
@@ -34,6 +35,10 @@ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart'
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../attach/attachment_painter.dart';
+import '../guides/guide_painter.dart';
+import '../guides/guide_references.dart';
+import '../guides/guide_settings.dart';
+import '../guides/guide_solver.dart';
 import '../symbols/plan_symbol.dart';
 import '../symbols/symbol_ghost.dart';
 import '../symbols/symbol_placer.dart';
@@ -72,10 +77,24 @@ const double kAttachPixels = 16.0;
 ///   the mirror, `mayRotate` ([canRotate]) and the last answer as `keep`.
 ///   Attached, the ghost and the release use the answer's transform
 ///   verbatim and the marker is drawn at its marker; M mirrors in place.
+/// - Alignment guides (alignment guides spec, "The delta: Place"): given
+///   [guides] and [guideSettings], the ghost's box at the raw pointer is
+///   solved against the document's objects, and each axis a guide captures
+///   takes `raw + offset` as the anchor, the other the chain's. The
+///   attachment still asks on the unguided placement; the ghost, the marker
+///   and the release read the guided one. Alt, or the setting off, places
+///   as before.
 class PlanSymbolTool extends Tool {
   PlanSymbolTool(this.armed,
-      {this.attachments, this.canRotate, this.canMirror, this.units}) {
+      {this.attachments,
+      this.canRotate,
+      this.canMirror,
+      this.units,
+      this.guides,
+      this.guideSettings,
+      this.guideStroke}) {
     armed.addListener(_onArmed);
+    guideSettings?.addListener(_onGuideSettings);
     _syncPath();
   }
 
@@ -96,6 +115,16 @@ class PlanSymbolTool extends Tool {
   /// The plan's units, read at each placement: a numbered unit takes the
   /// next number (spec 2b S2). Null places no label.
   final UnitIndex Function()? units;
+
+  /// The document's guide references, or null: no guides.
+  final GuideReferenceCache? guides;
+
+  /// The guide switch, listened to while the tool lives, or null: no
+  /// guides.
+  final PlanGuideSettings? guideSettings;
+
+  /// The guide stroke in screen pixels, read at paint.
+  final double Function()? guideStroke;
 
   final DragPoint _at = DragPoint();
   final SnapResult _scratch = SnapResult();
@@ -138,6 +167,26 @@ class PlanSymbolTool extends Tool {
   /// [ghostVisible] (after a pointer event brought a context).
   ToolContext? _listening;
 
+  // The guides (spec "The delta: Place"): the anchor the ghost and the
+  // release use, the solution, the painter, and the ghost's box. The box is
+  // cached at the origin anchor, keyed on (armed symbol, turns, mirror), and
+  // translated by the raw pointer per event: `placementTransform` turns and
+  // mirrors about the base point, then translates by `at`.
+  final Vector2 _guidedAt = Vector2.zero();
+  final GuideSolution _solution = GuideSolution();
+  final GuidePainter _guidePainter = GuidePainter();
+  final Float64List _originBox = Float64List(4);
+  PlanSymbol? _boxSymbol;
+  int _boxTurns = 0;
+  bool _boxMirror = false;
+  bool _boxValid = false;
+  bool _touch = false;
+  bool _alt = false;
+
+  /// The last guide solution, the one [paintOverlay] draws (tests read it).
+  @visibleForTesting
+  GuideSolution get debugSolution => _solution;
+
   /// What a placement commits (spec D6: the definition copy, its leaves and
   /// its jetcad.symbol).
   static const Set<Capability> needs = PlanToolIds.symbolNeeds;
@@ -166,7 +215,7 @@ class PlanSymbolTool extends Tool {
 
   /// The resolved (snapped) point the ghost's base point sits on while it
   /// places freely. Read only; reused.
-  Vector2 get ghostAt => _at.point;
+  Vector2 get ghostAt => _guidedAt;
 
   /// The ghost's cached local path, or null while idle.
   @visibleForTesting
@@ -228,19 +277,97 @@ class PlanSymbolTool extends Tool {
     notifyListeners();
   }
 
-  /// The free placement: the resolved point, the turns, the mirror.
-  Transform2? _free() {
+  /// The free placement: the guided anchor (or, [guided] false, the
+  /// resolved point), the turns, the mirror.
+  Transform2? _free({bool guided = true}) {
     final symbol = armed.value;
     return symbol == null
         ? null
         : placementTransform(
-            at: _at.point,
+            at: guided ? _guidedAt : _at.point,
             basePoint: symbol.entry.definition.basePoint,
             quarterTurns: _turns,
             mirrored: _mirror);
   }
 
-  void _syncPlacement() => _placement = _attached?.transform ?? _free();
+  /// The one solve site: every path that recomputes the placement (a
+  /// pointer, a camera, R and M, a re-arm, the permissions, the setting)
+  /// comes through here.
+  void _syncPlacement() {
+    _solveGuides();
+    _placement = _attached?.transform ?? _free();
+  }
+
+  /// The ghost's box anchored at the origin, or false when the armed symbol
+  /// has none; recomputed only when the symbol, the turns or the mirror
+  /// changed.
+  bool _originBoxFor(PlanSymbol symbol) {
+    final turns = _turns, mirror = _mirror;
+    if (identical(symbol, _boxSymbol) &&
+        turns == _boxTurns &&
+        mirror == _boxMirror) {
+      return _boxValid;
+    }
+    _boxSymbol = symbol;
+    _boxTurns = turns;
+    _boxMirror = mirror;
+    final symbolBox = boxOfEntry(symbol.entry);
+    _boxValid = symbolBox != null;
+    if (symbolBox != null) {
+      worldBoxOf(
+          symbolBox,
+          placementTransform(
+              at: Vector2.zero(),
+              basePoint: symbol.entry.definition.basePoint,
+              quarterTurns: turns,
+              mirrored: mirror),
+          _originBox);
+    }
+    return _boxValid;
+  }
+
+  /// Solves the guides on the ghost's box at the raw pointer, and writes
+  /// [_guidedAt]: a captured axis takes `raw + offset`, any other axis the
+  /// chain's value bit for bit. Guides off, Alt held, no symbol or no box
+  /// leave [_guidedAt] at the chain's point.
+  void _solveGuides() {
+    _solution.reset();
+    _guidedAt.setFrom(_at.point);
+    final references = guides, settings = guideSettings;
+    final symbol = armed.value;
+    if (references == null ||
+        settings == null ||
+        !settings.on ||
+        _alt ||
+        !_hasRaw ||
+        symbol == null ||
+        !_originBoxFor(symbol)) {
+      return;
+    }
+    final aperture =
+        (_touch ? kGuideTouchAperturePixels : kGuideAperturePixels) / _rawScale;
+    final rx = _raw.x, ry = _raw.y;
+    solveGuides(references.current,
+        minX: _originBox[0] + rx,
+        minY: _originBox[1] + ry,
+        maxX: _originBox[2] + rx,
+        maxY: _originBox[3] + ry,
+        aperture: aperture,
+        freeX: true,
+        freeY: true,
+        fallbackDx: _at.point.x - rx,
+        fallbackDy: _at.point.y - ry,
+        moving: const <Handle>{},
+        out: _solution);
+    if (_solution.capturedX) _guidedAt.x = rx + _solution.dx;
+    if (_solution.capturedY) _guidedAt.y = ry + _solution.dy;
+  }
+
+  void _onGuideSettings() {
+    if (armed.value == null || !_hasRaw) return;
+    _syncPlacement();
+    notifyListeners();
+  }
 
   void _syncAttachment(ToolContext ctx) {
     final previous = _attached;
@@ -258,7 +385,7 @@ class PlanSymbolTool extends Tool {
         kinds,
         AttachmentQuery(
           footprint: footprintOf(box),
-          current: _free()!,
+          current: _free(guided: false)!,
           pointer: _raw.clone(),
           capture: kAttachPixels / _rawScale,
           edgeCapture: kSnapAperturePixels / _rawScale,
@@ -303,6 +430,8 @@ class PlanSymbolTool extends Tool {
   void _track(ToolPointerEvent e, ToolContext ctx) {
     _lastScreen = e.screen;
     _context = ctx;
+    _touch = e.isTouch;
+    _alt = e.alt;
   }
 
   Vector2 _worldUnderPointer(ToolContext ctx) =>
@@ -390,6 +519,22 @@ class PlanSymbolTool extends Tool {
   /// - A key-up always bubbles.
   @override
   KeyEventResult onKey(KeyEvent event, ToolContext ctx) {
+    // Alt toggles the guides at once, before any early return (C-16): the
+    // preview never shows a stale state.
+    final altKey = event.logicalKey == LogicalKeyboardKey.altLeft ||
+        event.logicalKey == LogicalKeyboardKey.altRight;
+    if (altKey && event is! KeyRepeatEvent) {
+      final down = event is KeyDownEvent;
+      if (down != _alt) {
+        _alt = down;
+        final listening = _listening;
+        if (armed.value != null && listening != null && ghostVisible) {
+          _update(listening, _worldUnderPointer(listening));
+          notifyListeners();
+        }
+      }
+      return KeyEventResult.ignored;
+    }
     if (armed.value == null || event is KeyUpEvent) {
       return KeyEventResult.ignored;
     }
@@ -451,11 +596,12 @@ class PlanSymbolTool extends Tool {
   /// attached placement commits the attachment's transform verbatim.
   void _place(ToolContext ctx, PlanSymbol symbol) {
     if (!needs.every(ctx.document.commands.permissions.allows)) return;
+    // The guided placement, so the release commits what the ghost showed.
     ctx.execute(placeSymbol(ctx.document, symbol.entry,
-        at: _at.point,
+        at: _guidedAt,
         quarterTurns: _turns,
         mirrored: _mirror,
-        transform: _attached?.transform,
+        transform: _attached?.transform ?? _free(),
         units: units?.call()));
   }
 
@@ -471,8 +617,12 @@ class PlanSymbolTool extends Tool {
       paintAttachmentMarker(canvas, camera, attached.marker, _markerPaint);
       return;
     }
+    if (_solution.lineCount != 0 || _solution.markCount != 0) {
+      _guidePainter.paint(canvas, camera.worldToScreenMatrix, _solution,
+          color: paper.guideColor, strokePixels: guideStroke?.call() ?? 1.0);
+    }
     final m = camera.worldToScreenMatrix;
-    final p = _at.point;
+    final p = _guidedAt;
     final at =
         ui.Offset(m.a * p.x + m.c * p.y + m.e, m.b * p.x + m.d * p.y + m.f);
     drawSnapMarker(canvas, at, _at.objectKind,
@@ -511,6 +661,7 @@ class PlanSymbolTool extends Tool {
   @override
   void dispose() {
     armed.removeListener(_onArmed);
+    guideSettings?.removeListener(_onGuideSettings);
     _listening?.camera.removeListener(_onCamera);
     _listening = null;
     _context = null;

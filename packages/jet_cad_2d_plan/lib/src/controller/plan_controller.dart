@@ -1956,7 +1956,10 @@ class PlanController extends ChangeNotifier {
         attachments: session.attachments,
         canRotate: () => _permissions.rotate,
         canMirror: () => _permissions.mirror,
-        units: () => session.units.current));
+        units: () => session.units.current,
+        guides: session.guides,
+        guideSettings: _alignmentGuides,
+        guideStroke: () => guideStrokePixels));
     registerToolNeeds(PlanToolIds.symbol, PlanToolIds.symbolNeeds);
     _locked.value = session.locks.objects;
     session.boundary = FailureBoundary(
