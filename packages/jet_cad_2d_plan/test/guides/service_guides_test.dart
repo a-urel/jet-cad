@@ -16,6 +16,8 @@ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show SymbolBox;
 import 'package:jet_cad_2d_plan/src/guides/guide_solver.dart';
 import 'package:jet_cad_2d_plan/src/service/service_session.dart' show PlanMode;
 import 'package:jet_cad_2d_plan/src/service/service_state.dart' show UnitGroup;
+import 'package:jet_cad_2d_plan/src/service/service_tool.dart'
+    show PlanFloorDrag;
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../support/harness.dart';
@@ -416,6 +418,23 @@ void main() {
     g.up(from + Vector2(dx, 0));
     g.alt(down: false);
     expect(g.transformOf(g.tables[1]).e, closeTo(before + raw, 1e-9));
+  });
+
+  testWidgets(
+      'SG-alt-band an Alt key during a band is taken, not bubbled (RB-5, '
+      'M-SG-8-alt-band)', (tester) async {
+    final g = _rigOf(_planOf([_tA, _tB, _tC]));
+    final floor = Vector2(12000, 1000);
+    g.r.options = (
+      longPress: g.r.options.longPress,
+      onUnitContextMenu: null,
+      floorDrag: PlanFloorDrag.band,
+    );
+    g.hold(floor, floor + Vector2(300, -300));
+    expect(g.r.tool.phase, ToolPhase.dragging, reason: 'premise: a band');
+    expect(g.alt(down: true), KeyEventResult.handled);
+    expect(g.alt(down: false), KeyEventResult.handled);
+    g.up(floor + Vector2(300, -300));
   });
 
   testWidgets(

@@ -855,14 +855,17 @@ class ServiceTool extends Tool {
   @override
   KeyEventResult onKey(KeyEvent event, ToolContext ctx) {
     // Alt suspends the guides at once (C-16), and brings them back on its
-    // release; only a live guided drag listens.
+    // release; only a live guided drag listens. Any other gesture falls
+    // through, so a band still takes Alt (RB-5).
     final altKey = event.logicalKey == LogicalKeyboardKey.altLeft ||
         event.logicalKey == LogicalKeyboardKey.altRight;
-    if (altKey && event is! KeyRepeatEvent) {
-      final down = event is KeyDownEvent;
-      if (_dragCtx != null && _gesture == _Gesture.dragging && down != _alt) {
-        _alt = down;
-        _reaim();
+    if (altKey && _gesture == _Gesture.dragging) {
+      if (event is! KeyRepeatEvent && _dragCtx != null) {
+        final down = event is KeyDownEvent;
+        if (down != _alt) {
+          _alt = down;
+          _reaim();
+        }
       }
       return KeyEventResult.ignored;
     }
