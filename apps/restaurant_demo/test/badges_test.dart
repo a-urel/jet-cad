@@ -287,8 +287,7 @@ void main() {
       ('de', 'Tischanzeigen', 'Auf Tisch 7 zentrieren', '41 Min.'),
       ('tr', 'Rozetler', 'Ortala: masa 7', '41 dk'),
     ]) {
-      await tester.tap(byKey('lang-$lang'));
-      await settle(tester);
+      await switchLanguage(tester, lang);
       await reveal(tester, 'center-7');
       expect(find.text(badges), findsOneWidget, reason: lang);
       expect(find.text(centre), findsOneWidget, reason: lang);

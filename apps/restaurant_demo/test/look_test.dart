@@ -3,8 +3,9 @@
 // 2026-10-16-restaurant-kit-test-audit.md): the app bar's Standard / POS
 // look. The POS look is a `PlanTheme` in each of the app's themes
 // (lib/demo_theme.dart), a local `Theme` with a hand-built `ColorScheme`
-// around the view, and one field of the view's own (`selectionWidth: 3`),
-// merged over the extension. Read back on the Salon sample, whose fitted
+// of the app (the `ShadApp` root's derived Material theme), and one field of
+// the view's own (`selectionWidth: 3`), merged over the extension. The app's
+// zinc `ShadTheme` is above the view under both looks (spec D2). Read back on the Salon sample, whose fitted
 // camera is neither the identity nor at the origin, in both modes, under a
 // light and a dark platform, in pixels where the demo can see them (the bar,
 // the surround, the selection, the fill, the caption's size) and in the theme
@@ -181,9 +182,9 @@ void main() {
     final name = brightness.name;
     testWidgets(
         'DL${brightness == Brightness.light ? 1 : 2} the POS look under a '
-        '$name platform: the extension of the app\'s $name theme, a '
-        'ShadTheme of zinc above the view, zinc\'s background on the bar (DL-S1), under '
-        'Standard the derived one, the 52 px bar, the surround '
+        '$name platform: the extension of the app\'s $name theme, the app\'s '
+        'ShadTheme of zinc above the view under both looks, zinc\'s '
+        'background on the bar under both (DL-S1), the 52 px bar, the surround '
         'in the canvas colour in both modes, the selection 3 px in the '
         'theme\'s colour for the paper in both modes, the fill at 0.8, the '
         '12 px bold Roboto caption; Standard again is today\'s, byte for byte',
@@ -196,7 +197,7 @@ void main() {
       final c = demo.area.controller;
       final light = brightness == Brightness.light;
       final pos = posPlanTheme(brightness);
-      final posShad = posShadTheme(brightness);
+      final posShad = demoShadTheme(brightness);
       final zinc = light
           ? const ShadZincColorScheme.light()
           : const ShadZincColorScheme.dark();
@@ -219,13 +220,17 @@ void main() {
       final standardSeen = seen(tester);
       expect(standardSeen.ambient, isNull, reason: 'Standard: no extension');
       expect(standardSeen.view, isNull, reason: 'Standard: no view theme');
-      expect(standardSeen.shad, isNull,
-          reason: 'Standard: no ShadTheme above the view (the planner '
-              'derives its chrome from the Material theme)');
+      expect(standardSeen.shad, isNotNull,
+          reason: 'Standard: the app\'s ShadTheme is above the view');
+      expect(standardSeen.shad!.colorScheme, posShad.colorScheme,
+          reason: 'Standard: the app\'s zinc, as demoShadTheme builds it');
       final standardSurface = rgbOf(standardSeen.scheme.surface);
-      // The bar is the shadcn background derived from the seed scheme,
-      // which the mapping takes from `surface` (R-BarSurface).
-      final standardBar = rgbOf(standardSeen.scheme.surface);
+      expect(standardSurface, rgbOf(zinc.background),
+          reason: 'premise: the derived Material surface is zinc\'s '
+              'background');
+      // The bar is the shadcn background of the app's ShadTheme, under
+      // both looks (R-BarSurface).
+      final standardBar = rgbOf(zinc.background);
 
       /// The shown mode's look: the shot, the view's rect, and the pixels
       /// of [selection] within 3 per channel around table 7.
@@ -246,11 +251,10 @@ void main() {
           await check('Standard service', standardSet.selection);
       expect(hex(standardService.shot.rgbAtOffset(surround(c))),
           hex(standardSurface),
-          reason: 'premise: the surround is the seed scheme\'s surface');
+          reason: 'premise: the surround is the derived Material surface');
       expect(hex(standardService.shot.rgbAtOffset(barBackground(tester))),
           hex(standardBar),
-          reason: 'premise: the bar is the derived shadcn background of the '
-              'seed theme');
+          reason: 'Standard: the bar is zinc\'s background');
       expect(overlay(tester).selectionStrokePixels, 2);
       expect(overlay(tester).paper.selection, standardSet.selection);
       expect(standardService.selectionPixels, greaterThan(200),
@@ -290,7 +294,7 @@ void main() {
       expect(posSeen.shad!.brightness, brightness);
       expect(posSeen.shad!.colorScheme.background, zinc.background);
       expect(posSeen.shad!.colorScheme, posShad.colorScheme,
-          reason: 'zinc, as posShadTheme builds it');
+          reason: 'zinc, as demoShadTheme builds it');
       expect(posSeen.scheme, standardSeen.scheme,
           reason: 'the Material theme is the app\'s: no local Theme');
       expect(posSeen.ambient!.selectionWidth, isNull,
@@ -324,8 +328,9 @@ void main() {
       expect(hex(posService.shot.rgbAtOffset(barBackground(tester))),
           hex(rgbOf(zinc.background)),
           reason: 'DL-S1 the bar: zinc\'s background, not the derived one');
-      expect(rgbOf(zinc.background), isNot(standardBar),
-          reason: 'DL-S1 premise: the two looks\' bars differ');
+      expect(hex(standardBar), hex(rgbOf(zinc.background)),
+          reason: 'DL-S1: the bar is the same zinc background under both '
+              'looks');
       expect(hex(posService.shot.rgbAtOffset(surround(c))),
           hex(rgbOf(pos.canvasBackground!)),
           reason: 'service: the surround is the canvas colour');

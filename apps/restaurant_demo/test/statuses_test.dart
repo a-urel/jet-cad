@@ -120,17 +120,13 @@ void main() {
       (tester) async {
     final demo = await pumpDemo(tester);
     final c = demo.area.controller;
-    await tester.tap(byKey('lang-tr'));
-    await tester.pump();
-    await tester.pump();
+    await switchLanguage(tester, 'tr');
     c.select({'2'});
     await tester.pump();
     await tester.tap(byKey('status-bill'));
     await tester.pump();
     expect(c.unitStatuses.value['2']!.caption, 'Hesap', reason: 'premise');
-    await tester.tap(byKey('lang-de'));
-    await tester.pump();
-    await tester.pump();
+    await switchLanguage(tester, 'de');
     expect(c.unitStatuses.value['2']!.caption, 'Rechnung');
     expect(c.unitStatuses.value['2']!.color,
         DemoHomeState.kStatuses['Bill']!.color);

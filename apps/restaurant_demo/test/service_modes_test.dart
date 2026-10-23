@@ -117,9 +117,7 @@ void main() {
       'speak Turkish, then German', (tester) async {
     final demo = await pumpDemo(tester);
     final c = demo.area.controller;
-    await tester.tap(byKey('lang-tr'));
-    await tester.pump();
-    await tester.pump();
+    await switchLanguage(tester, 'tr');
     expect(find.text('Restoran demosu'), findsOneWidget);
     expect(find.text('Tasarım'), findsOneWidget);
     expect(find.text('Duvar'), findsOneWidget, reason: 'the planner too');
@@ -132,9 +130,7 @@ void main() {
     expect(c.unitStatuses.value['2']!.caption, 'Hesap');
     expect(find.text('Hesap'), findsWidgets, reason: 'the button');
 
-    await tester.tap(byKey('lang-de'));
-    await tester.pump();
-    await tester.pump();
+    await switchLanguage(tester, 'de');
     expect(find.text('Entwurf'), findsOneWidget);
   });
 

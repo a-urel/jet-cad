@@ -4,10 +4,9 @@
 //
 // - A `PlanTheme` in each of the app's `ThemeData`s, a light and a
 //   dark one ([posPlanTheme]), so the system's mode picks it.
-// - A `ShadTheme` around the view ([posShadTheme]), from shadcn's zinc
-//   palette: the planner's chrome (bars, panels, buttons, the export
-//   dialog) uses an ancestor `ShadTheme` as it finds it, as a shadcn POS
-//   would put one above its screens.
+// - The app's `ShadTheme` ([demoShadTheme]), shadcn's zinc palette, given
+//   to the `ShadApp` root: the planner's chrome (bars, panels, buttons, the
+//   export dialog) uses an ancestor `ShadTheme` as it finds it.
 // - The view's own `theme:` ([kPosViewOverride]), one field over the
 //   ambient extension: the merge, field by field.
 //
@@ -21,10 +20,10 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 
 /// The two looks the demo's app bar switches between.
 enum DemoLook {
-  /// Today's: the seeded Material theme, no `PlanTheme` anywhere.
+  /// Today's: the library's default `PlanTheme`.
   standard,
 
-  /// The POS's: [posPlanTheme], [posShadTheme], [kPosViewOverride].
+  /// The POS's: [posPlanTheme] and [kPosViewOverride].
   pos,
 }
 
@@ -89,10 +88,10 @@ PlanTheme posPlanTheme(Brightness brightness) =>
 /// width, so the resolved theme is the extension plus this).
 const PlanTheme kPosViewOverride = PlanTheme(selectionWidth: 3);
 
-/// The `ShadTheme` around the view under the POS look: shadcn's zinc
-/// palette for [brightness], in the planner's bundled `Roboto` (the same on
-/// every terminal, as the `PlanTheme`s' captions).
-ShadThemeData posShadTheme(Brightness brightness) => ShadThemeData(
+/// The app's `ShadTheme`, under both looks: shadcn's zinc palette for
+/// [brightness], in the planner's bundled `Roboto` (the same on every
+/// terminal, as the `PlanTheme`s' captions).
+ShadThemeData demoShadTheme(Brightness brightness) => ShadThemeData(
       brightness: brightness,
       colorScheme: brightness == Brightness.light
           ? const ShadZincColorScheme.light()

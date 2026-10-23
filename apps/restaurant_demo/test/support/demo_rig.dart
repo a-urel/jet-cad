@@ -15,6 +15,13 @@ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show kUnitLabelTag;
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 import 'package:restaurant_demo/main.dart';
 import 'package:restaurant_demo/samples/place_tables.dart';
+import 'package:shadcn_ui/shadcn_ui.dart' show GlobalShadLocalizations;
+
+/// The tick that lets a non-English shadcn locale arrive: `ShadApp` loads
+/// German and Turkish words through a deferred import, which completes on a
+/// timer, not on a bare frame. [pumpDemo] first loads both on the real event
+/// loop (the deferred libraries then stay loaded for the file).
+const Duration kLocaleTick = Duration(milliseconds: 1);
 
 Finder byKey(String k) => find.byKey(Key(k));
 
@@ -26,10 +33,15 @@ Future<DemoHomeState> pumpDemo(WidgetTester tester,
     PagePrinter? printer}) async {
   await tester.binding.setSurfaceSize(size);
   addTearDown(() => tester.binding.setSurfaceSize(null));
+  await tester.runAsync(() async {
+    for (final language in const ['de', 'tr']) {
+      await GlobalShadLocalizations.delegate.load(Locale(language));
+    }
+  });
   await tester.pumpWidget(
       RestaurantDemo(locale: locale, random: random, printer: printer));
   await tester.pump();
-  await tester.pump();
+  await tester.pump(kLocaleTick);
   return tester.state<DemoHomeState>(find.byType(DemoHome));
 }
 
@@ -161,6 +173,19 @@ Future<void> pressInPanel(WidgetTester tester, String key) async {
 Future<void> settle(WidgetTester tester) async {
   await tester.pump();
   await tester.pump();
+}
+
+/// [settle] for a language switch: the second frame carries
+/// [kLocaleTick].
+Future<void> settleLocale(WidgetTester tester) async {
+  await tester.pump();
+  await tester.pump(kLocaleTick);
+}
+
+/// Taps the language button [code] and settles past the new words' arrival.
+Future<void> switchLanguage(WidgetTester tester, String code) async {
+  await tester.tap(byKey('lang-$code'));
+  await settleLocale(tester);
 }
 
 /// Taps the widget keyed [key] and settles.

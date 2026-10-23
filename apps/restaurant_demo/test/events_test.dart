@@ -362,7 +362,7 @@ void main() {
     expect(demo.log[1], 'Salon: Plan ersetzt');
 
     // The stored plan carries no ids: Revert unlinked the tables.
-    await press(tester, 'lang-tr');
+    await switchLanguage(tester, 'tr');
     await press(tester, 'mode-design');
     expect(find.text('Masaları bağla'), findsOneWidget);
     expect(textOf(tester, 'unlinked'), 'Bağlanmamış: 11');

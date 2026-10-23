@@ -229,8 +229,7 @@ void main() {
   testWidgets('D19b the German "Reset layout" button (D19 ported without it)',
       (tester) async {
     await pumpDemo(tester);
-    await tester.tap(byKey('lang-de'));
-    await settle(tester);
+    await switchLanguage(tester, 'de');
     await enterService(tester);
     expect(find.text('Anordnung zurücksetzen'), findsOneWidget);
   });
@@ -269,8 +268,7 @@ void main() {
     // The Teras, saved before it is shown: a point plan stored.
     final teras = demo.areas[1];
     teras.stored = teras.controller.save();
-    await tester.tap(byKey('lang-de'));
-    await settle(tester);
+    await switchLanguage(tester, 'de');
     expect(find.text('Entwurf'), findsOneWidget, reason: 'premise: German');
     expect(separatorOf(demo.area.controller), DecimalSeparator.point,
         reason: 'a settled plan is not converted (N2)');

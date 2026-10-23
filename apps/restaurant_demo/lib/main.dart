@@ -21,7 +21,7 @@ import 'package:flutter/services.dart' show BrowserContextMenu;
 import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
 import 'package:jet_cad_2d_kit_restaurant/jet_cad_2d_kit_restaurant.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
-import 'package:shadcn_ui/shadcn_ui.dart' show ShadTheme;
+import 'package:shadcn_ui/shadcn_ui.dart' show ShadApp;
 
 import 'area.dart';
 import 'badges.dart' as badge_lib;
@@ -70,9 +70,6 @@ Future<void> main() async {
 /// editor then has 1000 logical px, the plan's desktop breakpoint.
 const double kDockedSidePanel = 1300;
 
-/// The demo's theme seed, for the light and the dark theme alike.
-const Color _seed = Colors.teal;
-
 /// The demo. [locale] is the language to start in; the system's when null.
 /// [random] is the source of "Random statuses" (tests seed it); [printer]
 /// is where Print sends the page, the platform's print dialog when null
@@ -94,24 +91,21 @@ class _RestaurantDemoState extends State<RestaurantDemo> {
   /// The look the app bar switches: the standard one by default.
   DemoLook _look = DemoLook.standard;
 
-  /// The app's theme for [brightness]: the seed's; under the POS look it
-  /// carries the POS's `PlanTheme` for that brightness, one extension per
-  /// `ThemeData`.
-  ThemeData _theme(Brightness brightness) =>
-      ThemeData(colorSchemeSeed: _seed, brightness: brightness, extensions: [
-        if (_look == DemoLook.pos) posPlanTheme(brightness),
-      ]);
-
   @override
-  Widget build(BuildContext context) => MaterialApp(
+  Widget build(BuildContext context) => ShadApp(
         onGenerateTitle: (context) => DemoStrings.of(context).title,
         // The planner follows the host's theme, and the OS picks light or
         // dark.
-        theme: _theme(Brightness.light),
-        darkTheme: _theme(Brightness.dark),
+        theme: demoShadTheme(Brightness.light),
+        darkTheme: demoShadTheme(Brightness.dark),
         themeMode: ThemeMode.system,
+        // The Material theme the canvas reads is derived from the
+        // `ShadTheme`; the POS look adds its `PlanTheme` to it.
+        materialThemeBuilder: (context, theme) => _look == DemoLook.pos
+            ? theme.copyWith(extensions: [posPlanTheme(theme.brightness)])
+            : theme,
         // The three languages, switched in the app bar through
-        // `MaterialApp.locale`, so all three can be looked at without
+        // `ShadApp.locale`, so all three can be looked at without
         // changing the system's language.
         locale: _locale,
         supportedLocales: planSupportedLocales,
@@ -689,19 +683,6 @@ class DemoHomeState extends State<DemoHome> {
     }
   }
 
-  /// Keeps the editor mounted when the look adds or drops the `ShadTheme`
-  /// above it (a second canvas on one controller asserts).
-  final GlobalKey _viewKey = GlobalKey();
-
-  /// The `ShadTheme` around the editor under the POS look (zinc, in the
-  /// ambient theme's brightness); under the standard look the planner
-  /// derives its chrome from the app's Material theme.
-  Widget _viewTheme(BuildContext context, Widget child) =>
-      widget.look == DemoLook.pos
-          ? ShadTheme(
-              data: posShadTheme(Theme.of(context).brightness), child: child)
-          : child;
-
   /// A badge: counted, so a test sees pan and zoom build none.
   Widget _badge(BuildContext context, PlanUnitOverlay unit) {
     badgeBuilds++;
@@ -885,32 +866,29 @@ class DemoHomeState extends State<DemoHome> {
             ),
       body: Row(children: [
         Expanded(
-          child: _viewTheme(
-            context,
-            Column(key: _viewKey, children: [
-              if (ownBar && c.mode.value == PlanMode.service)
-                OwnServiceBar(
-                    name: a.name,
-                    controller: c,
-                    onMerge: (numbers) => _merge(a, numbers),
-                    onSplit: (id) => _split(a, id),
-                    onExport: () => _ownExport(a),
-                    onPrint: () => _ownPrint(a)),
-              Expanded(
-                // Keyed: the editor is not remounted when the own bar comes
-                // and goes above it (a second canvas on one controller
-                // asserts).
-                key: const Key('editor-slot'),
-                // The demo's keys, while the plan's are off.
-                child: Focus(
-                  canRequestFocus: false,
-                  skipTraversal: true,
-                  onKeyEvent: (_, event) => _demoKey(a, event),
-                  child: _editor(a),
-                ),
+          child: Column(children: [
+            if (ownBar && c.mode.value == PlanMode.service)
+              OwnServiceBar(
+                  name: a.name,
+                  controller: c,
+                  onMerge: (numbers) => _merge(a, numbers),
+                  onSplit: (id) => _split(a, id),
+                  onExport: () => _ownExport(a),
+                  onPrint: () => _ownPrint(a)),
+            Expanded(
+              // Keyed: the editor is not remounted when the own bar comes
+              // and goes above it (a second canvas on one controller
+              // asserts).
+              key: const Key('editor-slot'),
+              // The demo's keys, while the plan's are off.
+              child: Focus(
+                canRequestFocus: false,
+                skipTraversal: true,
+                onKeyEvent: (_, event) => _demoKey(a, event),
+                child: _editor(a),
               ),
-            ]),
-          ),
+            ),
+          ]),
         ),
         if (docked) SizedBox(width: 300, child: DemoSidePanel(home: this)),
       ]),

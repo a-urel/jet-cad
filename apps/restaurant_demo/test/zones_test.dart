@@ -122,15 +122,11 @@ void main() {
     expect(find.text('Zones'), findsOneWidget);
     expect(find.text('All'), findsOneWidget);
     expect(find.text('Fade the others'), findsOneWidget);
-    await tester.tap(byKey('lang-de'));
-    await tester.pump();
-    await tester.pump();
+    await switchLanguage(tester, 'de');
     expect(find.text('Bereiche'), findsOneWidget);
     expect(find.text('Alle'), findsOneWidget);
     expect(find.text('Andere abblenden'), findsOneWidget);
-    await tester.tap(byKey('lang-tr'));
-    await tester.pump();
-    await tester.pump();
+    await switchLanguage(tester, 'tr');
     expect(find.text('Bölgeler'), findsOneWidget);
     expect(find.text('Tümü'), findsOneWidget);
     expect(find.text('Diğerlerini soldur'), findsOneWidget);
