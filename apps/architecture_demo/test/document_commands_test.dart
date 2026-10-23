@@ -39,6 +39,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show RenderParagraph;
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
+import 'package:jet_cad_2d_plan/src/chrome/icon_button.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
 import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
@@ -79,8 +80,19 @@ const List<String> kBarOrder = [
 Finder button(String id) => find.byKey(Key('toolbar-$id'));
 
 /// Whether the toolbar button [id] is enabled, as built.
-bool on(WidgetTester tester, String id) =>
-    tester.widget<IconButton>(button(id)).onPressed != null;
+bool on(WidgetTester tester, String id) {
+  final w = tester.widget(button(id));
+  // The app's own Open sample button is a Material one (a host slot).
+  if (w is IconButton) return w.onPressed != null;
+  return (w as PlanIconButton).onPressed != null;
+}
+
+/// The tooltip of toolbar button [id] (the library's, or the app's own).
+String? tooltipOfButton(WidgetTester tester, String id) {
+  final w = tester.widget(button(id));
+  if (w is IconButton) return w.tooltip;
+  return (w as PlanIconButton).tooltip ?? w.label;
+}
 
 Map<String, bool> states(WidgetTester tester) =>
     {for (final id in kIds) id: on(tester, id)};
@@ -308,9 +320,7 @@ void main() {
             'undo': 'Undo (Ctrl+Z)',
             'redo': 'Redo (Ctrl+Shift+Z)',
           };
-    expect({
-      for (final id in kIds) id: tester.widget<IconButton>(button(id)).tooltip
-    }, expected);
+    expect({for (final id in kIds) id: tooltipOfButton(tester, id)}, expected);
   },
       variant: const TargetPlatformVariant({
         TargetPlatform.macOS,

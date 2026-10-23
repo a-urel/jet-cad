@@ -16,8 +16,13 @@ import 'package:jet_cad_2d/jet_cad_2d.dart' show DraftDocument, zoomOf;
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
     show InteractionLayer, kLogicalPixelsPerMm, kRulerThickness;
 
+import 'package:shadcn_ui/shadcn_ui.dart'
+    show LucideIcons, ShadThemeData, ShadTooltip;
+
 import '../canvas/plan_canvas.dart';
 import '../chrome/host_slot.dart';
+import '../chrome/icon_button.dart';
+import '../chrome/segmented.dart';
 import '../chrome/shad_scope.dart';
 import '../controller/plan_controller.dart';
 import '../export/editor_page_flows.dart';
@@ -491,7 +496,7 @@ class _PlanEditorState extends State<PlanEditor> {
         _BarCommand(
             id: 'new',
             label: s.newDocument,
-            icon: Icons.note_add_outlined,
+            icon: LucideIcons.filePlus,
             shortcuts: kNewChords,
             enabled: _idleFlag!,
             run: _file((w) => w.onNew)),
@@ -499,7 +504,7 @@ class _PlanEditorState extends State<PlanEditor> {
         _BarCommand(
             id: 'open',
             label: s.open,
-            icon: Icons.folder_open_outlined,
+            icon: LucideIcons.folderOpen,
             shortcuts: kOpenChords,
             enabled: _idleFlag!,
             run: _file((w) => w.onOpen)),
@@ -507,7 +512,7 @@ class _PlanEditorState extends State<PlanEditor> {
         _BarCommand(
             id: 'save',
             label: s.save,
-            icon: Icons.save_outlined,
+            icon: LucideIcons.save,
             shortcuts: kSaveChords,
             enabled: _idleFlag!,
             run: _file((w) => w.onSave)),
@@ -515,7 +520,7 @@ class _PlanEditorState extends State<PlanEditor> {
         _BarCommand(
             id: 'save-as',
             label: s.saveAs,
-            icon: Icons.save_as_outlined,
+            icon: LucideIcons.saveAll,
             shortcuts: kSaveAsChords,
             enabled: _idleFlag!,
             run: _file((w) => w.onSaveAs)),
@@ -523,7 +528,7 @@ class _PlanEditorState extends State<PlanEditor> {
         _BarCommand(
             id: 'export',
             label: s.exportEllipsis,
-            icon: Icons.ios_share_outlined,
+            icon: LucideIcons.share,
             shortcuts: kExportChords,
             enabled: _exportFlag!,
             run: () => _flows.export(context)),
@@ -531,7 +536,7 @@ class _PlanEditorState extends State<PlanEditor> {
         _BarCommand(
             id: 'print',
             label: s.printEllipsis,
-            icon: Icons.print_outlined,
+            icon: LucideIcons.printer,
             shortcuts: kPrintChords,
             enabled: _printFlag!,
             run: () => _flows.print(context)),
@@ -544,14 +549,14 @@ class _PlanEditorState extends State<PlanEditor> {
               _BarCommand(
                   id: 'undo',
                   label: s.undo,
-                  icon: Icons.undo,
+                  icon: LucideIcons.undo,
                   shortcuts: kUndoChords,
                   enabled: _undoFlag!,
                   run: () async => widget.controller.undo()),
               _BarCommand(
                   id: 'redo',
                   label: s.redo,
-                  icon: Icons.redo,
+                  icon: LucideIcons.redo,
                   shortcuts: kRedoChords,
                   enabled: _redoFlag!,
                   run: () async => widget.controller.redo()),
@@ -628,7 +633,7 @@ class _PlanEditorState extends State<PlanEditor> {
   /// [first] and [last] are the compact layouts' drawer buttons, the bar's
   /// first and last items. With [phone] the status line and the read-outs
   /// are left out and the toolbar scrolls, so the bar fits 320 px.
-  Widget _topBar(ColorScheme scheme, PlanStrings strings,
+  Widget _topBar(ShadThemeData shad, PlanStrings strings,
       List<_BarCommand> file, List<_BarCommand> edit,
       {Widget? first, Widget? last, bool phone = false}) {
     final c = widget.controller;
@@ -664,12 +669,16 @@ class _PlanEditorState extends State<PlanEditor> {
       builder: (_, damaged, __) => damaged
           ? Padding(
               padding: const EdgeInsets.only(right: 8),
-              child: Tooltip(
-                message: strings.planDamaged,
-                child: Icon(Icons.warning_amber,
-                    key: const Key('plan-damaged'),
-                    size: 18,
-                    color: scheme.error),
+              child: Semantics(
+                container: true,
+                label: strings.planDamaged,
+                child: ShadTooltip(
+                  builder: (_) => Text(strings.planDamaged),
+                  child: Icon(LucideIcons.triangleAlert,
+                      key: const Key('plan-damaged'),
+                      size: 18,
+                      color: shad.colorScheme.destructive),
+                ),
               ),
             )
           : const SizedBox.shrink(),
@@ -726,7 +735,10 @@ class _PlanEditorState extends State<PlanEditor> {
     return Container(
       key: const Key('chrome-top'),
       height: 44,
-      color: scheme.surfaceContainer,
+      decoration: BoxDecoration(
+        color: shad.colorScheme.background,
+        border: Border(bottom: BorderSide(color: shad.colorScheme.border)),
+      ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12),
         child: bar.leading.isEmpty && bar.trailing.isEmpty
@@ -775,20 +787,16 @@ class _PlanEditorState extends State<PlanEditor> {
         Padding(
           padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
           child: ExcludeFocus(
-            child: SegmentedButton<_LeftTab>(
+            child: PlanSegmented<_LeftTab>(
               key: const Key('left-tabs'),
-              showSelectedIcon: false,
+              value: _leftTab,
               segments: [
-                ButtonSegment(
-                    value: _LeftTab.tools,
-                    label: Text(strings.tabTools, key: const Key('tab-tools'))),
-                ButtonSegment(
-                    value: _LeftTab.symbols,
-                    label: Text(strings.tabSymbols,
-                        key: const Key('tab-symbols'))),
+                PlanSegment(_LeftTab.tools, strings.tabTools,
+                    key: const Key('tab-tools')),
+                PlanSegment(_LeftTab.symbols, strings.tabSymbols,
+                    key: const Key('tab-symbols')),
               ],
-              selected: {_leftTab},
-              onSelectionChanged: (s) => setState(() => _leftTab = s.single),
+              onChanged: (v) => setState(() => _leftTab = v),
             ),
           ),
         ),
@@ -1060,20 +1068,18 @@ class _PlanEditorState extends State<PlanEditor> {
   /// drawers, and on a tablet the tool strip docked at the left.
   Widget _compact(BuildContext context, PlanEditorLayout layout) {
     final c = widget.controller;
-    final scheme = Theme.of(context).colorScheme;
+    final shad = planShadThemeOf(context);
     final strings = PlanStrings.of(context);
     final file = _fileCommands(strings);
     final edit = _editCommands(strings);
     final phone = layout == PlanEditorLayout.phone;
     Widget button(String key, IconData icon, String tip, PlanDrawerSide side) =>
         ExcludeFocus(
-          child: IconButton(
+          child: _barButton(
             key: Key(key),
-            tooltip: tip,
-            icon: Icon(icon),
-            iconSize: 20,
-            visualDensity: VisualDensity.compact,
-            isSelected: _drawer == side,
+            icon: icon,
+            label: tip,
+            selected: _drawer == side,
             onPressed: () => _toggleDrawer(side),
           ),
         );
@@ -1091,15 +1097,18 @@ class _PlanEditorState extends State<PlanEditor> {
         body: Column(
           children: [
             if (widget.bar.visible)
-              _topBar(scheme, strings, file, edit,
+              _topBar(shad, strings, file, edit,
                   phone: phone,
                   first: phone && _leftShown
-                      ? button('chrome-left-button', Icons.menu,
+                      ? button('chrome-left-button', LucideIcons.menu,
                           strings.openToolsPanel, PlanDrawerSide.left)
                       : null,
                   last: _rightShown
-                      ? button('chrome-right-button', Icons.tune,
-                          strings.openPropertiesPanel, PlanDrawerSide.right)
+                      ? button(
+                          'chrome-right-button',
+                          LucideIcons.slidersHorizontal,
+                          strings.openPropertiesPanel,
+                          PlanDrawerSide.right)
                       : null),
             Expanded(
               child: Row(
@@ -1108,7 +1117,7 @@ class _PlanEditorState extends State<PlanEditor> {
                     Container(
                       key: const Key('chrome-tool-strip'),
                       width: 56,
-                      color: scheme.surfaceContainerLow,
+                      decoration: _column(shad, right: true),
                       child: Column(
                         children: [
                           Expanded(
@@ -1202,7 +1211,7 @@ class _PlanEditorState extends State<PlanEditor> {
   /// 2a's editor: the shortcuts, the bar, the columns and the canvas.
   Widget _docked(BuildContext context) {
     final c = widget.controller;
-    final scheme = Theme.of(context).colorScheme;
+    final shad = planShadThemeOf(context);
     final strings = PlanStrings.of(context);
     final file = _fileCommands(strings);
     final edit = _editCommands(strings);
@@ -1218,7 +1227,7 @@ class _PlanEditorState extends State<PlanEditor> {
       child: Scaffold(
         body: Column(
           children: [
-            if (widget.bar.visible) _topBar(scheme, strings, file, edit),
+            if (widget.bar.visible) _topBar(shad, strings, file, edit),
             Expanded(
               child: Row(
                 children: [
@@ -1226,7 +1235,7 @@ class _PlanEditorState extends State<PlanEditor> {
                     Container(
                       key: const Key('chrome-left'),
                       width: 240,
-                      color: scheme.surfaceContainerLow,
+                      decoration: _column(shad, right: true),
                       child: _leftPanel(strings),
                     ),
                   // Keyed: when the columns on both sides come or go at
@@ -1247,7 +1256,7 @@ class _PlanEditorState extends State<PlanEditor> {
                     Container(
                       key: const Key('chrome-right'),
                       width: 280,
-                      color: scheme.surfaceContainerLow,
+                      decoration: _column(shad, right: false),
                       child: _rightColumn(c),
                     ),
                 ],
@@ -1258,6 +1267,36 @@ class _PlanEditorState extends State<PlanEditor> {
       ),
     );
   }
+}
+
+/// The one place the bar's buttons are built: a ghost icon button, secondary
+/// while [selected]. A new bar action is one more call.
+Widget _barButton({
+  required Key key,
+  required IconData icon,
+  required String label,
+  String? tooltip,
+  bool? selected,
+  VoidCallback? onPressed,
+}) =>
+    PlanIconButton(
+      key: key,
+      icon: icon,
+      label: label,
+      tooltip: tooltip,
+      selected: selected,
+      onPressed: onPressed,
+    );
+
+/// A docked column's surface: the card colour, a border on its inner edge.
+BoxDecoration _column(ShadThemeData shad, {required bool right}) {
+  final edge = BorderSide(color: shad.colorScheme.border);
+  return BoxDecoration(
+    color: shad.colorScheme.card,
+    border: Border(
+        left: right ? BorderSide.none : edge,
+        right: right ? edge : BorderSide.none),
+  );
 }
 
 /// One command of the bar (shell_commands.dart:61-133): invoked only
@@ -1322,13 +1361,12 @@ class _Toolbar extends StatelessWidget {
       for (final c in group) {
         children.add(ValueListenableBuilder<bool>(
           valueListenable: c.enabled,
-          builder: (context, enabled, _) => IconButton(
+          builder: (context, enabled, _) => _barButton(
             key: Key('toolbar-${c.id}'),
+            icon: c.icon,
+            label: c.label,
             tooltip: c.tooltipFor(defaultTargetPlatform,
                 control: strings.controlKey, shift: strings.shiftKey),
-            icon: Icon(c.icon),
-            iconSize: 20,
-            visualDensity: VisualDensity.compact,
             onPressed: enabled ? c.invoke : null,
           ),
         ));
@@ -1336,10 +1374,7 @@ class _Toolbar extends StatelessWidget {
     }
     return TextFieldTapRegion(
       child: ExcludeFocus(
-        child: Material(
-          color: Colors.transparent,
-          child: Row(mainAxisSize: MainAxisSize.min, children: children),
-        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: children),
       ),
     );
   }

@@ -45,6 +45,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
+import 'package:jet_cad_2d_plan/src/chrome/icon_button.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
     show InteractionLayer, SelectionKey, SymbolGallery;
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
@@ -226,7 +227,7 @@ void main() {
     await aimCamera(tester, c, kFar);
     await armBySymbolsTab(tester, c, symbolOf(c, 'bed.double'));
     VoidCallback? save() => tester
-        .widget<IconButton>(find.byKey(const Key('toolbar-save')))
+        .widget<PlanIconButton>(find.byKey(const Key('toolbar-save')))
         .onPressed;
     expect(save(), isNotNull, reason: 'premise: Save enabled');
 

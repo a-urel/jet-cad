@@ -32,6 +32,7 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
         SelectionKey,
         ViewportTransform,
         kRulerThickness;
+import 'package:jet_cad_2d_plan/src/chrome/icon_button.dart';
 import 'package:jet_cad_2d_plan/src/controller/permissions.dart';
 import 'package:jet_cad_2d_plan/src/controller/plan_controller.dart';
 import 'package:jet_cad_2d_plan/src/editor/plan_editor.dart';
@@ -338,7 +339,7 @@ Vector2 freeSpot(PlanController c, double dx, double dy) {
 }
 
 bool undoEnabled(WidgetTester tester) =>
-    tester.widget<IconButton>(byKey('toolbar-undo')).onPressed != null;
+    tester.widget<PlanIconButton>(byKey('toolbar-undo')).onPressed != null;
 
 void main() {
   group('readOnly (V-5)', () {

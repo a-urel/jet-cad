@@ -8,6 +8,7 @@ import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+import 'package:jet_cad_2d_plan/src/chrome/rows.dart';
 
 import '../support/canvas_fixture.dart';
 import '../support/design_harness.dart';
@@ -16,15 +17,16 @@ import '../support/stamp_kit.dart';
 import '../support/throwing_kit.dart';
 
 /// The palette's tool rows' keys, in order (the Fill toggle's inner
-/// ListTile carries no key).
+/// PlanListRow carries no key).
 List<String> rowKeys(WidgetTester tester) => [
-      for (final t in tester.widgetList<ListTile>(find.descendant(
-          of: find.byType(PlanToolPalette), matching: find.byType(ListTile))))
+      for (final t in tester.widgetList<PlanListRow>(find.descendant(
+          of: find.byType(PlanToolPalette),
+          matching: find.byType(PlanListRow))))
         if (t.key case final ValueKey<String> k) k.value,
     ];
 
 bool enabled(WidgetTester tester, String key) =>
-    tester.widget<ListTile>(find.byKey(Key(key))).enabled;
+    tester.widget<PlanListRow>(find.byKey(Key(key))).onTap != null;
 
 void main() {
   testWidgets(
@@ -125,9 +127,7 @@ void main() {
     await press(tester, LogicalKeyboardKey.keyF);
     expect(c.fill.value, isTrue);
     expect(
-        tester
-            .widget<CheckboxListTile>(find.byKey(const Key('tool-fill')))
-            .value,
+        tester.widget<PlanCheckRow>(find.byKey(const Key('tool-fill'))).value,
         isTrue);
     c.permissions = const PlanPermissions(tools: {'plan.select', 'plan.line'});
     await tester.pump();

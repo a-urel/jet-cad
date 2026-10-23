@@ -32,6 +32,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
+import 'package:jet_cad_2d_plan/src/chrome/icon_button.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart'
     show PageComponent, SetComponentCommand;
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
@@ -80,8 +81,8 @@ void main() {
       await tester.pump();
       expect(activeTool(tester).isMidShape, isTrue, reason: 'premise');
 
-      IconButton button(String id) =>
-          tester.widget<IconButton>(find.byKey(Key('toolbar-$id')));
+      PlanIconButton button(String id) =>
+          tester.widget<PlanIconButton>(find.byKey(Key('toolbar-$id')));
       for (final id in ['new', 'open', 'save', 'save-as']) {
         expect(button(id).onPressed, isNull, reason: id);
         await rig.tapKey('toolbar-$id');

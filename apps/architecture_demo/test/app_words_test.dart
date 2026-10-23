@@ -11,6 +11,7 @@ import 'package:architecture_demo/document_files.dart'
 import 'package:architecture_demo/main.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:jet_cad_2d_plan/src/chrome/icon_button.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 
 import 'support/app_fakes.dart';
@@ -29,8 +30,12 @@ Future<AppStrings> wordsFor(WidgetTester tester, Locale locale) async {
   return words;
 }
 
-String tooltipOf(WidgetTester tester, String key) =>
-    tester.widget<IconButton>(find.byKey(Key(key))).tooltip!;
+String tooltipOf(WidgetTester tester, String key) {
+  final w = tester.widget(find.byKey(Key(key)));
+  // The app's own Open sample button is a Material one (a host slot).
+  if (w is IconButton) return w.tooltip!;
+  return (w as PlanIconButton).tooltip ?? w.label;
+}
 
 /// The whole app under the system [locale].
 Future<void> pumpIn(WidgetTester tester, Locale locale) async {

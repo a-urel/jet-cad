@@ -78,8 +78,11 @@ class PlanListRow extends StatelessWidget implements PlanWordsCarrier {
 
   @override
   Widget build(BuildContext context) {
-    final content =
-        Align(alignment: AlignmentDirectional.centerStart, child: title);
+    // Flexible: the button's row does not constrain its child, so a long
+    // title would overflow it (large text in a narrow column).
+    final content = Flexible(
+        child:
+            Align(alignment: AlignmentDirectional.centerStart, child: title));
     return Semantics(
       button: true,
       selected: selected,

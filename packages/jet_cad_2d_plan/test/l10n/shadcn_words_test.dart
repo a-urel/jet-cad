@@ -24,6 +24,7 @@ const List<String> kAllowedShad = [
   'ShadOption',
   'ShadSelect',
   'ShadSelectController',
+  'ShadSeparator',
   'ShadSwitch',
   'ShadTextTheme',
   'ShadTheme',

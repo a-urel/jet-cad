@@ -51,7 +51,11 @@ class PlanSegmented<T> extends StatelessWidget implements PlanWordsCarrier {
     final icon = segment.icon;
     final leading = icon == null ? null : Icon(icon);
     final onPressed = enabled ? () => onChanged(segment.value) : null;
-    final child = Text(segment.label);
+    // Flexible: the button's row does not constrain its child, so a label
+    // wider than the segment (large text, a narrow column) would overflow.
+    final child = Flexible(
+        child:
+            Text(segment.label, maxLines: 1, overflow: TextOverflow.ellipsis));
     return Semantics(
       button: true,
       selected: selected,

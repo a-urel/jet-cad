@@ -5,6 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'
     show HardwareKeyboard, KeyDownEvent, KeyEvent, LogicalKeyboardKey;
 
+import '../chrome/host_slot.dart';
+import '../chrome/shad_scope.dart';
+
 /// The shapes of the editor's design mode (spec D1-D3).
 ///
 /// - [phone]: no docked column; the bar's left button opens the tools and
@@ -130,7 +133,10 @@ class _PlanDrawerHostState extends State<PlanDrawerHost> {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final shad = planShadThemeOf(context);
+    // The scrim is a Material token (black at every theme), kept: shadcn has
+    // no scrim colour.
+    final scrim = Theme.of(context).colorScheme.scrim;
     final open = widget.open, left = widget.left, right = widget.right;
     return LayoutBuilder(builder: (context, constraints) {
       final cap = constraints.maxWidth * 0.85;
@@ -146,13 +152,30 @@ class _PlanDrawerHostState extends State<PlanDrawerHost> {
           child: Visibility(
             visible: shown,
             maintainState: true,
-            child: Material(
+            // The transparent Material of the host slot keeps the drawer's
+            // Material descendants (panels, host widgets) painting ink.
+            child: DecoratedBox(
               key: Key(side == PlanDrawerSide.left
                   ? 'chrome-left-drawer'
                   : 'chrome-right-drawer'),
-              elevation: 8,
-              color: scheme.surfaceContainerLow,
-              child: child,
+              decoration: BoxDecoration(
+                color: shad.colorScheme.card,
+                border: Border(
+                  left: side == PlanDrawerSide.right
+                      ? BorderSide(color: shad.colorScheme.border)
+                      : BorderSide.none,
+                  right: side == PlanDrawerSide.left
+                      ? BorderSide(color: shad.colorScheme.border)
+                      : BorderSide.none,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                      color: scrim.withValues(alpha: 0.2),
+                      blurRadius: 16,
+                      offset: Offset(side == PlanDrawerSide.left ? 4 : -4, 0)),
+                ],
+              ),
+              child: PlanHostSlot(child: child),
             ),
           ),
         );
@@ -171,8 +194,7 @@ class _PlanDrawerHostState extends State<PlanDrawerHost> {
                     key: const Key('chrome-drawer-barrier'),
                     behavior: HitTestBehavior.opaque,
                     onTap: widget.onClose,
-                    child:
-                        ColoredBox(color: scheme.scrim.withValues(alpha: 0.32)),
+                    child: ColoredBox(color: scrim.withValues(alpha: 0.32)),
                   ),
                 ),
           drawer(PlanDrawerSide.left, left, widget.leftWidth),

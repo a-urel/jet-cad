@@ -4,8 +4,8 @@
 // the Moves switch, the Tables profile's editor (no wall tool, no Layers or
 // Page, the gallery's units only) with the POS id written as host data, the
 // read-only profile, and the find field.
-import 'package:flutter/material.dart' show ListTile;
 import 'package:flutter_test/flutter_test.dart';
+import 'package:jet_cad_2d_plan/src/chrome/rows.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 
 import 'support/demo_rig.dart';
@@ -62,7 +62,8 @@ void main() {
       }
     });
     bool wallEnabled() =>
-        tester.widget<ListTile>(byKey('tool-architecture.wall')).enabled;
+        tester.widget<PlanListRow>(byKey('tool-architecture.wall')).onTap !=
+        null;
     expect(wallEnabled(), isTrue, reason: 'premise: Full draws walls');
     expect(byKey('layers-panel'), findsOneWidget);
     expect(byKey('page-preset'), findsOneWidget);

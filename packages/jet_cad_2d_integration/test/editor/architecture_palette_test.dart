@@ -16,6 +16,7 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
 import 'package:jet_cad_2d_integration/jet_cad_2d_integration.dart';
 import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+import 'package:jet_cad_2d_plan/src/chrome/rows.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../support/canvas_rig.dart';
@@ -85,15 +86,15 @@ void main() {
       'tool-architecture.separator': true,
       'tool-architecture.dimension': true,
     };
-    // The tool tiles: the Fill toggle's inner ListTile carries no key.
+    // The tool tiles: the Fill toggle's inner PlanListRow carries no key.
     List<String> paletteKeys() => [
-          for (final t in tester.widgetList<ListTile>(find.descendant(
+          for (final t in tester.widgetList<PlanListRow>(find.descendant(
               of: find.byType(PlanToolPalette),
-              matching: find.byType(ListTile))))
+              matching: find.byType(PlanListRow))))
             if (t.key case final ValueKey<String> k) k.value,
         ];
     bool enabled(String key) =>
-        tester.widget<ListTile>(find.byKey(Key(key))).enabled;
+        tester.widget<PlanListRow>(find.byKey(Key(key))).onTap != null;
 
     final c = architectureController(json: drawPlanJson());
     addTearDown(c.dispose);

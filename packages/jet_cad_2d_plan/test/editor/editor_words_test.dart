@@ -59,8 +59,12 @@ Future<PlanController> pump(WidgetTester tester, Locale locale) async {
   return c;
 }
 
-String tooltipOf(WidgetTester tester, String key) =>
-    tester.widget<IconButton>(find.byKey(Key(key))).tooltip!;
+String tooltipOf(WidgetTester tester, String key) {
+  final w = tester.widget(find.byKey(Key(key)));
+  // The service bar keeps its Material buttons until its own task.
+  if (w is IconButton) return w.tooltip!;
+  return (w as PlanIconButton).tooltip ?? w.label;
+}
 
 class _Recording extends LocalizationsDelegate<PlanStrings> {
   const _Recording(this.strings);

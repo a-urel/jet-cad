@@ -10,6 +10,7 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
     show InteractionLayer, SelectionKey;
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show SymbolsState;
 import 'package:jet_cad_2d_plan/src/canvas/plan_canvas.dart';
+import 'package:jet_cad_2d_plan/src/chrome/icon_button.dart';
 import 'package:jet_cad_2d_plan/src/controller/permissions.dart';
 import 'package:jet_cad_2d_plan/src/controller/plan_controller.dart';
 import 'package:jet_cad_2d_plan/src/editor/plan_editor.dart';
@@ -36,8 +37,8 @@ const _en = PlanStringsEn();
 List<Handle> marksOf(PlanController c) =>
     c.catalog.objectsOf<MarkCross>(c.document);
 
-IconButton _button(WidgetTester tester, String key) =>
-    tester.widget<IconButton>(byKey(key));
+PlanIconButton _button(WidgetTester tester, String key) =>
+    tester.widget<PlanIconButton>(byKey(key));
 
 /// A host that owns its controller and disposes it in its own `dispose`,
 /// with the editor below it (spec P7; the controller outlives no view).
@@ -213,6 +214,7 @@ void main() {
   testWidgets(
       'ED-5 a damaged plan: a warning before the status line, with the '
       'word as its tooltip; none while the plan is sound', (tester) async {
+    final semantics = tester.ensureSemantics();
     final c = editorController();
     await pumpEditor(tester, PlanEditor(controller: c));
     expect(byKey('plan-damaged'), findsNothing);
@@ -222,12 +224,8 @@ void main() {
     await tester.pump();
     // M-ED-5: the bar does not listen to `damaged`.
     expect(byKey('plan-damaged'), findsOneWidget);
-    expect(
-        tester
-            .widget<Tooltip>(find.ancestor(
-                of: byKey('plan-damaged'), matching: find.byType(Tooltip)))
-            .message,
-        _en.planDamaged);
+    expect(find.bySemanticsLabel(_en.planDamaged), findsOneWidget);
+    semantics.dispose();
     expect(left(tester, 'status-text'), greaterThan(statusBefore));
   });
 

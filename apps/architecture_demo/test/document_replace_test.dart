@@ -23,6 +23,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
+import 'package:jet_cad_2d_plan/src/chrome/icon_button.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
 import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
 
@@ -37,7 +38,8 @@ Finder get dialog => find.byKey(const Key('replace-dialog'));
 
 /// Whether the toolbar button [id] is enabled, as built.
 bool enabled(WidgetTester tester, String id) =>
-    tester.widget<IconButton>(find.byKey(Key('toolbar-$id'))).onPressed != null;
+    tester.widget<PlanIconButton>(find.byKey(Key('toolbar-$id'))).onPressed !=
+    null;
 
 const List<String> kIds = [
   'new',
