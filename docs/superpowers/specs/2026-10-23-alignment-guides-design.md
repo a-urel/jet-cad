@@ -1,6 +1,9 @@
 # Alignment guides (smart guides) in both modes
 
-**Date:** 2026-10-23. **Status:** draft, for the human's approval.
+**Date:** 2026-10-23. **Status:** revision 2, for the human's approval.
+Revision 1 was reviewed through the OpenCode CLI (`github-copilot/gpt-6.1-sol`,
+the human's request); its twelve findings are folded in (O-1 to O-12, marked
+below).
 **Packages:** `jet_cad_2d_plan` (0.9.0 on pub.dev), `jet_cad_2d_flutter`
 (one generic seam on `SelectTool`, a palette colour);
 `apps/restaurant_demo`, `docs/host-guide.md`, `tool/ci/host_probe`.
@@ -84,106 +87,187 @@ before 1.0, so its API is part of what 1.0 freezes.
 
 ### The boxes
 
-- **Reference box**: a root-level symbol instance's world axis-aligned
-  bounding box (H3), in document units. Mirrored and rotated instances use
-  the AABB of their transformed definition box.
-- **Moving box**: the union of the moved objects' reference boxes, taken at
-  the start of the drag (or, when placing, the ghost's box at its current
-  transform), shifted by the drag's delta.
+- **Reference box** (O-4): a root-level symbol instance's world axis-aligned
+  bounding box (H3), in document units: the four corners of
+  `DraftDocument.definitionBounds(definition)` (the bounds the index and
+  `UnitPicker` already use, nested instances included) through the
+  instance's transform. Mirrored and rotated instances use the AABB of those
+  corners. An instance is skipped when it is hidden (its layer off, or
+  `visible` false), its transform is singular or non-finite, or its box is
+  empty or non-finite: the same rules as `UnitPicker.candidatesOf`.
+- **Moving box**: the union of the moved objects' reference boxes at the
+  drag's start (when placing, the ghost's box at its current transform),
+  shifted by the delta under test.
 - An object is a reference only when it is not moved and its box intersects
-  the visible viewport (*nearby*, my call: what the user can see).
+  the visible viewport (*nearby*, my call: what the user can see). An empty
+  reference set means no guide.
 - In design mode guides apply only when every moved root node is a symbol
   instance; a selection that includes a wall, a room or a line moves as
   today (my call, from H2).
 
-### Candidates on one axis
+### The reference cache (O-5, O-8)
 
-Each axis (x, then y) is solved on its own; the x axis aligns vertical
-lines, the y axis horizontal ones.
+- One cache per document (the design document, and the service copy). It is
+  keyed on the document's state and revision, as `UnitIndexCache` is. It is
+  rebuilt lazily on the first solve after a change, so a placement, an undo,
+  a redo, a load, a layer or definition change and a re-armed tool all see
+  the current objects.
+- A rebuild may allocate: an O(n) pass that fills a `Float64List` of four
+  numbers per box, a handle list, and a per-definition bounds memo. A solve
+  allocates nothing.
+- The moving box is computed once per drag start (or per ghost transform
+  change while placing) from the same bounds.
 
-1. **Edges and centre.** The moving box's three positions (min, centre, max)
-   against every reference's three positions: nine pairs per reference. The
-   offset is `reference − moving`.
-2. **Equal spacing.** Among references that overlap the moving box on the
-   *other* axis (its row or column):
-   - *between*: the nearest neighbour before and the nearest after, with the
-     moving box centred so the two gaps are equal (only when it fits);
-   - *continuing*: a gap between two adjacent references in that row, matched
-     by the moving box's gap to its nearest neighbour on either side.
-3. A candidate is captured when `|offset| ≤ aperture`, where
-   `aperture = kGuideAperturePixels / camera.scale` with
-   `kGuideAperturePixels = 6` for a mouse and 10 for touch (my call, after
-   `kPickRadiusPixels` and the touch reach).
-4. The smallest `|offset|` wins. On a tie, edges beat centres and centres beat
-   spacing, then the lower handle wins (a stable order: no jitter).
-5. After the snap, every candidate whose offset is now zero within
-   `Tolerance` is drawn. That covers the other references on the same line
-   and both gaps of an equal pair.
+### The delta (O-2)
 
-### Priority against the existing chain (H7)
+The drag's base is today's: the press point resolved through the chain
+without ortho (`SelectTool._moveBase`); in service it is the raw press point,
+as today. Per event, with `p` the raw pointer, `c` the chain's resolved
+target and `b` the base:
 
-The pointer is first resolved by today's chain (`resolveDragPoint`):
+- `dChain = c − b`: today's move (object snap, grid, ortho);
+- `dRaw = p − b`, with Shift's ortho pin applied to `dRaw` on the pinned axis
+  exactly as the chain pins `c`;
+- guides are solved on `moving box + dRaw`, giving per axis either a captured
+  offset `o` or nothing;
+- the final delta per axis is `dRaw + o` when captured, else `dChain`.
 
-- **an object-snap hit on the pointer wins**: no guides for that event (my
-  call: exact geometry is a stronger intent);
-- **an attachment** (`PlanMoveResolver`) wins: no guides;
-- otherwise guides are solved on the **raw** (unsnapped) delta. An axis a
-  guide captures takes the guide's position. An axis without a guide keeps
-  the chain's result, the grid's when grid snap is on. So a table can align
-  to a neighbour's edge on x while staying on the grid on y.
-- Shift's ortho move still applies first. Guides then act only on the free
-  axis.
+Both terms share the base `b`, so a capture switching on or off moves the
+object by at most the aperture, never by the base's snap.
+
+### Candidates on one axis (O-6, O-7)
+
+Each axis is solved on its own: x aligns vertical lines, y aligns horizontal
+ones. Let `M` be the moving box at `dRaw`, and `[lo, hi]` its interval on
+the axis.
+
+1. **Edges and centre.** `M`'s three positions on the axis (min, centre,
+   max) are compared with every reference's three positions, nine pairs per
+   reference. The offset is `reference − moving`.
+2. **Equal spacing.** The *row* of `M` on axis x is the set of references
+   whose y-interval overlaps `M`'s y-interval by more than
+   `Tolerance.standard`; the same holds for y with the roles swapped.
+   - **Left**: the row member with the largest `max ≤ lo` (ties: lower
+     handle). Its gap is `gL = lo − L.max ≥ 0`.
+   - **Right**: the row member with the smallest `min ≥ hi`. Its gap is
+     `gR = R.min − hi ≥ 0`.
+   - **Between**: with both present, the offset that makes `gL = gR` is
+     `o = ((R.min + L.max) − (lo + hi)) / 2`. It is a candidate only when
+     `R.min − L.max ≥ hi − lo`, i.e. the box fits.
+   - **Continuing**: take a pair of row members `(A, B)` that are adjacent
+     on the axis, meaning `B.min ≥ A.max` and no row member lies wholly
+     between them, and whose own perpendicular intervals overlap. Its gap is
+     `g = B.min − A.max`. With `L` the left neighbour, the candidate offset
+     is `o = (L.max + g) − lo`; mirrored with `R`, it is `o = (R.min − g) −
+     hi`. Pairs are limited to the 16 nearest to `M` on the axis, so a solve
+     stays bounded.
+3. A candidate is captured when `|o| ≤ aperture`, where
+   `aperture = kGuideAperturePixels / camera.scale`. `kGuideAperturePixels`
+   is 6 for a mouse and 10 for touch (my call, after `kPickRadiusPixels` and
+   the touch reach).
+4. **Total order**, so the same input always gives the same answer (no
+   jitter): the smallest `|o|` wins. Ties are broken in this order:
+   - edges, then centres, then between, then continuing;
+   - the smaller pair index, in the order min, centre, max of the moving box
+     and then of the reference;
+   - the lower reference handle, then the lower second handle of a pair;
+   - a negative `o` before a positive one.
+5. **No alternation.** Both axes are solved once each, on `M` at `dRaw`.
+   After the final delta is formed, a captured spacing candidate is
+   re-checked against the final box. If its row overlap no longer holds
+   (the other axis moved), that axis takes its best non-spacing candidate
+   from the same pass, or `dChain` if it has none. Nothing is solved again.
+6. After the snap, every candidate on a captured axis whose offset is now
+   zero within `Tolerance` is drawn: other references on the same line, and
+   both gaps of an equal pair.
+
+### Priority against the existing chain (O-1)
+
+The order, per event:
+
+1. today's chain resolves `c` (`resolveDragPoint`);
+2. today's attachment runs as it does now, after the chain and even after an
+   object-snap hit (`SelectTool._retarget`, `PlanSymbolTool`). A captured
+   attachment wins: no guides for that event;
+3. otherwise an **object-snap hit on the pointer** wins: no guides for that
+   event (my call: exact geometry is a stronger intent);
+4. otherwise guides apply as in *The delta*.
+
+The behaviour of attachment and of object snap is unchanged.
 
 ### Modes
 
 - **Design, move**: `SelectTool` body drags of movable objects.
-- **Design, place**: `PlanSymbolTool`'s ghost, before attachment. A captured
-  attachment turns guides off, as in a move.
-- **Service**: `ServiceTool`'s drag of units and whole groups. References are
-  the service document's other symbol instances (moving tables, bar counters,
-  fixed furniture). Service has no grid. An axis without a guide keeps the
-  raw delta.
+- **Design, place**: `PlanSymbolTool`'s ghost, while hovering and while
+  dragging, before attachment. The moving box is recomputed when the ghost's
+  transform changes (a rotation, a mirror, a new symbol).
+- **Service**: `ServiceTool`'s drag of units and whole groups. References
+  are the service document's other symbol instances (other tables, bar
+  counters, fixed furniture). Service has no grid; an axis without a guide
+  keeps `dRaw`.
+- **Service and the camera (O-3)**: service gains what design has. While a
+  drag lives, it listens to the camera and re-targets from the last screen
+  point, the last device kind and the last Alt state. It stops listening on
+  release, on cancel (including the second finger's cancel) and on dispose.
 - The release commits exactly what the preview showed. It is still one
   command (one undo step), and `onUnitsMoved` and `onLayoutChanged` fire as
   today with the snapped positions.
 
-### Turning them off (H5)
+### Turning them off (H5, O-10, O-11)
 
 - **Host:** `PlanEditor.alignmentGuides`, `PlanServiceView.alignmentGuides`
   and `PlanCanvas.alignmentGuides` are `bool`s that default to true and work
   the way `snapping` already does. False hides the bar button and turns
   guides off in that view.
-- **Controller:** `PlanController.alignmentGuides` is a `Listenable`
-  setting with `bool get on` (the effective value: allowed and the user's)
-  and `void toggle()`, beside `controller.snap`. It also has
-  `alignmentGuidesAllowed`, which the views set, like `snappingAllowed`. The
-  user's choice lives in memory for the controller's life. It is shared by
-  both modes and survives a mode switch.
+- **Controller:** `PlanController.alignmentGuides` is of a new, exported
+  type, `PlanGuideSettings extends ChangeNotifier`. It has:
+  - `bool get on`: the effective value (allowed and the user's);
+  - `bool get userOn` and `void toggle()`: the user's choice;
+  - `bool get allowed`: set by the views through
+    `PlanController.alignmentGuidesAllowed`, like `snappingAllowed`.
+  It notifies on a change of either value. An allowance change is delivered
+  frame-safe, as `snappingAllowed`'s is (never during a build).
+  - The user's choice lives in memory for the controller's life. It is
+    shared by both modes and survives a mode switch.
+  - Turning guides off mid-drag clears them at once (a repaint). The next
+    retarget, or a camera-driven one, resolves without them.
 - **User:** a new `PlanEditorAction.guides` and `PlanServiceAction.guides`.
-  Each is a plain toggle button (an icon button with a selected state) in
-  that bar's existing button group, listed by default, so the shadcn session
-  can restyle it. Its tooltip and semantics label are localised (en, de,
-  tr).
+  - Each is a plain toggle button (an icon button with a selected state),
+    listed by default, so the shadcn session can restyle it.
+  - It sits after Snap in the editor's edit group, and after Redo in the
+    service bar's undo group.
+  - Its tooltip and semantics label are localised (en, de, tr).
+  - Both of `PlanServiceView`'s exhaustive switches over the action (button
+    and grouping), and the editor's switches, list the new value.
+  - The CHANGELOG tells hosts that switch exhaustively over either enum to
+    add the case.
 - **Alt held** (`ToolPointerEvent.alt`) at any pointer event of the drag
-  suspends guides for that event. Releasing Alt brings them back. No guide is
-  drawn while it is held.
+  suspends guides for that event. The final delta is then `dChain`, and no
+  guide is drawn. Releasing Alt brings them back on the next event.
 
-### The look (H6)
+### The look (H6, O-9)
 
 - **Lines**: a guide runs in screen space through the shared coordinate. It
   spans from the moving box to the farthest aligned reference, plus 8 px
-  past each end. It is solid, `guideWidth` logical pixels wide (default 1),
-  in the guide colour.
-- **Gap marks**: one per equal gap, drawn at the middle of the overlap of
-  the two boxes on the other axis. Each is a segment across the gap with a
-  short perpendicular tick (4 px) at both ends, in the same colour. Nothing
-  is written.
-- **Colour**: a new `PaperPalette.guide`: a vivid magenta, light
-  `0xFFE0218A` and dark `0xFFFF5CB0` (my call, checked against both
-  canvases). It also gets new `PlanTheme.guideOnLight`, `guideOnDark` and
-  `guideWidth` fields, validated like the selection fields and applied by
-  `planPaperPaletteFor`. `withSelection` and every palette copy carry the new
-  field.
+  past each end. It is solid and `guideWidth` logical pixels wide, in the
+  guide colour.
+- **Gap marks**: one per equal gap, drawn at the middle of the perpendicular
+  overlap of the two boxes on either side of the gap. Each is a segment
+  across the gap with a short perpendicular tick (4 px) at both ends, in the
+  same colour. Nothing is written.
+- **Colour**: `PaperPalette` gains `guide`, an optional constructor argument
+  defaulting to a vivid magenta: light `0xFFE0218A`, dark `0xFFFF5CB0` (my
+  call, checked against both canvases). Existing callers compile unchanged,
+  and `withSelection` and every copy carry the new field.
+  - `PlanTheme` gains `guideOnLight`, `guideOnDark` and `guideWidth`
+    (default 1, range like `selectionWidth`'s). They are validated like the
+    selection fields.
+  - The colour reaches the painters through `planPaperPaletteFor`.
+  - **The width** reaches them through a plan-internal guide style. The
+    views resolve the theme in `didChangeDependencies` and write a plain
+    double into the session. The three guide painters (the design seam's
+    plan implementation, `PlanSymbolTool` and `ServiceTool`) read it at
+    paint; nothing reads Flutter theme state while painting.
 - Guides are drawn above the selection preview and below the snap marker,
   in the tool's screen-space overlay.
 
@@ -191,24 +275,17 @@ The pointer is first resolved by today's chain (`resolveDragPoint`):
 
 - **Solver** (pure Dart, no Flutter import): `lib/src/guides/` in
   `jet_cad_2d_plan`.
-  - It solves one moving box against a reference set, held in a
-    `Float64List` (four numbers per box) plus a handle list.
+  - It solves one moving box against the reference cache.
   - The answer goes into a caller-owned result: the per-axis offsets, and
     fixed-capacity buffers of lines and gap marks (16 each; past capacity,
     the extra guides are simply not drawn).
   - It allocates nothing per call once warmed. It is unit-tested by itself.
-- **Reference cache**: built once per drag start from the document's
-  root-level instances.
-  - Each box comes from `boxOfDefinition` (memoised per definition, as
-    `PlanMoveResolver` does) through the instance's transform.
-  - In service it may reuse `UnitPicker.candidates`' world corners for units.
-  - Allocating at drag start is allowed. Per-event work is a linear scan with
-    a viewport test.
 - **Design-mode seam** in `jet_cad_2d_flutter`: `SelectTool` gains an
   optional generic hook beside `MoveResolver`. It knows no plan types.
   - It is told when a move drag starts (the moved handles), and on every
-    retarget it may replace the delta. That runs after the chain, with the raw
-    point, the snapped point and whether object snap hit.
+    retarget it may replace the delta. That runs after the chain and the
+    attachment, with the raw point, the base, the chain's point, whether
+    object snap hit, whether attachment captured, and Alt.
   - It paints into `paintOverlay`, and is told when the drag ends or is
     cancelled.
   - Its exact name and signature are the builder's, as long as it stays
@@ -217,18 +294,23 @@ The pointer is first resolved by today's chain (`resolveDragPoint`):
   - The plan library implements it and passes it in `buildGenericTools`.
 - **Placement**: `PlanSymbolTool._resolve` applies the solver to the ghost's
   box and paints the guides in its `paintOverlay`.
-- **Service**: `ServiceTool._drag` applies the solver to `_dx/_dy` and paints
-  the guides in its `paintOverlay` beside the band.
-- **Camera moves mid-drag** (trackpad zoom, pan) re-solve with the new scale,
-  as `_onCamera` re-targets today.
+- **Service**: `ServiceTool._drag` (and its new camera re-target) applies
+  the solver to `_dx/_dy` and paints the guides in its `paintOverlay`
+  beside the band.
+- **Camera moves mid-drag** re-solve with the new scale, in every mode.
 
 ## Constraints
 
 - The frame path allocates nothing per entity in steady state and is O(1)
   per flush. `query_allocation_test`, `paint_allocation_test` and the plan's
-  `canvas_paint_allocation_test` stay green. A new invariant measures the
-  solver and the guide paint over a warmed drag (VM `AllocationMeter`, as
-  `pick_allocation_test` does).
+  `canvas_paint_allocation_test` stay green.
+- **O-12**: a new invariant measures warmed, end-to-end re-targets in all
+  three tools (move, place, service), pointer-driven and camera-driven, at
+  two reference counts (e.g. 10 and 200) and two selection sizes. Its
+  per-event allocation budget is zero, watching for `_Double`, `Aabb2`,
+  `Transform2`, records, closures and collections. The measurement uses the
+  VM `AllocationMeter`, as `pick_allocation_test` does, and the guide paint
+  is measured the same way. Each budget has a named mutation that breaks it.
 - Geometric decisions use `Tolerance`; the capture aperture is an
   interaction tolerance in screen pixels converted per zoom, as
   `kSnapAperturePixels` is.
@@ -236,8 +318,8 @@ The pointer is first resolved by today's chain (`resolveDragPoint`):
   the default colours live in `PaperPalette`.
 - Draw order, the file format, undo and the host events are unchanged apart
   from the snapped positions.
-- `jet_cad_2d_flutter`'s seam is additive; its CHANGELOG gets an Unreleased
-  entry.
+- `jet_cad_2d_flutter`'s seam and palette field are additive; its CHANGELOG
+  gets an Unreleased entry.
 
 ## Testing bar
 
@@ -249,7 +331,11 @@ solver. At minimum:
 - each candidate kind is captured and drawn, and refused just outside the
   aperture, at two zooms;
 - tie order and stability: the same pointer gives the same guide;
-- per-axis mixing with grid snap;
+- per-axis mixing with grid snap, and an off-grid press whose snapped base
+  differs from the raw press (O-2);
+- a spacing capture dropped when the other axis moves the row (O-7);
+- the reference cache rebuilt after a placement and after an undo (O-8);
+- a service camera change with no pointer move (O-3);
 - object snap and attachment win;
 - Alt, the host option, the bar toggle and its hidden state;
 - the committed command equals the preview, with one undo step;
