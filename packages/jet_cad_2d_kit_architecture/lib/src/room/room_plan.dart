@@ -4,9 +4,9 @@
 // never empty, and the area as drawn, a TextDisplay over the object (spec
 // 3a C1.1). The colour row's room half (colors/color_picker.dart:17-57) is
 // the type's colour target. The Room tool is [roomPlanTool].
-import 'package:flutter/material.dart' show Icons;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart' show LucideIcons;
 import 'package:meta/meta.dart' show visibleForTesting;
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
@@ -171,7 +171,7 @@ String roomAreaText(PlanObject object) {
 /// RoomInputs, its live rule the plan's.
 final PlanTool roomPlanTool = PlanTool(
   id: ArchitectureTools.room,
-  icon: Icons.meeting_room_outlined,
+  icon: LucideIcons.house,
   letter: 'M',
   needs: const {
     Capability.structure,

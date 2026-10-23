@@ -16,9 +16,9 @@
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart' show visibleForTesting;
-import 'package:flutter/material.dart' show Icons;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart' show LucideIcons;
 
 import '../ids.dart';
 import '../live.dart';
@@ -55,7 +55,7 @@ final PlanType<DimensionParams> dimensionPlanType = PlanType<DimensionParams>(
 /// `structure`, `components`, `geometry` (`dimension_tool.dart:311-315`).
 final PlanTool dimensionPlanTool = PlanTool(
   id: ArchitectureTools.dimension,
-  icon: Icons.straighten,
+  icon: LucideIcons.ruler,
   letter: 'I',
   needs: const {
     Capability.structure,
