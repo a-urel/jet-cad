@@ -213,7 +213,9 @@ void main() {
       expect(standardSeen.ambient, isNull, reason: 'Standard: no extension');
       expect(standardSeen.view, isNull, reason: 'Standard: no view theme');
       final standardSurface = rgbOf(standardSeen.scheme.surface);
-      final standardBar = rgbOf(standardSeen.scheme.surfaceContainer);
+      // The bar is the shadcn background derived from the seed scheme,
+      // which the mapping takes from `surface` (R-BarSurface).
+      final standardBar = rgbOf(standardSeen.scheme.surface);
 
       /// The shown mode's look: the shot, the view's rect, and the pixels
       /// of [selection] within 3 per channel around table 7.
@@ -237,7 +239,8 @@ void main() {
           reason: 'premise: the surround is the seed scheme\'s surface');
       expect(hex(standardService.shot.rgbAtOffset(barBackground(tester))),
           hex(standardBar),
-          reason: 'premise: the bar is the seed scheme\'s');
+          reason: 'premise: the bar is the derived shadcn background of the '
+              'seed theme');
       expect(overlay(tester).selectionStrokePixels, 2);
       expect(overlay(tester).paper.selection, standardSet.selection);
       expect(standardService.selectionPixels, greaterThan(200),
@@ -303,8 +306,9 @@ void main() {
           reason: 'the canvas starts under the 52 px bar');
       final posService = await check('POS service', posSelection);
       expect(hex(posService.shot.rgbAtOffset(barBackground(tester))),
-          hex(rgbOf(posScheme.surfaceContainer)),
-          reason: 'the bar in the local Theme\'s hand-built scheme');
+          hex(rgbOf(posScheme.surface)),
+          reason: 'the bar: the shadcn background derived from the local '
+              'Theme\'s hand-built scheme');
       expect(hex(posService.shot.rgbAtOffset(surround(c))),
           hex(rgbOf(pos.canvasBackground!)),
           reason: 'service: the surround is the canvas colour');
