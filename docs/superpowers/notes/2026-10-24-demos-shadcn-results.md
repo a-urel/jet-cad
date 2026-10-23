@@ -69,6 +69,11 @@ in AB1/AB2; alone it is green.
 
 ## Gates (run at `4a129cb2`, restaurant re-run at `a6913fc0`; real last lines)
 
+At `f3758596` (after fix round 3), re-run by the controller: restaurant
+`00:29 +127: All tests passed!`, its `integration_test -d macos`
+`00:05 +1: All tests passed!`; architecture `00:38 +183: All tests passed!`, its
+`integration_test -d macos` `00:04 +1: All tests passed!`.
+
 - `restaurant_demo`: `flutter test` `00:34 +126: All tests passed!`; analyze `No issues found! (ran in 3.7s)`;
   format `Formatted 45 files (0 changed)`.
 - `architecture_demo`: `01:26 +182: All tests passed!`; analyze `No issues found! (ran in 4.7s)`;
@@ -82,7 +87,30 @@ in AB1/AB2; alone it is green.
 
 ## Looked at
 
-(controller fills this in)
+Both demos were built and launched on macOS (`flutter build macos --debug`,
+opened from `build/`). Screen access to them was declined by the human, so the
+controller rendered both apps instead in a throwaway widget test (not committed)
+with the bundle's real fonts (`FontManifest.json` through `FontLoader`): 1300 x 820
+light and dark, and 400 x 820 (the restaurant demo with its side sheet open, dark).
+The images were looked at by the controller, not by the human.
+
+- Architecture demo, light and dark: the editor bar with the app's title and the
+  Open sample button, the palette, the layer and page panels: zinc, Roboto, no
+  Material left. Nothing to fix.
+- Restaurant demo, first render: the side panel's bare `Text`s (the tables, groups,
+  sections and log lines) had no default text style under a plain `ShadApp` (a
+  Material `Scaffold` used to give it), so they drew without the theme's font;
+  and on a phone the demo's side button and the library's panel button below it
+  showed the same `slidersHorizontal` glyph. Fixed at `f3758596` (fix round 3 of
+  Task 3): both demos' `ShadApp.builder` installs the theme's `p` style in the
+  foreground colour, as the library's `PlanShadScope` does; `DemoSidePanel` wraps
+  itself in the same style (the sheet's route set a muted one); the demo's button
+  is `LucideIcons.panelRight`. Tests RD4 and AD5 pin the style; dropping the
+  builder turns both red. Second render: the panel reads as the rest of the app,
+  light and dark, docked and in the sheet.
+
+Not looked at: the running apps themselves, the language switch at runtime, the
+tablet width.
 
 ## Not done, open
 

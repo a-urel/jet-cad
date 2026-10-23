@@ -62,3 +62,10 @@ Task 6: BLOCKED at 4a129cb2: restaurant integration POS1 fails (own-bar ShadSwit
 Task 3: fix round 2/5 (1 addressed, 0 open — reveal() left the entry in the cache extent below the viewport in the taller macOS window → ensureVisible; plus an 8 px dead zone between switch track and label in _toggle closed; commit a6913fc0; restaurant +126, integration +1)
 Ruling: the switch's label gap is made hit-testable with an opaque MouseRegion (click cursor) instead of a transparent colour — theme_colours_test forbids colour literals — costs: none seen.
 Task 6: unblocked, resumed to finish docs.
+Task 6: complete (commit 1d1786f1; Looked-at section pending the controller).
+Look (controller): real apps launched; screen access for them denied by the human, so the controller rendered both demos with the bundle's real fonts in a scratch widget test (not committed), 1300 light/dark and 400 light. Architecture: fine. Restaurant: bare Texts in the side panel (tables, groups, sections, log) have no DefaultTextStyle under plain ShadApp → wrong font; phone shows two identical slidersHorizontal icons (demo's side button + library's panel button).
+Task 3: fix round 3/5 dispatched (DefaultTextStyle via ShadApp builder in both demos; side button icon panelRight).
+Task 3: fix round 3/5 (2 addressed, 0 open — DefaultTextStyle from ShadApp.builder in both demos plus DemoSidePanel's own wrap; panelRight icon; commit f3758596; restaurant +127, architecture +183)
+Ruling: DemoSidePanel wraps itself in the theme's text style too — the ShadSheet route sets a muted DefaultTextStyle — costs: none.
+Look: second render clean. Controller re-run at f3758596: restaurant +127, integration +1; architecture +183, integration +1.
+All tasks complete. No final reviewer subagent (the human's rule); the controller self-reviewed every task.

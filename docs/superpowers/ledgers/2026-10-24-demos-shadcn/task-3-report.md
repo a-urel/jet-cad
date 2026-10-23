@@ -43,3 +43,10 @@ No `Icons.` left. No Material widget remains in the touched files.
 - Reproduced: `flutter test integration_test -d macos` failed at pos_test.dart:101, tap at (1363.8, 688) missed; hit path ended in the side panel's list (blank area), so the entry was built but outside the viewport (lazy list cache extent). Root cause: the rig's `reveal` (scrollUntilVisible stops at "built"). Fixed with ensureVisible (ruling).
 - Also found a genuine small dead zone in `_toggle`: the key's centre can fall in the 8 px gap between track and label for short labels (real Roboto), where a click does nothing. Fixed in lib/side_panel.dart: ShadSwitch padding zero and the label wrapped in an opaque MouseRegion(click cursor) with the 8 px start padding inside it, so the whole row toggles. All 8 keyed switches go through `_toggle`.
 - Results: flutter test 126 passed, "would not hit" count 0; analyze clean; format exit 0; `flutter test integration_test -d macos`: "00:05 +1: All tests passed!".
+
+## Fix round 3 (text style under a plain ShadApp)
+- ShadApp's `builder` runs inside ShadAppBuilder, below the ShadTheme (checked in shadcn_ui app.dart). Both demos' ShadApp now install DefaultTextStyle(textTheme.p + foreground); the architecture demo composes it with its CallbackShortcuts.
+- Found while testing: inside the side sheet the text is muted (some library surface sets a muted style nearer than the app's), so `DemoSidePanel` also wraps its list in the same DefaultTextStyle.
+- Side button icon: LucideIcons.panelRight.
+- Tests RD4 (restaurant) and AD5 (architecture), mutations red (app style dropped; panel style dropped). DZ2 retargeted (ruling).
+- Gates: restaurant flutter test passed, 0 "would not hit", analyze clean, format 0; architecture 183 passed, same.

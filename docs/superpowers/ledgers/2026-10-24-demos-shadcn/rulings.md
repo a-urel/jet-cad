@@ -175,3 +175,18 @@ All in apps/architecture_demo/test. No assertion dropped, no tolerance widened.
   extent below the viewport; the 1600 px macOS window put `own-bar` at y 688,
   outside the panel's viewport, and the tap hit the list's blank area. Same
   key, same tap; no assertion touched.
+
+## Task 3 fix round 3
+
+- test/zones_test.dart DZ2 (restaurant): the fixed `drag(side-panel, (0,-400))`
+  -> `reveal(tester, 'fade-others')`, repeated after each language switch.
+  With the theme's body text style the panel's lines changed height, so a
+  fixed 400 px drag no longer leaves the zones section in the built range after
+  the German switch ("Bereiche" not built). Every word asserted (Zones, All,
+  Fade the others and their de/tr words) is unchanged.
+- Added (assertions only): restaurant app_root_test RD4 and architecture
+  app_root_test AD5: the DefaultTextStyle a bare Text gets has Roboto, the
+  ShadTheme's foreground and body size, light and dark; RD4 also in the open
+  side sheet at 375 px. Mutations: the app builder's style dropped -> RD4 / AD5
+  red; the side panel's own DefaultTextStyle dropped -> RD4 red (the sheet
+  otherwise gives muted text).
