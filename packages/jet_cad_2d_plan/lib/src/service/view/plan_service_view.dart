@@ -15,6 +15,8 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../../canvas/plan_canvas_view.dart';
+import '../../chrome/host_slot.dart';
+import '../../chrome/shad_scope.dart';
 import '../../controller/plan_controller.dart';
 import '../../editor/editor_layout.dart';
 import '../../export/editor_page_flows.dart';
@@ -314,7 +316,9 @@ class _PlanServiceViewState extends State<PlanServiceView> {
   PlanEditorLayout? _builtLayout;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => PlanShadScope(child: _body(context));
+
+  Widget _body(BuildContext context) {
     validatePlanServiceBar(widget.bar);
     if (widget.unitOverlayBuilder != null) {
       validatePlanOverlayLayout(widget.unitOverlayLayout);
@@ -717,8 +721,9 @@ class _ServiceCanvasState extends State<_ServiceCanvas> {
   /// The canvas, with the host's panel docked beside it (desktop) or as a
   /// drawer over it (phone, tablet); the plan fills what is left.
   Widget _body(ColorScheme scheme, Widget canvas) {
-    final panel = widget.sidePanel;
-    if (panel == null) return canvas;
+    final host = widget.sidePanel;
+    if (host == null) return canvas;
+    final panel = PlanHostSlot(child: host);
     if (widget.layout == PlanEditorLayout.desktop) {
       return Row(
         children: [
@@ -833,7 +838,7 @@ class _ServiceCanvasState extends State<_ServiceCanvas> {
     );
     final guarded = bar.leading.isEmpty && bar.trailing.isEmpty
         ? row
-        : PlanShortcutGuard(controller: _c, child: row);
+        : PlanShortcutGuard(controller: _c, child: PlanHostSlot(child: row));
     // Off the desktop the bar may be wider than the screen: the buttons
     // scroll and the side panel's button stays pinned at the end.
     final compact = widget.layout != PlanEditorLayout.desktop;

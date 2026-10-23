@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart' show Capability;
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show kitOfKey;
 
+import '../chrome/shad_scope.dart';
 import '../controller/plan_controller.dart';
 import '../l10n/locale_scope.dart';
 import '../l10n/strings.dart';
@@ -85,7 +86,9 @@ class _PlanToolPaletteState extends State<PlanToolPalette> {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => PlanShadScope(child: _body(context));
+
+  Widget _body(BuildContext context) {
     final c = widget.controller;
     return ExcludeFocus(
       // The left slot paints its own background, so the tiles need a

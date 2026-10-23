@@ -12,6 +12,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart' show foregroundFor;
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show SymbolsState;
 
+import '../chrome/shad_scope.dart';
 import '../controller/plan_controller.dart';
 import '../l10n/locale_scope.dart';
 import '../l10n/strings.dart';
@@ -164,7 +165,9 @@ class _PlanSymbolGalleryState extends State<PlanSymbolGallery> {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => PlanShadScope(child: _body(context));
+
+  Widget _body(BuildContext context) {
     final c = widget.controller;
     return ListenableBuilder(
       listenable:

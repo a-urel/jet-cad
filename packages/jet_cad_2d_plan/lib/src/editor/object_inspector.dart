@@ -8,6 +8,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart' show Handle;
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
     show SelectionController;
 
+import '../chrome/host_slot.dart';
 import '../controller/plan_controller.dart';
 import '../objects/object_detail.dart';
 import '../objects/object_ref.dart';
@@ -121,6 +122,7 @@ class _ObjectInspectorState extends State<ObjectInspector> {
     final shown = _shown;
     final detail = shown == null ? null : _detail(shown);
     if (detail == null) return const SizedBox.shrink();
-    return widget.builder(context, detail) ?? const SizedBox.shrink();
+    final built = widget.builder(context, detail);
+    return built == null ? const SizedBox.shrink() : PlanHostSlot(child: built);
   }
 }

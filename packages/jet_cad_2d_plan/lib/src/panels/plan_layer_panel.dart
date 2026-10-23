@@ -8,6 +8,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
     show PageNotifier, displayPaperFor;
 
+import '../chrome/shad_scope.dart';
 import '../controller/plan_controller.dart';
 import '../l10n/locale_scope.dart';
 import '../l10n/numbered_names.dart';
@@ -255,7 +256,9 @@ class PlanLayerPanelState extends State<PlanLayerPanel> {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => PlanShadScope(child: _body(context));
+
+  Widget _body(BuildContext context) {
     final layers = _doc.tables.layers;
     // A row the document no longer has (an undo, a delete) is neither
     // selected nor being renamed.

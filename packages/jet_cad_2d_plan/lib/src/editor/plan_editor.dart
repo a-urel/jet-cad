@@ -17,6 +17,8 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
     show InteractionLayer, kLogicalPixelsPerMm, kRulerThickness;
 
 import '../canvas/plan_canvas.dart';
+import '../chrome/host_slot.dart';
+import '../chrome/shad_scope.dart';
 import '../controller/plan_controller.dart';
 import '../export/editor_page_flows.dart';
 import '../export/export_dialog.dart';
@@ -729,7 +731,7 @@ class _PlanEditorState extends State<PlanEditor> {
         padding: const EdgeInsets.symmetric(horizontal: 12),
         child: bar.leading.isEmpty && bar.trailing.isEmpty
             ? row
-            : PlanShortcutGuard(controller: c, child: row),
+            : PlanShortcutGuard(controller: c, child: PlanHostSlot(child: row)),
       ),
     );
   }
@@ -995,7 +997,9 @@ class _PlanEditorState extends State<PlanEditor> {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => PlanShadScope(child: _body(context));
+
+  Widget _body(BuildContext context) {
     validatePlanEditorBar(widget.bar);
     validatePlanServiceBar(widget.serviceBar);
     if (widget.unitOverlayBuilder != null) {

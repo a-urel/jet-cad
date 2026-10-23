@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show PageNotifier;
 
+import '../chrome/shad_scope.dart';
 import '../controller/plan_controller.dart';
 import '../l10n/locale_scope.dart';
 import '../l10n/number_text.dart';
@@ -195,7 +196,9 @@ class PlanPagePanelState extends State<PlanPagePanel> {
       fit: BoxFit.scaleDown, child: Text(text, key: key, maxLines: 1));
 
   @override
-  Widget build(BuildContext context) => PlanShortcutGuard(
+  Widget build(BuildContext context) => PlanShadScope(child: _body(context));
+
+  Widget _body(BuildContext context) => PlanShortcutGuard(
       controller: widget.controller,
       child: ValueListenableBuilder<PageComponent?>(
         valueListenable: widget.controller.page,

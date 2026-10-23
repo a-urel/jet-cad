@@ -22,6 +22,7 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
 import 'package:meta/meta.dart' show internal;
 
+import '../chrome/shad_scope.dart';
 import '../controller/plan_controller.dart';
 import '../kits/section_boundary.dart' show KitSectionBoundary;
 import '../l10n/locale_scope.dart';
@@ -1072,7 +1073,9 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
       });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => PlanShadScope(child: _body(context));
+
+  Widget _body(BuildContext context) {
     final c = _c;
     // A parent rebuild may arrive before the controller's notification.
     if (!identical(c.document, _document)) {
