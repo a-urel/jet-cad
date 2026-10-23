@@ -23,6 +23,8 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 import 'package:restaurant_demo/demo_theme.dart';
 import 'package:restaurant_demo/statuses.dart' show kStatuses;
+import 'package:shadcn_ui/shadcn_ui.dart'
+    show ShadThemeData, ShadTheme, ShadZincColorScheme;
 
 import 'support/demo_rig.dart';
 
@@ -153,15 +155,16 @@ Offset barBackground(WidgetTester tester) {
 }
 
 /// The look's controls and what the view resolved, by the public API: the
-/// ambient extension and colour scheme at the view's element, and the
-/// view's own `theme:`.
-({PlanTheme? ambient, ColorScheme scheme, PlanTheme? view}) seen(
-    WidgetTester tester) {
+/// ambient extension and colour scheme at the view's element, the
+/// `ShadTheme` above it (R-LOOK) and the view's own `theme:`.
+({PlanTheme? ambient, ColorScheme scheme, ShadThemeData? shad, PlanTheme? view})
+    seen(WidgetTester tester) {
   final view = find.byType(PlanEditor);
   final theme = Theme.of(tester.element(view));
   return (
     ambient: theme.extension<PlanTheme>(),
     scheme: theme.colorScheme,
+    shad: ShadTheme.maybeOf(tester.element(view)),
     view: tester.widget<PlanEditor>(view).theme,
   );
 }
@@ -178,8 +181,9 @@ void main() {
     final name = brightness.name;
     testWidgets(
         'DL${brightness == Brightness.light ? 1 : 2} the POS look under a '
-        '$name platform: the extension of the app\'s $name theme, the local '
-        'Theme\'s hand-built scheme on the bar, the 52 px bar, the surround '
+        '$name platform: the extension of the app\'s $name theme, a '
+        'ShadTheme of zinc above the view, zinc\'s background on the bar (DL-S1), under '
+        'Standard the derived one, the 52 px bar, the surround '
         'in the canvas colour in both modes, the selection 3 px in the '
         'theme\'s colour for the paper in both modes, the fill at 0.8, the '
         '12 px bold Roboto caption; Standard again is today\'s, byte for byte',
@@ -192,7 +196,10 @@ void main() {
       final c = demo.area.controller;
       final light = brightness == Brightness.light;
       final pos = posPlanTheme(brightness);
-      final posScheme = posColorScheme(brightness);
+      final posShad = posShadTheme(brightness);
+      final zinc = light
+          ? const ShadZincColorScheme.light()
+          : const ShadZincColorScheme.dark();
       // The Salon's page is White: under the dark theme it is shown on the
       // dark canvas (14d K1), whose selection is the dark set's.
       final standardSet = light ? PaperPalette.light : PaperPalette.dark;
@@ -212,6 +219,9 @@ void main() {
       final standardSeen = seen(tester);
       expect(standardSeen.ambient, isNull, reason: 'Standard: no extension');
       expect(standardSeen.view, isNull, reason: 'Standard: no view theme');
+      expect(standardSeen.shad, isNull,
+          reason: 'Standard: no ShadTheme above the view (the planner '
+              'derives its chrome from the Material theme)');
       final standardSurface = rgbOf(standardSeen.scheme.surface);
       // The bar is the shadcn background derived from the seed scheme,
       // which the mapping takes from `surface` (R-BarSurface).
@@ -276,7 +286,13 @@ void main() {
           reason: 'the extension of the app\'s $name theme, carried into '
               'the local Theme');
       expect(posSeen.view, const PlanTheme(selectionWidth: 3));
-      expect(posSeen.scheme, posScheme, reason: 'the local Theme\'s scheme');
+      expect(posSeen.shad, isNotNull, reason: 'a ShadTheme above the view');
+      expect(posSeen.shad!.brightness, brightness);
+      expect(posSeen.shad!.colorScheme.background, zinc.background);
+      expect(posSeen.shad!.colorScheme, posShad.colorScheme,
+          reason: 'zinc, as posShadTheme builds it');
+      expect(posSeen.scheme, standardSeen.scheme,
+          reason: 'the Material theme is the app\'s: no local Theme');
       expect(posSeen.ambient!.selectionWidth, isNull,
           reason: 'premise: the width is the view\'s alone (the merge)');
       final posDesign = await check('POS design', posSelection);
@@ -306,9 +322,10 @@ void main() {
           reason: 'the canvas starts under the 52 px bar');
       final posService = await check('POS service', posSelection);
       expect(hex(posService.shot.rgbAtOffset(barBackground(tester))),
-          hex(rgbOf(posScheme.surface)),
-          reason: 'the bar: the shadcn background derived from the local '
-              'Theme\'s hand-built scheme');
+          hex(rgbOf(zinc.background)),
+          reason: 'DL-S1 the bar: zinc\'s background, not the derived one');
+      expect(rgbOf(zinc.background), isNot(standardBar),
+          reason: 'DL-S1 premise: the two looks\' bars differ');
       expect(hex(posService.shot.rgbAtOffset(surround(c))),
           hex(rgbOf(pos.canvasBackground!)),
           reason: 'service: the surround is the canvas colour');
