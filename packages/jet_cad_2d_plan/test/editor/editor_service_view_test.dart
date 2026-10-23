@@ -25,6 +25,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show kUnitLabelTag;
+import 'package:jet_cad_2d_plan/src/chrome/icon_button.dart'
+    show PlanIconButton;
 import 'package:jet_cad_2d_plan/src/canvas/plan_canvas.dart';
 import 'package:jet_cad_2d_plan/src/controller/plan_controller.dart';
 import 'package:jet_cad_2d_plan/src/editor/plan_editor.dart';
@@ -639,7 +641,8 @@ void main() {
     await tester.pump();
     await tester.pump();
     for (final k in ['service-print', 'service-export']) {
-      expect(tester.widget<IconButton>(byKey(k)).onPressed, isNull, reason: k);
+      expect(tester.widget<PlanIconButton>(byKey(k)).onPressed, isNull,
+          reason: k);
     }
   });
 

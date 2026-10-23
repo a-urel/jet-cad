@@ -30,6 +30,8 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
     show InteractionLayer;
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart' as host;
+import 'package:jet_cad_2d_plan/src/chrome/icon_button.dart'
+    show PlanIconButton;
 import 'package:jet_cad_2d_plan/src/controller/plan_controller.dart';
 import 'package:jet_cad_2d_plan/src/service/service_session.dart' show PlanMode;
 import 'package:jet_cad_2d_plan/src/service/service_state.dart';
@@ -484,7 +486,7 @@ void main() {
       await tester.pump();
       expect(candidate.value, {'1', '2'});
       expect(() => candidate.value!.add('x'), throwsUnsupportedError);
-      expect(tester.widget<IconButton>(byKey('service-merge')).onPressed,
+      expect(tester.widget<PlanIconButton>(byKey('service-merge')).onPressed,
           isNotNull);
       await tester.tap(byKey('service-merge'));
       await tester.pump();
@@ -520,7 +522,8 @@ void main() {
       await tester.pump();
       expect(c.mergeCandidate.value, {'1', '2'});
       bool mergeOn() =>
-          tester.widget<IconButton>(byKey('service-merge')).onPressed != null;
+          tester.widget<PlanIconButton>(byKey('service-merge')).onPressed !=
+          null;
       expect(mergeOn(), isTrue);
       c.setUnitGroups({
         'G': UnitGroup(members: {'1', '2'})

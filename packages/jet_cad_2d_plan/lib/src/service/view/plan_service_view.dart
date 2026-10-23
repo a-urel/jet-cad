@@ -12,10 +12,12 @@ import 'package:flutter/gestures.dart'
 import 'package:flutter/material.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+import 'package:shadcn_ui/shadcn_ui.dart' show LucideIcons, ShadThemeData;
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../../canvas/plan_canvas_view.dart';
 import '../../chrome/host_slot.dart';
+import '../../chrome/icon_button.dart';
 import '../../chrome/shad_scope.dart';
 import '../../controller/plan_controller.dart';
 import '../../editor/editor_layout.dart';
@@ -701,9 +703,14 @@ class _ServiceCanvasState extends State<_ServiceCanvas> {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => PlanShadScope(child: _body(context));
+
+  Widget _body(BuildContext context) {
+    // The canvas reads the Material theme (its background, its paper, its
+    // brightness: SV3); the bar and the side panel read the chrome's.
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final shad = planShadThemeOf(context);
     final strings = PlanStrings.of(context);
     final flows = widget.flows;
     final callbacks = widget.callbacks();
@@ -729,8 +736,8 @@ class _ServiceCanvasState extends State<_ServiceCanvas> {
           child: Column(
             children: [
               if (widget.bar.visible)
-                _bar(widget.bar, scheme, strings, flows, callbacks),
-              Expanded(child: _body(scheme, _canvasOf(theme, scheme, paper))),
+                _bar(widget.bar, shad, strings, flows, callbacks),
+              Expanded(child: _layout(shad, _canvasOf(theme, scheme, paper))),
             ],
           ),
         ),
@@ -740,7 +747,7 @@ class _ServiceCanvasState extends State<_ServiceCanvas> {
 
   /// The canvas, with the host's panel docked beside it (desktop) or as a
   /// drawer over it (phone, tablet); the plan fills what is left.
-  Widget _body(ColorScheme scheme, Widget canvas) {
+  Widget _layout(ShadThemeData shad, Widget canvas) {
     final host = widget.sidePanel;
     if (host == null) return canvas;
     final panel = PlanHostSlot(child: host);
@@ -751,7 +758,7 @@ class _ServiceCanvasState extends State<_ServiceCanvas> {
           SizedBox(
             key: const Key('service-side-panel'),
             width: _kSidePanelWidth,
-            child: ColoredBox(color: scheme.surfaceContainerLow, child: panel),
+            child: ColoredBox(color: shad.colorScheme.card, child: panel),
           ),
         ],
       );
@@ -847,7 +854,7 @@ class _ServiceCanvasState extends State<_ServiceCanvas> {
 
   /// service_view.dart:610-636: the host's leading, the actions, the
   /// host's trailing; the host's widgets under the shortcut guard.
-  Widget _bar(PlanServiceBar bar, ColorScheme scheme, PlanStrings strings,
+  Widget _bar(PlanServiceBar bar, ShadThemeData shad, PlanStrings strings,
       EditorPageFlows flows, ServiceCallbacks callbacks) {
     final row = Row(
       children: [
@@ -864,11 +871,11 @@ class _ServiceCanvasState extends State<_ServiceCanvas> {
     final compact = widget.layout != PlanEditorLayout.desktop;
     final panelButton = compact && widget.sidePanel != null
         ? ExcludeFocus(
-            child: IconButton(
+            child: PlanIconButton(
               key: const Key('service-right-button'),
-              tooltip: strings.openServicePanel,
-              icon: const Icon(Icons.tune),
-              isSelected: widget.panelOpen,
+              label: strings.openServicePanel,
+              icon: LucideIcons.slidersHorizontal,
+              selected: widget.panelOpen,
               onPressed: widget.onTogglePanel,
             ),
           )
@@ -876,7 +883,10 @@ class _ServiceCanvasState extends State<_ServiceCanvas> {
     return Container(
       key: const Key('service-bar'),
       height: _theme.value?.serviceBarHeight ?? kServiceBarHeight,
-      color: scheme.surfaceContainer,
+      decoration: BoxDecoration(
+        color: shad.colorScheme.background,
+        border: Border(bottom: BorderSide(color: shad.colorScheme.border)),
+      ),
       padding: const EdgeInsets.symmetric(horizontal: 12),
       child: !compact
           ? guarded
@@ -902,35 +912,31 @@ class _ServiceCanvasState extends State<_ServiceCanvas> {
     int? lastGroup;
     for (final action in actions) {
       final button = switch (action) {
-        PlanServiceAction.undo => _button(
-            'service-undo', strings.undo, Icons.undo, _c.canUndo, _c.undo),
-        PlanServiceAction.redo => _button(
-            'service-redo', strings.redo, Icons.redo, _c.canRedo, _c.redo),
+        PlanServiceAction.undo => _button('service-undo', strings.undo,
+            LucideIcons.undo, _c.canUndo, _c.undo),
+        PlanServiceAction.redo => _button('service-redo', strings.redo,
+            LucideIcons.redo, _c.canRedo, _c.redo),
         PlanServiceAction.guides => !widget.alignmentGuides
             ? null
             : _button('service-guides', strings.alignmentGuides,
-                Icons.straighten, _alwaysEnabled, _c.alignmentGuides.toggle,
+                LucideIcons.ruler, _alwaysEnabled, _c.alignmentGuides.toggle,
                 selected: _guidesSelected),
         PlanServiceAction.merge => !merges || callbacks.onMergeRequested == null
             ? null
-            : _button('service-merge', strings.merge, Icons.merge_type,
+            : _button('service-merge', strings.merge, LucideIcons.merge,
                 _canMerge, _merge),
         PlanServiceAction.split => !merges || callbacks.onSplitRequested == null
             ? null
-            : _button('service-split', strings.split, Icons.call_split,
+            : _button('service-split', strings.split, LucideIcons.split,
                 _canSplit, _split),
         PlanServiceAction.export => flows.canExport
-            ? _button(
-                'service-export',
-                strings.exportEllipsis,
-                Icons.ios_share_outlined,
-                _pageReady,
-                () => flows.export(context))
+            ? _button('service-export', strings.exportEllipsis,
+                LucideIcons.share, _pageReady, () => flows.export(context))
             : null,
         PlanServiceAction.print => _button(
             'service-print',
             strings.printEllipsis,
-            Icons.print_outlined,
+            LucideIcons.printer,
             _pageReady,
             () => flows.print(context)),
       };
@@ -976,11 +982,11 @@ class _ServiceCanvasState extends State<_ServiceCanvas> {
       ListenableBuilder(
         listenable:
             selected == null ? enabled : Listenable.merge([enabled, selected]),
-        builder: (_, __) => IconButton(
+        builder: (_, __) => PlanIconButton(
           key: Key(key),
-          tooltip: tooltip,
-          icon: Icon(icon),
-          isSelected: selected?.value,
+          label: tooltip,
+          icon: icon,
+          selected: selected?.value,
           onPressed: enabled.value ? onPressed : null,
         ),
       );

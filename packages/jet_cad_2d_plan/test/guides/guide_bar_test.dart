@@ -14,9 +14,8 @@ import '../support/service_host.dart' hide byKey;
 
 bool selectedOf(WidgetTester tester, String key) =>
     switch (tester.widget(byKey(key))) {
-      // The editor bar's buttons are the chrome's (R-IconButton).
+      // Both bars' buttons are the chrome's (R-IconButton).
       PlanIconButton(:final selected) => selected!,
-      IconButton(:final isSelected) => isSelected!,
       final w => throw StateError('no toggle button: $w'),
     };
 
@@ -140,7 +139,7 @@ void main() {
           home: Scaffold(body: PlanServiceView(controller: c))));
       await tester.pump();
       await tester.pump();
-      expect(tester.widget<IconButton>(byKey('service-guides')).tooltip,
+      expect(tester.widget<PlanIconButton>(byKey('service-guides')).label,
           'Hizalama kılavuzları');
     });
   });
