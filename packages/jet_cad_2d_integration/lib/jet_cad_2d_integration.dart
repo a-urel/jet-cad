@@ -32,5 +32,9 @@ Widget planEditorApp(PlanController controller,
       locale: locale,
       supportedLocales: planSupportedLocales,
       localizationsDelegates: planLocalizationsDelegates,
-      home: PlanEditor(controller: controller, layerPanel: layerPanel),
+      // The planner's column as ported: every section under a selection.
+      home: PlanEditor(
+          controller: controller,
+          layerPanel: layerPanel,
+          contextualPanels: false),
     );

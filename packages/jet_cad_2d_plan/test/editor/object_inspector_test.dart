@@ -60,6 +60,8 @@ Future<Rig> mount(WidgetTester tester,
   await tester.pumpWidget(MaterialApp(
       home: Scaffold(
           body: PlanEditor(
+    // 0.9.0's column: Layers and Page under a selection.
+    contextualPanels: false,
     controller: c,
     propertyPanel: panel,
     objectInspectorBuilder: !objects

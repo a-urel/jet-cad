@@ -1,3 +1,10 @@
+## Unreleased
+
+- The editor's right column follows the selection: with anything selected it
+  shows the property panel and the host's inspectors only; with nothing
+  selected, the Layers and Page sections too, on every layout.
+  `PlanEditor.contextualPanels: false` keeps 0.9.0's column.
+
 ## 0.9.0
 
 - Depends on `jet_cad_2d_kit: ^0.1.1`.

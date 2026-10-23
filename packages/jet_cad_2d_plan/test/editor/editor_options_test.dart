@@ -147,6 +147,8 @@ Future<OptionsHost> mountOptions(WidgetTester tester,
       child: ValueListenableBuilder<Options>(
           valueListenable: h.options,
           builder: (_, o, __) => PlanEditor(
+              // 0.9.0's column: Layers and Page under a selection.
+              contextualPanels: false,
               controller: c,
               propertyPanel: o.propertyPanel,
               layerPanel: o.layerPanel,

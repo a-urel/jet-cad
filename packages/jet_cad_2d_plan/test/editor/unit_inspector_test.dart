@@ -64,6 +64,8 @@ Future<InspectorHost> mountInspector(WidgetTester tester,
               builder: (_, __) {
                 final label = h.label.value;
                 return PlanEditor(
+                    // 0.9.0's column: Layers and Page under a selection.
+                    contextualPanels: false,
                     controller: c,
                     propertyPanel: h.panel.value,
                     unitInspectorBuilder: !inspector

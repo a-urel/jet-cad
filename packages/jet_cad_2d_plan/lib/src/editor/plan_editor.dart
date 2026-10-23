@@ -46,6 +46,7 @@ import 'editor_layout.dart';
 import 'object_inspector.dart';
 import 'plan_editor_bar.dart';
 import 'plan_tool_palette.dart';
+import 'selection_gate.dart';
 import 'unit_inspector.dart';
 
 /// A host's file command: called after the editor settles pending input.
@@ -82,6 +83,7 @@ class PlanEditor extends StatefulWidget {
     this.propertyPanel = true,
     this.layerPanel = true,
     this.pagePanel = true,
+    this.contextualPanels = true,
     this.rulers = true,
     this.grid = true,
     this.snapping = true,
@@ -191,6 +193,14 @@ class PlanEditor extends StatefulWidget {
 
   /// Whether the Page section shows.
   final bool pagePanel;
+
+  /// Whether the right column follows the selection: with anything
+  /// selected it shows the property panel and the host's inspectors only,
+  /// the Layers and Page sections kept offstage with their state; with
+  /// nothing selected, those sections too. False: every shown section at
+  /// all times (0.9.0's column). The same on every layout, docked or in
+  /// the right drawer.
+  final bool contextualPanels;
 
   /// The canvas's rulers.
   final bool rulers;
@@ -1168,8 +1178,18 @@ class _PlanEditorState extends State<PlanEditor> {
                     controller: c,
                     unitsElsewhere: widget.unitInspectorBuilder != null,
                     builder: inspect),
-              _kept(widget.layerPanel, PlanLayerPanel(controller: c)),
-              _kept(widget.pagePanel, PlanPagePanel(controller: c)),
+              SelectionGate(
+                controller: c,
+                builder: (context, selected) {
+                  final shown = !(widget.contextualPanels && selected);
+                  return Column(children: [
+                    _kept(widget.layerPanel && shown,
+                        PlanLayerPanel(controller: c)),
+                    _kept(widget.pagePanel && shown,
+                        PlanPagePanel(controller: c)),
+                  ]);
+                },
+              ),
             ],
           ),
         ),
