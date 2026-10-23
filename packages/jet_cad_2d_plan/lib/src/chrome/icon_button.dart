@@ -28,6 +28,26 @@ class PlanTooltipSuppressor extends InheritedWidget {
       suppressed != oldWidget.suppressed;
 }
 
+/// The one tooltip of the chrome: a `ShadTooltip` showing [message], with
+/// [message] also as the semantics label of [child]. It reports its word to
+/// the leak collectors (a closed tooltip shows no text).
+class PlanTooltip extends StatelessWidget implements PlanWordsCarrier {
+  const PlanTooltip({super.key, required this.message, required this.child});
+
+  final String message;
+  final Widget child;
+
+  @override
+  Iterable<String> get visibleWords => [message];
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+        container: true,
+        label: message,
+        child: ShadTooltip(builder: (_) => Text(message), child: child),
+      );
+}
+
 /// A ghost icon button; the secondary variant when [selected] is true.
 ///
 /// [label] is the accessible name and the tooltip unless [tooltip] says
@@ -84,10 +104,7 @@ class _PlanIconButtonState extends State<PlanIconButton> {
       excludeSemantics: true,
       child: PlanTooltipSuppressor.of(context)
           ? button
-          : ShadTooltip(
-              builder: (context) => Text(widget.tooltip ?? widget.label),
-              child: button,
-            ),
+          : PlanTooltip(message: widget.tooltip ?? widget.label, child: button),
     );
   }
 }

@@ -419,6 +419,13 @@ void main() {
     expect(leaks, contains('Raw'));
   });
 
+  testWidgets('LK1x damaged warning: a PlanTooltip message is reported',
+      (tester) async {
+    final leaks = await leaksWith(
+        tester, const PlanTooltip(message: 'Raw', child: Icon(Icons.warning)));
+    expect(leaks, contains('Raw'));
+  });
+
   testWidgets('LK1x menu entry: a closed PlanMenuButton entry is reported',
       (tester) async {
     final leaks = await leaksWith(

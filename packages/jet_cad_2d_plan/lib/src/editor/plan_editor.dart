@@ -16,8 +16,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart' show DraftDocument, zoomOf;
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
     show InteractionLayer, kLogicalPixelsPerMm, kRulerThickness;
 
-import 'package:shadcn_ui/shadcn_ui.dart'
-    show LucideIcons, ShadThemeData, ShadTooltip;
+import 'package:shadcn_ui/shadcn_ui.dart' show LucideIcons, ShadThemeData;
 
 import '../canvas/plan_canvas.dart';
 import '../chrome/host_slot.dart';
@@ -669,16 +668,12 @@ class _PlanEditorState extends State<PlanEditor> {
       builder: (_, damaged, __) => damaged
           ? Padding(
               padding: const EdgeInsets.only(right: 8),
-              child: Semantics(
-                container: true,
-                label: strings.planDamaged,
-                child: ShadTooltip(
-                  builder: (_) => Text(strings.planDamaged),
-                  child: Icon(LucideIcons.triangleAlert,
-                      key: const Key('plan-damaged'),
-                      size: 18,
-                      color: shad.colorScheme.destructive),
-                ),
+              child: PlanTooltip(
+                message: strings.planDamaged,
+                child: Icon(LucideIcons.triangleAlert,
+                    key: const Key('plan-damaged'),
+                    size: 18,
+                    color: shad.colorScheme.destructive),
               ),
             )
           : const SizedBox.shrink(),

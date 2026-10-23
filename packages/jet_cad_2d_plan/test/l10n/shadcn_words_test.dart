@@ -74,6 +74,18 @@ void main() {
     expect(text, isNot(contains('keyboardToolbarBuilder')));
   });
 
+  test('SW5 ShadTooltip( appears only under lib/src/chrome/', () {
+    final outside = [
+      for (final e in sources.entries)
+        if (!e.key.startsWith('lib/src/chrome/') &&
+            e.value.contains(RegExp(r'\bShadTooltip\b')))
+          e.key,
+    ];
+    expect(outside, isEmpty);
+    expect(sources.entries.any((e) => e.value.contains('ShadTooltip(')), isTrue,
+        reason: 'the chrome builds it');
+  });
+
   test(
       'SW3 no withSearch, ShadDatePicker, ShadTimePicker, ShadCalendar in lib/',
       () {
