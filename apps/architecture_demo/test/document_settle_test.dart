@@ -32,6 +32,8 @@ import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
+import 'package:jet_cad_2d_plan/src/chrome/text_field.dart';
+import 'package:jet_cad_2d_plan/src/chrome/icon_button.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
 import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
@@ -84,8 +86,8 @@ double scaleOf(DraftDocument doc) =>
 
 /// The text in the page panel's scale field.
 String scaleField(WidgetTester tester) => tester
-    .widget<TextField>(find.byKey(const Key('page-scale')))
-    .controller!
+    .widget<PlanTextField>(find.byKey(const Key('page-scale')))
+    .controller
     .text;
 
 Finder get entry => find.byKey(const Key('text-entry'));
@@ -218,7 +220,7 @@ void main() {
     await openEntry(tester, c, far + Vector2(300, 700), 'Hall', mouse: true);
     expect(textsOf(doc), isEmpty, reason: 'premise: not committed');
     final save = find.byKey(const Key('toolbar-save'));
-    expect(tester.widget<IconButton>(save).onPressed, isNotNull,
+    expect(tester.widget<PlanIconButton>(save).onPressed, isNotNull,
         reason: 'an open entry is not mid-shape: Save is enabled');
 
     files.scriptSaveLocation(name: 'hall.jetplan', location: '/p/hall');

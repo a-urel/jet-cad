@@ -32,6 +32,13 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
         SelectionKey,
         ViewportTransform,
         kRulerThickness;
+import 'package:jet_cad_2d_plan/src/chrome/select.dart';
+import 'package:jet_cad_2d_plan/src/chrome/segmented.dart';
+import 'package:jet_cad_2d_plan/src/chrome/rows.dart';
+import 'package:jet_cad_2d_plan/src/chrome/pick.dart';
+import 'package:jet_cad_2d_plan/src/chrome/menu_button.dart';
+import 'package:jet_cad_2d_plan/src/chrome/icon_button.dart';
+import 'package:jet_cad_2d_plan/src/chrome/text_field.dart';
 import 'package:jet_cad_2d_plan/src/controller/permissions.dart';
 import 'package:jet_cad_2d_plan/src/controller/plan_controller.dart';
 import 'package:jet_cad_2d_plan/src/editor/plan_editor.dart';
@@ -279,13 +286,17 @@ Vector2 onMark(PlanController c, Handle h, double x, double y) =>
 double sizeOf(PlanController c, Handle h) =>
     c.document.components.get<MarkCross>(h)!.size;
 
-/// The panel field [key]'s widget.
-TextField fieldOf(WidgetTester tester, String key) =>
-    tester.widget<TextField>(byKey(key));
+/// The property panel's field [key]'s widget.
+PlanTextField propertyFieldOf(WidgetTester tester, String key) =>
+    tester.widget<PlanTextField>(byKey(key));
 
-/// Whether [finder]'s `IconButton` is enabled.
+/// The panel field [key]'s widget.
+PlanTextField fieldOf(WidgetTester tester, String key) =>
+    tester.widget<PlanTextField>(byKey(key));
+
+/// Whether [finder]'s `PlanIconButton` is enabled.
 bool iconEnabled(WidgetTester tester, Finder finder) =>
-    tester.widget<IconButton>(finder).onPressed != null;
+    tester.widget<PlanIconButton>(finder).onPressed != null;
 
 /// The plan's page.
 PageComponent pageOf(DraftDocument d) =>
@@ -338,7 +349,7 @@ Vector2 freeSpot(PlanController c, double dx, double dy) {
 }
 
 bool undoEnabled(WidgetTester tester) =>
-    tester.widget<IconButton>(byKey('toolbar-undo')).onPressed != null;
+    tester.widget<PlanIconButton>(byKey('toolbar-undo')).onPressed != null;
 
 void main() {
   group('readOnly (V-5)', () {
@@ -390,8 +401,8 @@ void main() {
           permissions: PlanPermissions.readOnly);
       await click(tester, u.screenOf(tester, c, s.edgeOf(c, '1')));
       expect(byKey('unit-section'), findsOneWidget);
-      expect(fieldOf(tester, 'unit-label').readOnly, isTrue);
-      expect(fieldOf(tester, 'symbol-rotation').readOnly, isTrue);
+      expect(propertyFieldOf(tester, 'unit-label').readOnly, isTrue);
+      expect(propertyFieldOf(tester, 'symbol-rotation').readOnly, isTrue);
       for (final k in [
         'unit-rotate-left',
         'unit-rotate-right',
@@ -554,51 +565,43 @@ void main() {
       }
       expect(
           tester
-              .widget<PopupMenuButton<int>>(byKey('layer-colour-$locked'))
+              .widget<PlanMenuButton<int>>(byKey('layer-colour-$locked'))
               .enabled,
           isFalse);
       void pageControls(bool enabled) {
         expect(
-            tester
-                    .widget<DropdownButton<SheetSize?>>(byKey('page-preset'))
-                    .onChanged !=
-                null,
+            tester.widget<PlanSelect<SheetSize>>(byKey('page-preset')).enabled,
             enabled,
             reason: 'preset');
         expect(
             tester
-                    .widget<SegmentedButton<PageOrientation>>(find.ancestor(
-                        of: byKey('page-orientation-portrait'),
-                        matching:
-                            find.byType(SegmentedButton<PageOrientation>)))
-                    .onSelectionChanged !=
-                null,
+                .widget<PlanSegmented<PageOrientation>>(find.ancestor(
+                    of: byKey('page-orientation-portrait'),
+                    matching: find.byType(PlanSegmented<PageOrientation>)))
+                .enabled,
             enabled,
             reason: 'orientation');
-        expect(fieldOf(tester, 'page-scale').enabled ?? true, enabled,
-            reason: 'scale');
+        expect(fieldOf(tester, 'page-scale').enabled, enabled, reason: 'scale');
         expect(
-            tester
-                    .widget<DropdownButton<DisplayUnit>>(byKey('page-unit'))
-                    .onChanged !=
-                null,
+            tester.widget<PlanSelect<DisplayUnit>>(byKey('page-unit')).enabled,
             enabled,
             reason: 'unit');
         expect(
             tester
-                    .widget<SegmentedButton<DecimalSeparator>>(
-                        byKey('page-decimal-separator'))
-                    .onSelectionChanged !=
-                null,
+                .widget<PlanSegmented<DecimalSeparator>>(
+                    byKey('page-decimal-separator'))
+                .enabled,
             enabled,
             reason: 'separator');
         for (final k in ['page-grid', 'page-snap', 'page-breaks']) {
-          expect(tester.widget<CheckboxListTile>(byKey(k)).onChanged != null,
-              enabled,
+          expect(
+              tester.widget<PlanCheckRow>(byKey(k)).onChanged != null, enabled,
               reason: k);
         }
         for (var i = 0; i < 4; i++) {
-          expect(tester.widget<InkWell>(byKey('page-swatch-$i')).onTap != null,
+          expect(
+              tester.widget<PlanSwatchButton>(byKey('page-swatch-$i')).onTap !=
+                  null,
               enabled,
               reason: 'swatch $i');
         }
@@ -665,10 +668,7 @@ void main() {
       final c = h.c;
       final locked = lockedLayer(c);
       bool pageEnabled() =>
-          tester
-              .widget<DropdownButton<SheetSize?>>(byKey('page-preset'))
-              .onChanged !=
-          null;
+          tester.widget<PlanSelect<SheetSize>>(byKey('page-preset')).enabled;
       bool layersEnabled() =>
           iconEnabled(tester, byKey('layers-add')) &&
           iconEnabled(tester, byKey('layer-eye-$locked'));

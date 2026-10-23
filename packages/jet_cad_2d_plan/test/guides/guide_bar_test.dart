@@ -5,13 +5,19 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+import 'package:jet_cad_2d_plan/src/chrome/icon_button.dart'
+    show PlanIconButton;
 
 import '../support/editor_host.dart';
 import '../support/mark_kit.dart';
 import '../support/service_host.dart' hide byKey;
 
 bool selectedOf(WidgetTester tester, String key) =>
-    tester.widget<IconButton>(byKey(key)).isSelected!;
+    switch (tester.widget(byKey(key))) {
+      // Both bars' buttons are the chrome's (R-IconButton).
+      PlanIconButton(:final selected) => selected!,
+      final w => throw StateError('no toggle button: $w'),
+    };
 
 void main() {
   group('editor bar', () {
@@ -83,8 +89,8 @@ void main() {
           home: Scaffold(body: PlanEditor(controller: c))));
       await tester.pump();
       await tester.pump();
-      expect(tester.widget<IconButton>(byKey('toolbar-guides')).tooltip,
-          'Hizalama kılavuzları');
+      final guides = tester.widget<PlanIconButton>(byKey('toolbar-guides'));
+      expect(guides.tooltip ?? guides.label, 'Hizalama kılavuzları');
     });
   });
 
@@ -133,7 +139,7 @@ void main() {
           home: Scaffold(body: PlanServiceView(controller: c))));
       await tester.pump();
       await tester.pump();
-      expect(tester.widget<IconButton>(byKey('service-guides')).tooltip,
+      expect(tester.widget<PlanIconButton>(byKey('service-guides')).label,
           'Hizalama kılavuzları');
     });
   });

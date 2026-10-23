@@ -3,9 +3,9 @@
 // jet_cad_floor_plan/lib/src/selection_panel.dart:415-417), refused in
 // write and gated by reshape (:384-390); and its PlanTool, B (today's
 // palette entry, planner_shell.dart:546-552). No grips, as today.
-import 'package:flutter/material.dart' show Icons;
 import 'package:jet_cad_2d/jet_cad_2d.dart' show Capability;
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart' show LucideIcons;
 
 import '../ids.dart';
 import 'box.dart';
@@ -39,7 +39,7 @@ final PlanType<BoxParams> boxPlanType = PlanType<BoxParams>(
 /// The Box tool: two opposite corners, one box.
 final PlanTool boxPlanTool = PlanTool(
   id: ArchitectureTools.box,
-  icon: Icons.crop_din,
+  icon: LucideIcons.squareDashed,
   letter: 'B',
   needs: const {
     Capability.structure,

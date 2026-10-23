@@ -5,13 +5,17 @@
 // 09b D7, F-4, F-13; 09c D13).
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' show CircularProgressIndicator;
+import 'package:flutter/widgets.dart';
 import 'package:flutter/services.dart'
     show HardwareKeyboard, KeyEvent, KeyUpEvent, LogicalKeyboardKey;
-import 'package:jet_cad_2d/jet_cad_2d.dart' show foregroundFor;
-import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show SymbolsState;
+import 'package:lucide_icons_flutter/lucide_icons.dart';
+import 'package:shadcn_ui/shadcn_ui.dart' show ShadButton;
 
+import '../chrome/icon_button.dart';
+import '../chrome/shad_scope.dart';
+import '../chrome/text_field.dart';
 import '../controller/plan_controller.dart';
 import '../l10n/locale_scope.dart';
 import '../l10n/strings.dart';
@@ -19,6 +23,7 @@ import '../symbols/gallery_model.dart';
 import '../symbols/plan_symbol.dart';
 import '../symbols/thumbnail_document.dart';
 import '../tools/generic_tools.dart' show PlanToolIds;
+import 'gallery_grid.dart';
 import 'panel_focus.dart';
 
 /// The gallery of [controller]'s symbols.
@@ -29,7 +34,7 @@ import 'panel_focus.dart';
 ///   `PlanController.retrySymbols`.
 /// - **Ready:** the search field (key `symbol-search`; a clear button
 ///   keyed `symbol-search-clear` while it is not empty), then the
-///   [SymbolGallery] over [searchPlanSymbols]. An empty result shows the
+///   [PlanGalleryGrid] over [searchPlanSymbols]. An empty result shows the
 ///   no-match words (key `symbol-search-empty`) and a Clear button (key
 ///   `symbol-search-clear-empty`); with no query (a [filter] offering
 ///   nothing), an empty area.
@@ -70,8 +75,8 @@ class _PlanSymbolGalleryState extends State<PlanSymbolGallery> {
 
   /// One cell per symbol, by identity, so a rebuild hands the gallery the
   /// same values; cleared when the symbols or the language change.
-  final Map<PlanSymbol, GallerySymbol> _cells =
-      Map<PlanSymbol, GallerySymbol>.identity();
+  final Map<PlanSymbol, PlanGalleryCell> _cells =
+      Map<PlanSymbol, PlanGalleryCell>.identity();
   final Map<String, PlanSymbol> _byId = <String, PlanSymbol>{};
   List<PlanSymbol>? _indexed;
   PlanSymbolWords _words = PlanSymbolWords.english;
@@ -131,13 +136,13 @@ class _PlanSymbolGalleryState extends State<PlanSymbolGallery> {
       ..addAll({for (final s in symbols) s.id: s});
   }
 
-  GallerySymbol _cell(PlanSymbol s) => _cells.putIfAbsent(
+  PlanGalleryCell _cell(PlanSymbol s) => _cells.putIfAbsent(
       s,
-      () => GallerySymbol(
-            id: s.id,
-            label: _words.name(s),
-            thumbnailKey: s.id,
-            thumbnailDocument: () => symbolThumbnailDocument(s),
+      () => PlanGalleryCell(
+            s.id,
+            _words.name(s),
+            s.id,
+            () => symbolThumbnailDocument(s),
           ));
 
   String? get _selectedId {
@@ -164,7 +169,9 @@ class _PlanSymbolGalleryState extends State<PlanSymbolGallery> {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => PlanShadScope(child: _body(context));
+
+  Widget _body(BuildContext context) {
     final c = widget.controller;
     return ListenableBuilder(
       listenable:
@@ -186,8 +193,6 @@ class _PlanSymbolGalleryState extends State<PlanSymbolGallery> {
       _words = words;
       _cells.clear();
     }
-    final scheme = Theme.of(context).colorScheme;
-    final cellColor = scheme.surfaceContainerLowest;
     final groups =
         searchPlanSymbols(c.symbols, _query.text, words, filter: widget.filter);
     return Column(
@@ -202,23 +207,19 @@ class _PlanSymbolGalleryState extends State<PlanSymbolGallery> {
               ? (_query.text.trim().isEmpty
                   ? const SizedBox.shrink()
                   : _NoMatch(query: _query.text, onClear: _clear))
-              : SymbolGallery(
-                  categories: [
+              : PlanGalleryGrid(
+                  groups: [
                     for (final g in groups)
-                      GalleryCategory(
-                        id: groupIdOf(g),
-                        name: words.category(g.symbols.first),
-                        symbols: [for (final s in g.symbols) _cell(s)],
+                      PlanGalleryGroup(
+                        groupIdOf(g),
+                        words.category(g.symbols.first),
+                        [for (final s in g.symbols) _cell(s)],
                       ),
                   ],
                   selectedId: _selectedId,
                   enabled: _enabled,
                   onSelect: _onSelect,
                   thumbnails: c.thumbnails,
-                  foreground: foregroundFor(cellColor.toARGB32() & 0xFFFFFF),
-                  selectedForeground: foregroundFor(
-                      scheme.primaryContainer.toARGB32() & 0xFFFFFF),
-                  cellColor: cellColor,
                 ),
         ),
       ],
@@ -235,30 +236,35 @@ class _PlanSymbolGalleryState extends State<PlanSymbolGallery> {
         bindings: <ShortcutActivator, VoidCallback>{
           const SingleActivator(LogicalKeyboardKey.escape): _handBack,
         },
-        child: TextField(
-          key: const Key('symbol-search'),
-          controller: _query,
-          focusNode: _searchFocus,
-          maxLines: 1,
-          textInputAction: TextInputAction.search,
-          onEditingComplete: _handBack,
-          onTapOutside: (_) => _handBack(),
-          decoration: InputDecoration(
-            isDense: true,
-            hintText: strings.searchSymbols,
-            prefixIcon: const Icon(Icons.search, size: 18),
-            border: const OutlineInputBorder(),
-            suffixIcon: _query.text.isEmpty
-                ? null
-                : ExcludeFocus(
-                    child: IconButton(
-                      key: const Key('symbol-search-clear'),
-                      tooltip: strings.clear,
-                      icon: const Icon(Icons.close, size: 18),
-                      onPressed: _clear,
-                    ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: PlanTextField(
+                key: const Key('symbol-search'),
+                controller: _query,
+                focusNode: _searchFocus,
+                placeholder: strings.searchSymbols,
+                onEditingComplete: _handBack,
+                onTapOutside: (_) => _handBack(),
+              ),
+            ),
+            if (_query.text.isNotEmpty)
+              // Inside the field's tap group: a tap on the clear button is
+              // not a tap outside the field (it sat in the field's
+              // decoration), so the field keeps the focus.
+              TapRegion(
+                groupId: EditableText,
+                child: ExcludeFocus(
+                  child: PlanIconButton(
+                    key: const Key('symbol-search-clear'),
+                    icon: LucideIcons.x,
+                    label: strings.clear,
+                    onPressed: _clear,
                   ),
-          ),
+                ),
+              ),
+          ],
         ),
       ),
     );
@@ -324,9 +330,11 @@ class _Loading extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const SizedBox.square(
+            SizedBox.square(
                 dimension: 24,
-                child: CircularProgressIndicator(strokeWidth: 2.5)),
+                child: CircularProgressIndicator(
+                    strokeWidth: 2.5,
+                    color: planShadThemeOf(context).colorScheme.primary)),
             const SizedBox(height: 8),
             Text(PlanStrings.of(context).loadingSymbols),
           ],
@@ -353,7 +361,7 @@ class _Failed extends StatelessWidget {
                   textAlign: TextAlign.center),
               const SizedBox(height: 8),
               ExcludeFocus(
-                child: FilledButton.tonal(
+                child: ShadButton.secondary(
                   key: const Key('symbol-retry'),
                   onPressed: onRetry,
                   child: Text(PlanStrings.of(context).retry),
@@ -383,7 +391,7 @@ class _NoMatch extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             ExcludeFocus(
-              child: TextButton(
+              child: ShadButton.ghost(
                 key: const Key('symbol-search-clear-empty'),
                 onPressed: onClear,
                 child: Text(PlanStrings.of(context).clear),

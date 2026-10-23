@@ -30,6 +30,8 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
     show InteractionLayer;
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart' as host;
+import 'package:jet_cad_2d_plan/src/chrome/icon_button.dart'
+    show PlanIconButton;
 import 'package:jet_cad_2d_plan/src/controller/plan_controller.dart';
 import 'package:jet_cad_2d_plan/src/service/service_session.dart' show PlanMode;
 import 'package:jet_cad_2d_plan/src/service/service_state.dart';
@@ -70,72 +72,54 @@ Future<PlanController> mountBars(WidgetTester tester,
   return c;
 }
 
-/// Every left edge of the default service bar, read on today's base
-/// (`ffe0b9c`) at 1440 x 900, per (onExport, Merge, Split); the alignment
-/// guides' toggle (task 9b) sits after Redo, 48 px wide, and moves what
-/// follows it by that.
-const Map<(bool, bool, bool), Map<String, double>> kServiceEdges = {
-  (true, true, true): {
-    'service-undo': 12,
-    'service-redo': 60,
-    'service-guides': 108,
-    'service-merge': 164,
-    'service-split': 212,
-    'service-export': 268,
-    'service-print': 316,
-  },
-  (true, true, false): {
-    'service-undo': 12,
-    'service-redo': 60,
-    'service-guides': 108,
-    'service-merge': 164,
-    'service-export': 220,
-    'service-print': 268,
-  },
-  (true, false, true): {
-    'service-undo': 12,
-    'service-redo': 60,
-    'service-guides': 108,
-    'service-split': 164,
-    'service-export': 220,
-    'service-print': 268,
-  },
-  (true, false, false): {
-    'service-undo': 12,
-    'service-redo': 60,
-    'service-guides': 108,
-    'service-export': 164,
-    'service-print': 212,
-  },
-  (false, true, true): {
-    'service-undo': 12,
-    'service-redo': 60,
-    'service-guides': 108,
-    'service-merge': 164,
-    'service-split': 212,
-    'service-print': 268,
-  },
-  (false, true, false): {
-    'service-undo': 12,
-    'service-redo': 60,
-    'service-guides': 108,
-    'service-merge': 164,
-    'service-print': 220,
-  },
-  (false, false, true): {
-    'service-undo': 12,
-    'service-redo': 60,
-    'service-guides': 108,
-    'service-split': 164,
-    'service-print': 220,
-  },
-  (false, false, false): {
-    'service-undo': 12,
-    'service-redo': 60,
-    'service-guides': 108,
-    'service-print': 164,
-  },
+/// The default service bar's buttons in order, with their group (undo,
+/// redo and guides; merge and split; export and print): a gap of 8 px
+/// opens where the group changes. The order and the gaps are the contract
+/// (R-BarGeometry); the button width is measured.
+const Map<String, int> kServiceGroups = {
+  'service-undo': 0,
+  'service-redo': 0,
+  'service-guides': 0,
+  'service-merge': 1,
+  'service-split': 1,
+  'service-export': 2,
+  'service-print': 2,
 };
+
+/// Every left edge of the default service bar at 1440 x 900 for the
+/// buttons in [shown], each [width] wide, from the 12 px padding.
+Map<String, double> kServiceEdges(Iterable<String> shown, double width) {
+  final edges = <String, double>{};
+  var x = 12.0;
+  int? last;
+  for (final k in kServiceKeys.where(shown.contains)) {
+    final group = kServiceGroups[k]!;
+    if (last != null && group != last) x += 8;
+    last = group;
+    edges[k] = x;
+    x += width;
+  }
+  return edges;
+}
+
+/// The keys of the buttons a bar shows for (onExport, Merge, Split).
+List<String> shownKeys(bool export, bool merge, bool split) => [
+      'service-undo',
+      'service-redo',
+      'service-guides',
+      if (merge) 'service-merge',
+      if (split) 'service-split',
+      if (export) 'service-export',
+      'service-print',
+    ];
+
+/// The width of a service bar button, measured; it is the PlanIconButton's
+/// 40, so a silent size change is caught.
+double buttonWidth(WidgetTester tester) {
+  final w = tester.getSize(byKey('service-undo')).width;
+  expect(w, 40, reason: "the PlanIconButton's width");
+  return w;
+}
 
 /// The bar the host rebuilds its view with, and what it heard.
 final class BarHost {
@@ -218,13 +202,19 @@ double right(WidgetTester tester, String k) => tester.getTopRight(byKey(k)).dx;
 
 void main() {
   group('BC the default bars, characterized on the base (T2-a)', () {
-    for (final MapEntry(key: (export, merge, split), value: want)
-        in kServiceEdges.entries) {
+    for (final (export, merge, split) in [
+      for (final e in [true, false])
+        for (final m in [true, false])
+          for (final sp in [true, false]) (e, m, sp)
+    ]) {
       testWidgets(
           'BC1 the service bar, onExport $export, Merge $merge, Split '
           '$split: every left edge as on the base', (tester) async {
         await mountBars(tester, export: export, merge: merge, split: split);
-        expect(edgesOf(tester, kServiceKeys), want);
+        expect(
+            edgesOf(tester, kServiceKeys),
+            kServiceEdges(
+                shownKeys(export, merge, split), buttonWidth(tester)));
       });
     }
   });
@@ -415,7 +405,9 @@ void main() {
       expectInBar(tester, 'host-trail', 'service-bar');
       // The default buttons keep today's spacing, shifted by the lead.
       final shifted = {
-        for (final e in kServiceEdges[(true, true, true)]!.entries)
+        for (final e
+            in kServiceEdges(shownKeys(true, true, true), buttonWidth(tester))
+                .entries)
           e.key: e.value + 30
       };
       expect(edgesOf(tester, kServiceKeys), shifted);
@@ -484,7 +476,7 @@ void main() {
       await tester.pump();
       expect(candidate.value, {'1', '2'});
       expect(() => candidate.value!.add('x'), throwsUnsupportedError);
-      expect(tester.widget<IconButton>(byKey('service-merge')).onPressed,
+      expect(tester.widget<PlanIconButton>(byKey('service-merge')).onPressed,
           isNotNull);
       await tester.tap(byKey('service-merge'));
       await tester.pump();
@@ -520,7 +512,8 @@ void main() {
       await tester.pump();
       expect(c.mergeCandidate.value, {'1', '2'});
       bool mergeOn() =>
-          tester.widget<IconButton>(byKey('service-merge')).onPressed != null;
+          tester.widget<PlanIconButton>(byKey('service-merge')).onPressed !=
+          null;
       expect(mergeOn(), isTrue);
       c.setUnitGroups({
         'G': UnitGroup(members: {'1', '2'})

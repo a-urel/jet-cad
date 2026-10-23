@@ -1,9 +1,9 @@
 // The wall as the kit declares it (spec 3a C3.2): its plan type (the
 // engine type, its grips, its thickness and justification fields) and its
 // tool (letter W, the settings the panel edits while the tool is active).
-import 'package:flutter/material.dart' show Icons;
 import 'package:jet_cad_2d/jet_cad_2d.dart' show Capability;
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart' show LucideIcons;
 
 import '../ids.dart';
 import '../live.dart';
@@ -48,7 +48,7 @@ final PlanType<WallParams> wallPlanType = PlanType<WallParams>(
 /// (today's).
 final PlanTool wallPlanTool = PlanTool(
   id: ArchitectureTools.wall,
-  icon: Icons.maximize,
+  icon: LucideIcons.brickWall,
   letter: 'W',
   needs: const {
     Capability.structure,

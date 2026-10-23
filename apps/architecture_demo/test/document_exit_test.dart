@@ -143,6 +143,7 @@ void main() {
 
     // Escape.
     response = tester.binding.handleRequestAppExit();
+    await tester.idle();
     await tester.pump();
     expect(dialog, findsOneWidget);
     await press(tester, LogicalKeyboardKey.escape);
@@ -156,6 +157,7 @@ void main() {
     // Save, and the write fails: the error, then cancel.
     files.failNextWrite(StateError('the disk is full'));
     response = tester.binding.handleRequestAppExit();
+    await tester.idle();
     await tester.pump();
     await answerReplace(tester, 'replace-save');
     expect(find.byKey(const Key('document-error')), findsOneWidget);
@@ -167,6 +169,7 @@ void main() {
 
     // Don't Save: exit, and nothing is written.
     response = tester.binding.handleRequestAppExit();
+    await tester.idle();
     await tester.pump();
     await answerReplace(tester, 'replace-discard');
     noDialog(tester);
@@ -178,6 +181,7 @@ void main() {
     // Save, and it succeeds: the bytes, then exit.
     final before = bytesOf(c);
     response = tester.binding.handleRequestAppExit();
+    await tester.idle();
     await tester.pump();
     await answerReplace(tester, 'replace-save');
     noDialog(tester);
@@ -212,6 +216,7 @@ void main() {
 
     files.scriptSaveLocation(name: 'porch.jetplan', location: '/p/porch');
     response = tester.binding.handleRequestAppExit();
+    await tester.idle();
     await tester.pump();
     await answerReplace(tester, 'replace-save');
     noDialog(tester);
@@ -260,6 +265,7 @@ void main() {
         tester, c, far + Vector2(2000, -900), far + Vector2(2000, 900));
     final before = bytesOf(c);
     final response = tester.binding.handleRequestAppExit();
+    await tester.idle();
     await tester.pump();
     await answerReplace(tester, 'replace-save');
     expect(files.heldWrites, hasLength(2), reason: 'premise: held');
@@ -308,6 +314,7 @@ void main() {
     expect(c.dirty.value, isFalse, reason: 'premise: clean');
 
     final response = tester.binding.handleRequestAppExit();
+    await tester.idle();
     await tester.pump();
     expect(dialog, findsOneWidget, reason: 'the typed value made it dirty');
     expect(doc.components.get<WallParams>(wall),
@@ -340,6 +347,7 @@ void main() {
         reason: 'premise: the chain goes on');
     expect(c.dirty.value, isTrue, reason: 'premise: a wall is down');
     final response = tester.binding.handleRequestAppExit();
+    await tester.idle();
     await tester.pump();
     expect(dialog, findsOneWidget);
     await answerReplace(tester, 'replace-discard');

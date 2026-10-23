@@ -14,9 +14,10 @@
 # with each package's resolved-ref in the lock.
 #
 # GPU split spec S8: the host's graph holds no GPU renderer and runs no
-# build hook. The probe starts clean, because stale output survives a
-# build; its lock is checked after `pub get`, and its web build after the
-# build.
+# build hook but objective_c's, which shadcn_ui brings through
+# path_provider_foundation (the shadcn chrome spec, 2026-10-23). The probe
+# starts clean, because stale output survives a build; its lock is checked
+# after `pub get`, and its web build after the build.
 set -euo pipefail
 url=$1
 ref=$2
@@ -34,10 +35,17 @@ fail=0
 # The lock check above is the main guard; these three catch what reached
 # the build anyway. hooks_runner is Flutter's own folder name, so a rename
 # would let its check pass silently.
-if [ -e .dart_tool/hooks_runner ]; then
-  echo "host probe: a build hook ran (.dart_tool/hooks_runner exists)" >&2
-  fail=1
-fi
+# Flutter lays a hook's output out as hooks_runner/<package> and
+# hooks_runner/shared/<package>; the only package whose hook may run is
+# objective_c (exact name), see the header.
+for entry in .dart_tool/hooks_runner/* .dart_tool/hooks_runner/shared/*; do
+  [ -e "$entry" ] || continue
+  name=$(basename "$entry")
+  if [ "$name" != objective_c ] && [ "$name" != shared ]; then
+    echo "host probe: a build hook ran ($name)" >&2
+    fail=1
+  fi
+done
 if [ -e build/web/assets/packages/flutter_scene ]; then
   echo "host probe: the web build ships flutter_scene's assets" >&2
   fail=1

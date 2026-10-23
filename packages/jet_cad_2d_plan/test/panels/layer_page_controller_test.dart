@@ -8,6 +8,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
+import 'package:jet_cad_2d_plan/src/chrome/select.dart';
+import 'package:jet_cad_2d_plan/src/chrome/rows.dart';
+import 'package:jet_cad_2d_plan/src/chrome/pick.dart';
+import 'package:jet_cad_2d_plan/src/chrome/text_field.dart';
+import 'package:jet_cad_2d_plan/src/chrome/menu_button.dart';
+import 'package:jet_cad_2d_plan/src/chrome/icon_button.dart';
 import 'package:jet_cad_2d_plan/src/controller/permissions.dart';
 import 'package:jet_cad_2d_plan/src/controller/plan_controller.dart';
 import 'package:jet_cad_2d_plan/src/l10n/localizations.dart';
@@ -26,7 +32,7 @@ Finder byKey(String k) => find.byKey(Key(k));
 String hx(Handle h) => h.toHex();
 
 bool enabled(WidgetTester tester, String key) =>
-    tester.widget<IconButton>(byKey(key)).onPressed != null;
+    tester.widget<PlanIconButton>(byKey(key)).onPressed != null;
 
 Future<void> settle(WidgetTester tester) async {
   await tester.pump();
@@ -110,13 +116,11 @@ Future<void> openPicker(WidgetTester tester) async {
   await tester.pumpAndSettle();
 }
 
-String pickerTooltip(WidgetTester tester) => tester
-    .widget<Tooltip>(find.ancestor(
-        of: byKey('layer-picker'), matching: find.byType(Tooltip)))
-    .message!;
+String pickerTooltip(WidgetTester tester) =>
+    tester.widget<PlanMenuButton<Handle>>(byKey('layer-picker')).label;
 
 bool pickerEnabled(WidgetTester tester) =>
-    tester.widget<PopupMenuButton<Handle>>(byKey('layer-picker')).enabled;
+    tester.widget<PlanMenuButton<Handle>>(byKey('layer-picker')).enabled;
 
 void main() {
   testWidgets(
@@ -189,14 +193,9 @@ void main() {
     ]) {
       expect(enabled(tester, key), isFalse, reason: key);
     }
-    expect(
-        tester.widget<PopupMenuButton<int>>(byKey('layer-colour-$a')).enabled,
+    expect(tester.widget<PlanMenuButton<int>>(byKey('layer-colour-$a')).enabled,
         isFalse);
-    expect(
-        tester
-            .widget<Tooltip>(find.ancestor(
-                of: byKey('layers-delete'), matching: find.byType(Tooltip)))
-            .message,
+    expect(tester.widget<PlanIconButton>(byKey('layers-delete')).label,
         _en.layersLocked);
     expect(byKey('layers-list'), findsOneWidget, reason: 'the list is shown');
 
@@ -221,16 +220,16 @@ void main() {
             scaleDenominator: 20, displayUnit: DisplayUnit.centimeters)));
     final json = other.save();
     await pumpPanels(tester, c);
-    expect(tester.widget<TextField>(byKey('page-scale')).controller!.text,
+    expect(tester.widget<PlanTextField>(byKey('page-scale')).controller.text,
         isNot('20'),
         reason: 'premise');
 
     c.load(json);
     await settle(tester);
     // M-LP-3: `_onController` does not rebind the page notifier.
-    expect(
-        tester.widget<TextField>(byKey('page-scale')).controller!.text, '20');
-    expect(tester.widget<DropdownButton<DisplayUnit>>(byKey('page-unit')).value,
+    expect(tester.widget<PlanTextField>(byKey('page-scale')).controller.text,
+        '20');
+    expect(tester.widget<PlanSelect<DisplayUnit>>(byKey('page-unit')).value,
         DisplayUnit.centimeters);
     await tester.tap(byKey('page-grid'));
     await tester.pump();
@@ -246,16 +245,13 @@ void main() {
     c.permissions = PlanPermissions.full.copyWith(editPage: false);
     await tester.pump();
     bool presetEnabled() =>
-        tester
-            .widget<DropdownButton<SheetSize?>>(byKey('page-preset'))
-            .onChanged !=
-        null;
+        tester.widget<PlanSelect<SheetSize>>(byKey('page-preset')).enabled;
     // M-LP-4: `_editable` ignores `permissions.editPage`.
     expect(presetEnabled(), isFalse);
-    expect(tester.widget<TextField>(byKey('page-scale')).enabled, isFalse);
+    expect(tester.widget<PlanTextField>(byKey('page-scale')).enabled, isFalse);
+    expect(tester.widget<PlanCheckRow>(byKey('page-grid')).onChanged, isNull);
     expect(
-        tester.widget<CheckboxListTile>(byKey('page-grid')).onChanged, isNull);
-    expect(tester.widget<InkWell>(byKey('page-swatch-3')).onTap, isNull);
+        tester.widget<PlanSwatchButton>(byKey('page-swatch-3')).onTap, isNull);
     final before = DraftDocumentCodec.encodeToString(c.document);
     await tester.tap(byKey('page-grid'));
     await tester.tap(byKey('page-swatch-3'));
@@ -277,17 +273,18 @@ void main() {
     final c = fx.controller;
     await pumpPanels(tester, c);
     final shown =
-        tester.widget<TextField>(byKey('page-scale')).controller!.text;
+        tester.widget<PlanTextField>(byKey('page-scale')).controller.text;
     await tester.enterText(byKey('page-scale'), '77');
     await tester.pump();
-    expect(tester.widget<TextField>(byKey('page-scale')).controller!.text, '77',
+    expect(
+        tester.widget<PlanTextField>(byKey('page-scale')).controller.text, '77',
         reason: 'premise: typed, not submitted');
 
     c.settlePendingInput();
     await tester.pump();
     // M-LP-5: the panel registers no settler.
-    expect(
-        tester.widget<TextField>(byKey('page-scale')).controller!.text, shown);
+    expect(tester.widget<PlanTextField>(byKey('page-scale')).controller.text,
+        shown);
     expect(c.document.commands.undoDepth, 0);
   });
 

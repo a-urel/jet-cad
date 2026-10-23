@@ -264,6 +264,7 @@ void main() {
       final calls = files.openCalls;
       files.scriptOpen(name: name, bytes: bytes, location: '/plans/$name');
       final flow = host.openFlow();
+      await tester.idle();
       await tester.pump();
       expect(files.openCalls, calls, reason: '$name: the dialog first');
       await answerReplace(tester, 'replace-discard');
@@ -297,6 +298,7 @@ void main() {
     // The picker itself failing is reported the same way.
     files.scriptOpenThrow(StateError('the disk went away'));
     final thrown = host.openFlow();
+    await tester.idle();
     await tester.pump();
     await answerReplace(tester, 'replace-discard');
     expect(

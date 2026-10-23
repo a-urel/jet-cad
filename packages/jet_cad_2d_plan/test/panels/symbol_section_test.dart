@@ -33,8 +33,11 @@ import 'package:jet_cad_2d_kit/authoring.dart'
         encodeLibrary;
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+import 'package:jet_cad_2d_plan/src/chrome/select.dart';
+import 'package:jet_cad_2d_plan/src/chrome/text_field.dart';
 import 'package:jet_cad_2d_plan/src/panels/symbol_section.dart';
 import 'package:jet_cad_2d_plan/src/symbols/symbol_placer.dart';
+import 'package:shadcn_ui/shadcn_ui.dart' show ShadButton;
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../support/unit_fixtures.dart' show addUnitLabel;
@@ -444,14 +447,12 @@ void main() {
     }
 
     bool editable(WidgetTester tester) =>
-        !tester.widget<TextField>(byKey('symbol-rotation')).readOnly;
+        !tester.widget<PlanTextField>(byKey('symbol-rotation')).readOnly;
     bool mirrorEnabled(WidgetTester tester) =>
-        tester.widget<OutlinedButton>(byKey('symbol-mirror')).onPressed != null;
-    bool menuEnabled(WidgetTester tester) =>
-        tester
-            .widget<DropdownButton<SymbolEntry>>(byKey('symbol-size-menu'))
-            .onChanged !=
-        null;
+        tester.widget<ShadButton>(byKey('symbol-mirror')).onPressed != null;
+    bool menuEnabled(WidgetTester tester) => tester
+        .widget<PlanSelect<SymbolEntry>>(byKey('symbol-size-menu'))
+        .enabled;
 
     testWidgets(
         'SW1 one symbol shows name, size and rotation; two hide it; a table '
@@ -467,7 +468,10 @@ void main() {
           tester.widget<Text>(byKey('symbol-name')).data, 'Test test.bed.1600');
       expect(tester.widget<Text>(byKey('symbol-size')).data, '1600 × 2000');
       expect(
-          tester.widget<TextField>(byKey('symbol-rotation')).controller!.text,
+          tester
+              .widget<PlanTextField>(byKey('symbol-rotation'))
+              .controller
+              .text,
           '30');
       await select(tester, c, [bed, other]);
       expect(byKey('symbol-section'), findsNothing);
@@ -498,7 +502,10 @@ void main() {
       await typeRotation(tester, 'east');
       expect(doc.commands.undoDepth, depth + 1);
       expect(
-          tester.widget<TextField>(byKey('symbol-rotation')).controller!.text,
+          tester
+              .widget<PlanTextField>(byKey('symbol-rotation'))
+              .controller
+              .text,
           '45');
       final before = footprint(doc, bed);
       await tester.tap(byKey('symbol-mirror'));
@@ -650,7 +657,8 @@ void main() {
       final c = await pumpPanel(tester);
       final bed = place(c.document, 'test.bed.1600', far);
       await select(tester, c, [bed]);
-      expect(tester.widget<TextField>(byKey('symbol-rotation')).keyboardType,
+      expect(
+          tester.widget<PlanTextField>(byKey('symbol-rotation')).keyboardType,
           const TextInputType.numberWithOptions(decimal: true, signed: true));
     });
 

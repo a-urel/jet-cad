@@ -8,7 +8,11 @@
 import 'package:flutter/material.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart' show Capability;
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show kitOfKey;
+import 'package:shadcn_ui/shadcn_ui.dart';
 
+import '../chrome/icon_button.dart';
+import '../chrome/rows.dart';
+import '../chrome/shad_scope.dart';
 import '../controller/plan_controller.dart';
 import '../l10n/locale_scope.dart';
 import '../l10n/strings.dart';
@@ -85,78 +89,84 @@ class _PlanToolPaletteState extends State<PlanToolPalette> {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => PlanShadScope(child: _body(context));
+
+  Widget _body(BuildContext context) {
     final c = widget.controller;
     return ExcludeFocus(
-      // The left slot paints its own background, so the tiles need a
-      // Material of their own to paint their ink on.
-      child: Material(
-        color: Colors.transparent,
-        child: ListenableBuilder(
-          // The controller notifies on a permissions change and a document
-          // swap (Tasks 8, 12).
-          listenable: Listenable.merge([c, c.activeTool, c.fill, c.locale]),
-          builder: (context, _) {
-            final strings = PlanStrings.of(context);
-            final geometry =
-                c.document.commands.permissions.allows(Capability.geometry);
-            final active = c.activeTool.value;
-            final rows = <Widget>[];
-            String? group;
-            for (final e in planToolEntries(c)) {
-              if (group != null && e.kitId != group) {
-                rows.add(Divider(key: Key('tool-group-${e.kitId}')));
-              }
-              group = e.kitId;
-              if (widget.compact) {
-                rows.add(IconButton(
-                  key: Key('tool-${e.id}'),
-                  tooltip: planToolLabel(context, c, e.id),
-                  icon: Icon(e.icon, size: 20),
-                  isSelected: active == e.id,
-                  onPressed: _enabled(c, e) ? () => c.selectTool(e.id) : null,
-                ));
-                continue;
-              }
-              rows.add(ListTile(
+      child: ListenableBuilder(
+        // The controller notifies on a permissions change and a document
+        // swap (Tasks 8, 12).
+        listenable: Listenable.merge([c, c.activeTool, c.fill, c.locale]),
+        builder: (context, _) {
+          final strings = PlanStrings.of(context);
+          final geometry =
+              c.document.commands.permissions.allows(Capability.geometry);
+          final active = c.activeTool.value;
+          final rows = <Widget>[];
+          String? group;
+          for (final e in planToolEntries(c)) {
+            if (group != null && e.kitId != group) {
+              rows.add(
+                  ShadSeparator.horizontal(key: Key('tool-group-${e.kitId}')));
+            }
+            group = e.kitId;
+            final label = planToolLabel(context, c, e.id);
+            if (widget.compact) {
+              rows.add(PlanIconButton(
                 key: Key('tool-${e.id}'),
-                dense: true,
-                leading: Icon(e.icon, size: 18),
+                label: label,
+                icon: e.icon,
                 selected: active == e.id,
-                enabled: _enabled(c, e),
-                title: Text(planToolLabel(context, c, e.id)),
-                trailing: e.letter == null ? null : Text(e.letter!),
-                onTap: () => c.selectTool(e.id),
+                onPressed: _enabled(c, e) ? () => c.selectTool(e.id) : null,
               ));
+              continue;
             }
-            if (fillOffered(c) && widget.compact) {
-              rows
-                ..add(const Divider())
-                ..add(IconButton(
-                  key: const Key('tool-fill'),
-                  tooltip: strings.fill,
-                  icon: const Icon(Icons.format_color_fill, size: 20),
-                  isSelected: c.fill.value,
-                  onPressed:
-                      geometry ? () => c.fill.value = !c.fill.value : null,
-                ));
-            } else if (fillOffered(c)) {
-              rows
-                ..add(const Divider())
-                ..add(CheckboxListTile(
-                  key: const Key('tool-fill'),
-                  dense: true,
-                  title: Text(strings.fill),
-                  secondary: const Text('F'),
-                  value: c.fill.value,
-                  onChanged: geometry ? (v) => c.fill.value = v ?? false : null,
-                ));
-            }
-            return ListView(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                children: rows);
-          },
-        ),
+            rows.add(PlanListRow(
+              key: Key('tool-${e.id}'),
+              leading: Icon(e.icon, size: 18),
+              selected: active == e.id,
+              onTap: _enabled(c, e) ? () => c.selectTool(e.id) : null,
+              title: Row(mainAxisSize: MainAxisSize.min, children: [
+                Flexible(child: Text(label)),
+                if (e.letter != null) ...[
+                  const SizedBox(width: 12),
+                  Text(e.letter!),
+                ],
+              ]),
+            ));
+          }
+          if (fillOffered(c) && widget.compact) {
+            rows
+              ..add(const ShadSeparator.horizontal())
+              ..add(PlanIconButton(
+                key: const Key('tool-fill'),
+                label: strings.fill,
+                icon: LucideIcons.paintBucket,
+                selected: c.fill.value,
+                onPressed: geometry ? () => c.fill.value = !c.fill.value : null,
+              ));
+          } else if (fillOffered(c)) {
+            rows
+              ..add(const ShadSeparator.horizontal())
+              ..add(Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                child: Row(children: [
+                  PlanCheckRow(
+                    key: const Key('tool-fill'),
+                    label: strings.fill,
+                    value: c.fill.value,
+                    onChanged: geometry ? (v) => c.fill.value = v : null,
+                  ),
+                  const Spacer(),
+                  const Text('F'),
+                ]),
+              ));
+          }
+          return ListView(
+              padding: const EdgeInsets.symmetric(vertical: 8), children: rows);
+        },
       ),
     );
   }

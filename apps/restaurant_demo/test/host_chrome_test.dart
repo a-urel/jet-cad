@@ -19,6 +19,8 @@ import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
+import 'package:jet_cad_2d_plan/src/chrome/rows.dart';
+import 'package:jet_cad_2d_plan/src/chrome/text_field.dart' show PlanTextField;
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 
 import 'package:restaurant_demo/editor_profiles.dart' show DemoEditor;
@@ -96,7 +98,8 @@ void main() {
     expect(c.setUnitData('2', {'seats_note': 'window'}), isTrue);
     await settle(tester);
     bool wallEnabled() =>
-        tester.widget<ListTile>(byKey('tool-architecture.wall')).enabled;
+        tester.widget<PlanListRow>(byKey('tool-architecture.wall')).onTap !=
+        null;
     // Full (the default): the whole editor, the inspector included. The
     // right column follows the selection: a selected table has its own
     // properties and the combo, no Layers or Page.
@@ -413,7 +416,7 @@ void main() {
     await tester.enterText(byKey('symbol-search'), 'table5');
     await chord(tester, LogicalKeyboardKey.backspace);
     expect(labels(), contains('5'));
-    expect(tester.widget<TextField>(byKey('symbol-search')).controller!.text,
+    expect(tester.widget<PlanTextField>(byKey('symbol-search')).controller.text,
         'table');
   });
 

@@ -14,6 +14,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart' show Handle;
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
     show InputClaim, ViewportTransform;
 
+import '../../chrome/host_slot.dart';
 import '../../controller/plan_controller.dart';
 import '../../units/unit_detail.dart';
 import '../service_state.dart' show UnitStatus, groupIdsByLabel;
@@ -470,8 +471,10 @@ class _OverlayChild extends StatelessWidget {
   final PlanUnitOverlay overlay;
 
   @override
-  Widget build(BuildContext context) =>
-      builder(context, overlay) ?? const SizedBox.shrink();
+  Widget build(BuildContext context) {
+    final built = builder(context, overlay);
+    return built == null ? const SizedBox.shrink() : PlanHostSlot(child: built);
+  }
 }
 
 /// A child's slot: its index into the box cache.

@@ -9,9 +9,11 @@ import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
-    show InteractionLayer, PaperPalette, SymbolGallery, Tool, ViewportTransform;
+    show InteractionLayer, PaperPalette, Tool, ViewportTransform;
 import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+import 'package:jet_cad_2d_plan/src/panels/gallery_grid.dart'
+    show PlanGalleryGrid;
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import 'app_rig.dart';
@@ -46,18 +48,18 @@ Future<void> tapFinder(WidgetTester tester, Finder f) async {
   await tester.pump();
 }
 
-SymbolGallery galleryOf(WidgetTester tester) =>
-    tester.widget<SymbolGallery>(find.byType(SymbolGallery));
+PlanGalleryGrid galleryOf(WidgetTester tester) =>
+    tester.widget<PlanGalleryGrid>(find.byType(PlanGalleryGrid));
 
 /// The gallery's cell ids, in order.
 List<String> galleryIdsOf(WidgetTester tester) => [
-      for (final c in galleryOf(tester).categories)
-        for (final s in c.symbols) s.id,
+      for (final c in galleryOf(tester).groups)
+        for (final s in c.cells) s.id,
     ];
 
 /// The gallery's category names, in order.
 List<String> categoryNamesOf(WidgetTester tester) =>
-    [for (final c in galleryOf(tester).categories) c.name];
+    [for (final c in galleryOf(tester).groups) c.name];
 
 /// The ids of the loaded symbols whose stored name, category or a tag
 /// carries [word], computed apart from the widget (the library's folding

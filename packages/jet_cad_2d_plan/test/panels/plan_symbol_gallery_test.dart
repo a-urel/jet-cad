@@ -14,9 +14,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
-import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+import 'package:jet_cad_2d_plan/src/chrome/shad_scope.dart';
+import 'package:jet_cad_2d_plan/src/chrome/text_field.dart';
+import 'package:jet_cad_2d_plan/src/panels/gallery_grid.dart';
 
 import '../support/symbol_fixtures.dart';
 
@@ -53,7 +55,7 @@ final class Host {
   final Map<String, int> shortcuts = {'R': 0, 'W': 0, 'M': 0, 'Esc': 0};
 
   /// The search field's focus node: the gallery's own.
-  FocusNode get searchFocus => tester.widget<TextField>(field).focusNode!;
+  FocusNode get searchFocus => tester.widget<PlanTextField>(field).focusNode!;
 
   PlanSymbol loaded(String key) =>
       controller.symbols.singleWhere((s) => s.component.key == key);
@@ -113,12 +115,12 @@ final class Host {
 
 final Finder field = find.byKey(const Key('symbol-search'));
 
-SymbolGallery gallery(WidgetTester tester) =>
-    tester.widget<SymbolGallery>(find.byType(SymbolGallery));
+PlanGalleryGrid gallery(WidgetTester tester) =>
+    tester.widget<PlanGalleryGrid>(find.byType(PlanGalleryGrid));
 
 List<String> galleryIds(WidgetTester tester) => [
-      for (final c in gallery(tester).categories)
-        for (final s in c.symbols) s.id,
+      for (final c in gallery(tester).groups)
+        for (final s in c.cells) s.id,
     ];
 
 /// Whether the button keyed [key] could take the focus (Ruling 05-6): the
@@ -160,7 +162,7 @@ void main() {
       expect(find.byType(CircularProgressIndicator), findsOneWidget);
       expect(find.text('Loading symbols…'), findsOneWidget);
       expect(field, findsNothing);
-      expect(find.byType(SymbolGallery), findsNothing);
+      expect(find.byType(PlanGalleryGrid), findsNothing);
 
       read.complete(demoBytes());
       await tester.pump();
@@ -199,6 +201,36 @@ void main() {
     });
   });
 
+  group('GG5 the gallery\'s chrome', () {
+    testWidgets(
+        'the search field is a PlanTextField; the loading indicator takes '
+        'the scope\'s primary; no-match shows its words', (tester) async {
+      final read = Completer<Uint8List>();
+      final h = Host(tester, read: () => read.future);
+      await h.pump(load: false);
+      final indicator = tester.widget<CircularProgressIndicator>(
+          find.byType(CircularProgressIndicator));
+      final colours = planShadThemeFrom(
+              Theme.of(tester.element(find.byKey(const Key('symbol-loading')))))
+          .colorScheme;
+      expect(indicator.color, colours.primary);
+      expect(find.text('Loading symbols…'), findsOneWidget);
+
+      read.complete(demoBytes());
+      await tester.pump();
+      await tester.pump();
+      expect(find.byType(PlanTextField), findsOneWidget);
+      expect(tester.widget(field), isA<PlanTextField>());
+      expect(find.byType(TextField), findsNothing,
+          reason: 'no Material text field');
+
+      await tester.enterText(field, 'bed zebra');
+      await tester.pump();
+      expect(find.text('No symbols match "bed zebra"'), findsOneWidget);
+      expect(find.byType(PlanGalleryGrid), findsNothing);
+    });
+  });
+
   group('search', () {
     testWidgets(
         'typing "bed" shows only the matches; the clear button '
@@ -212,8 +244,7 @@ void main() {
       await tester.enterText(field, 'bed');
       await tester.pump();
       expect(galleryIds(tester), bedIds);
-      expect(
-          [for (final c in gallery(tester).categories) c.name], ['Bed Room']);
+      expect([for (final c in gallery(tester).groups) c.name], ['Bed Room']);
       for (final id in bedIds) {
         expect(find.byKey(Key('symbol-cell-$id')), findsOneWidget);
       }
@@ -239,7 +270,7 @@ void main() {
       await h.pump();
       await tester.enterText(field, 'bed zebra');
       await tester.pump();
-      expect(find.byType(SymbolGallery), findsNothing);
+      expect(find.byType(PlanGalleryGrid), findsNothing);
       expect(find.text('No symbols match "bed zebra"'), findsOneWidget);
 
       expect(
@@ -249,7 +280,7 @@ void main() {
       await tester.pump();
       expect(find.byKey(const Key('symbol-search-empty')), findsNothing);
       expect(galleryIds(tester), allIds);
-      expect(tester.widget<TextField>(field).controller!.text, isEmpty);
+      expect(tester.widget<PlanTextField>(field).controller.text, isEmpty);
     });
   });
 
@@ -269,7 +300,7 @@ void main() {
       h.query.text = 'sofa three';
       await tester.pump();
       expect(galleryIds(tester), ['demo.sofa.three@1']);
-      expect(tester.widget<TextField>(field).controller, same(h.query));
+      expect(tester.widget<PlanTextField>(field).controller, same(h.query));
     });
 
     testWidgets(
@@ -279,10 +310,9 @@ void main() {
       h.query.text = 'bed';
       await h.pump();
       expect(galleryIds(tester), bedIds);
-      expect(
-          [for (final c in gallery(tester).categories) c.name], ['Bed Room']);
+      expect([for (final c in gallery(tester).groups) c.name], ['Bed Room']);
       expect(find.byKey(const Key('symbol-search-clear')), findsOneWidget);
-      expect(tester.widget<TextField>(field).controller!.text, 'bed');
+      expect(tester.widget<PlanTextField>(field).controller.text, 'bed');
     });
 
     testWidgets(
@@ -304,7 +334,7 @@ void main() {
 
       // A new gallery over it reads its text.
       await h.pump();
-      expect(tester.widget<TextField>(field).controller!.text, 'sofa');
+      expect(tester.widget<PlanTextField>(field).controller.text, 'sofa');
       expect(galleryIds(tester), isNot(allIds));
       expect(galleryIds(tester),
           allOf(isNotEmpty, everyElement(startsWith('demo.sofa.'))));
@@ -321,7 +351,7 @@ void main() {
 
       await h.pump(query: other);
       expect(galleryIds(tester), bedIds);
-      expect(tester.widget<TextField>(field).controller, same(other));
+      expect(tester.widget<PlanTextField>(field).controller, same(other));
 
       // The old one no longer drives the gallery...
       h.query.text = 'bed zebra';
@@ -515,7 +545,7 @@ void main() {
       final h = Host(tester);
       await h.pump();
       final symbols = [
-        for (final c in gallery(tester).categories) ...c.symbols,
+        for (final c in gallery(tester).groups) ...c.cells,
       ];
       final visible = [
         for (final e in SymbolLibrary.decode(demoBytes()).entries)
@@ -527,8 +557,6 @@ void main() {
         expect(symbols[i].label, e.symbol.name);
         expect(symbols[i].thumbnailKey, symbols[i].id);
       }
-      expect(gallery(tester).foreground, 0x000000,
-          reason: 'black on the light cell (F-8)');
     });
 
     testWidgets(
@@ -541,9 +569,9 @@ void main() {
       await tester.pump();
       final entry = h.loaded('demo.bed.double').entry;
       final symbol = gallery(tester)
-          .categories
+          .groups
           .single
-          .symbols
+          .cells
           .singleWhere((s) => s.id == 'demo.bed.double@1');
       final doc = symbol.thumbnailDocument();
 
@@ -614,10 +642,10 @@ void main() {
       // M-S18a: didChangeDependencies drops PlanLocaleScope.push.
       expect(h.controller.locale.value, const Locale('tr'));
       // M-S18b: the gallery's words fixed to English.
-      final categories = gallery(tester).categories;
+      final categories = gallery(tester).groups;
       expect(categories.first.name, 'Yatak odası');
       expect(categories.first.id, 'demo/Bed Room');
-      expect(categories.first.symbols.first.label, 'Çift kişilik yatak');
+      expect(categories.first.cells.first.label, 'Çift kişilik yatak');
       expect(categories.last.name, 'Office', reason: 'no word: the stored');
       await tester.pumpWidget(const SizedBox());
     });

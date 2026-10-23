@@ -4,10 +4,11 @@
 // jet_cad_2d_kit_restaurant/doc/screenshots/ under UPDATE_SCREENSHOTS=1.
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SymbolGallery;
 import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
 import 'package:jet_cad_2d_kit_restaurant/jet_cad_2d_kit_restaurant.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+import 'package:jet_cad_2d_plan/src/panels/gallery_grid.dart'
+    show PlanGalleryGrid;
 import 'package:restaurant_demo/samples/salon.dart';
 
 import 'support/shots.dart';
@@ -68,8 +69,9 @@ void main() {
         size: kPanel);
     await settle(tester);
     const open = '$_kit/Outdoor and Decor';
-    final gallery = tester.widget<SymbolGallery>(find.byType(SymbolGallery));
-    final ids = [for (final c in gallery.categories) c.id];
+    final gallery =
+        tester.widget<PlanGalleryGrid>(find.byType(PlanGalleryGrid));
+    final ids = [for (final c in gallery.groups) c.id];
     expect(ids, contains(open));
     expect(ids, everyElement(startsWith('$_kit/')));
     // Collapse every category, in the gallery's order: collapsing the first

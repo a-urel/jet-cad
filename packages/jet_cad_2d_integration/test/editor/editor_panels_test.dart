@@ -22,6 +22,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+import 'package:jet_cad_2d_plan/src/chrome/text_field.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../support/canvas_rig.dart';
@@ -30,7 +31,8 @@ import '../support/room_plans.dart' show select;
 import '../support/units.dart';
 
 /// The panel field [f]'s widget.
-TextField fieldOf(WidgetTester tester, Finder f) => tester.widget<TextField>(f);
+PlanTextField fieldOf(WidgetTester tester, Finder f) =>
+    tester.widget<PlanTextField>(f);
 
 /// Types [text] into the read-only field [f] the only way a test can --
 /// into its controller, the field focused -- and leaves it: its focus-loss
@@ -39,7 +41,7 @@ Future<void> typeIntoReadOnly(
     WidgetTester tester, Finder f, String text) async {
   await tester.tap(f);
   await tester.pump();
-  fieldOf(tester, f).controller!.text = text;
+  fieldOf(tester, f).controller.text = text;
   FocusManager.instance.primaryFocus?.unfocus();
   await tester.pump();
 }
@@ -78,7 +80,7 @@ void main() {
       expect(fieldOf(tester, field('thickness')).readOnly, isTrue);
       await typeIntoReadOnly(tester, field('thickness'), '300');
       expect(encoded(c), before);
-      expect(menuOf(tester, 'justification').onChanged, isNull);
+      expect(menuOf(tester, 'justification').enabled, isFalse);
       // The door.
       final door = doorOf(d);
       await select(tester, c, [door]);
@@ -94,7 +96,7 @@ void main() {
       // The dimension.
       final dim = firstOf<DimensionParams>(d);
       await select(tester, c, [dim]);
-      expect(menuOf(tester, 'kind').onChanged, isNull);
+      expect(menuOf(tester, 'kind').enabled, isFalse);
       // A symbol with a family: the Size menu (ruling IT-R8: armed and
       // placed with a click, as a user would).
       expect(await symbolsReady(tester, c), isTrue,
@@ -119,7 +121,7 @@ void main() {
       expect(fieldOf(tester, field('thickness')).readOnly, isFalse);
       await typeAndSubmit(tester, field('thickness'), '300');
       expect(d.components.get<WallParams>(wall)!.thickness, 300);
-      expect(menuOf(tester, 'justification').onChanged, isNotNull);
+      expect(menuOf(tester, 'justification').enabled, isTrue);
       await select(tester, c, [door]);
       final hinge = d.components.get<OpeningParams>(door)!.hinge;
       await tester.tap(field('flip-hinge'));
@@ -141,7 +143,7 @@ void main() {
       await press(tester, LogicalKeyboardKey.keyW);
       expect(c.activeTool.value, ArchitectureTools.wall);
       expect(fieldOf(tester, field('thickness')).readOnly, isFalse);
-      expect(menuOf(tester, 'justification').onChanged, isNotNull);
+      expect(menuOf(tester, 'justification').enabled, isTrue);
     });
   });
 
@@ -170,7 +172,7 @@ void main() {
       expect(sectionFinder(ArchitectureTypes.wall, ArchitectureTools.wall),
           findsOneWidget);
       expect(fieldOf(tester, field('thickness')).readOnly, isTrue);
-      expect(menuOf(tester, 'justification').onChanged, isNull);
+      expect(menuOf(tester, 'justification').enabled, isFalse);
       // The living room, by its name label.
       await clickAt(Vector2(22857, 15478));
       expect(byKey('section-architecture.room'), findsOneWidget);
@@ -178,7 +180,7 @@ void main() {
       // The overall depth, by its dimension line.
       await clickAt(Vector2(26300, 15000));
       expect(byKey('section-architecture.dimension'), findsOneWidget);
-      expect(menuOf(tester, 'kind').onChanged, isNull);
+      expect(menuOf(tester, 'kind').enabled, isFalse);
       // The east wall's window.
       await clickAt(Vector2(25875, 14200));
       expect(sectionFinder(ArchitectureTypes.opening, ArchitectureTools.door),
@@ -222,7 +224,7 @@ void main() {
       expect(fieldOf(tester, field('width')).readOnly, isFalse);
       final before = encoded(c);
       await typeAndSubmit(tester, field('width'), '1000');
-      expect(fieldOf(tester, field('width')).controller!.text, '1000');
+      expect(fieldOf(tester, field('width')).controller.text, '1000');
       expect(encoded(c), before);
     });
   });

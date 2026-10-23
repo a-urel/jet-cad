@@ -195,6 +195,7 @@ void noDialog(WidgetTester tester) {
 /// Runs [flow] (New, Open or Open sample) from a dirty plan and answers its
 /// dialog with Don't Save.
 Future<void> discardAndRun(WidgetTester tester, Future<void> flow) async {
+  await tester.idle();
   await tester.pump();
   await answerReplace(tester, 'replace-discard');
   noDialog(tester);

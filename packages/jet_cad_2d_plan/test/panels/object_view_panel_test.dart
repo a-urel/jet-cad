@@ -12,6 +12,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+import 'package:jet_cad_2d_plan/src/chrome/text_field.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../support/design_harness.dart';
@@ -23,7 +24,7 @@ import '../support/throwing_kit.dart';
 Finder byKey(String k) => find.byKey(Key(k));
 
 String textOf(WidgetTester tester, String key) =>
-    tester.widget<TextField>(byKey(key)).controller!.text;
+    tester.widget<PlanTextField>(byKey(key)).controller.text;
 
 String shown(WidgetTester tester, String key) =>
     tester.widget<Text>(byKey(key)).data!;

@@ -17,9 +17,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
-    show InteractionLayer, SelectionKey, SymbolGallery;
+    show InteractionLayer, SelectionKey;
 import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+import 'package:jet_cad_2d_plan/src/chrome/words_carrier.dart';
+import 'package:jet_cad_2d_plan/src/panels/gallery_grid.dart'
+    show PlanGalleryGrid;
 
 import '../support/canvas_rig.dart' show symbolsReady;
 import '../support/recording_plan_strings.dart';
@@ -58,6 +61,10 @@ Set<String> visibleTexts(WidgetTester tester) => {
         if (t.data != null) t.data! else t.textSpan?.toPlainText() ?? '',
       for (final t in tester.widgetList<Tooltip>(find.byType(Tooltip)))
         if (t.message != null) t.message!,
+      // The chrome parts report their own words, open or closed (R-LK).
+      for (final w in tester
+          .widgetList(find.byWidgetPredicate((w) => w is PlanWordsCarrier)))
+        ...(w as PlanWordsCarrier).visibleWords,
     }..remove('');
 
 /// The architecture kit's Turkish words, and its `text:` templates as
@@ -162,7 +169,7 @@ void main() {
     await tester.scrollUntilVisible(cell, 200,
         scrollable: find
             .descendant(
-                of: find.byType(SymbolGallery),
+                of: find.byType(PlanGalleryGrid),
                 matching: find.byType(Scrollable))
             .first);
     await tester.ensureVisible(cell);

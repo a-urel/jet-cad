@@ -14,6 +14,7 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
     show InteractionLayer;
 import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart' show PlanStrings;
+import 'package:jet_cad_2d_plan/src/chrome/text_field.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import 'dimension_plans.dart';
@@ -197,7 +198,7 @@ void main() {
         reason: 'I reaches the platform as text');
     tester.testTextInput.enterText('I');
     await tester.pump();
-    expect(tester.widget<TextField>(name).controller!.text, 'I');
+    expect(tester.widget<PlanTextField>(name).controller.text, 'I');
     expect(status(tester), status0, reason: 'I switched no tool');
     expect(c.activeTool.value, isNot(ArchitectureTools.dimension)); // DT-R2
   });

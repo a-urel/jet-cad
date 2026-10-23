@@ -5,9 +5,10 @@
 // only: the barrels.
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SymbolGallery;
 import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+import 'package:jet_cad_2d_plan/src/panels/gallery_grid.dart'
+    show PlanGalleryGrid;
 
 import 'support/shots.dart';
 
@@ -69,9 +70,10 @@ void main() {
     // the library's categories and one of them whole. The header key
     // carries the group id `<kit>/<English category>`.
     const open = 'architecture/Bathroom';
-    final gallery = tester.widget<SymbolGallery>(find.byType(SymbolGallery));
-    expect([for (final c in gallery.categories) c.id], contains(open));
-    for (final c in gallery.categories) {
+    final gallery =
+        tester.widget<PlanGalleryGrid>(find.byType(PlanGalleryGrid));
+    expect([for (final c in gallery.groups) c.id], contains(open));
+    for (final c in gallery.groups) {
       if (c.id == open) continue;
       final header = find.byKey(Key('symbol-group-${c.id}'));
       await tester.ensureVisible(header);

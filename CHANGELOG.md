@@ -25,6 +25,12 @@ A host depends on the plan library and the kits it loads from pub.dev (see
 released together, by git, under one version and one tag (`vX.Y.Z`); that
 shared history follows, unchanged.
 
+## Unreleased
+
+`jet_cad_2d_plan`'s chrome is `shadcn_ui` (`^0.57.1`, Dart 3.11 through it)
+and its icons are Lucide, as are the architecture kit's tool icons; see the
+`jet_cad_2d_plan` and `jet_cad_2d_kit_architecture` CHANGELOGs.
+
 ## Latest releases
 
 0.7.2 of `jet_cad_2d`, `jet_cad_2d_flutter` and `jet_cad_floor_plan`

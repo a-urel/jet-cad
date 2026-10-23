@@ -11,6 +11,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+import 'package:jet_cad_2d_plan/src/chrome/text_field.dart';
 
 import '../support/panel_kits.dart';
 import '../support/canvas_fixture.dart';
@@ -20,7 +21,7 @@ Finder get width => find.byKey(const Key('property-width'));
 Finder get height => find.byKey(const Key('property-height'));
 
 String textOf(WidgetTester tester, Finder f) =>
-    tester.widget<TextField>(f).controller!.text;
+    tester.widget<PlanTextField>(f).controller.text;
 
 Future<void> select(
     WidgetTester tester, PlanController c, List<Handle> hs) async {
@@ -138,8 +139,8 @@ void main() {
     await select(tester, c, [b]);
     await tester.tap(width);
     await tester.pump();
-    final widthNode = tester.widget<TextField>(width).focusNode!;
-    final scaleNode = tester.widget<TextField>(pageScale()).focusNode!;
+    final widthNode = tester.widget<PlanTextField>(width).focusNode!;
+    final scaleNode = tester.widget<PlanTextField>(pageScale()).focusNode!;
     // No frame: Width's tap-outside is still armed from its last build,
     // and the scale's is not armed yet.
     await tester.tap(pageScale());
@@ -165,7 +166,7 @@ void main() {
     await select(tester, c, [b]);
     await tester.tap(width);
     await tester.pump();
-    final widthNode = tester.widget<TextField>(width).focusNode!;
+    final widthNode = tester.widget<PlanTextField>(width).focusNode!;
     expect(widthNode.hasFocus, isTrue);
     // Empty paper, clear of both boxes; no frame, so Width's tap-outside is
     // still armed from its last build.

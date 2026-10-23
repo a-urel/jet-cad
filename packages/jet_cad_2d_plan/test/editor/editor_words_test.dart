@@ -19,9 +19,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show SymbolsState;
+import 'package:jet_cad_2d_plan/src/chrome/icon_button.dart';
+import 'package:jet_cad_2d_plan/src/chrome/menu_button.dart';
+import 'package:jet_cad_2d_plan/src/chrome/text_field.dart';
+import 'package:jet_cad_2d_plan/src/chrome/words_carrier.dart';
 import 'package:jet_cad_2d_plan/src/controller/plan_controller.dart';
 import 'package:jet_cad_2d_plan/src/editor/editor_layout.dart';
 import 'package:jet_cad_2d_plan/src/editor/plan_editor.dart';
+import 'package:jet_cad_2d_plan/src/editor/plan_editor_bar.dart';
 import 'package:jet_cad_2d_plan/src/l10n/localizations.dart';
 import 'package:jet_cad_2d_plan/src/l10n/strings.dart';
 import 'package:jet_cad_2d_plan/src/l10n/strings_tr.dart';
@@ -54,8 +59,12 @@ Future<PlanController> pump(WidgetTester tester, Locale locale) async {
   return c;
 }
 
-String tooltipOf(WidgetTester tester, String key) =>
-    tester.widget<IconButton>(find.byKey(Key(key))).tooltip!;
+String tooltipOf(WidgetTester tester, String key) {
+  final w = tester.widget(find.byKey(Key(key)));
+  // The service bar keeps its Material buttons until its own task.
+  if (w is IconButton) return w.tooltip!;
+  return (w as PlanIconButton).tooltip ?? w.label;
+}
 
 class _Recording extends LocalizationsDelegate<PlanStrings> {
   const _Recording(this.strings);
@@ -87,6 +96,10 @@ Set<String> visibleTexts(WidgetTester tester) => {
         if (t.data != null) t.data! else t.textSpan?.toPlainText() ?? '',
       for (final t in tester.widgetList<Tooltip>(find.byType(Tooltip)))
         if (t.message != null) t.message!,
+      // The chrome parts report their own words, open or closed (R-LK).
+      for (final w in tester
+          .widgetList(find.byWidgetPredicate((w) => w is PlanWordsCarrier)))
+        ...(w as PlanWordsCarrier).visibleWords,
     }..remove('');
 
 /// [seen]'s texts that are no word the plan library asked [recording] for,
@@ -360,7 +373,7 @@ void main() {
       }
     });
     await look();
-    await tester.enterText(find.byType(TextField).first, 'zzz');
+    await tester.enterText(find.byKey(const Key('symbol-search')), 'zzz');
     await look();
     // The service bar (2b Task 16). M-LK1s: its Print in English.
     c.setMode(PlanMode.service);
@@ -371,6 +384,74 @@ void main() {
     expect(leaks, isEmpty, reason: 'shown but never asked of the strings');
     expect(seen.length, greaterThan(60), reason: 'premise: a full screen');
     expect(recording.handedOut, contains('Çizgi'), reason: 'premise');
+  });
+
+  // LK1x: a raw English word on a chrome part is reported by the collector
+  // although no Text or Tooltip shows it (the part reports its own words).
+  Future<List<String>> leaksWith(WidgetTester tester, Widget part) async {
+    final recording = RecordingPlanStrings(const PlanStringsTr());
+    final c = PlanController(kits: [markKit()], json: editorPlanJson());
+    addTearDown(c.dispose);
+    await tester.binding.setSurfaceSize(const Size(1440, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(MaterialApp(
+        locale: const Locale('tr'),
+        supportedLocales: planSupportedLocales,
+        localizationsDelegates: [
+          _Recording(recording),
+          ...planLocalizationsDelegates
+              .where((d) => d != PlanLocalizations.delegate),
+        ],
+        home: Scaffold(
+            body: PlanEditor(
+                controller: c, bar: PlanEditorBar(trailing: [part])))));
+    await tester.pump();
+    final seen = visibleTexts(tester);
+    expect(leaksOf(seen, recording, c), isNot(contains('Çizgi')),
+        reason: 'premise: the editor itself is clean');
+    return leaksOf(seen, recording, c);
+  }
+
+  testWidgets('LK1x tooltip: a PlanIconButton label is reported',
+      (tester) async {
+    final leaks = await leaksWith(tester,
+        PlanIconButton(icon: Icons.add, label: 'Raw', onPressed: () {}));
+    expect(leaks, contains('Raw'));
+  });
+
+  testWidgets('LK1x damaged warning: a PlanTooltip message is reported',
+      (tester) async {
+    final leaks = await leaksWith(
+        tester, const PlanTooltip(message: 'Raw', child: Icon(Icons.warning)));
+    expect(leaks, contains('Raw'));
+  });
+
+  testWidgets('LK1x menu entry: a closed PlanMenuButton entry is reported',
+      (tester) async {
+    final leaks = await leaksWith(
+        tester,
+        PlanMenuButton<int>(
+            icon: Icons.menu,
+            label: 'Menü',
+            entries: () => const [PlanMenuEntry(1, 'Raw')],
+            onSelected: (_) {}));
+    expect(find.text('Raw'), findsNothing, reason: 'premise: the menu is shut');
+    expect(leaks, contains('Raw'));
+  });
+
+  testWidgets('LK1x field error: a PlanTextField error is reported',
+      (tester) async {
+    final field = TextEditingController();
+    addTearDown(field.dispose);
+    final leaks = await leaksWith(
+        tester,
+        // The bar is one line high: the field's error hangs below it.
+        SizedBox(
+            width: 120,
+            child: OverflowBox(
+                maxHeight: 200,
+                child: PlanTextField(controller: field, errorText: 'Raw'))));
+    expect(leaks, contains('Raw'));
   });
 
   testWidgets(

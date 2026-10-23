@@ -135,12 +135,14 @@ jobs:
           dart analyze --fatal-infos lib test expect_failures.dart
           check_guide.dart check_host_lock.dart package_root.dart
           check_screenshots.dart check_readmes.dart check_kit_deps.dart
+          check_api_boundary.dart
       - name: Format
         working-directory: tool/ci
         run: >-
           dart format --output=none --set-exit-if-changed
           lib test expect_failures.dart check_guide.dart check_host_lock.dart package_root.dart
           check_screenshots.dart check_readmes.dart check_kit_deps.dart
+          check_api_boundary.dart
           ../readme_probe/lib
       # The probe is a host of its own (pubspec.yaml.in, sdk ^3.6.0); in the
       # repository it sits inside tool/ci, so its language version is named.
@@ -151,6 +153,8 @@ jobs:
           host_probe/lib
       - name: The host guide's code is the probe's
         run: dart run tool/ci/check_guide.dart
+      - name: No shadcn_ui type is in the plan library's API
+        run: dart run tool/ci/check_api_boundary.dart
       - name: The screenshots hold pub.dev's rules
         run: dart run tool/ci/check_screenshots.dart
       - name: The package READMEs' code is the probe's

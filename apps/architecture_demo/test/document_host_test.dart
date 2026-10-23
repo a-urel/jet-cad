@@ -44,6 +44,7 @@ Future<void> dirtyRun(AppRig rig,
   expect(c.dirty.value, isFalse, reason: 'undo returns to the save');
   expect(titleOf(tester), '$name — jet-cad');
   c.redo();
+  await tester.idle();
   await tester.pump();
   expect(c.dirty.value, isTrue, reason: 'redo');
   expect(titleOf(tester), '• $name — jet-cad');
@@ -71,6 +72,7 @@ Future<void> dirtyRun(AppRig rig,
   await undoKey(tester);
   expect(c.dirty.value, isTrue, reason: 'the saved state is gone for good');
   c.redo();
+  await tester.idle();
   await tester.pump();
   expect(c.dirty.value, isTrue, reason: 'and not on the redo either');
   expect(titleOf(tester), '• $savedName — jet-cad');

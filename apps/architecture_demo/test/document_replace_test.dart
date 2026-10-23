@@ -23,6 +23,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
+import 'package:jet_cad_2d_plan/src/chrome/icon_button.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
 import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
 
@@ -36,8 +37,12 @@ final Vector2 far = Vector2(-39876.25, 33456.5);
 Finder get dialog => find.byKey(const Key('replace-dialog'));
 
 /// Whether the toolbar button [id] is enabled, as built.
-bool enabled(WidgetTester tester, String id) =>
-    tester.widget<IconButton>(find.byKey(Key('toolbar-$id'))).onPressed != null;
+bool enabled(WidgetTester tester, String id) {
+  final w = tester.widget(find.byKey(Key('toolbar-$id')));
+  // The app's own Open sample button is a Material one (a host slot).
+  if (w is IconButton) return w.onPressed != null;
+  return (w as PlanIconButton).onPressed != null;
+}
 
 const List<String> kIds = [
   'new',
@@ -96,6 +101,7 @@ void main() {
       for (final escape in [false, true]) {
         final how = '$name, ${escape ? 'Escape' : 'Cancel'}';
         final flow = run();
+        await tester.idle();
         await tester.pump();
         expect(dialog, findsOneWidget, reason: how);
         expect(tester.widget<Text>(find.byKey(const Key('replace-title'))).data,
@@ -558,6 +564,7 @@ void main() {
 
     files.holdWrites = true;
     final saving = rig.host.saveStep();
+    await tester.idle();
     await tester.pump();
     expect(files.writes, hasLength(1), reason: 'premise: held');
     final replacing = rig.host.newFlow();

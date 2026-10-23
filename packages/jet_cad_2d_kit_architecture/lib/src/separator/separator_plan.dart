@@ -5,9 +5,9 @@
 // and its PlanTool, S (planner_shell.dart:588-594), which band-trims
 // through the same RoomInputs. No properties: today's panel has no
 // separator section.
-import 'package:flutter/material.dart' show Icons;
 import 'package:jet_cad_2d/jet_cad_2d.dart' show Capability;
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart' show LucideIcons;
 
 import '../ids.dart';
 import '../room/room_inputs.dart';
@@ -29,7 +29,7 @@ final PlanType<SeparatorParams> separatorPlanType = PlanType<SeparatorParams>(
 /// The Separator tool: two clicks per separator, band-trimmed.
 final PlanTool separatorPlanTool = PlanTool(
   id: ArchitectureTools.separator,
-  icon: Icons.horizontal_rule,
+  icon: LucideIcons.minus,
   letter: 'S',
   needs: const {
     Capability.structure,

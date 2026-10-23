@@ -32,10 +32,14 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
+import 'package:jet_cad_2d_plan/src/chrome/icon_button.dart';
+import 'package:jet_cad_2d_plan/src/chrome/text_field.dart' show PlanTextField;
+import 'package:jet_cad_2d_plan/src/panels/gallery_grid.dart'
+    show PlanGalleryGrid;
 import 'package:jet_cad_2d/jet_cad_2d.dart'
     show PageComponent, SetComponentCommand;
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
-    show InteractionLayer, SymbolGallery;
+    show InteractionLayer;
 
 import 'support/app_fakes.dart';
 import 'support/app_rig.dart';
@@ -80,8 +84,8 @@ void main() {
       await tester.pump();
       expect(activeTool(tester).isMidShape, isTrue, reason: 'premise');
 
-      IconButton button(String id) =>
-          tester.widget<IconButton>(find.byKey(Key('toolbar-$id')));
+      PlanIconButton button(String id) =>
+          tester.widget<PlanIconButton>(find.byKey(Key('toolbar-$id')));
       for (final id in ['new', 'open', 'save', 'save-as']) {
         expect(button(id).onPressed, isNull, reason: id);
         await rig.tapKey('toolbar-$id');
@@ -226,7 +230,7 @@ void main() {
       await tester.tap(searchField);
       await tester.pump();
       expect(FocusManager.instance.primaryFocus,
-          tester.widget<TextField>(searchField).focusNode,
+          tester.widget<PlanTextField>(searchField).focusNode,
           reason: 'premise: the search field has the focus');
       await press(tester, LogicalKeyboardKey.tab);
       final afterTab = FocusManager.instance.primaryFocus;
@@ -243,7 +247,7 @@ void main() {
 
       for (var i = 0; i < 6; i++) {
         await press(tester, LogicalKeyboardKey.tab);
-        expect(under(find.byType(SymbolGallery)), isFalse, reason: 'tab $i');
+        expect(under(find.byType(PlanGalleryGrid)), isFalse, reason: 'tab $i');
         expect(under(strip), isFalse, reason: 'tab $i');
       }
       await tester.tap(searchField);
@@ -251,7 +255,7 @@ void main() {
       for (var i = 0; i < 6; i++) {
         await pressWith(
             tester, [LogicalKeyboardKey.shift], LogicalKeyboardKey.tab);
-        expect(under(find.byType(SymbolGallery)), isFalse,
+        expect(under(find.byType(PlanGalleryGrid)), isFalse,
             reason: 'shift+tab $i');
         expect(under(strip), isFalse, reason: 'shift+tab $i');
       }
@@ -296,7 +300,7 @@ void main() {
     await rig.host.newFlow();
     await tester.pump();
     await tapFinder(tester, tabSymbols);
-    expect(tester.widget<TextField>(searchField).controller!.text, 'sofa');
+    expect(tester.widget<PlanTextField>(searchField).controller.text, 'sofa');
     expect(galleryIdsOf(tester), sofas);
     expect(galleryIdsOf(tester), idsMatching(c, 'sofa'));
   });

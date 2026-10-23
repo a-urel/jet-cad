@@ -11,6 +11,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+import 'package:jet_cad_2d_plan/src/chrome/rows.dart';
 
 import '../support/canvas_fixture.dart';
 import '../support/design_harness.dart';
@@ -52,9 +53,8 @@ void main() {
       await press(tester, key);
       expect(status(tester), name);
     }
-    bool fill() => tester
-        .widget<CheckboxListTile>(find.byKey(const Key('tool-fill')))
-        .value!;
+    bool fill() =>
+        tester.widget<PlanCheckRow>(find.byKey(const Key('tool-fill'))).value;
     expect(fill(), isFalse);
     await press(tester, LogicalKeyboardKey.keyF);
     expect(fill(), isTrue);
@@ -219,13 +219,15 @@ void main() {
     await pumpDesign(tester, c);
     expect(
         tester
-            .widget<ListTile>(find.byKey(const Key('tool-plan.line')))
-            .enabled,
+                .widget<PlanListRow>(find.byKey(const Key('tool-plan.line')))
+                .onTap !=
+            null,
         isFalse);
     expect(
         tester
-            .widget<ListTile>(find.byKey(const Key('tool-plan.select')))
-            .enabled,
+                .widget<PlanListRow>(find.byKey(const Key('tool-plan.select')))
+                .onTap !=
+            null,
         isTrue);
     await press(tester, LogicalKeyboardKey.keyL);
     expect(status(tester), 'Select');
@@ -249,15 +251,15 @@ void main() {
       'tool-plan.arc': true,
       'tool-plan.text': true,
     };
-    // The tool tiles: the Fill toggle's inner ListTile carries no key.
+    // The tool tiles: the Fill toggle's inner PlanListRow carries no key.
     List<String> paletteKeys() => [
-          for (final t in tester.widgetList<ListTile>(find.descendant(
+          for (final t in tester.widgetList<PlanListRow>(find.descendant(
               of: find.byType(PlanToolPalette),
-              matching: find.byType(ListTile))))
+              matching: find.byType(PlanListRow))))
             if (t.key case final ValueKey<String> k) k.value,
         ];
     bool enabled(String key) =>
-        tester.widget<ListTile>(find.byKey(Key(key))).enabled;
+        tester.widget<PlanListRow>(find.byKey(Key(key))).onTap != null;
 
     final f = drawController();
     final c = f.c;

@@ -7,7 +7,11 @@ import 'package:flutter/material.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
     show PageNotifier, displayPaperFor;
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../chrome/icon_button.dart';
+import '../chrome/rows.dart';
+import '../chrome/shad_scope.dart';
 import '../controller/plan_controller.dart';
 import '../l10n/locale_scope.dart';
 import '../l10n/numbered_names.dart';
@@ -194,7 +198,8 @@ class PlanLayerPanelState extends State<PlanLayerPanel> {
   /// ACI 7's ink on the paper the canvas shows
   /// (`planner_shell.dart:327-342`): the page's background, a dark
   /// canvas's paper, or the canvas background (the theme's surface) for a
-  /// plan without a page.
+  /// plan without a page. Canvas-owned: it reads the Material theme the
+  /// canvas reads, not the chrome's shadcn theme.
   int _foreground(BuildContext context) {
     final theme = Theme.of(context);
     final surface =
@@ -255,7 +260,9 @@ class PlanLayerPanelState extends State<PlanLayerPanel> {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => PlanShadScope(child: _body(context));
+
+  Widget _body(BuildContext context) {
     final layers = _doc.tables.layers;
     // A row the document no longer has (an undo, a delete) is neither
     // selected nor being renamed.
@@ -266,7 +273,8 @@ class PlanLayerPanelState extends State<PlanLayerPanel> {
     final current = drawingLayer(_doc);
     final foreground = _foreground(context);
     final rows = layersInPanelOrder(layers.records);
-    final title = Theme.of(context).textTheme.titleSmall;
+    final shad = planShadThemeOf(context);
+    final title = shad.textTheme.small.copyWith(fontWeight: FontWeight.w600);
     final strings = PlanStrings.of(context);
     final blocked =
         allowed ? _deleteBlocked(_selected, strings) : strings.layersLocked;
@@ -279,97 +287,94 @@ class PlanLayerPanelState extends State<PlanLayerPanel> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           mainAxisSize: MainAxisSize.min,
           children: [
-            InkWell(
+            PlanListRow(
               key: const Key('layers-header'),
               onTap: () => setState(() => _open = !_open),
-              child: SizedBox(
-                height: 32,
-                child: Row(children: [
-                  Expanded(child: Text(strings.layers, style: title)),
-                  Icon(_open ? Icons.expand_less : Icons.expand_more, size: 18),
-                ]),
-              ),
+              title: Row(children: [
+                Expanded(child: Text(strings.layers, style: title)),
+                Icon(_open ? LucideIcons.chevronUp : LucideIcons.chevronDown,
+                    size: 16),
+              ]),
             ),
             if (_open) ...[
               ConstrainedBox(
                 constraints: const BoxConstraints(
                     maxHeight: kLayerListVisibleRows * kLayerRowHeight),
-                child: Scrollbar(
-                  controller: _scroll,
-                  child: SingleChildScrollView(
-                    key: const Key('layers-list'),
+                child: ScrollbarTheme(
+                  data: ScrollbarThemeData(
+                    thumbColor: WidgetStatePropertyAll(shad.colorScheme.border),
+                  ),
+                  child: Scrollbar(
                     controller: _scroll,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        for (final r in rows)
-                          LayerRow(
-                            key: ValueKey<Handle>(r.handle),
-                            controller: widget.controller,
-                            record: r,
-                            current: r.handle == current,
-                            selected: r.handle == _selected,
-                            enabled: allowed,
-                            editing: r.handle == _editing,
-                            foreground: foreground,
-                            onSelect: () =>
-                                setState(() => _selected = r.handle),
-                            onMakeCurrent: r.handle == current &&
-                                    _doc.header.currentLayer == r.handle
-                                ? null
-                                : () =>
-                                    _execute(SetCurrentLayerCommand(r.handle)),
-                            onToggleVisible: () => _update(r.handle,
-                                (l) => l.copyWith(visible: !l.visible)),
-                            onToggleLocked: () => _update(
-                                r.handle, (l) => l.copyWith(locked: !l.locked)),
-                            onColour: (aci) => _update(
-                                r.handle,
-                                (l) => l.color == IndexedColor(aci)
-                                    ? null
-                                    : l.copyWith(color: IndexedColor(aci))),
-                            onStartRename: () => setState(() {
-                              _selected = r.handle;
-                              _editing = r.handle;
-                            }),
-                            validate: (name) => switch (
-                                layerNameProblem(_doc, name, self: r.handle)) {
-                              null => null,
-                              final p =>
-                                PlanStrings.of(context).layerNameProblem(p),
-                            },
-                            onRename: (name) => _update(
-                                r.handle, (l) => l.copyWith(name: name)),
-                            onEndRename: () {
-                              if (_editing == r.handle && mounted) {
-                                setState(() => _editing = null);
-                              }
-                            },
-                          ),
-                      ],
+                    child: SingleChildScrollView(
+                      key: const Key('layers-list'),
+                      controller: _scroll,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          for (final r in rows)
+                            LayerRow(
+                              key: ValueKey<Handle>(r.handle),
+                              controller: widget.controller,
+                              record: r,
+                              current: r.handle == current,
+                              selected: r.handle == _selected,
+                              enabled: allowed,
+                              editing: r.handle == _editing,
+                              foreground: foreground,
+                              onSelect: () =>
+                                  setState(() => _selected = r.handle),
+                              onMakeCurrent: r.handle == current &&
+                                      _doc.header.currentLayer == r.handle
+                                  ? null
+                                  : () => _execute(
+                                      SetCurrentLayerCommand(r.handle)),
+                              onToggleVisible: () => _update(r.handle,
+                                  (l) => l.copyWith(visible: !l.visible)),
+                              onToggleLocked: () => _update(r.handle,
+                                  (l) => l.copyWith(locked: !l.locked)),
+                              onColour: (aci) => _update(
+                                  r.handle,
+                                  (l) => l.color == IndexedColor(aci)
+                                      ? null
+                                      : l.copyWith(color: IndexedColor(aci))),
+                              onStartRename: () => setState(() {
+                                _selected = r.handle;
+                                _editing = r.handle;
+                              }),
+                              validate: (name) => switch (layerNameProblem(
+                                  _doc, name,
+                                  self: r.handle)) {
+                                null => null,
+                                final p =>
+                                  PlanStrings.of(context).layerNameProblem(p),
+                              },
+                              onRename: (name) => _update(
+                                  r.handle, (l) => l.copyWith(name: name)),
+                              onEndRename: () {
+                                if (_editing == r.handle && mounted) {
+                                  setState(() => _editing = null);
+                                }
+                              },
+                            ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
               ),
               Row(children: [
-                IconButton(
+                PlanIconButton(
                   key: const Key('layers-add'),
-                  icon: const Icon(Icons.add),
-                  iconSize: 18,
-                  tooltip: strings.newLayer,
-                  visualDensity: VisualDensity.compact,
+                  icon: LucideIcons.plus,
+                  label: strings.newLayer,
                   onPressed: allowed ? _add : null,
                 ),
-                Tooltip(
-                  message: blocked ?? strings.deleteLayer,
-                  child: IconButton(
-                    key: const Key('layers-delete'),
-                    icon: const Icon(Icons.delete_outline),
-                    iconSize: 18,
-                    visualDensity: VisualDensity.compact,
-                    onPressed:
-                        blocked == null ? () => _delete(_selected!) : null,
-                  ),
+                PlanIconButton(
+                  key: const Key('layers-delete'),
+                  icon: LucideIcons.trash2,
+                  label: blocked ?? strings.deleteLayer,
+                  onPressed: blocked == null ? () => _delete(_selected!) : null,
                 ),
               ]),
             ],

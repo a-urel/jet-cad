@@ -16,6 +16,7 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:jet_cad_2d_integration/jet_cad_2d_integration.dart';
 import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+import 'package:jet_cad_2d_plan/src/chrome/text_field.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import 'editor_rig.dart';
@@ -144,7 +145,11 @@ Finder get flipHinge => find.byKey(const Key('property-flip-hinge'));
 Finder get flipSwing => find.byKey(const Key('property-flip-swing'));
 
 String textOf(WidgetTester tester, Finder f) =>
-    tester.widget<TextField>(f).controller!.text;
+    tester.widget<PlanTextField>(f).controller.text;
+
+/// Whether the action button [f] takes a press: its `onPressed` is set.
+bool pressable(WidgetTester tester, Finder f) =>
+    (tester.widget(f) as dynamic).onPressed != null;
 
 Future<void> enterAndSubmit(
     WidgetTester tester, Finder field, String text) async {

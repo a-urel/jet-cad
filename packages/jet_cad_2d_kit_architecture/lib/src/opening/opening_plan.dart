@@ -3,11 +3,12 @@
 // 405-433, 754-758, 1035-1059, 1332-1371) as property specs over the
 // object, and its slide grip over the plan's services. The three opening
 // tools close the file (Task 15).
-import 'package:flutter/material.dart' show IconData, Icons;
+import 'package:flutter/widgets.dart' show IconData;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
     show ObjectGripProvider;
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart' show LucideIcons;
 
 import '../ids.dart';
 import '../live.dart';
@@ -125,8 +126,8 @@ PlanTool _openingPlanTool(OpeningKind kind, String letter, IconData icon) =>
     );
 
 final PlanTool doorPlanTool =
-    _openingPlanTool(OpeningKind.door, 'D', Icons.door_front_door_outlined);
+    _openingPlanTool(OpeningKind.door, 'D', LucideIcons.doorClosed);
 final PlanTool windowPlanTool =
-    _openingPlanTool(OpeningKind.window, 'N', Icons.window_outlined);
+    _openingPlanTool(OpeningKind.window, 'N', LucideIcons.appWindow);
 final PlanTool gapPlanTool =
-    _openingPlanTool(OpeningKind.gap, 'G', Icons.space_bar);
+    _openingPlanTool(OpeningKind.gap, 'G', LucideIcons.space);

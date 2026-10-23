@@ -70,8 +70,15 @@ Import only the packages' barrels, `package:jet_cad_2d_plan/jet_cad_2d_plan.dart
 and the kits' own. Anything under `src/` is not API.
 
 The packages need Flutter 3.44 or later (the Dart that comes with it);
-0.9.0 is built and tested with Flutter 3.47.6. They bring no build hook and
-no GPU renderer: nothing runs at build time beyond Flutter's own.
+0.9.0 is built and tested with Flutter 3.47.6. The planner's chrome is
+`shadcn_ui` (`^0.57.1`), and that package needs Dart 3.11: the plan library's
+own SDK floor is unchanged, but a host that depends on it needs Dart 3.11
+through `shadcn_ui`. A host that already uses `shadcn_ui` moves to `^0.57.1`
+(the planner and the host share one copy). There is no GPU renderer, and
+the one build hook the packages bring is `objective_c`'s native-assets hook,
+which `shadcn_ui` pulls in (through `universal_image`, `extended_image_library`
+and `path_provider_foundation`) for Apple platforms; no hook of the packages'
+own runs at build time.
 
 The imports the snippets below need:
 
@@ -1226,11 +1233,23 @@ class _TwoViewsState extends State<TwoViews> {
 
 ## 10. Themes and your own widgets
 
-The planner follows the host's `ThemeData`: its colour scheme for the bars,
-panels, buttons and dialogs, and a `PlanTheme` **extension** for the plan's
-own look: status fills and captions, group frames and chips, the selection,
-the focus veil, the canvas background and the service bar's height. Put one
-in each of the host's themes; the system picks light or dark:
+The planner's chrome (bars, panels, buttons, fields, selects, menus, tooltips
+and the export dialog) is `shadcn_ui`; its canvas look is a `PlanTheme`
+**extension**. Which design system your app uses decides what you put around
+the view:
+
+- **A shadcn host** puts its `ShadTheme` (or `ShadApp`) above the view; the
+  planner uses it as is.
+- **A Material host** needs nothing. The chrome is derived from the ambient
+  `ThemeData`: its colours, its brightness and its font family. Light and dark
+  themes work as before.
+- **Icons** are Lucide icons. `IconData` stays the API: a kit may give any
+  icon, and the architecture kit's tool icons are Lucide.
+
+`PlanTheme` is for the plan's own look: status fills and captions, group
+frames and chips, the selection, the focus veil, the canvas background and
+the service bar's height (`serviceBarHeight` still sizes the service bar).
+Put one in each of the host's themes; the system picks light or dark:
 
 ```dart
 /// The planner's look in the POS's light theme.
@@ -1257,13 +1276,24 @@ final ThemeData posLightTheme = ThemeData(
   default. `theme:` on a view overrides the ambient extension field by field.
 - The selection colours are chosen by the paper (light or dark), not by the
   theme.
-- A POS whose own design system is not Material builds a `ColorScheme` by
-  hand from its tokens and puts it in a local `Theme` around the view; a
-  seeded scheme cannot reproduce another design system's colours.
-  `apps/restaurant_demo/lib/demo_theme.dart` does this.
+- A POS whose own design system is shadcn puts a `ShadTheme` with its tokens
+  around the view; a Material scheme cannot reproduce another design
+  system's colours. The restaurant demo's POS look is a `ShadTheme` (zinc):
+  `apps/restaurant_demo/lib/demo_theme.dart`.
 - `PlanTheme.unitColourOpacity` is the opacity of a unit's own colour
   (`setUnitColour`, `setUnitsColour`); the export draws it at the same
   opacity as the screen.
+
+**Moving to the shadcn chrome (0.9.x hosts).** What a host sees:
+
+- Icon buttons are 40 px (they were 48), the service bar is painted with the
+  shadcn background, and the export dialog is a shadcn dialog.
+- A widget test that found Material types inside the planner (`IconButton`,
+  `TextField`, `DropdownButton`, `SegmentedButton`, `Tooltip`, `ListTile`,
+  `AlertDialog`) finds the planner's own widgets now; the keys are
+  unchanged, so a finder by key keeps working. An open select or menu keeps
+  the keyboard, as a Material route did.
+- A host on `shadcn_ui` is on `^0.57.1`; a Material host adds nothing.
 
 **Your own widgets on the tables.** A view calls `unitOverlayBuilder` for
 each table to draw, in the modes in `unitOverlayModes` (service by default),

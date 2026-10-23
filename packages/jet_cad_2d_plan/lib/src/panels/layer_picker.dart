@@ -7,6 +7,8 @@ import 'package:flutter/material.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
 
+import '../chrome/menu_button.dart';
+import '../chrome/shad_scope.dart';
 import '../controller/plan_controller.dart';
 import '../l10n/strings.dart';
 import '../l10n/strings_en.dart';
@@ -227,45 +229,34 @@ class LayerPicker extends StatelessWidget {
             null => '—',
             final h => layers[h]?.name ?? strings.missingLayer(h.toHex()),
           };
-    return Row(
-      children: [
-        Text(strings.layer),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Tooltip(
-            message: blocked ?? strings.moveSelectionToLayer,
-            child: PopupMenuButton<Handle>(
+    return PlanShadScope(
+      child: Row(
+        children: [
+          Text(strings.layer),
+          const SizedBox(width: 12),
+          Expanded(
+            child: PlanMenuButton<Handle>(
               key: const Key('layer-picker'),
+              expanded: true,
               enabled: blocked == null,
-              tooltip: '',
-              initialValue: mixed ? null : common,
+              // The tooltip and the accessible name: why it is disabled,
+              // else what it does.
+              label: blocked ?? strings.moveSelectionToLayer,
+              selected: mixed ? null : common,
               onSelected: _choose,
-              itemBuilder: (context) => [
+              entries: () => [
                 for (final r in layersInPanelOrder(layers.records))
-                  PopupMenuItem<Handle>(
-                    key: Key('layer-picker-item-${r.handle.toHex()}'),
-                    value: r.handle,
-                    height: 32,
-                    child: Text(r.name, overflow: TextOverflow.ellipsis),
-                  ),
+                  PlanMenuEntry<Handle>(r.handle, r.name,
+                      key: Key('layer-picker-item-${r.handle.toHex()}')),
               ],
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(label,
-                          key: const Key('layer-picker-value'),
-                          overflow: TextOverflow.ellipsis),
-                    ),
-                    const Icon(Icons.arrow_drop_down, size: 18),
-                  ],
-                ),
-              ),
+              child: Text(label,
+                  key: const Key('layer-picker-value'),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }

@@ -10,6 +10,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:jet_cad_2d_plan/src/chrome/icon_button.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart' show EntityKind, PageComponent;
 import 'package:jet_cad_2d_flutter/export_testing.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
@@ -24,7 +25,8 @@ Finder get printButton => find.byKey(const Key('toolbar-print'));
 
 /// Whether the toolbar button [id] is enabled, as built.
 bool on(WidgetTester tester, String id) =>
-    tester.widget<IconButton>(find.byKey(Key('toolbar-$id'))).onPressed != null;
+    tester.widget<PlanIconButton>(find.byKey(Key('toolbar-$id'))).onPressed !=
+    null;
 
 /// The app with the sample opened from `flat.jetplan` (at `/p/flat`): titled
 /// `flat`, clean, its page A4 landscape at 1:50 off the origin; the screen's

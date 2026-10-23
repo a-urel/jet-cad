@@ -35,6 +35,7 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show PlanSwatch;
 import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart'
     show ArchitectureTools, RoomParams, SeparatorParams, WallParams;
+import 'package:jet_cad_2d_plan/src/chrome/icon_button.dart' show PlanTooltip;
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
@@ -45,11 +46,11 @@ import '../support/rooms_plan.dart';
 Finder swatch(String name) => find.byKey(Key('color-swatch-$name'));
 Finder get picker => find.byKey(const Key('color-picker'));
 
-/// The Semantics node of swatch [name] (the nearest above its InkWell that
-/// carries the label).
+/// The Semantics of swatch [name] (the outermost below its key that carries
+/// the label).
 Semantics semanticsOf(WidgetTester tester, String name) =>
     tester.widget<Semantics>(find
-        .ancestor(
+        .descendant(
             of: swatch(name),
             matching: find.byWidgetPredicate(
                 (w) => w is Semantics && w.properties.label != null))
@@ -57,9 +58,9 @@ Semantics semanticsOf(WidgetTester tester, String name) =>
 
 /// The tooltip text of swatch [name].
 String tooltipOf(WidgetTester tester, String name) => tester
-    .widget<Tooltip>(
-        find.ancestor(of: swatch(name), matching: find.byType(Tooltip)).first)
-    .message!;
+    .widget<PlanTooltip>(
+        find.descendant(of: swatch(name), matching: find.byType(PlanTooltip)))
+    .message;
 
 /// The marked swatch's name, or null for none.
 String? marked(WidgetTester tester) {
@@ -268,6 +269,7 @@ void main() {
     await tester.pump();
     expect(marked(tester), 'teal', reason: 'both teal');
     paint(doc, r.b, 'purple');
+    await tester.idle();
     await tester.pump();
     expect(marked(tester), isNull, reason: 'teal and purple: mixed');
 
@@ -381,6 +383,7 @@ void main() {
     // A teal, B purple: a tap on teal changes B only.
     paint(doc, r.a, 'teal');
     paint(doc, r.b, 'purple');
+    await tester.idle();
     await tester.pump();
     await rig.select([r.a, r.b]);
     // Not ported (ruling IP-R7): today's recolorCommand(doc, keys,

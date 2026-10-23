@@ -1,3 +1,8 @@
+## Unreleased
+
+- The tool icons are Lucide icons (`lucide_icons_flutter`), no longer
+  Material `Icons`.
+
 ## 0.1.1
 
 - Depends on `jet_cad_2d_kit: ^0.1.1`.

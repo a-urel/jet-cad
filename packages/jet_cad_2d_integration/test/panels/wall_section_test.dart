@@ -18,6 +18,7 @@ import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show KitDiagnosticCode;
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart'
     show PlanController, PlanLocked;
+import 'package:jet_cad_2d_plan/src/chrome/text_field.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../support/canvas_rig.dart';
@@ -31,7 +32,7 @@ Finder get wallSection =>
     sectionFinder(ArchitectureTypes.wall, ArchitectureTools.wall);
 
 String textOf(WidgetTester tester, Finder f) =>
-    tester.widget<TextField>(f).controller!.text;
+    tester.widget<PlanTextField>(f).controller.text;
 
 /// The justification choice's selection (today's segment set: one value).
 Set<Justification> shownJustification(WidgetTester tester) =>
@@ -249,14 +250,14 @@ void main() {
     final pa = doc.components.get<WallParams>(wa)!;
     doc.commands.permissions = DraftPermissions.runtime;
     await select(tester, view, [wa]);
-    expect(tester.widget<TextField>(thickness).readOnly, isTrue);
-    expect(menuOf(tester, 'justification').onChanged, isNull);
+    expect(tester.widget<PlanTextField>(thickness).readOnly, isTrue);
+    expect(menuOf(tester, 'justification').enabled, isFalse);
     await choose(tester, 'justification', 'right');
     expect(doc.components.get<WallParams>(wa), pa);
     expect(doc.commands.undoDepth, 0);
     doc.commands.permissions = DraftPermissions.all;
     await select(tester, view, [wb]);
-    expect(tester.widget<TextField>(thickness).readOnly, isFalse);
+    expect(tester.widget<PlanTextField>(thickness).readOnly, isFalse);
   });
 
   testWidgets(
@@ -402,6 +403,7 @@ void main() {
     await tester.enterText(thickness, '333');
     await tester.pump();
     doc.commands.undo();
+    await tester.idle();
     await tester.pump();
     expect(doc.tree[wd], isNull);
     expect(wallSection, findsNothing);
@@ -426,13 +428,13 @@ void main() {
     doc.commands.permissions = const DraftPermissions(
         transform: true, components: false, geometry: true, structure: true);
     await select(tester, view, [wa]);
-    expect(tester.widget<TextField>(thickness).readOnly, isTrue);
-    expect(menuOf(tester, 'justification').onChanged, isNull);
+    expect(tester.widget<PlanTextField>(thickness).readOnly, isTrue);
+    expect(menuOf(tester, 'justification').enabled, isFalse);
     await choose(tester, 'justification', 'right');
     expect(doc.components.get<WallParams>(wa), pa);
     await select(tester, view, [bx]);
-    expect(tester.widget<TextField>(width).readOnly, isTrue);
-    expect(tester.widget<TextField>(height).readOnly, isTrue);
+    expect(tester.widget<PlanTextField>(width).readOnly, isTrue);
+    expect(tester.widget<PlanTextField>(height).readOnly, isTrue);
     expect(doc.commands.undoDepth, 0);
     expect(tester.takeException(), isNull);
   });

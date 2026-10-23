@@ -15,8 +15,11 @@ import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shadcn_ui/shadcn_ui.dart' show LucideIcons;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+import 'package:jet_cad_2d_plan/src/chrome/icon_button.dart'
+    show PlanIconButton;
 import 'package:jet_cad_2d_plan/src/controller/plan_controller.dart';
 import 'package:jet_cad_2d_plan/src/service/service_session.dart' show PlanMode;
 import 'package:jet_cad_2d_plan/src/service/service_state.dart';
@@ -107,7 +110,7 @@ Future<void> tap(WidgetTester tester, Offset p, {bool add = false}) async {
 }
 
 bool enabled(WidgetTester tester, String k) =>
-    tester.widget<IconButton>(byKey(k)).onPressed != null;
+    tester.widget<PlanIconButton>(byKey(k)).onPressed != null;
 
 /// Merge's and Split's enabled flags, as `(merge, split)`.
 (bool, bool) flags(WidgetTester tester) =>
@@ -349,10 +352,16 @@ void main() {
     for (var i = 1; i < xs.length; i++) {
       expect(xs[i], greaterThan(xs[i - 1]), reason: 'order at $i: $xs');
     }
-    expect(tester.widget<IconButton>(byKey('service-merge')).tooltip, 'Merge');
-    expect(tester.widget<IconButton>(byKey('service-split')).tooltip, 'Split');
-    expect(find.byIcon(Icons.merge_type), findsOneWidget);
-    expect(find.byIcon(Icons.call_split), findsOneWidget);
+    expect(
+        tester.widget<PlanIconButton>(byKey('service-merge')).tooltip ??
+            tester.widget<PlanIconButton>(byKey('service-merge')).label,
+        'Merge');
+    expect(
+        tester.widget<PlanIconButton>(byKey('service-split')).tooltip ??
+            tester.widget<PlanIconButton>(byKey('service-split')).label,
+        'Split');
+    expect(find.byIcon(LucideIcons.merge), findsOneWidget);
+    expect(find.byIcon(LucideIcons.split), findsOneWidget);
 
     // The rebuilt bar follows the selection as the first did.
     h.c.setUnitGroups({

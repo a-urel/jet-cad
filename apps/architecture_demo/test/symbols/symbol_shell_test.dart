@@ -45,9 +45,13 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
+import 'package:jet_cad_2d_plan/src/chrome/icon_button.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
-    show InteractionLayer, SelectionKey, SymbolGallery;
+    show InteractionLayer, SelectionKey;
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+import 'package:jet_cad_2d_plan/src/chrome/text_field.dart' show PlanTextField;
+import 'package:jet_cad_2d_plan/src/panels/gallery_grid.dart'
+    show PlanGalleryGrid;
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../support/app_rig.dart';
@@ -133,7 +137,7 @@ void main() {
       expect(FocusManager.instance.primaryFocus, same(canvas),
           reason: 'a segment cannot take the focus');
     }
-    final cellNodes = focusNodesUnder(tester, find.byType(SymbolGallery));
+    final cellNodes = focusNodesUnder(tester, find.byType(PlanGalleryGrid));
     expect(cellNodes, isNotEmpty, reason: 'premise: the cells\' nodes');
     for (final n in cellNodes) {
       n.requestFocus();
@@ -208,7 +212,7 @@ void main() {
       await mouse.removePointer();
       // The tab stays where the user left it (the editor is the same one):
       // the Symbols gallery is still shown, and highlights no cell.
-      expect(find.byType(SymbolGallery), findsOneWidget);
+      expect(find.byType(PlanGalleryGrid), findsOneWidget);
       expect(galleryOf(tester).selectedId, isNull);
       await tapFinder(tester, tabTools);
       expect(find.byType(PlanToolPalette), findsOneWidget);
@@ -226,7 +230,7 @@ void main() {
     await aimCamera(tester, c, kFar);
     await armBySymbolsTab(tester, c, symbolOf(c, 'bed.double'));
     VoidCallback? save() => tester
-        .widget<IconButton>(find.byKey(const Key('toolbar-save')))
+        .widget<PlanIconButton>(find.byKey(const Key('toolbar-save')))
         .onPressed;
     expect(save(), isNotNull, reason: 'premise: Save enabled');
 
@@ -269,7 +273,7 @@ void main() {
       // A second build of the editor while the gallery is away.
       await press(tester, LogicalKeyboardKey.keyW);
       await tapFinder(tester, tabSymbols);
-      expect(tester.widget<TextField>(searchField).controller!.text, 'bed');
+      expect(tester.widget<PlanTextField>(searchField).controller.text, 'bed');
       expect(galleryIdsOf(tester), beds);
       expect(categoryNamesOf(tester), ['Bed Room']);
       expect(find.byKey(const Key('symbol-search-clear')), findsOneWidget);
@@ -284,7 +288,7 @@ void main() {
       await tapFinder(tester, tabSymbols);
       await tester.enterText(searchField, 'bed');
       await tester.pump();
-      final given = tester.widget<TextField>(searchField).controller!;
+      final given = tester.widget<PlanTextField>(searchField).controller;
       final editor = tester.state(find.byType(PlanEditor));
 
       for (final replace in [
@@ -302,7 +306,8 @@ void main() {
 
         await tapFinder(tester, tabTools);
         await tapFinder(tester, tabSymbols);
-        expect(tester.widget<TextField>(searchField).controller, same(given));
+        expect(
+            tester.widget<PlanTextField>(searchField).controller, same(given));
         expect(given.text, 'bed');
         expect(galleryIdsOf(tester), idsMatching(c, 'bed'));
       }
@@ -316,7 +321,7 @@ void main() {
       await tapFinder(tester, tabSymbols);
       await tester.enterText(searchField, 'bed');
       await tester.pump();
-      final given = tester.widget<TextField>(searchField).controller!;
+      final given = tester.widget<PlanTextField>(searchField).controller;
 
       await tapFinder(tester, tabTools);
       expect(find.byType(PlanSymbolGallery), findsNothing, reason: 'premise');
@@ -325,7 +330,7 @@ void main() {
       given.addListener(_noop);
       given.removeListener(_noop);
       await tapFinder(tester, tabSymbols);
-      expect(tester.widget<TextField>(searchField).controller!.text, 'sofa');
+      expect(tester.widget<PlanTextField>(searchField).controller.text, 'sofa');
       expect(
           galleryIdsOf(tester),
           allOf(isNotEmpty,
@@ -336,9 +341,10 @@ void main() {
           reason: 'disposed with the editor');
       await pumpSymbolsApp(tester);
       await tapFinder(tester, tabSymbols);
+      expect(tester.widget<PlanTextField>(searchField).controller,
+          isNot(same(given)));
       expect(
-          tester.widget<TextField>(searchField).controller, isNot(same(given)));
-      expect(tester.widget<TextField>(searchField).controller!.text, isEmpty);
+          tester.widget<PlanTextField>(searchField).controller.text, isEmpty);
     });
   });
 }

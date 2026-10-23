@@ -18,6 +18,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
     show InteractionLayer, SelectionKey;
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+import 'package:jet_cad_2d_plan/src/chrome/text_field.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../support/harness.dart' show coordsOf;
@@ -276,12 +277,12 @@ void main() {
       expect(c.grips.rotatable, isFalse);
       expect(find.byKey(const Key('unit-rotate-left')), findsNothing);
       expect(find.byKey(const Key('unit-rotate-right')), findsNothing);
-      final field =
-          tester.widget<TextField>(find.byKey(const Key('symbol-rotation')));
+      final field = tester
+          .widget<PlanTextField>(find.byKey(const Key('symbol-rotation')));
       expect(field.readOnly, isTrue);
       await tester.tap(find.byKey(const Key('symbol-rotation')));
       await tester.pump();
-      field.controller!.text = '75';
+      field.controller.text = '75';
       FocusManager.instance.primaryFocus?.unfocus();
       await tester.pump();
       expect(encoded(c), before, reason: 'the typed value');
@@ -295,7 +296,7 @@ void main() {
       expect(find.byKey(const Key('unit-rotate-left')), findsOneWidget);
       expect(
           tester
-              .widget<TextField>(find.byKey(const Key('symbol-rotation')))
+              .widget<PlanTextField>(find.byKey(const Key('symbol-rotation')))
               .readOnly,
           isFalse);
       final turn = degreesOf(transformOf(c, '1'));

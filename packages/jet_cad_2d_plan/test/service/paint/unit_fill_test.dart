@@ -439,11 +439,12 @@ void expectAt(
     expectPixel(shot, pixelOf(tester, w), want, reason);
 
 /// The frame after a document change: the planner hears its document's
-/// changes on the dispatcher's stream, which is asynchronous, so the first
-/// pump delivers the change (it asks for a frame) and the second draws
-/// that frame. Nothing else moves.
+/// changes on the dispatcher's stream, which is asynchronous. The idle
+/// flushes that stream as the event loop does before the next frame, and
+/// the change then asks for its own frame; the pump draws it. Nothing else
+/// moves.
 Future<void> nextFrame(WidgetTester tester) async {
-  await tester.pump();
+  await tester.idle();
   expect(tester.binding.hasScheduledFrame, isTrue,
       reason: 'the change asks for a frame');
   await tester.pump();

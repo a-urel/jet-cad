@@ -23,6 +23,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
     show DraftCanvas, DraftCanvasState, SelectionKey;
+import 'package:jet_cad_2d_plan/src/chrome/icon_button.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
@@ -79,13 +80,11 @@ Future<void> drawWallByPalette(
 }
 
 /// Whether layer [h]'s row shows the current mark.
+/// Whether row [h]'s mark says it is the current layer: its button is named
+/// "Current layer" (a row that is not says "Make current").
 bool isCurrentRow(WidgetTester tester, Handle h) =>
-    tester
-        .widget<Icon>(find.descendant(
-            of: byKey('layer-current-${h.toHex()}'),
-            matching: find.byType(Icon)))
-        .icon ==
-    Icons.radio_button_checked;
+    tester.widget<PlanIconButton>(byKey('layer-current-${h.toHex()}')).label ==
+    'Current layer';
 
 String nameOfRow(WidgetTester tester, Handle h) => tester
     .widget<Text>(find.descendant(
@@ -165,7 +164,8 @@ void main() {
         reason: 'not vacuous: everything draws first');
 
     // The current layer cannot be hidden: make layer 0 current, then hide.
-    expect(tester.widget<IconButton>(byKey('layer-eye-$hex')).onPressed, isNull,
+    expect(tester.widget<PlanIconButton>(byKey('layer-eye-$hex')).onPressed,
+        isNull,
         reason: 'premise: decision 7');
     await tapKey(tester, 'layer-current-${zero.toHex()}');
     expect(drawingLayer(doc), zero);

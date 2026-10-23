@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
+import 'package:jet_cad_2d_plan/src/chrome/segmented.dart';
 import 'package:jet_cad_2d_plan/src/export/builtin_exporters.dart';
 import 'package:jet_cad_2d_plan/src/export/export_dialog.dart';
 import 'package:jet_cad_2d_plan/src/export/registries.dart';
@@ -62,9 +63,8 @@ void main() {
     done = false;
     await tester.tap(byKey('open'));
     await tester.pumpAndSettle();
-    expect(
-        tester.widget<SegmentedButton<String>>(byKey('export-format')).selected,
-        {'plan.pdf'},
+    expect(tester.widget<PlanSegmented<String>>(byKey('export-format')).value,
+        'plan.pdf',
         reason: 'the initial answer it was given');
     await tester.tap(byKey('export-cancel'));
     await tester.pumpAndSettle();

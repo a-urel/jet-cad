@@ -13,8 +13,10 @@ import 'package:jet_cad_2d_kit/authoring.dart'
     show CatalogPolyline, CatalogSymbol, CatalogUnit;
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+import 'package:jet_cad_2d_plan/src/chrome/text_field.dart';
 import 'package:jet_cad_2d_plan/src/symbols/symbol_placer.dart'
     show placeSymbol;
+import 'package:shadcn_ui/shadcn_ui.dart' show ShadButton;
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../support/harness.dart';
@@ -29,11 +31,11 @@ Finder get left => find.byKey(const Key('unit-rotate-left'));
 Finder get right => find.byKey(const Key('unit-rotate-right'));
 
 String fieldText(WidgetTester tester) =>
-    tester.widget<TextField>(label).controller!.text;
+    tester.widget<PlanTextField>(label).controller.text;
 
 /// The label field's title.
 String fieldTitle(WidgetTester tester) =>
-    tester.widget<TextField>(label).decoration!.labelText!;
+    tester.widget<PlanTextField>(label).label!;
 
 Future<void> pumpPanel(WidgetTester tester, PlanController c) => pumpApp(
     tester, SingleChildScrollView(child: PlanPropertyPanel(controller: c)));
@@ -123,7 +125,7 @@ void main() {
     final table = c.unitIndex.withLabel('1').single;
     await select(tester, c, table.instance);
     // M-UW6: `_editable` of the unit target ignoring `relabel`.
-    expect(tester.widget<TextField>(label).readOnly, isTrue);
+    expect(tester.widget<PlanTextField>(label).readOnly, isTrue);
     final depth = c.document.commands.undoDepth;
     await enterAndSubmit(tester, '5');
     expect(c.document.commands.undoDepth, depth);
@@ -389,7 +391,7 @@ void main() {
     c.document.commands.permissions = DraftPermissions.runtime;
     await pumpPanel(tester, c);
     await select(tester, c, a);
-    expect(tester.widget<TextField>(label).readOnly, isTrue);
+    expect(tester.widget<PlanTextField>(label).readOnly, isTrue);
     expect(left, findsNothing);
     expect(right, findsNothing);
   });
@@ -417,11 +419,11 @@ void main() {
     c.document.commands.permissions = DraftPermissions.runtime;
     await pumpPanel(tester, c);
     bool rotationEditable() => !tester
-        .widget<TextField>(find.byKey(const Key('symbol-rotation')))
+        .widget<PlanTextField>(find.byKey(const Key('symbol-rotation')))
         .readOnly;
     bool mirrorEnabled() =>
         tester
-            .widget<OutlinedButton>(find.byKey(const Key('symbol-mirror')))
+            .widget<ShadButton>(find.byKey(const Key('symbol-mirror')))
             .onPressed !=
         null;
     await select(tester, c, planter);

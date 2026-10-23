@@ -21,6 +21,7 @@ import 'package:flutter/services.dart' show BrowserContextMenu;
 import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
 import 'package:jet_cad_2d_kit_restaurant/jet_cad_2d_kit_restaurant.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+import 'package:shadcn_ui/shadcn_ui.dart' show ShadTheme;
 
 import 'area.dart';
 import 'badges.dart' as badge_lib;
@@ -688,10 +689,18 @@ class DemoHomeState extends State<DemoHome> {
     }
   }
 
-  /// The local `Theme` around the editor under the POS look: the POS's
-  /// tokens as the Material scheme.
-  ThemeData _viewTheme(ThemeData ambient) =>
-      widget.look == DemoLook.pos ? posViewTheme(ambient) : ambient;
+  /// Keeps the editor mounted when the look adds or drops the `ShadTheme`
+  /// above it (a second canvas on one controller asserts).
+  final GlobalKey _viewKey = GlobalKey();
+
+  /// The `ShadTheme` around the editor under the POS look (zinc, in the
+  /// ambient theme's brightness); under the standard look the planner
+  /// derives its chrome from the app's Material theme.
+  Widget _viewTheme(BuildContext context, Widget child) =>
+      widget.look == DemoLook.pos
+          ? ShadTheme(
+              data: posShadTheme(Theme.of(context).brightness), child: child)
+          : child;
 
   /// A badge: counted, so a test sees pan and zoom build none.
   Widget _badge(BuildContext context, PlanUnitOverlay unit) {
@@ -876,9 +885,9 @@ class DemoHomeState extends State<DemoHome> {
             ),
       body: Row(children: [
         Expanded(
-          child: Theme(
-            data: _viewTheme(Theme.of(context)),
-            child: Column(children: [
+          child: _viewTheme(
+            context,
+            Column(key: _viewKey, children: [
               if (ownBar && c.mode.value == PlanMode.service)
                 OwnServiceBar(
                     name: a.name,

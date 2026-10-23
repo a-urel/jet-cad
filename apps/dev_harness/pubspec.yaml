@@ -14,7 +14,7 @@ dependencies:
   jet_cad:
     path: ../../packages/jet_cad
   lucide_icons_flutter: ^3.1.15
-  shadcn_ui: ^0.55.0
+  shadcn_ui: ^0.57.1
 
 dev_dependencies:
   flutter_test:

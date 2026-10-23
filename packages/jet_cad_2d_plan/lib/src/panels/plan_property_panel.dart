@@ -20,8 +20,14 @@ import 'package:flutter/material.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:meta/meta.dart' show internal;
+import 'package:shadcn_ui/shadcn_ui.dart' show ShadButton;
 
+import '../chrome/rows.dart';
+import '../chrome/select.dart';
+import '../chrome/shad_scope.dart';
+import '../chrome/text_field.dart';
 import '../controller/plan_controller.dart';
 import '../kits/section_boundary.dart' show KitSectionBoundary;
 import '../l10n/locale_scope.dart';
@@ -680,14 +686,15 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
 
   Widget _textField(Key key, String label, _Field f, bool editable,
           {String? suffix, bool signed = false, bool isText = false}) =>
-      TextField(
+      PlanTextField(
         key: key,
         controller: f.text,
         focusNode: f.focus,
         readOnly: !editable,
         // No maxLength formatter: a text over the spec's maxLength is
         // refused at the commit and the field reverts (Task 3's refusal).
-        decoration: InputDecoration(labelText: label, suffixText: suffix),
+        label: label,
+        suffix: suffix,
         keyboardType: isText
             ? TextInputType.text
             : TextInputType.numberWithOptions(decimal: true, signed: signed),
@@ -730,62 +737,57 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
         return _textField(key, label, _fieldFor(scope, id), editable,
             isText: true);
       case ToggleProperty():
-        return SwitchListTile(
-          key: key,
-          dense: true,
-          contentPadding: EdgeInsets.zero,
-          title: Text(label),
-          value: field.value == true,
-          onChanged: editable ? (v) => _act(t, id, v) : null,
+        // Its own width: the row is the tap target, not the panel's width.
+        return Align(
+          alignment: AlignmentDirectional.centerStart,
+          child: PlanSwitchRow(
+            key: key,
+            label: label,
+            value: field.value == true,
+            onChanged: editable ? (v) => _act(t, id, v) : null,
+          ),
         );
       case ChoiceProperty(:final values):
         final focus = _choiceFocus.putIfAbsent(
             name, () => PanelFieldFocusNode(debugLabel: name));
-        return InputDecorator(
-          decoration:
-              InputDecoration(labelText: label, border: InputBorder.none),
-          child: DropdownButton<Object?>(
-            key: key,
-            focusNode: focus,
-            isExpanded: true,
-            value: field.value,
-            items: [
-              for (final v in values)
-                DropdownMenuItem<Object?>(
-                  value: v,
-                  child: Text(
-                      planWordOf(_c, kitId,
-                              '${field.wordId}.${ChoiceProperty.segmentOf(v)}') ??
-                          ChoiceProperty.segmentOf(v),
-                      key: Key('$name-${ChoiceProperty.segmentOf(v)}')),
-                ),
-            ],
-            onChanged: editable
-                ? (v) {
-                    _act(t, id, v);
-                    _handBackAfterChoice(focus);
-                  }
-                : null,
-          ),
+        return PlanSelect<Object?>(
+          key: key,
+          expanded: true,
+          focusNode: focus,
+          label: label,
+          value: field.value,
+          enabled: editable,
+          options: [
+            for (final v in values)
+              PlanOption<Object?>(
+                  v,
+                  planWordOf(_c, kitId,
+                          '${field.wordId}.${ChoiceProperty.segmentOf(v)}') ??
+                      ChoiceProperty.segmentOf(v),
+                  key: Key('$name-${ChoiceProperty.segmentOf(v)}')),
+          ],
+          onChanged: (v) {
+            _act(t, id, v);
+            _handBackAfterChoice(focus);
+          },
         );
       case ValueDisplay(:final unit):
-        return InputDecorator(
-          decoration:
-              InputDecoration(labelText: label, border: InputBorder.none),
+        return PlanReadOnlyField(
+          label: label,
           child: Text(_valueText(field.value, unit), key: key),
         );
       case TextDisplay():
         // Spec 3a C1.1: a read-only line, the text as the kit read it.
-        return InputDecorator(
-          decoration:
-              InputDecoration(labelText: label, border: InputBorder.none),
+        return PlanReadOnlyField(
+          label: label,
           child: Text(field.value as String? ?? '', key: key),
         );
       case ActionProperty():
         return Padding(
           padding: const EdgeInsets.only(top: 8),
-          child: OutlinedButton(
+          child: ShadButton.outline(
               key: key,
+              width: double.infinity,
               onPressed: editable ? () => _act(t, id, null) : null,
               child: Text(label)),
         );
@@ -841,16 +843,17 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
   /// What replaces a section whose kit hook threw while it was being built
   /// (spec P4): Task 11's "section failed" box (`KitSectionBoundary`).
   Widget _sectionFailed() {
-    final scheme = Theme.of(context).colorScheme;
+    final theme = planShadThemeOf(context);
+    final error = theme.colorScheme.destructive;
     return Container(
       key: const Key('kit-section-failed'),
       padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
-        border: Border.all(color: scheme.error),
+        border: Border.all(color: error),
         borderRadius: BorderRadius.circular(4),
       ),
-      child:
-          Text(_strings.sectionFailed, style: TextStyle(color: scheme.error)),
+      child: Text(_strings.sectionFailed,
+          style: theme.textTheme.small.copyWith(color: error)),
     );
   }
 
@@ -935,14 +938,12 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
         component.name;
     return [
       Text(_strings.toolSymbol, key: const Key('symbol-section'), style: title),
-      InputDecorator(
-        decoration:
-            InputDecoration(labelText: _strings.name, border: InputBorder.none),
+      PlanReadOnlyField(
+        label: _strings.name,
         child: Text(name, key: const Key('symbol-name')),
       ),
-      InputDecorator(
-        decoration:
-            InputDecoration(labelText: _strings.size, border: InputBorder.none),
+      PlanReadOnlyField(
+        label: _strings.size,
         child:
             Text(box == null ? '—' : size(box), key: const Key('symbol-size')),
       ),
@@ -952,43 +953,40 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
       // A button the permissions refuse is not shown (S-11).
       if (p.mirror) ...[
         const SizedBox(height: 8),
-        OutlinedButton.icon(
+        ShadButton.outline(
           key: const Key('symbol-mirror'),
+          width: double.infinity,
           onPressed: turnable
               ? () => _guarded(t, 'Mirror', () {
                     final command = mirrorSymbolCommand(doc, h);
                     if (command != null) c.execute(command);
                   })
               : null,
-          icon: const Icon(Icons.flip),
-          label: Text(_strings.mirror),
+          leading: const Icon(LucideIcons.flipHorizontal),
+          child: Flexible(
+              child: Text(_strings.mirror, overflow: TextOverflow.ellipsis)),
         ),
       ],
       if (members.isNotEmpty && p.reshape) ...[
         const SizedBox(height: 8),
-        DropdownButton<SymbolEntry>(
+        PlanSelect<SymbolEntry>(
           key: const Key('symbol-size-menu'),
-          isExpanded: true,
+          expanded: true,
           value:
               members.where((m) => m.symbol.key == component.key).firstOrNull,
-          items: [
+          enabled: resizable,
+          options: [
             for (final m in members)
-              DropdownMenuItem(
-                value: m,
-                child: Text(size(boxOfEntry(m)!),
-                    key: Key('symbol-size-${m.symbol.key}')),
-              ),
+              PlanOption<SymbolEntry>(m, size(boxOfEntry(m)!),
+                  key: Key('symbol-size-${m.symbol.key}')),
           ],
-          onChanged: resizable
-              ? (m) {
-                  if (m == null) return;
-                  _guarded(t, 'Change size', () {
-                    final command = changeSizeCommand(doc, h, m);
-                    if (command != null) c.execute(command);
-                  });
-                  if (mounted) setState(() {});
-                }
-              : null,
+          onChanged: (m) {
+            _guarded(t, 'Change size', () {
+              final command = changeSizeCommand(doc, h, m);
+              if (command != null) c.execute(command);
+            });
+            if (mounted) setState(() {});
+          },
         ),
       ],
     ];
@@ -1002,7 +1000,7 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
     final error =
         _labelErrorFor == t.handle ? _labelError?.call(_strings) : null;
     final shared = u.text == null ? 0 : c.unitIndex.withLabel(u.text!).length;
-    final theme = Theme.of(context);
+    final theme = planShadThemeOf(context);
     final engine = c.document.commands.permissions;
     final turnable = engine.allows(Capability.transform) &&
         engine.allows(Capability.geometry);
@@ -1021,7 +1019,8 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
           padding: const EdgeInsets.only(top: 4),
           child: Text(error,
               key: const Key('unit-label-error'),
-              style: TextStyle(color: theme.colorScheme.error)),
+              style: theme.textTheme.small
+                  .copyWith(color: theme.colorScheme.destructive)),
         ),
       if (shared > 1)
         Padding(
@@ -1030,11 +1029,11 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
               _strings
                   .labelWarning(DuplicateLabel(label: u.text!, count: shared)),
               key: const Key('unit-label-duplicate'),
-              style: TextStyle(color: theme.colorScheme.tertiary)),
+              style: theme.textTheme.small
+                  .copyWith(color: theme.colorScheme.mutedForeground)),
         ),
-      InputDecorator(
-        decoration: InputDecoration(
-            labelText: _strings.capacity, border: InputBorder.none),
+      PlanReadOnlyField(
+        label: _strings.capacity,
         child: Text('${u.capacity}', key: const Key('unit-capacity')),
       ),
       // A button the permissions refuse is not shown (S-11).
@@ -1042,20 +1041,26 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
         Row(
           children: [
             Expanded(
-              child: OutlinedButton.icon(
+              child: ShadButton.outline(
                 key: const Key('unit-rotate-left'),
+                width: double.infinity,
                 onPressed: () => _rotateUnit(t, 1),
-                icon: const Icon(Icons.rotate_left),
-                label: Text(_strings.rotateLeft),
+                leading: const Icon(LucideIcons.rotateCcw),
+                child: Flexible(
+                    child: Text(_strings.rotateLeft,
+                        overflow: TextOverflow.ellipsis)),
               ),
             ),
             const SizedBox(width: 8),
             Expanded(
-              child: OutlinedButton.icon(
+              child: ShadButton.outline(
                 key: const Key('unit-rotate-right'),
+                width: double.infinity,
                 onPressed: () => _rotateUnit(t, -1),
-                icon: const Icon(Icons.rotate_right),
-                label: Text(_strings.rotateRight),
+                leading: const Icon(LucideIcons.rotateCw),
+                child: Flexible(
+                    child: Text(_strings.rotateRight,
+                        overflow: TextOverflow.ellipsis)),
               ),
             ),
           ],
@@ -1072,7 +1077,9 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
       });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => PlanShadScope(child: _body(context));
+
+  Widget _body(BuildContext context) {
     final c = _c;
     // A parent rebuild may arrive before the controller's notification.
     if (!identical(c.document, _document)) {
@@ -1080,7 +1087,7 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
       _forgetTargets();
       _bindDocument();
     }
-    final title = Theme.of(context).textTheme.titleSmall;
+    final title = planShadThemeOf(context).textTheme.small;
     final tool = _toolTarget;
     final object = _objectTarget;
     final symbol = object == null ? _symbolTarget : null;
