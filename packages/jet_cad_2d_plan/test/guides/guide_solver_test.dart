@@ -228,6 +228,19 @@ void main() {
       _expectRow(m[1], [0, 250 + _ox, 300 + _ox, 34.25 + _oy]);
     });
 
+    test('continuing needs A to overlap L perpendicularly', () {
+      // A lies left of L on x but in another row (y 100..160 vs L's 10..50).
+      final apart = _refs([_box(0, 100, 100, 160), _box(150, 250, 10, 50)]);
+      final s = _solve(apart, _box(302, 402, qy0, qy1));
+      expect(s.capturedX, isFalse);
+      expect(s.dx, 0.75);
+      expect(s.markCount, 0);
+      // The same layout with A in L's row does capture.
+      final same = _refs([_box(0, 100, 0, 60), _box(150, 250, 10, 50)]);
+      final c = _solve(same, _box(302, 402, qy0, qy1));
+      expect(c.kindX, GuideKind.continuing);
+    });
+
     test('continuing on the right mirrors the left', () {
       final r = _refs([_box(300, 400, 10, 50), _box(450, 550, 0, 60)]);
       final s = _solve(r, _box(148, 248, qy0, qy1));
