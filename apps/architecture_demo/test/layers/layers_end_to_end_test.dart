@@ -205,7 +205,10 @@ void main() {
     }
     expect(layerOf(doc, line), l, reason: 'the line stayed');
 
-    // The new layer current again, so the file's current layer is not 0.
+    // The new layer current again, so the file's current layer is not 0:
+    // nothing selected first, so the right column shows the Layers section.
+    c.select({});
+    await tester.pump();
     await tapKey(tester, 'layer-current-$hex');
     expect(doc.header.currentLayer, l);
     final layersBefore = {

@@ -97,12 +97,16 @@ void main() {
     await settle(tester);
     bool wallEnabled() =>
         tester.widget<ListTile>(byKey('tool-architecture.wall')).enabled;
-    // Full (the default): today's editor, no inspector.
+    // Full (the default): the whole editor, the inspector included. The
+    // right column follows the selection: a selected table has its own
+    // properties and the combo, no Layers or Page.
     expect(wallEnabled(), isTrue);
     expect(byKey('layers-panel'), findsOneWidget);
     await clickAt(tester, centreOf(c, '2'));
     expect(c.selectedUnits.value, {'2'}, reason: 'premise: selected');
-    expect(byKey('pos-id'), findsNothing);
+    expect(byKey('pos-id'), findsOneWidget);
+    expect(byKey('layers-panel'), findsNothing);
+    expect(byKey('page-preset'), findsNothing);
 
     await pressInPanel(tester, 'editor-tables');
     expect(demo.editor, DemoEditor.tables);

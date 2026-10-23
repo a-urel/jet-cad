@@ -91,14 +91,13 @@ void main() {
 
   testWidgets(
       'PF3 Tables: the inspector writes the POS id as host data, its other '
-      'data kept; an empty id unlinks; Full shows no inspector',
-      (tester) async {
+      'data kept; an empty id unlinks; Full shows it too', (tester) async {
     final demo = await pumpDemo(tester);
     final c = demo.area.controller;
     c.select({'1'});
     await tester.pump();
     await tester.pump();
-    expect(byKey('pos-id'), findsNothing, reason: 'Full has no inspector');
+    expect(byKey('pos-id'), findsOneWidget, reason: 'Full has it too');
 
     await profile(tester, 'editor-tables');
     expect(byKey('pos-id'), findsOneWidget);

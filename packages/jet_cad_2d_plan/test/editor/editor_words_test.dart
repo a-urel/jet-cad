@@ -325,6 +325,9 @@ void main() {
     await look();
     await tester.sendKeyEvent(LogicalKeyboardKey.f3);
     await look();
+    // Nothing selected: the right column shows the Layers and Page sections.
+    c.selection.replace([]);
+    await look();
     // The layer colour menu, then the page's preset menu.
     await tester.tap(find
         .byWidgetPredicate((w) =>

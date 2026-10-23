@@ -1080,6 +1080,12 @@ Widget inspectedEditor(PlanController c, List<String> records) => PlanEditor(
 
 Hiding the property panel (`propertyPanel: false`) hides the inspectors too.
 
+The right column follows the selection (`contextualPanels`, true by
+default): with anything selected it shows the object's own properties and
+the inspectors only; with nothing selected, the Layers and Page sections. The
+same holds in the right drawer on a phone or a tablet. Pass
+`contextualPanels: false` for 0.9.0's column, every section at all times.
+
 ## 7. Permissions
 
 `PlanPermissions` decides what the editor offers its user: which tools, and
