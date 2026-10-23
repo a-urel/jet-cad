@@ -25,3 +25,99 @@ Reviewer: OpenCode CLI v2.1.1, model `github-copilot/gpt-6.1-sol` (the default `
 11. **Minor — “Turning them off,” action enums.** Adding `PlanServiceAction.guides` requires changes to **two exhaustive switches**, for button creation and grouping (`packages/jet_cad_2d_plan/lib/src/service/view/plan_service_view.dart:879–912`). Editor switches have fallbacks that would silently omit an unhandled action (`packages/jet_cad_2d_plan/lib/src/editor/plan_editor.dart:582–587,639–654`). **Fix:** explicitly include switch updates, default ordering/group placement, and host migration guidance for exhaustive enum switches. Repository demo usages found are explicit lists, not exhaustive switches.
 
 12. **Important — “Constraints” / allocation testing.** Measuring only solver and guide paint misses per-reference allocations in adapters, viewport filtering and moving-box construction. Existing plan paint tests pin painter/sink identity rather than tool-event allocations (`packages/jet_cad_2d_plan/test/invariants/canvas_paint_allocation_test.dart:6–19`). Boxed-double regressions are already documented in picking (`packages/jet_cad_2d_plan/test/invariants/pick_allocation_test.dart:14–33`). **Fix:** require warmed end-to-end retarget measurements in all three tools, including camera retargets, with varying reference/selection counts; watch `_Double`, bounds, transforms, records and collection allocations, using named mutants.
+
+## Revision 2: Copilot CLI review
+
+Reviewer: GitHub Copilot CLI (default model), `--allow-all-tools --deny-tool write`, requested by the human, 2026-10-23. Findings verbatim; all nineteen folded into revision 3 as C-1 to C-19 (C-8 reverses revision 2's object-snap-wins call; C-3 drops the viewport filter).
+
+1. **Critical — "Turning them off / User", editor bar.**
+   - The spec puts the toggle "after Snap in the editor's edit group". Snap and Zoom are not toolbar buttons. They are text read-outs built in a separate `readOuts` switch (`plan_editor.dart:638-655`, `osnap-text`).
+   - The toolbar groups only hold export, print, undo and redo (`plan_editor.dart:582-587`).
+   - The default `bar.actions` path bypasses the action switch entirely: `listEquals(bar.actions, values) ? _Toolbar(groups: [file, edit])` (`plan_editor.dart:634`).
+   - Both switches end in `_ =>`, so a new `PlanEditorAction.guides` is silently dropped. The compiler will not flag it.
+   - **Fix:** name the real host (a command in the `edit` list, or a read-out widget). Add a test that the toggle appears with the default `actions` and with an explicit list.
+
+2. **Critical — "The boxes", service references.**
+   - The spec says "the service document's other symbol instances (bar counters, fixed furniture)" and "same rules as `UnitPicker.candidatesOf`".
+   - `candidatesOf` iterates `index.units`, and `UnitIndex.of` keeps only instances whose definition has a `UnitComponent` (`unit_index.dart:~149-153`). Non-unit furniture is never a reference.
+   - It also includes generated units nested one level inside a root group (`unit_index.dart:~157-168`). That contradicts "root-level".
+   - It checks only layer visibility (`UnitInfo.visible`), not the node's own `visible` flag. The spec cites both.
+   - **Fix:** decide whether service references are units only or all root instances. If all, the cache needs its own `tree.nodes` scan. Decide whether generated units count. Pick one visibility rule.
+
+3. **Important — "boxes": "nearby = intersects the visible viewport".**
+   - Tools get no viewport `Size` on pointer events. `ToolContext` and `ToolPointerEvent` carry none. Only `paintOverlay` receives it, and `ViewportTransform.visibleWorld(Size)` allocates an `Aabb2` (`viewport_transform.dart:65`).
+   - The filter is also O(n) per event.
+   - **Fix:** drop the viewport filter and use a world radius or the sorted axis arrays. Or specify that the layer publishes the viewport size.
+
+4. **Important — "Constraints" (O-12): per-event budget "zero".** This is already false for today's tools.
+   - `GripDrag.moveTo` builds a `Transform2.translation` per event (`grip_drag.dart:259`); `moveToTransform` allocates too.
+   - `SelectTool._onCamera` allocates a `Vector2` per tick.
+   - `PlanSymbolTool` allocates in `_free()` (a `Transform2`) and in `_syncAttachment` (`_raw.clone()`, `AttachmentQuery`, `footprintOf`).
+   - `ServiceTool` builds `Transform2.translation` per paint (`service_tool.dart:287`).
+   - **Fix:** state the invariant as "guides add zero over the baseline", and measure with and without guides. Or list the existing allocations as exempt.
+
+5. **Important — "Architecture" (seam ordering).**
+   - Today `_retarget` calls `drag.moveTo(chain point)` before attachment (`select_tool.dart:~462-470`). A guide that "replaces the delta after attachment" means a second `moveTo`, one more `Transform2`, and attachment evaluated on the unguided transform.
+   - **Fix:** say where the guided target enters. Suggest solving between `_resolve` and `moveTo`, with the attachment result still overriding.
+
+6. **Important — "The delta": Shift/ortho.**
+   - `dRaw` gets "the pin applied on the pinned axis", but a guide capture `o` is then added to that same axis. That breaks the ortho line, which `resolveDragPoint` keeps exact (`drag_snap.dart:96-98`).
+   - **Fix:** a pinned axis takes no guide capture.
+
+7. **Important — "The delta": jitter claim.**
+   - "A capture switching moves the object by at most the aperture" is wrong when the grid is on. Compare `dChain` (grid-snapped, up to half a step from `dRaw`) with `dRaw+o`. The jump is up to half a step plus the aperture.
+   - **Fix:** correct the claim and the test. Consider also solving against the `dChain` box, so an on-grid alignment does not move.
+
+8. **Important — "Priority", rule 3: OSNAP suppresses guides.**
+   - Object snap queries the pointer at 10 px against walls, rooms and every endpoint (`kDragSnapMask`, `drag_snap.dart:72`). On a real plan the pointer is often near some geometry.
+   - Guides will therefore blink on and off as the pointer crosses geometry, and the object swaps between the OSNAP and guided positions. This is the stated jitter anti-goal.
+   - **Fix:** apply the OSNAP-wins rule only when the snapped point is the one in use. Or add a release hysteresis. At minimum, add a test with a wall endpoint near the pointer.
+
+9. **Important — "Modes: place".**
+   - `dRaw`, `b` and "drag start" do not exist for placement (no base; hover has no press). The delta section covers moves only.
+   - The ghost's box comes from `boxOfEntry(entry)` (direct leaves only, `symbol_box.dart:129`). The entry is not yet in the document, so it cannot use `definitionBounds`, and the "same bounds" claim fails.
+   - R and M keys call `_syncAttachment` and `_syncPlacement` without `_update` (`plan_symbol_tool.dart:~395-402`), so the guide solve must be hooked there too.
+   - `_track` stores no Alt and no pointer kind, which `_onCamera` retargets need for the aperture and for Alt.
+   - **Fix:** define the placement delta as `p − chain` on `at`. Define the box source (for example `boxOfEntry` through `placementTransform`). Say that the key handlers and `_track` also store Alt and kind. Note that attachment's `current: _free()` must stay unguided.
+
+10. **Important — "Candidates", step 5: recheck circularity.**
+    - If both axes capture spacing, x's recheck uses the final y and y's recheck uses the final x. The order is undefined and the result can differ by implementation.
+    - **Fix:** evaluate both rechecks against the pre-recheck final delta (simultaneous), or fix the order x then y with y seeing the updated x.
+
+11. **Important — "Candidates", continuing spacing.**
+    - The pair `(A,B)` is any of the 16 nearest, but the offset formula uses `L` or `R`. Whether `B` must equal `L` is not stated.
+    - "16 nearest pairs" has no metric, no non-allocating selection, and no tie rule.
+    - A gap `g` of 0 (touching tables) makes every touching pair a snap-to-flush candidate with zero-length marks.
+    - Row membership uses `Tolerance.standard`, which is not a number. It should be `.linear` (`tolerance.dart`).
+    - **Fix:** require `B == L` (or `A == R`) or say any pair is allowed. Specify the ranking (by distance from `M`, with a fixed-size insertion buffer). Exclude `g ≤ tol` from continuing and from marks.
+
+12. **Important — "Controller / host options".**
+    - `PlanServiceView` has no `snapping` option (grep: none). Only `PlanCanvas` writes `snappingAllowed` (`plan_canvas.dart:165,198,210`), and it resets to true on dispose. "Work the way `snapping` does" is false for the service view.
+    - Two writers (`PlanCanvas`, `PlanServiceView`) to one controller flag conflict. `PlanEditor` mounts both.
+    - **Fix:** name the single owner and how `PlanServiceView.alignmentGuides` combines with the canvas flag, for example an `allowedBy` set or a last-writer rule. Add the dispose reset.
+
+13. **Important — API names (frozen at 1.0).**
+    - `alignmentGuides` is a `bool` on three widgets and a `PlanGuideSettings` on the controller. Today the pair is `snapping` (bool) and `snap` (object).
+    - **Fix:** use `controller.guides`, or call the widget option `guides`. The `*Allowed` setter should be `@internal` like `snappingAllowed`.
+    - Hosts that compare `bar.actions` with `PlanEditorAction.values` (`plan_editor.dart:634`) change behaviour when `values` grows. Say so in the CHANGELOG.
+
+14. **Important — references: seats and chairs.**
+    - Units of kind seat are separate instances that "stay where they are" when a table moves (`service_tool.dart`, `_startDrag`). If they are references, the table snaps to chair edges and centres constantly.
+    - **Fix:** exclude seats and attached children, or state that they are references and test it.
+
+15. **Minor — box source.** `leavesByOwner` (used by `definitionBounds`) includes ATTRIB entities. `UnitIndex` excludes them from its box (`unit_index.dart:~121-123`). A unit's text label can therefore stretch the box. Verify, and say which box is canonical.
+
+16. **Minor — Alt.** Pressing or releasing Alt without a pointer event does not re-solve. "Next event" leaves a stale preview on a held pointer. Have `onKey` retarget, or document the stale state.
+
+17. **Minor — moving box.** Edge cases are not stated: an empty moving box (a hidden or singular member of a service group), a group member missing from the cache, and a selection of mixed design nodes (handled by "my call"). Add "empty moving box means no guide".
+
+18. **Minor — `PaperPalette`.**
+    - One optional default cannot be both light and dark, so a custom dark palette built without `guide` gets the light magenta.
+    - The `preview` doc comment already says "guide lines". Clarify the difference.
+    - `==`, `hashCode` and `PlanTheme`'s `copyWith`, `merge`, `lerp`, `debugFillProperties` (`plan_theme.dart:146-354`) must also carry `guideOnLight`, `guideOnDark` and `guideWidth`. The spec lists only validation.
+    - Add `withGuide`, and apply it in `planPaperPaletteFor`, which currently builds only the selection copy.
+
+19. **Minor — touch.** The aperture depends on device kind, but the design seam stores no kind (`select_tool.dart:_follow` stores only screen and shift). Camera retargets need the last kind. Add to the seam's inputs.
+
+
+
