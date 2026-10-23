@@ -610,12 +610,9 @@ class DemoHomeState extends State<DemoHome> {
   }
 
   /// The inspector: a combo over the fake records that fit the one selected
-  /// object, a table's (the Tables profile; the Full one leaves the tables
-  /// to the plan's own panels), a bar counter's or a room's.
+  /// object, a table's, a bar counter's or a room's, under every profile
+  /// but the read-only one (which passes no inspector).
   Widget? _inspector(BuildContext context, PlanObjectDetail object) {
-    if (object.kind == PlanObjectKind.unit && editor != DemoEditor.tables) {
-      return null;
-    }
     final records = recordsFor(object);
     if (records.isEmpty) return null;
     final a = area;
