@@ -142,4 +142,22 @@ void main() {
     await tester.pump();
     expect(await answer, 'Kitchen.jetplan');
   });
+
+  testWidgets(
+      'AD5 a bare Text takes the ShadTheme\'s text style (Roboto, the '
+      'foreground), light and dark', (tester) async {
+    addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
+    await pumpApp(tester);
+    for (final b in [Brightness.light, Brightness.dark]) {
+      tester.platformDispatcher.platformBrightnessTestValue = b;
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      final theme = appShadTheme(b);
+      final style =
+          DefaultTextStyle.of(tester.element(find.byType(DocumentHost)));
+      expect(style.style.fontFamily, 'Roboto', reason: '$b');
+      expect(style.style.color, theme.colorScheme.foreground, reason: '$b');
+      expect(style.style.fontSize, theme.textTheme.p.fontSize, reason: '$b');
+    }
+  });
 }

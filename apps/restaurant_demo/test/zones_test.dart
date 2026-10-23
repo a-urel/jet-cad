@@ -116,16 +116,17 @@ void main() {
   testWidgets('DZ2 the zones\' three strings in German and Turkish (Z22)',
       (tester) async {
     await pumpDemo(tester);
-    await tester.drag(byKey('side-panel'), const Offset(0, -400));
-    await tester.pump();
+    await reveal(tester, 'fade-others');
     expect(find.text('Zones'), findsOneWidget);
     expect(find.text('All'), findsOneWidget);
     expect(find.text('Fade the others'), findsOneWidget);
     await switchLanguage(tester, 'de');
+    await reveal(tester, 'fade-others');
     expect(find.text('Bereiche'), findsOneWidget);
     expect(find.text('Alle'), findsOneWidget);
     expect(find.text('Andere abblenden'), findsOneWidget);
     await switchLanguage(tester, 'tr');
+    await reveal(tester, 'fade-others');
     expect(find.text('Bölgeler'), findsOneWidget);
     expect(find.text('Tümü'), findsOneWidget);
     expect(find.text('Diğerlerini soldur'), findsOneWidget);

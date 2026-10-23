@@ -111,6 +111,16 @@ class _RestaurantDemoState extends State<RestaurantDemo> {
         locale: _locale,
         supportedLocales: planSupportedLocales,
         localizationsDelegates: planLocalizationsDelegates,
+        // A plain `ShadApp` has no Scaffold to set the text style: every
+        // route (the side sheet is its own) gets the theme's, as the
+        // planner's own surfaces do.
+        builder: (context, child) {
+          final shad = ShadTheme.of(context);
+          return DefaultTextStyle(
+              style:
+                  shad.textTheme.p.copyWith(color: shad.colorScheme.foreground),
+              child: child!);
+        },
         home: DemoHome(
             random: widget.random,
             printer: widget.printer,
@@ -867,7 +877,7 @@ class DemoHomeState extends State<DemoHome> {
                             builder: (_) => Text(words.hostChoices),
                             child: ShadIconButton.ghost(
                               key: const Key('side-panel-button'),
-                              icon: const Icon(LucideIcons.slidersHorizontal),
+                              icon: const Icon(LucideIcons.panelRight),
                               onPressed: _openSidePanel,
                             ),
                           ),

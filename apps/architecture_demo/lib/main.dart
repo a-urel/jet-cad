@@ -133,12 +133,22 @@ class ArchitectureDemoAppState extends State<ArchitectureDemoApp> {
         // web an unhandled Cmd/Ctrl+S opens the browser's Save Page. The
         // editor's own bindings run the commands when the home route has
         // the focus.
-        builder: (context, child) => CallbackShortcuts(
-          bindings: <ShortcutActivator, VoidCallback>{
-            for (final chord in kFileChords) chord: _consume,
-          },
-          child: child!,
-        ),
+        //
+        // A plain `ShadApp` has no Scaffold to set the text style: every
+        // route gets the theme's, as the planner's own surfaces do.
+        builder: (context, child) {
+          final shad = ShadTheme.of(context);
+          return DefaultTextStyle(
+            style:
+                shad.textTheme.p.copyWith(color: shad.colorScheme.foreground),
+            child: CallbackShortcuts(
+              bindings: <ShortcutActivator, VoidCallback>{
+                for (final chord in kFileChords) chord: _consume,
+              },
+              child: child!,
+            ),
+          );
+        },
         home: DocumentHost(
             controller: _controller,
             session: _session,
