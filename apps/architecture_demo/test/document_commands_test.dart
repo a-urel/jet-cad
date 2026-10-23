@@ -10,7 +10,7 @@
 //          and the dirty mark are a bounded host widget in
 //          `PlanEditorBar.leading`; DC12 keeps 800 px, DC12c's floor moves
 //          to 800 px with Export's button and the
-//          name at 144 px, re-measured in Task 6)
+//          name at 104 px, re-measured in Task 6)
 //   COVERED DC3: packages/jet_cad_2d_plan/test/editor/plan_editor_test.dart
 //          ED-3 (:133, "without them none is offered") and ED-U (:445),
 //          editor/editor_view_test.dart V1 (:28, "the editor has Export and
@@ -829,7 +829,7 @@ void main() {
     // Intent half: COVERED, checked: packages/jet_cad_2d_plan/test/editor/
     // editor_words_test.dart:190 (the OV-$code cases: "no overflow from 704 px
     // down to 656 px", the library bar without host widgets).
-    // The width is the old 800 px: the name is bounded at 144 px.
+    // The width is the old 800 px: the name is bounded at 104 px (144 px before the alignment guides toggle).
     // Decided: this test pins the desktop top bar below 1000 px (an editor
     // narrower than 1000 px has the tablet layout by default now, ruling
     // R6), so it forces the desktop layout.
@@ -853,7 +853,7 @@ void main() {
         find.descendant(of: f, matching: find.byType(RichText)));
     expect(paragraph(name).didExceedMaxLines, isTrue,
         reason: 'cut, not wrapped');
-    expect(tester.getRect(name).width, 144, reason: 'bounded at 144');
+    expect(tester.getRect(name).width, 104, reason: 'bounded at 104');
     final bar = tester.getRect(find.byKey(const Key('chrome-top')));
     expect(
         tester.getRect(name).right,
@@ -889,7 +889,7 @@ void main() {
       'long status line do not overflow the top bar, and OSNAP and the zoom '
       'stay on screen (spec 12a D7, S-27)', (tester) async {
     // Decided: premise impossible (the range). The floor is 800 px, measured
-    // on this layout: the 144 px name, the 40 px Open sample button, the
+    // on this layout: the 104 px name, the 40 px Open sample button, the
     // library's toolbar (Export's button in it, since Task 6) and its gap,
     // OSNAP and the zoom, and the bar's padding, with nothing left for the
     // status; at 799 px the bar overflows by 1 px. (Task 4b measured 776 px

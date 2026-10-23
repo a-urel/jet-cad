@@ -432,6 +432,25 @@ final ThemeData posLightTheme = ThemeData(
   extensions: const [planLookLight],
 );
 
+/// A floor editor that never offers alignment guides.
+Widget plainEditor(PlanController c) =>
+    PlanEditor(controller: c, alignmentGuides: false);
+
+/// Follow the guides' switch in the POS's own chrome, and flip it from code.
+void watchGuides(PlanController c) {
+  c.alignmentGuides.addListener(() {
+    debugPrint('guides: ${c.alignmentGuides.on}');
+  });
+  c.alignmentGuides.toggle();
+}
+
+/// Guides in the brand's blue, twice as thick as the default.
+const PlanTheme planLookGuides = PlanTheme(
+  guideOnLight: Color(0xFF2563EB),
+  guideOnDark: Color(0xFF60A5FA),
+  guideWidth: 2,
+);
+
 /// The POS.
 class PosApp extends StatefulWidget {
   const PosApp({super.key, required this.store});

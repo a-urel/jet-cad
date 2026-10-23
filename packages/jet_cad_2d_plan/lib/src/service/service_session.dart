@@ -15,6 +15,8 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:meta/meta.dart' show internal;
 
+import '../guides/guide_references.dart';
+import '../guides/guide_settings.dart';
 import '../kits/guard.dart';
 import '../kits/locks.dart';
 import '../units/unit_index.dart';
@@ -72,6 +74,8 @@ final class ServiceSession {
         damage,
     ValueListenable<Map<String, UnitGroup>>? groups,
     bool Function()? moves,
+    PlanGuideSettings? guideSettings,
+    double Function()? guideStroke,
     Set<Handle> Function(DraftDocument document, Handle object)? referencesOf,
   })  : page = PageNotifier(document),
         index = SpatialIndex(document) {
@@ -122,7 +126,12 @@ final class ServiceSession {
         userCamera: () => host.userCamera(),
         toGlobal: (local) => host.toGlobal(local),
         events: () => host.events(),
-        idleKeys: () => host.idleKeys());
+        idleKeys: () => host.idleKeys(),
+        guides: guideSettings == null
+            ? null
+            : GuideReferenceCache(document, units: () => units),
+        guideSettings: guideSettings,
+        guideStroke: guideStroke);
     tools = ToolController(initial: tool, context: toolContext);
   }
 

@@ -94,6 +94,9 @@ class RecordingPlanStrings implements PlanStrings {
   String get redo => record(inner.redo);
 
   @override
+  String get alignmentGuides => record(inner.alignmentGuides);
+
+  @override
   String get newDocument => record(inner.newDocument);
 
   @override

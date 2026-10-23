@@ -41,6 +41,10 @@ const Duration kLockHintDuration = Duration(seconds: 2);
 /// - [rulers] and [grid] are the drafting aids; [snapping] lets object snap
 ///   act (the user's F3 setting is kept either way); [autofocus] lets the
 ///   canvas take the focus when it is mounted.
+/// - [alignmentGuides] lets alignment guides act in this view (the user's
+///   toggle is kept either way); a host mounting a [PlanCanvas] and a
+///   `PlanServiceView` over one controller with different values gets the
+///   last mounted one's.
 class PlanCanvas extends StatefulWidget {
   const PlanCanvas({
     super.key,
@@ -48,6 +52,7 @@ class PlanCanvas extends StatefulWidget {
     this.rulers = true,
     this.grid = true,
     this.snapping = true,
+    this.alignmentGuides = true,
     this.autofocus = true,
     this.unitOverlays,
   });
@@ -56,6 +61,7 @@ class PlanCanvas extends StatefulWidget {
   final bool rulers;
   final bool grid;
   final bool snapping;
+  final bool alignmentGuides;
   final bool autofocus;
 
   /// Above everything on the canvas, inside its input listeners, clipped
@@ -163,6 +169,7 @@ class _PlanCanvasState extends State<PlanCanvas> {
     // clears too.
     _onHint();
     _c.snappingAllowed = widget.snapping;
+    _c.alignmentGuidesAllowed = widget.alignmentGuides;
     _bind();
   }
 
@@ -195,7 +202,10 @@ class _PlanCanvasState extends State<PlanCanvas> {
       // alone counts again (today's snap was the shell's, never the
       // controller's). Only here, where the order is the swap's: a canvas
       // replaced by another in one frame is not undone by its dispose.
-      if (!old.isDisposed) old.snappingAllowed = true;
+      if (!old.isDisposed) {
+        old.snappingAllowed = true;
+        old.alignmentGuidesAllowed = true;
+      }
       old.removeListener(_onController);
       old.lockHint.removeListener(_onHint);
       _hintTimer?.cancel();
@@ -208,6 +218,7 @@ class _PlanCanvasState extends State<PlanCanvas> {
       PlanLocaleScope.push(context, _c);
     }
     _c.snappingAllowed = widget.snapping;
+    _c.alignmentGuidesAllowed = widget.alignmentGuides;
   }
 
   @override
@@ -366,6 +377,8 @@ class _PlanCanvasState extends State<PlanCanvas> {
     // A parent rebuild may arrive before the controller's notification.
     if (!identical(document, _document)) _rebind();
     final paper = _paperArgb();
+    // Read by the tools' paint, so a plain field (not a notifier).
+    c.guideStrokePixels = _theme?.guideWidth ?? 1.0;
     return ColoredBox(
       color: _canvasColour(scheme),
       child: Stack(

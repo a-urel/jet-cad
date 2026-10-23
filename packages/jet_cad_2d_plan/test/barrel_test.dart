@@ -94,6 +94,8 @@ void main() {
       'showPlanExportDialog', 'kFileChords',
       // 4a Task 3
       'PlanToolIds',
+      // Alignment guides Task 5
+      'PlanGuideSettings',
     });
   });
 

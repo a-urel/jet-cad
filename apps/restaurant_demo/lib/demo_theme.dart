@@ -118,9 +118,10 @@ ColorScheme posColorScheme(Brightness brightness) =>
 /// planner's bundled `Roboto` (the same on every terminal, the guide's
 /// advice), status fills at 0.8 of their colour, group frames in the
 /// primary (the chips follow the frame), rounder chips, the muted token
-/// around the page, a taller service bar, an orange selection, and a
-/// heavier veil over the tables out of focus. The veil keeps the paper's
-/// colour: one of another colour would show each faded table's box.
+/// around the page, a taller service bar, 1.5 px alignment guides, an orange
+/// selection, and a heavier veil over the tables out of focus. The veil keeps
+/// the paper's colour: one of another colour would show each faded table's
+/// box.
 const PlanTheme kPosPlanLight = PlanTheme(
   statusCaptionStyle: TextStyle(
       fontFamily: 'Roboto', fontSize: 12, fontWeight: FontWeight.bold),
@@ -134,6 +135,7 @@ const PlanTheme kPosPlanLight = PlanTheme(
   focusVeilOpacity: 0.75,
   canvasBackground: _zinc100,
   serviceBarHeight: 52,
+  guideWidth: 1.5,
 );
 
 /// [kPosPlanLight]'s dark counterpart: the dark primary and muted
@@ -153,6 +155,7 @@ const PlanTheme kPosPlanDark = PlanTheme(
   focusVeilOpacity: 0.75,
   canvasBackground: _zinc800,
   serviceBarHeight: 52,
+  guideWidth: 1.5,
 );
 
 /// The POS look for [brightness]'s app theme.

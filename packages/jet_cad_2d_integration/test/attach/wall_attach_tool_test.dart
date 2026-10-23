@@ -137,6 +137,9 @@ final class Rig {
     });
     final c = architectureController(json: plan.json);
     addTearDown(c.dispose);
+    // The tests pin exact landings: alignment guides (on by default) would
+    // snap a drop near another symbol, so they are off in this rig.
+    c.alignmentGuides.toggle();
     await pumpPlanEditor(tester, c);
     expect(await symbolsReady(tester, c), isTrue,
         reason: 'premise: the furniture library loaded');

@@ -22,10 +22,17 @@ Finder byKey(String k) => find.byKey(Key(k));
 /// A controller over [json] (the embedding plan by default) with [kits]
 /// (the fixture kit by default: the fixture plans are plan files over
 /// `fxKit()`), disposed at tear-down.
-PlanController serviceController({String? json, List<PlanKit>? kits}) {
+///
+/// The alignment guides are off unless [guides]: the fixtures' tables stand
+/// in rows and columns, so a drag here would snap to a neighbour a few
+/// millimetres away, and these tests pin where a drag lands without them.
+/// `test/guides` pins the guides themselves.
+PlanController serviceController(
+    {String? json, List<PlanKit>? kits, bool guides = false}) {
   final c = PlanController(
       kits: kits ?? [fxKit()], json: json ?? embeddingPlanJson());
   addTearDown(c.dispose);
+  if (!guides && c.alignmentGuides.on) c.alignmentGuides.toggle();
   return c;
 }
 

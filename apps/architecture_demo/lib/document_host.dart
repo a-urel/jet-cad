@@ -436,9 +436,10 @@ class DocumentHostState extends State<DocumentHost> {
 }
 
 /// The plan's name, with `• ` in front and an `Edited` tooltip while it is
-/// dirty, cut with an ellipsis at 144 px: with the Open sample button and
+/// dirty, cut with an ellipsis at 104 px: with the Open sample button and
 /// the library's bar, Export's button included (it was 160 px before the app
-/// gave `onExport`), that leaves the top bar fitting 800 px.
+/// gave `onExport`, and 144 px before the library's alignment guides
+/// toggle took 40 px), that leaves the top bar fitting 800 px.
 class _DocumentTitle extends StatelessWidget {
   const _DocumentTitle({required this.session, required this.controller});
 
@@ -447,7 +448,7 @@ class _DocumentTitle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 144),
+        constraints: const BoxConstraints(maxWidth: 104),
         child: ListenableBuilder(
           listenable: Listenable.merge([session, controller.dirty]),
           builder: (context, _) {

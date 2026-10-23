@@ -31,6 +31,7 @@ const List<String> kEditorKeys = [
   'toolbar-print',
   'toolbar-undo',
   'toolbar-redo',
+  'toolbar-guides',
   'status-text',
   'osnap-text',
   'zoom-text',
@@ -42,14 +43,16 @@ Map<String, double> edgesOf(WidgetTester tester, List<String> keys) => {
     };
 
 /// Every left edge of the default editor bar, read on the floor planner's
-/// base (`ffe0b9c`) at 1440 x 900, per onExport.
+/// base (`ffe0b9c`) at 1440 x 900, per onExport; the alignment guides'
+/// toggle (task 9b) sits after Redo, 40 px wide, and moves the status line.
 const Map<bool, Map<String, double>> kEditorEdges = {
   true: {
     'toolbar-export': 12,
     'toolbar-print': 52,
     'toolbar-undo': 104,
     'toolbar-redo': 144,
-    'status-text': 200,
+    'toolbar-guides': 184,
+    'status-text': 240,
     'osnap-text': 1184,
     'zoom-text': 1271.25,
   },
@@ -57,7 +60,8 @@ const Map<bool, Map<String, double>> kEditorEdges = {
     'toolbar-print': 12,
     'toolbar-undo': 64,
     'toolbar-redo': 104,
-    'status-text': 160,
+    'toolbar-guides': 144,
+    'status-text': 200,
     'osnap-text': 1184,
     'zoom-text': 1271.25,
   },
@@ -172,7 +176,7 @@ void main() {
         'toString naming what differs from the default; the enum in '
         "today's left-to-right order (S-2)", () {
       expect(host.PlanEditorAction.values.map((a) => a.name),
-          ['export', 'print', 'undo', 'redo', 'snap', 'zoom']);
+          ['export', 'print', 'undo', 'redo', 'guides', 'snap', 'zoom']);
       const a = Text('a'), b = Text('b');
       const editor = host.PlanEditorBar();
       expect(editor.visible, isTrue);

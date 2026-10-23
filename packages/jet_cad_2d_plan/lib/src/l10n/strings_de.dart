@@ -96,6 +96,9 @@ class PlanStringsDe extends PlanStrings {
   String get redo => 'Wiederholen';
 
   @override
+  String get alignmentGuides => 'Ausrichtungshilfen';
+
+  @override
   String get newDocument => 'Neu';
 
   @override

@@ -12,6 +12,9 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
 
 import '../attach/attachment_registry.dart';
+import '../guides/guide_references.dart';
+import '../guides/guide_settings.dart';
+import '../guides/plan_move_guides.dart';
 import '../kits/guard.dart';
 import '../kits/kit_set.dart';
 import '../kits/locks.dart';
@@ -42,6 +45,8 @@ final class DocumentSession {
       required PlanPermissions Function() permissions,
       required ValueListenable<bool> fill,
       required Tool Function(String kitId, String toolId, Tool tool) guard,
+      required PlanGuideSettings guideSettings,
+      required double Function() guideStrokePixels,
       MoveResolver? moveResolver})
       : _log = log,
         _guard = guard,
@@ -76,8 +81,22 @@ final class DocumentSession {
         grips: grips);
     // The session's one plan.select: the generic set's, gated (spec P2
     // permissions, P4 locks).
-    generic =
-        buildGenericTools(gates: gates, fill: fill, moveResolver: moveResolver);
+    // The alignment guides' references read the unit index lazily: it is
+    // made after the tools (below).
+    guides = GuideReferenceCache(document, units: () => units);
+    moveGuides = PlanMoveGuides(
+        references: guides,
+        settings: guideSettings,
+        strokePixels: guideStrokePixels,
+        movable: (h) {
+          final node = document.tree[h];
+          return node is InstanceNode && node.parent == document.rootHandle;
+        });
+    generic = buildGenericTools(
+        gates: gates,
+        fill: fill,
+        moveResolver: moveResolver,
+        moveAdjuster: moveGuides);
     select = generic.select;
     // Every tool in the map is guarded (spec P4), the plan's own under the
     // kit id `plan`; the tool controller knows the guarded one.
@@ -138,6 +157,13 @@ final class DocumentSession {
 
   /// The document's units (spec 2b S2, `UnitIndex`).
   late final UnitIndexCache units;
+
+  /// The alignment guides' references (alignment guides spec, "The
+  /// reference cache"), over [units].
+  late final GuideReferenceCache guides;
+
+  /// The design move's alignment guides, the select tool's adjuster.
+  late final PlanMoveGuides moveGuides;
 
   /// The select tool's and the grip cache's gates: the permissions and the
   /// locks (spec P2, P4).

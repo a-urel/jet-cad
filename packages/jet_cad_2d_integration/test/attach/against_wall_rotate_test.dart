@@ -81,7 +81,10 @@ void main() {
         '${rotate ? 'turns' : 'does not turn'}; against the north face it '
         'attaches unturned; one dragged to the east face '
         '${rotate ? 'turns' : 'keeps its turn'}', (tester) async {
+      // The test pins exact landings; alignment guides (on by default)
+      // would snap a drop near the base unit's neighbours.
       final c = await mountEditor(tester,
+          alignmentGuides: false,
           permissions: PlanPermissions.full.copyWith(rotate: rotate));
       final d = c.document;
       gridSnapOff(d);
@@ -156,7 +159,9 @@ void main() {
       'under rotate: false, attaches to the face its back faces with its own '
       'linear part bit for bit, and stays a plain move near a face it does '
       'not', (tester) async {
-    final c = await mountEditor(tester);
+    // These pin exact landings; alignment guides (on by default) would snap
+    // a drop near the base unit's neighbours, so they are off here.
+    final c = await mountEditor(tester, alignmentGuides: false);
     final d = c.document;
     gridSnapOff(d);
     await openSymbols(tester, c);
@@ -205,7 +210,9 @@ void main() {
       'F-7 review R-3: the ghost attached to the east face lets go and '
       'unturns when rotate turns false with no pointer event; full again, '
       'it attaches turned', (tester) async {
-    final c = await mountEditor(tester);
+    // These pin exact landings; alignment guides (on by default) would snap
+    // a drop near the base unit's neighbours, so they are off here.
+    final c = await mountEditor(tester, alignmentGuides: false);
     gridSnapOff(c.document);
     await openSymbols(tester, c);
     await tester.enterText(byKey('symbol-search'), 'base unit 600');
