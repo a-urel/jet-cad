@@ -533,7 +533,10 @@ class PlanSymbolTool extends Tool {
           notifyListeners();
         }
       }
-      return KeyEventResult.ignored;
+      // Mid-press every key-down is swallowed (below); a key-up bubbles.
+      return _pressed && armed.value != null && down
+          ? KeyEventResult.handled
+          : KeyEventResult.ignored;
     }
     if (armed.value == null || event is KeyUpEvent) {
       return KeyEventResult.ignored;

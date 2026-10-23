@@ -191,10 +191,11 @@ PlanKit _kit(RecordingProvider provider) => PlanKit(
 Future<_Rig> _rig(
     {String armed = 'fx.table.two@1',
     bool objectSnap = false,
-    bool grid = false}) async {
+    bool grid = false,
+    Transform2? tableAt}) async {
   final provider = RecordingProvider('test-edge', (_) => null);
   final text = planText([_kit(provider)], (d) {
-    placeUnit(d, tableSymbol(), transform: _tA);
+    placeUnit(d, tableSymbol(), transform: tableAt ?? _tA);
     d.commands.execute(SetComponentCommand<PageComponent>(
         d.rootHandle,
         d.components
@@ -448,6 +449,50 @@ void main() {
   });
 
   test(
+      'PG-11 the snap marker is painted at the guided anchor\'s screen '
+      'point, not the chain\'s', () async {
+    final tA = placementAt(6000, 4037, 30 * math.pi / 180);
+    final r = await _rig(grid: true, tableAt: tA);
+    r.turn();
+    final a = _aabb(tA);
+    final raw = Vector2(a.maxX + 3000.123456789, a.maxY - _halfY + 3 * _px);
+    r.hover(raw);
+    expect(r.sol.capturedY, isTrue);
+    final guided = r.tool.ghostAt;
+    // The grid marker is a cross: its two lines meet at the marker.
+    final canvas = _CountingCanvas();
+    r.tool.paintOverlay(
+        canvas, _camera, const ui.Size(800, 600), PaperPalette.light);
+    expect(canvas.lines, hasLength(2));
+    final (h0, h1) = canvas.lines.first;
+    final centre = ui.Offset((h0.dx + h1.dx) / 2, (h0.dy + h1.dy) / 2);
+    // Screen = (2x - 9000, -2y + 11000), by hand.
+    expect(centre.dx, closeTo(2 * guided.x - 9000, 1e-6));
+    expect(centre.dy, closeTo(-2 * guided.y + 11000, 1e-6));
+    // Premise: the chain's point is elsewhere (about 50 mm away).
+    final off = await _rig(grid: true, tableAt: tA);
+    off.turn();
+    off.c.alignmentGuides.toggle();
+    off.hover(raw);
+    expect((off.tool.ghostAt.y - guided.y).abs(), greaterThan(5));
+  });
+
+  test('PG-12 Alt is swallowed mid-press and bubbles when not pressed',
+      () async {
+    final r = await _rig();
+    final raw = _aboveTop(_aabb(_tA), 2);
+    r.hover(raw);
+    expect(r.altDown(), KeyEventResult.ignored);
+    expect(r.altUp(), KeyEventResult.ignored);
+    r.tool.onPointerDown(r.ev(raw, buttons: kPrimaryButton), r.ctx);
+    expect(r.tool.isMidShape, isTrue);
+    expect(r.altDown(), KeyEventResult.handled);
+    // The key-up bubbles.
+    expect(r.altUp(), KeyEventResult.ignored);
+    r.tool.cancel(r.ctx);
+  });
+
+  test(
       'PG-9 a wall-attaching symbol: the attachment is asked on the '
       'unguided transform; attached it is taken verbatim and no guide is '
       'painted', () async {
@@ -489,6 +534,11 @@ void main() {
 /// Counts the canvas calls by method name.
 final class _CountingCanvas implements ui.Canvas {
   final Map<String, int> calls = {};
+  final List<(ui.Offset, ui.Offset)> lines = [];
+
+  @override
+  void drawLine(ui.Offset p1, ui.Offset p2, ui.Paint paint) =>
+      lines.add((p1, p2));
 
   @override
   dynamic noSuchMethod(Invocation invocation) {
