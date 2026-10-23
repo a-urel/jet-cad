@@ -87,6 +87,7 @@ class PlanEditor extends StatefulWidget {
     this.rulers = true,
     this.grid = true,
     this.snapping = true,
+    this.alignmentGuides = true,
     this.bar = const PlanEditorBar(),
     this.onNew,
     this.onOpen,
@@ -210,6 +211,10 @@ class PlanEditor extends StatefulWidget {
 
   /// Whether object snap may act (and F3 and the OSNAP read-out exist).
   final bool snapping;
+
+  /// Whether alignment guides may act, in design and in service (the
+  /// user's toggle is kept either way).
+  final bool alignmentGuides;
 
   /// The top bar.
   final PlanEditorBar bar;
@@ -818,6 +823,7 @@ class _PlanEditorState extends State<PlanEditor> {
 
   PlanServiceView _serviceView() => _service ??= PlanServiceView(
         controller: widget.controller,
+        alignmentGuides: widget.alignmentGuides,
         breakpoints: widget.breakpoints,
         layout: widget.layout,
         serviceSidePanel: widget.serviceSidePanel,
@@ -1140,6 +1146,7 @@ class _PlanEditorState extends State<PlanEditor> {
                         rulers: widget.rulers,
                         grid: widget.grid,
                         snapping: widget.snapping,
+                        alignmentGuides: widget.alignmentGuides,
                         autofocus: widget.autofocus,
                         unitOverlays: _designOverlays(),
                       ),
@@ -1235,6 +1242,7 @@ class _PlanEditorState extends State<PlanEditor> {
                       rulers: widget.rulers,
                       grid: widget.grid,
                       snapping: widget.snapping,
+                      alignmentGuides: widget.alignmentGuides,
                       autofocus: widget.autofocus,
                       unitOverlays: _designOverlays(),
                     ),

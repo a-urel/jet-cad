@@ -75,6 +75,7 @@ class PlanServiceView extends StatefulWidget {
     this.longPress = PlanLongPress.toggleSelection,
     this.floorDrag = PlanFloorDrag.pan,
     this.userCamera = true,
+    this.alignmentGuides = true,
     this.shortcuts = true,
     this.autofocus = true,
     this.unitOverlayBuilder,
@@ -92,6 +93,11 @@ class PlanServiceView extends StatefulWidget {
   });
 
   final PlanController controller;
+
+  /// Whether alignment guides may act in this view (the user's toggle is
+  /// kept either way). A host mounting this view and a `PlanCanvas` over
+  /// one controller with different values gets the last mounted one's.
+  final bool alignmentGuides;
 
   /// The host's panel beside the plan in service (orders, a table's detail).
   /// On a desktop layout it is docked on the right, 320 logical pixels wide
@@ -212,6 +218,7 @@ class _PlanServiceViewState extends State<PlanServiceView> {
   void initState() {
     super.initState();
     _listen(_c);
+    _c.alignmentGuidesAllowed = widget.alignmentGuides;
   }
 
   void _listen(PlanController c) {
@@ -244,7 +251,14 @@ class _PlanServiceViewState extends State<PlanServiceView> {
       _flows.dispose();
       _flows = _flowsFor(widget.controller);
       PlanLocaleScope.push(context, widget.controller);
+      // This view no longer speaks for the old controller's guides. Only
+      // here: a view replaced by another in one frame is not undone by its
+      // dispose (spec, "Turning them off").
+      if (!oldWidget.controller.isDisposed) {
+        oldWidget.controller.alignmentGuidesAllowed = true;
+      }
     }
+    widget.controller.alignmentGuidesAllowed = widget.alignmentGuides;
   }
 
   @override
@@ -687,6 +701,8 @@ class _ServiceCanvasState extends State<_ServiceCanvas> {
     final callbacks = widget.callbacks();
     final keys = widget.shortcuts;
     final paper = _paperArgb();
+    // Read by the tools' paint, so a plain field (not a notifier).
+    _c.guideStrokePixels = _theme.value?.guideWidth ?? 1.0;
     return CallbackShortcuts(
       bindings: <ShortcutActivator, VoidCallback>{
         if (keys)
