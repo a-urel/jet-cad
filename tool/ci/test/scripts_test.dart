@@ -287,13 +287,32 @@ void main() {
       expect(r.stdout, contains('no GPU renderer, no build hook'));
     });
 
-    test('a build hook ran: exit 1', () async {
+    test('a build hook ran: exit 1, named', () async {
       Directory(
-        '${probe.path}/.dart_tool/hooks_runner',
+        '${probe.path}/.dart_tool/hooks_runner/flutter_scene',
       ).createSync(recursive: true);
       final r = await runTail();
       expect(r.exitCode, 1);
-      expect(r.stderr, contains('a build hook ran'));
+      expect(r.stderr, contains('a build hook ran (flutter_scene)'));
+    });
+
+    test("objective_c's hook, in both layouts, is allowed", () async {
+      for (final dir in ['', 'shared/']) {
+        Directory(
+          '${probe.path}/.dart_tool/hooks_runner/${dir}objective_c',
+        ).createSync(recursive: true);
+      }
+      final r = await runTail();
+      expect(r.exitCode, 0, reason: '${r.stdout}${r.stderr}');
+    });
+
+    test('a name that only starts with objective_c is not', () async {
+      Directory(
+        '${probe.path}/.dart_tool/hooks_runner/shared/objective_c_x',
+      ).createSync(recursive: true);
+      final r = await runTail();
+      expect(r.exitCode, 1);
+      expect(r.stderr, contains('a build hook ran (objective_c_x)'));
     });
 
     test("flutter_scene's assets: exit 1", () async {
