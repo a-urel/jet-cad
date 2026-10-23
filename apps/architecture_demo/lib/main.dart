@@ -1,15 +1,15 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' show ThemeMode;
+import 'package:flutter/widgets.dart';
 import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+import 'package:shadcn_ui/shadcn_ui.dart';
 
 import 'app_strings.dart';
+import 'app_theme.dart';
 import 'document_files.dart';
 import 'document_host.dart';
 import 'document_session.dart';
 import 'exit_guard.dart';
-
-/// The app's theme seed, light and dark alike (the old app's).
-const Color kAppSeed = Color(0xFF2266CC);
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -28,7 +28,7 @@ Future<void> main() async {
 }
 
 /// The app: it owns the one [PlanController], the [DocumentSession] and the
-/// [DocumentFiles], and rebuilds [MaterialApp] from the session and the
+/// [DocumentFiles], and rebuilds [ShadApp] from the session and the
 /// controller's dirty flag, so `onGenerateTitle` -- which runs above `home`
 /// and re-runs only when the app rebuilds -- follows the plan's name and
 /// dirty state (the web tab's title). The [DocumentHost] in `home` runs the
@@ -86,7 +86,7 @@ class ArchitectureDemoAppState extends State<ArchitectureDemoApp> {
   DocumentSession get session => _session;
 
   /// The web's save-name prompt, shown over the navigator: the files object
-  /// is made above the `MaterialApp`, so it has no `BuildContext` of its
+  /// is made above the `ShadApp`, so it has no `BuildContext` of its
   /// own.
   Future<String?> _askName(String suggested) async {
     final context = _navigator.currentContext;
@@ -119,16 +119,14 @@ class ArchitectureDemoAppState extends State<ArchitectureDemoApp> {
         builder: (context, _) => _app(),
       );
 
-  Widget _app() => MaterialApp(
+  Widget _app() => ShadApp(
         navigatorKey: _navigator,
         onGenerateTitle: (_) =>
             documentTitle(_session.name, dirty: _controller.dirty.value),
-        debugShowCheckedModeBanner: false,
         supportedLocales: planSupportedLocales,
         localizationsDelegates: planLocalizationsDelegates,
-        theme: ThemeData(colorSchemeSeed: kAppSeed),
-        darkTheme:
-            ThemeData(colorSchemeSeed: kAppSeed, brightness: Brightness.dark),
+        theme: appShadTheme(Brightness.light),
+        darkTheme: appShadTheme(Brightness.dark),
         themeMode: ThemeMode.system,
         // The file chords once more above the Navigator, consume-only: a
         // dialog's route is outside the editor's focus chain, and on the

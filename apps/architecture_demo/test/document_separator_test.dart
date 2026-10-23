@@ -3,7 +3,7 @@
 // "document_separator_test.dart"): FS1-FS3, all PORT. The app's new plans
 // print the decimal separator of the language of the moment: New and Open
 // sample reach `controller.newPlan` after the editor reported the locale;
-// the launch plan resolves the system's locales as the app's `MaterialApp`
+// the launch plan resolves the system's locales as the app's `ShadApp`
 // does. Library halves: packages/jet_cad_2d_plan/test/controller/
 // locale_separator_test.dart (NS1, NS6, NS8), editor/editor_separator_test.dart
 // (NS1, NS2); Open sample's words: packages/jet_cad_2d_kit_architecture/
@@ -38,7 +38,7 @@ PlanStrings hostStrings(WidgetTester tester) =>
 Future<void> switchSystemTo(WidgetTester tester, Locale locale) async {
   tester.platformDispatcher.localesTestValue = [locale];
   await tester.pump();
-  await tester.pump();
+  await tester.pump(kLocaleTick);
 }
 
 Future<void> tapToolbar(WidgetTester tester, String id) async {
@@ -65,7 +65,7 @@ void main() {
       final rig = await pumpUnder(tester, locales);
       final strings = hostStrings(tester);
       expect(strings.languageCode, language,
-          reason: 'premise: the language the MaterialApp resolved');
+          reason: 'premise: the language the ShadApp resolved');
       final c = rig.controller;
       expect(rig.session.fileName, isNull, reason: 'premise: the launch plan');
       expect(separatorOf(c), expected);

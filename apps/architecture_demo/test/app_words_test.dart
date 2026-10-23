@@ -13,6 +13,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d_plan/src/chrome/icon_button.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+import 'package:shadcn_ui/shadcn_ui.dart'
+    show GlobalShadLocalizations, ShadIconButton;
 
 import 'support/app_fakes.dart';
 import 'support/app_rig.dart';
@@ -32,8 +34,9 @@ Future<AppStrings> wordsFor(WidgetTester tester, Locale locale) async {
 
 String tooltipOf(WidgetTester tester, String key) {
   final w = tester.widget(find.byKey(Key(key)));
-  // The app's own Open sample button is a Material one (a host slot).
-  if (w is IconButton) return w.tooltip!;
+  // The app's own Open sample button is a shadcn one (a host slot), its
+  // words in the `ShadTooltip` around it.
+  if (w is ShadIconButton) return shadTooltipOf(tester, find.byWidget(w))!;
   return (w as PlanIconButton).tooltip ?? w.label;
 }
 
@@ -130,6 +133,11 @@ void main() {
     await tester.binding.setSurfaceSize(const Size(1440, 900));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     FileTypeLabel? handed;
+    await tester.runAsync(() async {
+      for (final language in const ['de', 'tr']) {
+        await GlobalShadLocalizations.delegate.load(Locale(language));
+      }
+    });
     await tester.pumpWidget(ArchitectureDemoApp(createFiles: (
         {required DocumentNamePrompt askName,
         required FileTypeLabel typeLabel}) {
@@ -137,11 +145,13 @@ void main() {
       return FakeDocumentFiles();
     }));
     await tester.pump();
+    await tester.pump(kLocaleTick);
     expect(handed, isNotNull, reason: 'premise: the app made its files');
     expect(handed!(FileKind.pdf), 'PDF-Dokument');
     expect(handed!(FileKind.jetplan), 'Jet-Plan');
     tester.platformDispatcher.localesTestValue = [const Locale('tr', 'TR')];
     await tester.pump();
+    await tester.pump(kLocaleTick);
     expect(handed!(FileKind.png), 'PNG görüntüsü',
         reason: 'read at each call: the language of the moment');
   });

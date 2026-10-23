@@ -21,8 +21,10 @@ dependencies:
     sdk: flutter
   jet_cad_2d_kit_architecture: ^0.1.1
   jet_cad_2d_plan: ^0.9.0
+  lucide_icons_flutter: ^3.1.25
   # The print wrapper names PdfPageFormat (PagePrinter's signature).
   pdf: ^3.13.1
+  shadcn_ui: ^0.57.1
   web: ^1.1.0
 
 dev_dependencies:

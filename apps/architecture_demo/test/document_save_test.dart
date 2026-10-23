@@ -9,6 +9,7 @@
 // jet_cad_2d_plan/test/controller/plan_controller_test.dart C4.
 import 'package:architecture_demo/document_host.dart';
 import 'package:flutter/material.dart';
+import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
@@ -211,7 +212,7 @@ void main() {
       'typed name on Save or Enter, null on Cancel (spec 12a D9, T-12)',
       (tester) async {
     late BuildContext context;
-    await tester.pumpWidget(MaterialApp(home: Builder(builder: (c) {
+    await tester.pumpWidget(ShadApp(home: Builder(builder: (c) {
       context = c;
       return const SizedBox();
     })));
@@ -224,7 +225,7 @@ void main() {
     await tester.pump();
     final field = find.byKey(const Key('name-prompt-field'));
     expect(
-        tester.widget<TextField>(field).controller!.text, 'Untitled.jetplan');
+        tester.widget<ShadInput>(field).controller!.text, 'Untitled.jetplan');
     await tester.enterText(field, 'Kitchen');
     await tester.tap(find.byKey(const Key('name-prompt-save')));
     await tester.pump();

@@ -29,12 +29,13 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'dart:ui' show AppExitResponse;
 
-import 'package:flutter/material.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart'
     show buildSampleFlat;
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+import 'package:shadcn_ui/shadcn_ui.dart';
 
 import 'app_strings.dart';
 import 'busy_wrappers.dart';
@@ -222,7 +223,7 @@ class DocumentHostState extends State<DocumentHost> {
 
   Future<SaveChoice> _askToSave() async {
     if (!mounted) return SaveChoice.cancel;
-    final choice = await showDialog<SaveChoice>(
+    final choice = await showShadDialog<SaveChoice>(
       context: context,
       barrierDismissible: false,
       builder: (_) => _SaveChangesDialog(name: _session.name),
@@ -364,14 +365,15 @@ class DocumentHostState extends State<DocumentHost> {
       String Function(AppStrings words) title, Object error) async {
     if (!mounted) return;
     final words = AppStrings.of(context);
-    await showDialog<void>(
+    await showShadDialog<void>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (context) => ShadDialog.alert(
         key: const Key('document-error'),
         title: Text(title(words), key: const Key('document-error-title')),
-        content: Text(error.toString(), key: const Key('document-error-text')),
+        description:
+            Text(error.toString(), key: const Key('document-error-text')),
         actions: [
-          TextButton(
+          ShadButton(
             key: const Key('document-error-ok'),
             onPressed: () => Navigator.of(context).pop(),
             child: Text(AppStrings.of(context).ok),
@@ -412,25 +414,24 @@ class DocumentHostState extends State<DocumentHost> {
   @override
   Widget build(BuildContext context) => ListenableBuilder(
         listenable: _session,
-        builder: (context, _) => Scaffold(
-          body: PlanEditor(
-            controller: _controller,
-            layout: widget.layout,
-            onNew: _idle(newFlow),
-            onOpen: _idle(openFlow),
-            onSave: _idle(saveStep),
-            onSaveAs: _idle(saveAsStep),
-            onExport: (export) => unawaited(exportFlow(export)),
-            onExportDialog: _exportDialog,
-            printer: _printer,
-            onPageFlowError: (e) =>
-                unawaited(_showError((w) => w.pageFlowFailed, e)),
-            exportName: _session.name,
-            bar: PlanEditorBar(leading: [
-              _DocumentTitle(session: _session, controller: _controller),
-              _OpenSampleButton(onPressed: _idle(openSampleFlow)),
-            ]),
-          ),
+        // The editor has a `Scaffold` of its own.
+        builder: (context, _) => PlanEditor(
+          controller: _controller,
+          layout: widget.layout,
+          onNew: _idle(newFlow),
+          onOpen: _idle(openFlow),
+          onSave: _idle(saveStep),
+          onSaveAs: _idle(saveAsStep),
+          onExport: (export) => unawaited(exportFlow(export)),
+          onExportDialog: _exportDialog,
+          printer: _printer,
+          onPageFlowError: (e) =>
+              unawaited(_showError((w) => w.pageFlowFailed, e)),
+          exportName: _session.name,
+          bar: PlanEditorBar(leading: [
+            _DocumentTitle(session: _session, controller: _controller),
+            _OpenSampleButton(onPressed: _idle(openSampleFlow)),
+          ]),
         ),
       );
 }
@@ -459,7 +460,11 @@ class _DocumentTitle extends StatelessWidget {
                 softWrap: false,
                 overflow: TextOverflow.ellipsis);
             return dirty
-                ? Tooltip(message: PlanStrings.of(context).edited, child: text)
+                // A `ShadTooltip` opens through the hover strategy its child
+                // reads: a bare `Text` reads none, so the detector does.
+                ? ShadTooltip(
+                    builder: (context) => Text(PlanStrings.of(context).edited),
+                    child: ShadGestureDetector(child: text))
                 : text;
           },
         ),
@@ -474,13 +479,13 @@ class _OpenSampleButton extends StatelessWidget {
   final PlanFileCallback onPressed;
 
   @override
-  Widget build(BuildContext context) => IconButton(
-        key: const Key('toolbar-open-sample'),
-        icon: const Icon(Icons.home_work_outlined),
-        iconSize: 20,
-        visualDensity: VisualDensity.compact,
-        tooltip: AppStrings.of(context).openSample,
-        onPressed: () => unawaited(onPressed()),
+  Widget build(BuildContext context) => ShadTooltip(
+        builder: (context) => Text(AppStrings.of(context).openSample),
+        child: ShadIconButton.ghost(
+          key: const Key('toolbar-open-sample'),
+          icon: const Icon(LucideIcons.house, size: 20),
+          onPressed: () => unawaited(onPressed()),
+        ),
       );
 }
 
@@ -499,23 +504,23 @@ class _SaveChangesDialog extends StatelessWidget {
         const SingleActivator(LogicalKeyboardKey.escape): () =>
             choose(SaveChoice.cancel),
       },
-      child: AlertDialog(
+      child: ShadDialog(
         key: const Key('replace-dialog'),
         title: Text(AppStrings.of(context).saveChangesTo(name),
             key: const Key('replace-title')),
-        content: Text(AppStrings.of(context).changesLost),
+        description: Text(AppStrings.of(context).changesLost),
         actions: [
-          TextButton(
+          ShadButton.ghost(
             key: const Key('replace-discard'),
             onPressed: () => choose(SaveChoice.discard),
             child: Text(AppStrings.of(context).dontSave),
           ),
-          TextButton(
+          ShadButton.outline(
             key: const Key('replace-cancel'),
             onPressed: () => choose(SaveChoice.cancel),
             child: Text(PlanStrings.of(context).cancel),
           ),
-          FilledButton(
+          ShadButton(
             key: const Key('replace-save'),
             autofocus: true,
             onPressed: () => choose(SaveChoice.save),
@@ -532,7 +537,7 @@ class _SaveChangesDialog extends StatelessWidget {
 /// and appends `.jetplan`.
 Future<String?> showDocumentNamePrompt(
         BuildContext context, String suggested) =>
-    showDialog<String>(
+    showShadDialog<String>(
       context: context,
       builder: (_) => _NamePrompt(suggested: suggested),
     );
@@ -559,28 +564,34 @@ class _NamePromptState extends State<_NamePrompt> {
   void _save() => Navigator.of(context).pop(_name.text);
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
+  Widget build(BuildContext context) => ShadDialog(
         key: const Key('name-prompt'),
         title: Text(AppStrings.of(context).saveAsTitle),
-        content: TextField(
-          key: const Key('name-prompt-field'),
-          controller: _name,
-          autofocus: true,
-          decoration:
-              InputDecoration(labelText: AppStrings.of(context).fileName),
-          onSubmitted: (_) => _save(),
-        ),
         actions: [
-          TextButton(
+          ShadButton.outline(
             key: const Key('name-prompt-cancel'),
             onPressed: () => Navigator.of(context).pop(),
             child: Text(PlanStrings.of(context).cancel),
           ),
-          TextButton(
+          ShadButton(
             key: const Key('name-prompt-save'),
             onPressed: _save,
             child: Text(AppStrings.of(context).save),
           ),
         ],
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(AppStrings.of(context).fileName),
+            const SizedBox(height: 8),
+            ShadInput(
+              key: const Key('name-prompt-field'),
+              controller: _name,
+              autofocus: true,
+              onSubmitted: (_) => _save(),
+            ),
+          ],
+        ),
       );
 }

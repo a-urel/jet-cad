@@ -1,6 +1,6 @@
 // New tests N3 and N5 (audit docs/superpowers/specs/
 // 2026-10-16-architecture-demo-test-audit.md, "New tests"): the web tab's
-// title, which is the `MaterialApp`'s `onGenerateTitle`, follows the plan's
+// title, which is the `ShadApp`'s `onGenerateTitle`, follows the plan's
 // name, its dirty flag and the language.
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -11,12 +11,15 @@ import 'support/app_rig.dart';
 
 final Vector2 far = Vector2(41234.5, -27654.25);
 
-/// Switches the system language to [locale] and pumps the two frames the
+/// Switches the system language to [locale] and pumps the three frames the
 /// app needs to show it in its title: the first rebuilds the host, whose
-/// post-frame callback tells the app; the second rebuilds the app.
+/// post-frame callback tells the app; the second carries the tick the
+/// shadcn words need to arrive (`kLocaleTick`), and rebuilds the host; the
+/// third rebuilds the app.
 Future<void> switchTo(WidgetTester tester, Locale locale) async {
   tester.platformDispatcher.localesTestValue = [locale];
   await tester.pump();
+  await tester.pump(kLocaleTick);
   await tester.pump();
 }
 
