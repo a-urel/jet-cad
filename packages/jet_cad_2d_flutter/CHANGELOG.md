@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `SelectTool.moveAdjuster` (`MoveAdjuster`): a generic seam to replace a
+  body move's target after the snap chain.
 - `PaperPalette.guide` (and `withGuide`, `guideColor`): the alignment
   guides' colour; the built-in sets carry a magenta.
 

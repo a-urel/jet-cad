@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 import 'dart:ui' show Canvas, Offset, Paint, Path, PaintingStyle, Rect, Size;
 
+import 'package:flutter/foundation.dart' show Listenable;
 import 'package:flutter/services.dart'
     show
         KeyDownEvent,
@@ -41,6 +42,43 @@ abstract interface class MoveResolver {
       ToolContext ctx, Handle node, Transform2 delta);
 }
 
+/// What a body move's target may be replaced with, after the snap chain and
+/// before the move (alignment guides spec, C-8). An application seam:
+/// generic, the render layer knows no guides.
+abstract interface class MoveAdjuster {
+  /// A move drag of [moving] (the drag's own set; it may hold leaf handles,
+  /// the adjuster decides eligibility) begins.
+  void begin(ToolContext ctx, Set<Handle> moving);
+
+  /// [target] holds the chain's point; write the point to move to. [raw] is
+  /// the pointer, [base] the drag's base, [orthoBase] non-null while Shift
+  /// pins an axis (the minor one, `resolveDragPoint`'s rule), [objectSnapped]
+  /// whether the chain's point came from object snap. [touch] and [alt] are
+  /// the pointer's kind and the Alt key now.
+  void adjust(ToolContext ctx,
+      {required Vector2 raw,
+      required Vector2 base,
+      required Vector2? orthoBase,
+      required bool objectSnapped,
+      required bool touch,
+      required bool alt,
+      required Vector2 target});
+
+  /// The attachment replaced this event's move: draw nothing for it.
+  void suppress();
+
+  /// Screen space, under the tool's overlay, above the selection preview.
+  void paint(Canvas canvas, ViewportTransform camera, Size viewport,
+      PaperPalette paper);
+
+  /// The drag ended: committed, cancelled or abandoned.
+  void end();
+
+  /// Notifies when the adjustment would change for the same input (its
+  /// setting toggled): the tool re-targets from the last screen point.
+  Listenable get changes;
+}
+
 /// What a press landed on (spec 03 D2). The first class that hits wins.
 enum PressClass { rotationGrip, grip, selectedBody, unselectedBody, empty }
 
@@ -54,10 +92,14 @@ enum PressClass { rotationGrip, grip, selectedBody, unselectedBody, empty }
 /// pick, the band, each drag kind, Delete and the idle keys; without, every
 /// gate is open.
 class SelectTool extends Tool {
-  SelectTool({this.moveResolver, this.gates});
+  SelectTool({this.moveResolver, this.gates, this.moveAdjuster});
 
   /// Spec 09c D8: asked during a single-node body drag; null: today's move.
   final MoveResolver? moveResolver;
+
+  /// Alignment guides spec, C-8: replaces a body move's target after the
+  /// snap chain; null: today's move.
+  final MoveAdjuster? moveAdjuster;
 
   /// What this tool may do, asked live (never captured): the pick at each
   /// press and hover, a drag's gate at the slop and again at the up, the
@@ -110,6 +152,15 @@ class SelectTool extends Tool {
   ToolContext? _dragCtx;
   Offset _lastScreen = Offset.zero;
   bool _lastShift = false;
+  bool _lastTouch = false;
+  bool _lastAlt = false;
+
+  /// The adjuster's answer for one event; reused, so a drag allocates
+  /// nothing per event (alignment guides spec, C-8).
+  final Vector2 _adjusted = Vector2.zero();
+
+  /// Whether this drag added [_onCamera] to the adjuster's `changes`.
+  bool _adjusting = false;
   final DragPoint _dragPoint = DragPoint();
   final SnapResult _snapScratch = SnapResult();
   MouseCursor _cursor = MouseCursor.defer;
@@ -435,6 +486,12 @@ class SelectTool extends Tool {
     // Ruling 03-7: a trackpad zoom or a middle-button pan moves the camera
     // with no pointer event; the target follows from the last screen point.
     ctx.camera.addListener(_onCamera);
+    final adjuster = moveAdjuster;
+    if (adjuster != null && drag.kind == DragKind.move) {
+      adjuster.begin(ctx, drag.handles);
+      adjuster.changes.addListener(_onCamera);
+      _adjusting = true;
+    }
     _cursor = switch (drag.kind) {
       DragKind.move => SystemMouseCursors.move,
       DragKind.rotate => SystemMouseCursors.grabbing,
@@ -449,6 +506,8 @@ class SelectTool extends Tool {
   void _follow(ToolPointerEvent e, ToolContext ctx) {
     _lastScreen = e.screen;
     _lastShift = e.shift;
+    _lastTouch = e.isTouch;
+    _lastAlt = e.alt;
     _retarget(ctx, e.world, e.shift);
   }
 
@@ -460,7 +519,22 @@ class SelectTool extends Tool {
       return;
     }
     _resolve(ctx, world, shift ? drag.base : null);
-    drag.moveTo(_dragPoint.point);
+    final adjuster = moveAdjuster;
+    if (adjuster != null && drag.kind == DragKind.move) {
+      // Alignment guides spec, C-8: the chain's point in, the move's out.
+      _adjusted.setFrom(_dragPoint.point);
+      adjuster.adjust(ctx,
+          raw: world,
+          base: drag.base,
+          orthoBase: shift ? drag.base : null,
+          objectSnapped: _dragPoint.objectKind != null,
+          touch: _lastTouch,
+          alt: _lastAlt,
+          target: _adjusted);
+      drag.moveTo(_adjusted);
+    } else {
+      drag.moveTo(_dragPoint.point);
+    }
     // Spec 09c D8: after the plain move, on every path that retargets; with
     // Shift down the plain, ortho move applies.
     _attached = false;
@@ -471,6 +545,7 @@ class SelectTool extends Tool {
     if (r == null) return;
     drag.moveToTransform(r.marker, r.transform);
     _attached = true;
+    adjuster?.suppress();
   }
 
   /// The dragged objects while a move drag lives: they offer no snap to
@@ -673,6 +748,11 @@ class SelectTool extends Tool {
   void _endDrag(ToolContext ctx) {
     if (_drag == null) return;
     (_dragCtx ?? ctx).camera.removeListener(_onCamera);
+    if (_adjusting) {
+      _adjusting = false;
+      moveAdjuster!.changes.removeListener(_onCamera);
+      moveAdjuster!.end();
+    }
     ctx.grips?.hot = -1;
     _drag = null;
     _exclude = null;
@@ -710,6 +790,16 @@ class SelectTool extends Tool {
       // releasing it re-targets from the last screen point at once, as a
       // camera change does, rather than at the next pointer move.
       _lastShift = event is KeyDownEvent;
+      _onCamera();
+    }
+    if (_drag != null &&
+        event is! KeyRepeatEvent &&
+        (event.logicalKey == LogicalKeyboardKey.altLeft ||
+            event.logicalKey == LogicalKeyboardKey.altRight)) {
+      // Alignment guides spec, C-8: Alt switches the guides off for the
+      // move; re-target at once, as Shift does. The key is still the
+      // drag's below.
+      _lastAlt = event is KeyDownEvent;
       _onCamera();
     }
     if (_phase == ToolPhase.dragging &&
@@ -888,6 +978,9 @@ class SelectTool extends Tool {
       _guidePaint.color = paper.preview;
       _markerPaint.color = paper.snap;
       _paintGuide(canvas, camera.worldToScreenMatrix, drag);
+      if (!_attached && _adjusting) {
+        moveAdjuster!.paint(canvas, camera, viewport, paper);
+      }
       return;
     }
     final rect = bandScreen;
