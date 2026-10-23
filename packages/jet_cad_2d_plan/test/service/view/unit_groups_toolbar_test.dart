@@ -391,8 +391,14 @@ void main() {
       'TB7 no merge or split callback: Print sits 8 px after Redo, as before '
       '(R-C4-1, review 4 finding 1)', (tester) async {
     await mount(tester, merge: false, split: false);
+    // The guides' toggle joins Undo and Redo (task 9b), so Print sits 8 px
+    // after it.
+    expect(
+        tester.getTopLeft(byKey('service-guides')).dx -
+            tester.getTopRight(byKey('service-redo')).dx,
+        0);
     final gap = tester.getTopLeft(byKey('service-print')).dx -
-        tester.getTopRight(byKey('service-redo')).dx;
+        tester.getTopRight(byKey('service-guides')).dx;
     expect(gap, 8);
   });
 }

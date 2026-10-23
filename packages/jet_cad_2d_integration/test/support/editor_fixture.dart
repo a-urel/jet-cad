@@ -116,7 +116,8 @@ ViewportTransform editorCamera() => ViewportTransform(
 Future<PlanController> mountEditor(WidgetTester tester,
     {PlanPermissions permissions = PlanPermissions.full,
     String? json,
-    bool snapping = true}) async {
+    bool snapping = true,
+    bool alignmentGuides = true}) async {
   final c = PlanController(
       kits: [architectureKit, fxKit()], json: json ?? editorPlanJson());
   addTearDown(c.dispose);
@@ -124,7 +125,11 @@ Future<PlanController> mountEditor(WidgetTester tester,
   await tester.binding.setSurfaceSize(kEditorSurface);
   addTearDown(() => tester.binding.setSurfaceSize(null));
   await tester.pumpWidget(MaterialApp(
-      home: Scaffold(body: PlanEditor(controller: c, snapping: snapping))));
+      home: Scaffold(
+          body: PlanEditor(
+              controller: c,
+              snapping: snapping,
+              alignmentGuides: alignmentGuides))));
   await tester.pump();
   await tester.pump();
   c.camera.value = editorCamera();

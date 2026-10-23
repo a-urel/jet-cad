@@ -11,8 +11,8 @@ import 'package:flutter/widgets.dart' show Widget;
 const double kServiceBarHeight = 44;
 
 /// The service bar's buttons, in today's left-to-right order: the history
-/// (Undo, Redo), the groups (Merge, Split), the page (Export, Print).
-enum PlanServiceAction { undo, redo, merge, split, export, print }
+/// (Undo, Redo, and the alignment guides' toggle), the groups (Merge, Split), the page (Export, Print).
+enum PlanServiceAction { undo, redo, guides, merge, split, export, print }
 
 /// The service mode's bar.
 ///

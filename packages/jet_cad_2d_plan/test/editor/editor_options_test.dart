@@ -788,12 +788,16 @@ void main() {
       await mountOptions(tester,
           permissions: PlanPermissions.full
               .copyWith(export: false, print: false, undo: false));
+      // Only the alignment guides' toggle is left (task 9b): it is not a
+      // command the permissions refuse.
       expect(
           find.byWidgetPredicate((w) =>
               w.key is ValueKey<String> &&
-              (w.key! as ValueKey<String>).value.startsWith('toolbar-')),
+              (w.key! as ValueKey<String>).value.startsWith('toolbar-') &&
+              (w.key! as ValueKey<String>).value != 'toolbar-guides'),
           findsNothing);
-      expect(tester.getTopLeft(byKey('status-text')).dx,
+      expect(byKey('toolbar-guides'), findsOneWidget);
+      expect(tester.getTopLeft(byKey('toolbar-guides')).dx,
           tester.getTopLeft(byKey('chrome-top')).dx + 12);
     });
   });

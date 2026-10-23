@@ -88,6 +88,7 @@ class PaperPalette {
     required this.gripHot,
     required this.preview,
     required this.snap,
+    this.guide,
   });
 
   /// The minor grid lines.
@@ -122,11 +123,26 @@ class PaperPalette {
   /// The hovered grip, and the grabbed one during a drag.
   final Color gripHot;
 
-  /// Drag previews, rubber bands, ghosts and guide lines.
+  /// The move's base-to-target line, rubber bands and ghosts.
   final Color preview;
 
   /// Snap markers.
   final Color snap;
+
+  /// Alignment guides and their gap marks. Null on a palette built without
+  /// one; [guideColor] then picks [lightGuide] or [darkGuide] by the paper.
+  final Color? guide;
+
+  /// The alignment guides' magenta on paper that takes black ink.
+  static const Color lightGuide = Color(0xFFE0218A);
+
+  /// The alignment guides' pink on paper that takes white ink.
+  static const Color darkGuide = Color(0xFFFF5CB0);
+
+  /// [guide] when set; else [darkGuide] when the paper is dark (the minor
+  /// grid is light ink, luminance above one half), else [lightGuide].
+  Color get guideColor =>
+      guide ?? (minorGrid.computeLuminance() > 0.5 ? darkGuide : lightGuide);
 
   /// The overlays on paper that takes black ink: today's colours.
   static const PaperPalette light = PaperPalette(
@@ -142,6 +158,7 @@ class PaperPalette {
     gripHot: Color(0xFFE8541E),
     preview: Color(0xFFE8A11E),
     snap: Color(0xFF2E9E5B),
+    guide: lightGuide,
   );
 
   /// The overlays on paper that takes white ink.
@@ -158,6 +175,7 @@ class PaperPalette {
     gripHot: Color(0xFFFF8A5C),
     preview: Color(0xFFFFC857),
     snap: Color(0xFF5FD68F),
+    guide: darkGuide,
   );
 
   /// The set for a paper of colour [argb] (`0xAARRGGBB`; the alpha byte is
@@ -172,8 +190,8 @@ class PaperPalette {
   /// This set with [selection] as its selection colour and [hover] derived
   /// from it: [selection]'s colour at its alpha times `0x99 / 0xFF` (60%),
   /// the ratio both sets' own hover has to their selection, so
-  /// `light.withSelection(light.selection) == light`. The ten other colours
-  /// are this set's (host embedding API spec T-1, S-8).
+  /// `light.withSelection(light.selection) == light`. The other colours
+  /// are this set's, [guide] included (host embedding API spec T-1, S-8).
   PaperPalette withSelection(Color selection) => PaperPalette(
         minorGrid: minorGrid,
         majorGrid: majorGrid,
@@ -187,6 +205,25 @@ class PaperPalette {
         gripHot: gripHot,
         preview: preview,
         snap: snap,
+        guide: guide,
+      );
+
+  /// This set with [guide] as its alignment-guide colour; the rest are this
+  /// set's.
+  PaperPalette withGuide(Color guide) => PaperPalette(
+        minorGrid: minorGrid,
+        majorGrid: majorGrid,
+        pageBreak: pageBreak,
+        selection: selection,
+        hover: hover,
+        windowBand: windowBand,
+        crossingBand: crossingBand,
+        grip: grip,
+        gripMove: gripMove,
+        gripHot: gripHot,
+        preview: preview,
+        snap: snap,
+        guide: guide,
       );
 
   @override
@@ -203,7 +240,8 @@ class PaperPalette {
       other.gripMove == gripMove &&
       other.gripHot == gripHot &&
       other.preview == preview &&
-      other.snap == snap;
+      other.snap == snap &&
+      other.guide == guide;
 
   @override
   int get hashCode => Object.hash(
@@ -219,6 +257,7 @@ class PaperPalette {
         gripHot,
         preview,
         snap,
+        guide,
       );
 }
 

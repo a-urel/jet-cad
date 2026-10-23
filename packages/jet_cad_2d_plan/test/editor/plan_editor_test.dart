@@ -202,8 +202,11 @@ void main() {
     ]) {
       expect(byKey(k), findsNothing, reason: k);
     }
-    expect(left(tester, 'status-text'), 12,
-        reason: 'no button left: no toolbar and no gap');
+    // The alignment guides' toggle stays whatever the permissions say.
+    expect(byKey('toolbar-guides'), findsOneWidget);
+    expect(left(tester, 'toolbar-guides'), 12);
+    expect(left(tester, 'status-text'), right(tester, 'toolbar-guides') + 16,
+        reason: 'the toggle is the only button left');
     c.permissions = PlanPermissions.full;
     await tester.pump();
     expect(byKey('toolbar-undo'), findsOneWidget);

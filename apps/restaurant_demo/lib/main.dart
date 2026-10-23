@@ -705,6 +705,9 @@ class DemoHomeState extends State<DemoHome> {
         // controller asserts, and a switch mounts the other area's.
         key: ValueKey(a.name),
         controller: a.controller,
+        // Alignment guides are the default; the demo says so, as a showcase
+        // (the Terrace's row of tables at y 7000 shows them).
+        alignmentGuides: true,
         exportName: a.name.toLowerCase(),
         printer: widget.printer,
         onExport: (e) => _exported(a, e),

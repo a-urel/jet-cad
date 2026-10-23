@@ -9,9 +9,11 @@
 // (isLockedUnit) is tapped and grouped, never selected or dragged.
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:typed_data' show Float64List;
 import 'dart:ui' show Canvas, Offset, Rect, Size;
 
-import 'package:flutter/foundation.dart' show ValueListenable;
+import 'package:flutter/foundation.dart'
+    show ValueListenable, visibleForTesting;
 import 'package:flutter/gestures.dart'
     show
         kDoubleTapSlop,
@@ -25,6 +27,10 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
+import '../guides/guide_painter.dart';
+import '../guides/guide_references.dart';
+import '../guides/guide_settings.dart';
+import '../guides/guide_solver.dart';
 import '../units/unit_index.dart' show UnitInfo;
 import 'service_state.dart' show GroupUnit, UnitGroup, UnitGroupLookup;
 import 'unit_picker.dart' show PickCandidate, UnitPicker;
@@ -170,7 +176,10 @@ class ServiceTool extends Tool {
       this.userCamera = _always,
       this.toGlobal = _sameOffset,
       this.events = _noEvents,
-      this.idleKeys = _always});
+      this.idleKeys = _always,
+      this.guides,
+      this.guideSettings,
+      this.guideStroke});
 
   final UnitPicker picker;
 
@@ -204,6 +213,17 @@ class ServiceTool extends Tool {
   /// read at each key: false leaves Escape, which clears the selection
   /// while no gesture runs, to the host.
   final bool Function() idleKeys;
+
+  /// The service copy's guide references, or null: no guides (alignment
+  /// guides spec, "Modes").
+  final GuideReferenceCache? guides;
+
+  /// The guide switch, or null: no guides. Listened to only while an
+  /// eligible drag lives with the guides on at its start.
+  final PlanGuideSettings? guideSettings;
+
+  /// The guide stroke in screen pixels, read at paint.
+  final double Function()? guideStroke;
 
   /// [userCamera] as the press read it.
   bool _pans = true;
@@ -248,6 +268,23 @@ class ServiceTool extends Tool {
   /// The units a drag moves: the selection when it began, with every
   /// group it touches (G4).
   List<Handle> _moving = const [];
+
+  // The guides of the live drag (alignment guides spec, "The delta: Move").
+  // All of it is set at the drag's start and cleared by [_reset]; a drag
+  // that began with guides off or with nothing to align never listens, so
+  // it is today's, byte for byte.
+  final GuideSolution _solution = GuideSolution();
+  final GuidePainter _guidePainter = GuidePainter();
+  final Float64List _box = Float64List(4);
+  Set<Handle> _movingSet = const {};
+  ToolContext? _dragCtx;
+  bool _eligible = false;
+  bool _touch = false;
+  bool _alt = false;
+
+  /// The last guide solution, the one [paintOverlay] draws (tests read it).
+  @visibleForTesting
+  GuideSolution get debugSolution => _solution;
 
   /// The picker's candidates by instance (Z0: the units the picker can
   /// hit, a locked one listed), rebuilt when the picker's list is a new one
@@ -424,8 +461,93 @@ class ServiceTool extends Tool {
         for (final t in lookup!.selectableMembers(id)) t.handle,
     });
     _gesture = _Gesture.dragging;
+    _beginGuides(ctx);
     return true;
   }
+
+  /// The guides of a drag that has just begun: eligible when the moving
+  /// units have a box (the cache leaves out seats and hidden units, so a
+  /// group of hidden members has none), and listened to only when the
+  /// setting is on. May allocate: drag start only.
+  void _beginGuides(ToolContext ctx) {
+    _solution.reset();
+    _eligible = false;
+    _alt = false;
+    final references = guides, settings = guideSettings;
+    if (references == null || settings == null || !settings.on) return;
+    if (!references.unionOf(_moving, _box)) return;
+    _eligible = true;
+    _movingSet = Set<Handle>.of(_moving);
+    _dragCtx = ctx;
+    ctx.camera.addListener(_onGuideCamera);
+    settings.addListener(_onGuideSettings);
+  }
+
+  /// Takes the listeners off; the drag's end, by any road.
+  void _endGuides() {
+    final ctx = _dragCtx;
+    if (ctx != null) {
+      ctx.camera.removeListener(_onGuideCamera);
+      guideSettings?.removeListener(_onGuideSettings);
+    }
+    _dragCtx = null;
+    _eligible = false;
+    _alt = false;
+    _movingSet = const {};
+    _solution.reset();
+  }
+
+  /// The translation for the pointer at world (`wx`, `wy`): the raw delta,
+  /// plus the guide's offset on each axis it captures (spec "The delta").
+  /// Guides off, Alt held or no box: the raw delta, today's.
+  void _aim(ToolContext ctx, double wx, double wy) {
+    final rawX = wx - _pressWorld.x, rawY = wy - _pressWorld.y;
+    _dx = rawX;
+    _dy = rawY;
+    final references = guides, settings = guideSettings;
+    if (!_eligible || references == null || settings == null) return;
+    if (!settings.on || _alt) {
+      _solution.reset();
+      return;
+    }
+    final aperture =
+        (_touch ? kGuideTouchAperturePixels : kGuideAperturePixels) /
+            ctx.camera.value.scale;
+    solveGuides(references.current,
+        minX: _box[0] + rawX,
+        minY: _box[1] + rawY,
+        maxX: _box[2] + rawX,
+        maxY: _box[3] + rawY,
+        aperture: aperture,
+        freeX: true,
+        freeY: true,
+        fallbackDx: 0,
+        fallbackDy: 0,
+        moving: _movingSet,
+        out: _solution);
+    if (_solution.capturedX) _dx = rawX + _solution.dx;
+    if (_solution.capturedY) _dy = rawY + _solution.dy;
+  }
+
+  /// Aims again at the pointer's last screen point under the current
+  /// camera and tells the listeners.
+  void _reaim() {
+    final ctx = _dragCtx;
+    if (ctx == null) return;
+    // The screen point back to the world by the camera's own coefficients:
+    // `screenToWorld` would build a `Vector2` for its argument and one for
+    // its result on every camera change (spec Constraints: guides add no
+    // allocation per event).
+    final m = ctx.camera.value.worldToScreenMatrix;
+    final det = m.a * m.d - m.b * m.c;
+    final sx = _lastScreen.dx - m.e, sy = _lastScreen.dy - m.f;
+    _aim(ctx, (m.d * sx - m.c * sy) / det, (m.a * sy - m.b * sx) / det);
+    notifyListeners();
+  }
+
+  void _onGuideCamera() => _reaim();
+
+  void _onGuideSettings() => _reaim();
 
   static List<Handle> _sorted(Iterable<Handle> handles) =>
       handles.toList()..sort((a, b) => a.value.compareTo(b.value));
@@ -434,8 +556,9 @@ class ServiceTool extends Tool {
     if (_gesture == _Gesture.panning) {
       ctx.camera.panBy(e.screen - _lastScreen);
     } else {
-      _dx = e.world.x - _pressWorld.x;
-      _dy = e.world.y - _pressWorld.y;
+      _touch = e.isTouch;
+      _alt = e.alt;
+      _aim(ctx, e.world.x, e.world.y);
     }
     _lastScreen = e.screen;
     notifyListeners();
@@ -736,6 +859,21 @@ class ServiceTool extends Tool {
 
   @override
   KeyEventResult onKey(KeyEvent event, ToolContext ctx) {
+    // Alt suspends the guides at once (C-16), and brings them back on its
+    // release; only a live guided drag listens. Any other gesture falls
+    // through, so a band still takes Alt (RB-5).
+    final altKey = event.logicalKey == LogicalKeyboardKey.altLeft ||
+        event.logicalKey == LogicalKeyboardKey.altRight;
+    if (altKey && _gesture == _Gesture.dragging) {
+      if (event is! KeyRepeatEvent && _dragCtx != null) {
+        final down = event is KeyDownEvent;
+        if (down != _alt) {
+          _alt = down;
+          _reaim();
+        }
+      }
+      return KeyEventResult.ignored;
+    }
     // A band takes every key (RB-5): Escape ends it, whatever idleKeys
     // says; no other shortcut lands in its middle.
     if (_gesture == _Gesture.banding) {
@@ -776,6 +914,7 @@ class ServiceTool extends Tool {
     _moving = const [];
     _dx = _dy = 0;
     _reachOnly = false;
+    _endGuides();
   }
 
   /// The live band, from the press's screen point to the pointer's latest
@@ -783,6 +922,13 @@ class ServiceTool extends Tool {
   @override
   void paintOverlay(Canvas canvas, ViewportTransform camera, Size viewport,
       PaperPalette paper) {
+    if (_gesture == _Gesture.dragging) {
+      if (_solution.lineCount != 0 || _solution.markCount != 0) {
+        _guidePainter.paint(canvas, camera.worldToScreenMatrix, _solution,
+            color: paper.guideColor, strokePixels: guideStroke?.call() ?? 1.0);
+      }
+      return;
+    }
     if (_gesture != _Gesture.banding) return;
     _bandPainter.paint(
         canvas, Rect.fromPoints(_pressScreen, _lastScreen), _bandMode, paper);
@@ -792,6 +938,8 @@ class ServiceTool extends Tool {
   void dispose() {
     _timer?.cancel();
     _timer = null;
+    // Not through [_reset]: the listeners come off, the rest dies with it.
+    _endGuides();
     super.dispose();
   }
 }

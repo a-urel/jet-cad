@@ -44,6 +44,7 @@ import '../../support/service_host.dart'
 const List<String> kServiceKeys = [
   'service-undo',
   'service-redo',
+  'service-guides',
   'service-merge',
   'service-split',
   'service-export',
@@ -70,59 +71,69 @@ Future<PlanController> mountBars(WidgetTester tester,
 }
 
 /// Every left edge of the default service bar, read on today's base
-/// (`ffe0b9c`) at 1440 x 900, per (onExport, Merge, Split).
+/// (`ffe0b9c`) at 1440 x 900, per (onExport, Merge, Split); the alignment
+/// guides' toggle (task 9b) sits after Redo, 48 px wide, and moves what
+/// follows it by that.
 const Map<(bool, bool, bool), Map<String, double>> kServiceEdges = {
   (true, true, true): {
     'service-undo': 12,
     'service-redo': 60,
-    'service-merge': 116,
-    'service-split': 164,
-    'service-export': 220,
-    'service-print': 268,
+    'service-guides': 108,
+    'service-merge': 164,
+    'service-split': 212,
+    'service-export': 268,
+    'service-print': 316,
   },
   (true, true, false): {
     'service-undo': 12,
     'service-redo': 60,
-    'service-merge': 116,
-    'service-export': 172,
-    'service-print': 220,
+    'service-guides': 108,
+    'service-merge': 164,
+    'service-export': 220,
+    'service-print': 268,
   },
   (true, false, true): {
     'service-undo': 12,
     'service-redo': 60,
-    'service-split': 116,
-    'service-export': 172,
-    'service-print': 220,
+    'service-guides': 108,
+    'service-split': 164,
+    'service-export': 220,
+    'service-print': 268,
   },
   (true, false, false): {
     'service-undo': 12,
     'service-redo': 60,
-    'service-export': 116,
-    'service-print': 164,
+    'service-guides': 108,
+    'service-export': 164,
+    'service-print': 212,
   },
   (false, true, true): {
     'service-undo': 12,
     'service-redo': 60,
-    'service-merge': 116,
-    'service-split': 164,
-    'service-print': 220,
+    'service-guides': 108,
+    'service-merge': 164,
+    'service-split': 212,
+    'service-print': 268,
   },
   (false, true, false): {
     'service-undo': 12,
     'service-redo': 60,
-    'service-merge': 116,
-    'service-print': 172,
+    'service-guides': 108,
+    'service-merge': 164,
+    'service-print': 220,
   },
   (false, false, true): {
     'service-undo': 12,
     'service-redo': 60,
-    'service-split': 116,
-    'service-print': 172,
+    'service-guides': 108,
+    'service-split': 164,
+    'service-print': 220,
   },
   (false, false, false): {
     'service-undo': 12,
     'service-redo': 60,
-    'service-print': 116,
+    'service-guides': 108,
+    'service-print': 164,
   },
 };
 
@@ -224,7 +235,7 @@ void main() {
         'toString naming what differs from the default; the enums in '
         "today's left-to-right order (S-2)", () {
       expect(host.PlanServiceAction.values.map((a) => a.name),
-          ['undo', 'redo', 'merge', 'split', 'export', 'print']);
+          ['undo', 'redo', 'guides', 'merge', 'split', 'export', 'print']);
       const a = Text('a'), b = Text('b');
       const service = host.PlanServiceBar();
       expect(service.visible, isTrue);

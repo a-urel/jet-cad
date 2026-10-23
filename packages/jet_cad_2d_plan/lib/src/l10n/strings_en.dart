@@ -96,6 +96,9 @@ class PlanStringsEn extends PlanStrings {
   String get redo => 'Redo';
 
   @override
+  String get alignmentGuides => 'Alignment guides';
+
+  @override
   String get newDocument => 'New';
 
   @override

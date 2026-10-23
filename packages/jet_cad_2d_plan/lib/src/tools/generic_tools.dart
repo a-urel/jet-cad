@@ -121,14 +121,17 @@ final class GenericToolSet {
 }
 
 /// Builds the generic tools over [gates] (the select tool's), [fill] (the
-/// polyline's, the rectangle's and the circle's) and [moveResolver] (null
-/// until Task 14 injects plan.symbol's).
+/// polyline's, the rectangle's and the circle's), [moveResolver] (null
+/// until Task 14 injects plan.symbol's) and [moveAdjuster] (the alignment
+/// guides' seam; null: today's move).
 GenericToolSet buildGenericTools({
   required SelectGates gates,
   required ValueListenable<bool> fill,
   MoveResolver? moveResolver,
+  MoveAdjuster? moveAdjuster,
 }) {
-  final select = SelectTool(moveResolver: moveResolver, gates: gates);
+  final select = SelectTool(
+      moveResolver: moveResolver, gates: gates, moveAdjuster: moveAdjuster);
   return GenericToolSet._(select, {
     PlanToolIds.select: select,
     PlanToolIds.line: LineTool(),

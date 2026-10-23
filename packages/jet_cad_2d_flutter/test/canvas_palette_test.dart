@@ -280,7 +280,8 @@ void main() {
     });
 
     test('PaperPalette compares by value, every field', () {
-      final copy = paperFrom(paperFields(PaperPalette.dark));
+      final copy = paperFrom(paperFields(PaperPalette.dark))
+          .withGuide(PaperPalette.dark.guide!);
       expect(identical(copy, PaperPalette.dark), isFalse);
       expect(copy, PaperPalette.dark);
       expect(copy.hashCode, PaperPalette.dark.hashCode);
@@ -288,9 +289,64 @@ void main() {
       for (final name in paperFields(PaperPalette.dark).keys) {
         final fields = paperFields(PaperPalette.dark)
           ..[name] = const Color(0xFF010203);
-        expect(paperFrom(fields) == PaperPalette.dark, isFalse,
+        expect(
+            paperFrom(fields).withGuide(PaperPalette.dark.guide!) ==
+                PaperPalette.dark,
+            isFalse,
             reason: 'differs in $name');
       }
+    });
+  });
+
+  group('PaperPalette.guide (alignment guides)', () {
+    const magenta = Color(0xFFE0218A);
+    const pink = Color(0xFFFF5CB0);
+    const probe = Color(0xFF00FF00);
+
+    test('the built-in sets carry the guide colour', () {
+      expect(PaperPalette.lightGuide, magenta);
+      expect(PaperPalette.darkGuide, pink);
+      expect(PaperPalette.light.guide, magenta);
+      expect(PaperPalette.dark.guide, pink);
+      expect(PaperPalette.light.guideColor, magenta);
+      expect(PaperPalette.dark.guideColor, pink);
+    });
+
+    test('an unset guide falls back by the grid\'s luminance', () {
+      // A palette built from dark's colours, guide omitted: dark paper.
+      final fromDark = paperFrom(paperFields(PaperPalette.dark));
+      expect(fromDark.guide, isNull);
+      expect(fromDark.guideColor, PaperPalette.darkGuide);
+      final fromLight = paperFrom(paperFields(PaperPalette.light));
+      expect(fromLight.guide, isNull);
+      expect(fromLight.guideColor, PaperPalette.lightGuide);
+    });
+
+    test('an explicit guide wins over the fallback', () {
+      final p = paperFrom(paperFields(PaperPalette.dark)).withGuide(probe);
+      expect(p.guideColor, probe);
+    });
+
+    test('withSelection keeps the guide', () {
+      expect(PaperPalette.light.withSelection(probe).guide,
+          PaperPalette.light.guide);
+      expect(PaperPalette.dark.withSelection(probe).guide,
+          PaperPalette.dark.guide);
+    });
+
+    test('withGuide changes the guide and nothing else', () {
+      final p = PaperPalette.light.withGuide(probe);
+      expect(p.guide, probe);
+      expect(paperFields(p), paperFields(PaperPalette.light));
+    });
+
+    test('guide takes part in == and hashCode', () {
+      final p = PaperPalette.light.withGuide(probe);
+      expect(p == PaperPalette.light, isFalse);
+      expect(p.hashCode == PaperPalette.light.hashCode, isFalse);
+      final same = PaperPalette.light.withGuide(PaperPalette.light.guide!);
+      expect(same, PaperPalette.light);
+      expect(same.hashCode, PaperPalette.light.hashCode);
     });
   });
 }

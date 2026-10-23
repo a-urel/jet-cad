@@ -1,5 +1,45 @@
 ## Unreleased
 
+- **Alignment guides** (smart guides), in both modes. While a movable object
+  is dragged or placed, lines show where its edges or its centre line up with
+  a nearby object, or where its gap equals another gap (small gap marks, no
+  measurement), and the object snaps there. Movable objects are placed symbol
+  instances (tables, bar counters, kit symbols, units); walls, rooms and
+  lines are not references, and a table's own seats are not either. A rotated
+  or mirrored object aligns by its axis-aligned bounding box, a multi-selection
+  by the outer box of the group. They work in design mode (moving a selection
+  of symbols and placing a symbol with `PlanSymbolTool`) and in service mode
+  (a waiter dragging tables or a group). The capture distance is 6 screen
+  pixels (10 for touch), at any zoom. Holding Alt (Option on macOS) suspends
+  them for the drag. Draw order, the file format, undo (one command per drag)
+  and the host events are unchanged apart from the snapped positions.
+- Options: `PlanEditor.alignmentGuides`, `PlanServiceView.alignmentGuides` and
+  `PlanCanvas.alignmentGuides` (all `bool`, default true). False hides the
+  bar's button and turns guides off in that view. Two standalone views over
+  one controller with different values: the one mounted last wins.
+- `PlanController.alignmentGuides` is a `PlanGuideSettings` (exported, a
+  `ChangeNotifier`): `on` (allowed and the user's choice), `userOn`,
+  `allowed` and `toggle()`. The user's choice lives in memory for the
+  controller's life and is not saved in the plan.
+- **Behaviour changes for existing hosts.**
+  - Guides are on by default, so a drag near a neighbour now lands aligned. A
+    test that pins an exact landing needs `controller.alignmentGuides.toggle()`
+    or `alignmentGuides: false`.
+  - `PlanEditorAction` and `PlanServiceAction` have a new value, `guides`
+    (after `redo`; keys `toolbar-guides` and `service-guides`). A host that
+    switches exhaustively over either enum adds the case; a host whose
+    `actions` equal `values` now gets the toggle; a host with an explicit
+    list lists `guides` where it wants the button.
+  - A guide beats a pointer object-snap hit in a guide-eligible drag (spec
+    C-8), so the dragged object does not swap positions when the pointer
+    passes a wall's endpoint. An axis no guide captures keeps object snap and
+    the grid. An attachment (a symbol that clings to a wall) still wins, and
+    object snap is unchanged outside guide-eligible drags (grips, rotate,
+    walls, rooms, mixed selections, Alt held, guides off).
+- `PlanTheme.guideOnLight`, `guideOnDark` (the guide colour on a light and on
+  a dark paper) and `guideWidth` (logical pixels, default 1).
+- Depends on `jet_cad_2d_flutter`'s new `SelectTool.moveAdjuster` and
+  `PaperPalette.guide`; see its CHANGELOG for the release order.
 - The editor's right column follows the selection: with anything selected it
   shows the property panel and the host's inspectors only; with nothing
   selected, the Layers and Page sections too, on every layout.
