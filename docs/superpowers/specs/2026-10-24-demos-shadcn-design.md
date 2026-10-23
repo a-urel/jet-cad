@@ -1,6 +1,9 @@
 # The example apps in shadcn
 
-**Date:** 2026-10-24. **Status:** rev 1, draft for the human.
+**Date:** 2026-10-24. **Status:** rev 2, for the human's approval. Rev 1
+followed monepro's skeleton; the human then ruled (2026-10-24): *"monepro'da
+hatalar olmuş. mümkün olan her durumda shadcn tercih et."* monepro is now a
+reference, not a template: wherever shadcn can do it, shadcn does it.
 **Branch:** `claude/shadcn-ui-75d8dc` (the human: "bu branch'te"), at `main`'s
 tip `8f9a444b`.
 **Apps:** `apps/restaurant_demo`, `apps/architecture_demo`. **Not**
@@ -15,26 +18,26 @@ around it are still Material: an `AppBar`, `SegmentedButton`s,
 demos are read by two people (the human, 2026-10-24: "ikisi de, ama öncelik
 monepro örneği"):
 
-1. **First, a monepro developer.** monepro is the first real host. Its
-   skeleton is `ShadApp.custom` around a `MaterialApp.router` with
-   `ShadAppBuilder`, a `Scaffold` that stays, shadcn components inside
-   (`monepro-frontend/lib/app.dart`,
-   `lib/features/common/shared/widgets/base_layout.dart`). A demo that
-   copies that skeleton is code they can lift as it is.
+1. **First, a monepro developer.** monepro is the first real host and a
+   shadcn app, but its skeleton carries Material it does not need
+   (`ShadApp.custom` around a `MaterialApp.router`, a `Scaffold` with
+   Material `Drawer`s and `IconButton`s, `monepro-frontend/lib/app.dart`,
+   `base_layout.dart`). The demos show the shadcn-first way to mount the
+   planner, which monepro can move towards.
 2. **Then, someone from pub.dev** trying the library: the same code shows
    them how a shadcn host mounts the planner.
 
 ## Goals
 
-- **G1 — monepro's skeleton.** Both demos root in `ShadApp.custom` with a
-  `MaterialApp` built in its `appBuilder`, the Material `ThemeData` derived
-  from the `ShadTheme` as monepro derives it, and `ShadAppBuilder` in
-  `MaterialApp.builder`. The `Scaffold` stays.
+- **G1 — shadcn first.** Both demos root in a plain `ShadApp` (no
+  `MaterialApp`, no `Scaffold`); every widget the demo itself builds is a
+  shadcn one wherever shadcn has one.
 - **G2 — Zinc.** Both demos are shadcn zinc, light and dark, following the
   system (the human: "zinc olsun, monepro gibi"). The architecture demo's
   `kAppSeed` Material look goes.
-- **G3 — No Material component the user sees** in either demo's `lib/`,
-  except the ones decision 7 lists with their reason. No `Icons.`: Lucide.
+- **G3 — No Material** in either demo's `lib/`, except what decision 7
+  lists with its reason (expected: nothing the user sees). No `Icons.`:
+  Lucide.
 - **G4 — Behaviour unchanged.** Every key, callback, flow and string stays.
   The demos' tests stay green; a test changes only where a widget type
   changed, and each change is a ruling (old → new, why the same thing is
@@ -49,8 +52,7 @@ monepro örneği"):
   that hides it.
 - **N2 — monepro's own tokens.** Stock `ShadZincColorScheme`, not monepro's
   `AppTheme`.
-- **N3 — Routing.** No `go_router`; `MaterialApp` (not `.router`) stays,
-  since neither demo has routes.
+- **N3 — Routing.** No `go_router`: neither demo has routes.
 - **N4 — The canvas.** Painting, snap, move: untouched.
 
 ## Anti-goals
@@ -61,59 +63,63 @@ monepro örneği"):
 
 ## Decisions
 
-**1. The root (both demos).** As monepro's `app.dart`:
+**1. The root (both demos): a plain `ShadApp`.** Not `ShadApp.custom`.
+shadcn 0.57.3's `ShadApp` (`ShadAppType.shadcn`) builds a `WidgetsApp`
+with `MaterialPageRoute`s, adds the Material, Cupertino, widgets and shadcn
+localization delegates, and puts an `AnimatedTheme` with a Material
+`ThemeData` *derived from the `ShadTheme`* above it (`app.dart`
+`materialTheme`: primary, surface = background, brightness, font family).
+That derived theme is what the canvas reads (`Theme.of`: background,
+paper, brightness), so no hand-written `ThemeData` is needed.
 
 ```dart
-ShadApp.custom(
+ShadApp(
   theme: demoShadTheme(Brightness.light),
   darkTheme: demoShadTheme(Brightness.dark),
   themeMode: ThemeMode.system,
-  appBuilder: (context) {
-    final shad = ShadTheme.of(context);
-    return MaterialApp(
-      theme: materialFrom(shad), // seed: shad primary, surface: shad background
-      darkTheme: ...,             // the same for dark
-      themeMode: ThemeMode.system,
-      builder: (context, child) => ShadAppBuilder(child: child!),
-      ...today's locale, delegates, title, navigatorKey, home...
-    );
-  },
+  materialThemeBuilder: (context, theme) => ..., // only to add extensions
+  ...today's locale, delegates, title, navigatorKey, builder, home...
 )
 ```
 
 Everything `MaterialApp` carries today (the restaurant demo's `locale`, the
 architecture demo's `navigatorKey`, `onGenerateTitle` and its
-`CallbackShortcuts` builder, which now wraps `ShadAppBuilder`'s child)
-moves into the `appBuilder` unchanged. `demoShadTheme` is zinc with the
-planner's bundled `Roboto` (both demos already bundle it; the same glyphs on
-every platform keep the screenshots stable). My call: monepro uses its own
-font; Roboto is the nearest thing both demos already ship.
+`CallbackShortcuts` `builder`) moves onto `ShadApp`, which takes the same
+parameters. The restaurant demo's POS `PlanTheme` extension, today added in
+`_theme`, goes through `materialThemeBuilder` (`theme.copyWith(extensions:
+...)`). `demoShadTheme` is zinc with the planner's bundled `Roboto` (both
+demos bundle it; the same glyphs on every platform keep the screenshots
+stable) — my call. No `Scaffold` in the demos: `PlanEditor` keeps its own
+(the library's ruling 7); the demo's page paints the `ShadTheme`'s
+`background` itself.
 
-**2. The restaurant demo's look toggle. PENDING THE HUMAN.** Today
-*Standard* has no `ShadTheme` above the view (the planner derives its chrome
-from the Material theme) and *POS* puts a zinc `ShadTheme` around it
-(`look_test.dart` pins both). Under a `ShadApp` root every view has a zinc
-`ShadTheme` above it, so *Standard*'s "derived" chrome cannot be shown any
-more. Proposed: the toggle stays, and changes what it changes on the canvas
-side only — *Standard* is the library's default `PlanTheme`; *POS* is the
-POS `PlanTheme`s, the 3 px selection and the 52 px service bar. The derived
-path stays covered by the library's own tests (SC1–SC10). The `look_test`
-assertions on "no `ShadTheme` under Standard" become a ruling.
+**2. The restaurant demo's look toggle.** Today *Standard* has no
+`ShadTheme` above the view (the planner derives its chrome from the
+Material theme) and *POS* puts a zinc `ShadTheme` around it (`look_test.dart`
+pins both). Under a `ShadApp` root every view has the app's zinc
+`ShadTheme` above it, so the derived chrome is not shown any more; the
+library's own tests (SC1–SC10) keep covering it. The toggle stays and
+changes the canvas side: *Standard* is the library's default `PlanTheme`;
+*POS* is the POS `PlanTheme`s, the 3 px selection and the 52 px service bar.
+The per-view `ShadTheme` wrap (`_viewTheme`) goes. `look_test`'s "no
+`ShadTheme` under Standard" and "derived bar" assertions become rulings,
+retargeted at what the toggle now changes. Accepted by the human's rule
+("mümkün olan her durumda shadcn").
 
-**3. The restaurant demo's bar: no `AppBar`.** monepro has none; its
-`BaseLayout` puts a top pane (a padded `Row`) above the content inside the
-`Scaffold`'s body. The demo does the same: the title, then, docked
-(≥ `kDockedSidePanel`), the controls in the row; below it, a tune
-`ShadIconButton` (`side-panel-button`) at the end and the controls in a
-horizontal scroll row under the title (`app-controls`). Heights may differ
-from the `AppBar`'s; the layout tests' numbers that follow from them are
-rulings.
+**3. The restaurant demo's bar: no `AppBar`.** A top pane above the
+editor, built from shadcn parts on the `ShadTheme`'s `background`, with a
+bottom `ShadSeparator`: the title, then, docked (≥ `kDockedSidePanel`), the
+controls in the row; below it, a tune `ShadIconButton`
+(`side-panel-button`) at the end and the controls in a horizontal scroll row
+under the title (`app-controls`). Heights may differ from the `AppBar`'s;
+the layout tests' numbers that follow from them are rulings.
 
-**4. The side panel stays a Material `Drawer`**, coloured with the
-`ShadTheme`'s `card`, as monepro's `BaseLayout` and `PosLayout` do for their
-`endDrawer`. *This revises the playback*, which mapped `Drawer` to
-`ShadSheet`: monepro uses `ShadSheet` for forms, a `Drawer` for the
-layout's side panel. Following monepro is the stated priority.
+**4. The side panel, undocked: a `ShadSheet`** from the right
+(`showShadSheet(side: ShadSheetSide.right)`), 320 wide, keyed
+`side-panel-drawer`, holding `DemoSidePanel`. It replaces the `Scaffold`'s
+`endDrawer` and the `GlobalKey<ScaffoldState>`. Docked, the panel stays
+beside the editor as today. monepro uses a Material `Drawer` here; the
+human's rule overrides that.
 
 **5. The mapping.**
 
@@ -129,6 +135,8 @@ layout's side panel. Following monepro is the stated priority.
 | `SwitchListTile` | `ShadSwitch` with `label`/`sublabel` | `side_panel.dart` ×8 |
 | `showMenu` + `PopupMenuItem` | `ShadContextMenu` at a `ShadGlobalAnchor` (the title item disabled, a divider) | `table_menu.dart`; `showTableMenu`'s signature stays |
 | `Material(color: surfaceContainerHigh)` | `ColoredBox` with the shadcn `muted` | `own_bar.dart` |
+| `Theme.of(context).colorScheme`/`textTheme` in the badges | `ShadTheme.of(context)` tokens | `badges.dart` |
+| `Scaffold`, `AppBar`, `Drawer` | decisions 1, 3, 4 | `main.dart` (both), `document_host.dart` |
 | `Theme.of(context).textTheme.*`, `.colorScheme.error` in host chrome | `ShadTheme.of(context).textTheme.*`, `.colorScheme.destructive` | `side_panel.dart` |
 | `Icons.*` | `LucideIcons.*` | everywhere |
 
@@ -141,12 +149,11 @@ keeps the behaviour, and records the ruling.
 value and lands on the widget a user acts on (the button, the tab, the
 switch, the option), so tests that tap by key keep working.
 
-**7. Material kept, with the reason.** `MaterialApp`, `ThemeData`/
-`ColorScheme` (the derived theme the canvas reads), `Scaffold`, `Drawer`
-(decision 4), `Theme.of` reads that feed the canvas (the table badges are
-painted over the plan, `badges.dart`: they keep the Material scheme the
-canvas uses, so a badge matches the plan it sits on — my call). Anything
-else the builder keeps goes in decision 8's list with its reason.
+**7. Material kept, with the reason.** Expected: none in either demo's
+`lib/`. The canvas reads the Material theme `ShadApp` derives; the demo
+does not build one. A construct the builder cannot replace (a shadcn
+component missing, or one that cannot carry a behaviour the demo has) goes
+in decision 8's allow-list with its reason and a ruling.
 
 **8. The guard.** `test/invariants/kept_material_test.dart` in each demo,
 as the library's KM1/KM2: (DKM1) every Material construct in `lib/` is in a
