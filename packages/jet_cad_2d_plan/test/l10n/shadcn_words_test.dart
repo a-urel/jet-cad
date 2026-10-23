@@ -17,6 +17,8 @@ const List<String> kAllowedShad = [
   'ShadContextMenu',
   'ShadContextMenuController',
   'ShadContextMenuItem',
+  'ShadDialog',
+  'ShadDialogRoute',
   'ShadIconButton',
   'ShadInput',
   'ShadMouseAreaSurface',

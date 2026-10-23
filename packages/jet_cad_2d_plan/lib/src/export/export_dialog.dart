@@ -3,7 +3,10 @@
 // Escape cancels (a dismissible route pops on Escape). Ported from
 // jet_cad_floor_plan/lib/src/export/export_dialog.dart.
 import 'package:flutter/material.dart';
+import 'package:shadcn_ui/shadcn_ui.dart';
 
+import '../chrome/segmented.dart';
+import '../chrome/shad_scope.dart';
 import '../l10n/strings.dart';
 import 'registries.dart';
 
@@ -23,16 +26,44 @@ bool isRasterExporter(PlanExporter exporter) =>
 /// (from the first exporter when [initial] names none of [exporters]).
 /// Null when cancelled (Cancel, Escape or a tap outside).
 Future<PlanExportAnswer?> showPlanExportDialog(BuildContext context,
-        PlanExportAnswer initial, List<PlanExporter> exporters) =>
-    showDialog<PlanExportAnswer>(
-      context: context,
-      builder: (_) => _ExportDialog(initial: initial, exporters: exporters),
-    );
+    PlanExportAnswer initial, List<PlanExporter> exporters) {
+  // Everything the dialog reads is resolved here, with the caller's
+  // context: the route is pushed under the root navigator, where a local
+  // Theme or ShadTheme of the caller is not in scope, and `showShadDialog`
+  // would read a ShadTheme from the caller (a bare MaterialApp has none).
+  final theme = planShadThemeOf(context);
+  final strings = PlanStrings.of(context);
+  return Navigator.of(context, rootNavigator: true).push(
+    ShadDialogRoute<PlanExportAnswer>(
+      barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
+      pageBuilder: (routeContext) => PlanShadScope(
+        data: theme,
+        // The scope's mouse region fills the page and is opaque, so the
+        // route's barrier never hears a tap: a tap outside the card is
+        // answered here.
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => Navigator.of(routeContext).pop(),
+              ),
+            ),
+            _ExportDialog(
+                initial: initial, exporters: exporters, strings: strings),
+          ],
+        ),
+      ),
+    ),
+  );
+}
 
 class _ExportDialog extends StatefulWidget {
-  const _ExportDialog({required this.initial, required this.exporters});
+  const _ExportDialog(
+      {required this.initial, required this.exporters, required this.strings});
 
   final PlanExportAnswer initial;
+  final PlanStrings strings;
   final List<PlanExporter> exporters;
 
   @override
@@ -52,60 +83,54 @@ class _ExportDialogState extends State<_ExportDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final strings = PlanStrings.of(context);
-    return AlertDialog(
+    final strings = widget.strings;
+    return ShadDialog(
       key: const Key('export-dialog'),
       title: Text(strings.exportTitle),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SegmentedButton<String>(
-            key: const Key('export-format'),
-            showSelectedIcon: false,
-            segments: [
-              for (final e in widget.exporters)
-                ButtonSegment(
-                    value: e.id,
-                    label: Text(e.extension.toUpperCase(),
-                        key: Key('export-format-${e.id}'))),
-            ],
-            selected: {_answer.exporter},
-            onSelectionChanged: (s) =>
-                setState(() => _answer = _answer.copyWith(exporter: s.single)),
-          ),
-          if (isRasterExporter(_exporter)) ...[
-            const SizedBox(height: 12),
-            SegmentedButton<PlanExportDpi>(
-              key: const Key('export-dpi'),
-              showSelectedIcon: false,
-              segments: [
-                for (final d in PlanExportDpi.values)
-                  ButtonSegment(
-                      value: d,
-                      label: Text(strings.dpi(d.value),
-                          key: Key('export-dpi-${d.value}'))),
-              ],
-              selected: {_answer.choice.dpi},
-              onSelectionChanged: (s) => setState(() => _answer = _answer
-                  .copyWith(choice: _answer.choice.copyWith(dpi: s.single))),
-            ),
-          ],
-        ],
-      ),
       actions: [
-        TextButton(
+        ShadButton.outline(
           key: const Key('export-cancel'),
           onPressed: _cancel,
           child: Text(strings.cancel),
         ),
-        FilledButton(
+        ShadButton(
           key: const Key('export-ok'),
           autofocus: true,
           onPressed: () => Navigator.of(context).pop(_answer),
           child: Text(strings.exportAction),
         ),
       ],
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          PlanSegmented<String>(
+            key: const Key('export-format'),
+            value: _answer.exporter,
+            segments: [
+              for (final e in widget.exporters)
+                PlanSegment(e.id, e.extension.toUpperCase(),
+                    key: Key('export-format-${e.id}')),
+            ],
+            onChanged: (id) =>
+                setState(() => _answer = _answer.copyWith(exporter: id)),
+          ),
+          if (isRasterExporter(_exporter)) ...[
+            const SizedBox(height: 12),
+            PlanSegmented<PlanExportDpi>(
+              key: const Key('export-dpi'),
+              value: _answer.choice.dpi,
+              segments: [
+                for (final d in PlanExportDpi.values)
+                  PlanSegment(d, strings.dpi(d.value),
+                      key: Key('export-dpi-${d.value}')),
+              ],
+              onChanged: (d) => setState(() => _answer =
+                  _answer.copyWith(choice: _answer.choice.copyWith(dpi: d))),
+            ),
+          ],
+        ],
+      ),
     );
   }
 }
