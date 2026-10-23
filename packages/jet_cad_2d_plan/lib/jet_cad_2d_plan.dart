@@ -53,6 +53,7 @@ export 'src/file/plan_format_exception.dart'
     show PlanFormatCode, PlanFormatException;
 export 'src/fonts/plan_fonts.dart'
     show ensurePlanFonts, kPlanFontFamily, registerFontLicences;
+export 'src/guides/guide_settings.dart' show PlanGuideSettings;
 export 'src/kits/guard.dart' show KitHookFailure;
 export 'src/kits/kit_set.dart'
     show KitSet, KitSetError, reservedKitIds, validateKitSet;

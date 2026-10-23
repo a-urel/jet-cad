@@ -1,5 +1,7 @@
 ## Unreleased
 
+- `PlanController.alignmentGuides` (`PlanGuideSettings`: `on`, `userOn`,
+  `toggle()`); `PlanTheme.guideOnLight`, `guideOnDark`, `guideWidth`.
 - The editor's right column follows the selection: with anything selected it
   shows the property panel and the host's inspectors only; with nothing
   selected, the Layers and Page sections too, on every layout.

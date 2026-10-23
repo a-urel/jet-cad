@@ -41,6 +41,9 @@ final class PlanTheme extends ThemeExtension<PlanTheme> {
     this.selectionOnLight,
     this.selectionOnDark,
     this.selectionWidth,
+    this.guideOnLight,
+    this.guideOnDark,
+    this.guideWidth,
     this.focusVeilColor,
     this.focusVeilOpacity,
     this.canvasBackground,
@@ -109,6 +112,18 @@ final class PlanTheme extends ThemeExtension<PlanTheme> {
   /// pixels, finite and above 0. Null: 2. The hover stays 1.5.
   final double? selectionWidth;
 
+  /// The alignment guides' colour on a light paper, in both modes. Null: the
+  /// light palette's.
+  final Color? guideOnLight;
+
+  /// The alignment guides' colour on a dark paper (and on the dark canvas),
+  /// in both modes. Null: the dark palette's.
+  final Color? guideOnDark;
+
+  /// The alignment guides' stroke in screen logical pixels, finite and
+  /// above 0. Null: 1.
+  final double? guideWidth;
+
   /// The service's focus veil over the units outside the focus;
   /// its alpha is multiplied by [focusVeilOpacity]. Null: the paper's
   /// colour.
@@ -145,6 +160,9 @@ final class PlanTheme extends ThemeExtension<PlanTheme> {
     Color? selectionOnLight,
     Color? selectionOnDark,
     double? selectionWidth,
+    Color? guideOnLight,
+    Color? guideOnDark,
+    double? guideWidth,
     Color? focusVeilColor,
     double? focusVeilOpacity,
     Color? canvasBackground,
@@ -164,6 +182,9 @@ final class PlanTheme extends ThemeExtension<PlanTheme> {
         selectionOnLight: selectionOnLight ?? this.selectionOnLight,
         selectionOnDark: selectionOnDark ?? this.selectionOnDark,
         selectionWidth: selectionWidth ?? this.selectionWidth,
+        guideOnLight: guideOnLight ?? this.guideOnLight,
+        guideOnDark: guideOnDark ?? this.guideOnDark,
+        guideWidth: guideWidth ?? this.guideWidth,
         focusVeilColor: focusVeilColor ?? this.focusVeilColor,
         focusVeilOpacity: focusVeilOpacity ?? this.focusVeilOpacity,
         canvasBackground: canvasBackground ?? this.canvasBackground,
@@ -193,6 +214,9 @@ final class PlanTheme extends ThemeExtension<PlanTheme> {
       selectionOnLight: other.selectionOnLight ?? selectionOnLight,
       selectionOnDark: other.selectionOnDark ?? selectionOnDark,
       selectionWidth: other.selectionWidth ?? selectionWidth,
+      guideOnLight: other.guideOnLight ?? guideOnLight,
+      guideOnDark: other.guideOnDark ?? guideOnDark,
+      guideWidth: other.guideWidth ?? guideWidth,
       focusVeilColor: other.focusVeilColor ?? focusVeilColor,
       focusVeilOpacity: other.focusVeilOpacity ?? focusVeilOpacity,
       canvasBackground: other.canvasBackground ?? canvasBackground,
@@ -251,6 +275,9 @@ final class PlanTheme extends ThemeExtension<PlanTheme> {
           _lerp(selectionOnDark, other.selectionOnDark, t, Color.lerp),
       selectionWidth:
           _lerp(selectionWidth, other.selectionWidth, t, _lerpBetween),
+      guideOnLight: _lerp(guideOnLight, other.guideOnLight, t, Color.lerp),
+      guideOnDark: _lerp(guideOnDark, other.guideOnDark, t, Color.lerp),
+      guideWidth: _lerp(guideWidth, other.guideWidth, t, _lerpBetween),
       focusVeilColor:
           _lerp(focusVeilColor, other.focusVeilColor, t, Color.lerp),
       focusVeilOpacity:
@@ -311,6 +338,9 @@ final class PlanTheme extends ThemeExtension<PlanTheme> {
       other.selectionOnLight == selectionOnLight &&
       other.selectionOnDark == selectionOnDark &&
       other.selectionWidth == selectionWidth &&
+      other.guideOnLight == guideOnLight &&
+      other.guideOnDark == guideOnDark &&
+      other.guideWidth == guideWidth &&
       other.focusVeilColor == focusVeilColor &&
       other.focusVeilOpacity == focusVeilOpacity &&
       other.canvasBackground == canvasBackground &&
@@ -331,6 +361,9 @@ final class PlanTheme extends ThemeExtension<PlanTheme> {
         selectionOnLight,
         selectionOnDark,
         selectionWidth,
+        guideOnLight,
+        guideOnDark,
+        guideWidth,
         focusVeilColor,
         focusVeilOpacity,
         canvasBackground,
@@ -352,6 +385,9 @@ final class PlanTheme extends ThemeExtension<PlanTheme> {
         'selectionOnLight': selectionOnLight,
         'selectionOnDark': selectionOnDark,
         'selectionWidth': selectionWidth,
+        'guideOnLight': guideOnLight,
+        'guideOnDark': guideOnDark,
+        'guideWidth': guideWidth,
         'focusVeilColor': focusVeilColor,
         'focusVeilOpacity': focusVeilOpacity,
         'canvasBackground': canvasBackground,
@@ -422,6 +458,7 @@ void validatePlanTheme(PlanTheme theme) {
     }
   }
   positive(theme.selectionWidth, 'selectionWidth');
+  positive(theme.guideWidth, 'guideWidth');
   opacity(theme.focusVeilOpacity, 'focusVeilOpacity');
   positive(theme.serviceBarHeight, 'serviceBarHeight');
 }
@@ -429,7 +466,8 @@ void validatePlanTheme(PlanTheme theme) {
 /// The overlays' colours on the display paper [paperArgb] under [theme]: the
 /// set [PaperPalette.forPaper] picks, with the theme's colour for that set
 /// (`selectionOnDark` for the dark set, `selectionOnLight` for the light) as
-/// its selection and hover ([PaperPalette.withSelection]). With no theme,
+/// its selection and hover ([PaperPalette.withSelection]) and its guide
+/// colour (`guideOnDark`, `guideOnLight`; [PaperPalette.withGuide]). With no theme,
 /// or no colour for that set, it is the `const` set itself, so a canvas
 /// with no theme hands its painters today's instance. Grips and the
 /// attachment marker take this palette's grip and snap colours.
@@ -438,10 +476,13 @@ void validatePlanTheme(PlanTheme theme) {
 @internal
 PaperPalette planPaperPaletteFor(int paperArgb, PlanTheme? theme) {
   final set = PaperPalette.forPaper(paperArgb);
-  final colour = identical(set, PaperPalette.dark)
-      ? theme?.selectionOnDark
-      : theme?.selectionOnLight;
-  return colour == null ? set : set.withSelection(colour);
+  final dark = identical(set, PaperPalette.dark);
+  final selection = dark ? theme?.selectionOnDark : theme?.selectionOnLight;
+  final guide = dark ? theme?.guideOnDark : theme?.guideOnLight;
+  var palette = set;
+  if (selection != null) palette = palette.withSelection(selection);
+  if (guide != null) palette = palette.withGuide(guide);
+  return palette;
 }
 
 /// Resolves the plan library's look just below an editor or a canvas: the

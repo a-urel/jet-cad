@@ -16,6 +16,7 @@ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../file/manifest.dart';
+import '../guides/guide_settings.dart';
 import '../file/plan_file.dart';
 import '../file/plan_format_exception.dart';
 import '../kits/guard.dart';
@@ -592,6 +593,22 @@ class PlanController extends ChangeNotifier {
   /// it changes (S-14: F3 only while snapping is allowed).
   @internal
   ValueListenable<bool> get snapping => _snapping;
+
+  final PlanGuideSettings _alignmentGuides = PlanGuideSettings();
+
+  /// The alignment guides' switch: [PlanGuideSettings.on] gates the guides
+  /// in design moves, placement and service moves alike.
+  PlanGuideSettings get alignmentGuides => _alignmentGuides;
+
+  /// The canvas's guides option: written like [snappingAllowed], so the
+  /// value changes now and [alignmentGuides] notifies after the frame.
+  @internal
+  set alignmentGuidesAllowed(bool value) => _alignmentGuides.allowed = value;
+
+  /// The guide stroke in screen logical pixels (the theme's `guideWidth`,
+  /// else 1), written by the views so the tools' paint can read it.
+  @internal
+  double guideStrokePixels = 1.0;
 
   final _AdoptingLocale _locale = _AdoptingLocale(const Locale('en'));
   final DiagnosticsLog _diagnostics = DiagnosticsLog();
@@ -3111,6 +3128,7 @@ class PlanController extends ChangeNotifier {
     _unitBaseline = null;
     _snap.dispose();
     _snapping.dispose();
+    _alignmentGuides.dispose();
     _userSnap.dispose();
     camera.dispose();
     _settles.clear();
