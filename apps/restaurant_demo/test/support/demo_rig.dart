@@ -159,6 +159,10 @@ Future<void> reveal(WidgetTester tester, String key) async {
           .descendant(
               of: byKey('side-panel'), matching: find.byType(Scrollable))
           .first);
+  // The list is lazy and caches past its edge: a built entry may still lie
+  // outside the viewport, where a tap misses (a taller native window shows
+  // it). Bring it fully in.
+  await tester.ensureVisible(byKey(key));
   await tester.pump();
 }
 

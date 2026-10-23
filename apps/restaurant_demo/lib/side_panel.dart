@@ -237,7 +237,9 @@ class DemoSidePanel extends StatelessWidget {
 }
 
 /// A switch with its label, as wide as its content: the switch is the whole
-/// of what a click lands on, not the row it sits in.
+/// of what a click lands on, not the row it sits in. The gap between the
+/// track and the label belongs to the label (an opaque `MouseRegion`), so no point of
+/// the row, its centre included, is a dead zone.
 Widget _toggle(Key key, Widget label,
         {required bool value, required ValueChanged<bool>? onChanged}) =>
     Padding(
@@ -245,7 +247,15 @@ Widget _toggle(Key key, Widget label,
         child: Align(
             alignment: AlignmentDirectional.centerStart,
             child: ShadSwitch(
-                key: key, label: label, value: value, onChanged: onChanged)));
+                key: key,
+                padding: EdgeInsets.zero,
+                label: MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    child: Padding(
+                        padding: const EdgeInsetsDirectional.only(start: 8),
+                        child: label)),
+                value: value,
+                onChanged: onChanged)));
 
 /// A button's label: it wraps within the button instead of overflowing it
 /// (a `ShadButton` lays its child out in a row, unbounded).
