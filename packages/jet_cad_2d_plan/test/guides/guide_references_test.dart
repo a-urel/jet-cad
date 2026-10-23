@@ -173,6 +173,35 @@ void main() {
     expect(refs.handles, [shown]);
   });
 
+  test('a symbol nested in a group is no reference; at the root it is', () {
+    final doc = unitPlan();
+    final def = definitionForEntry(doc, entryOf(planterSymbol));
+    doc.commands.execute(CompoundCommand(def.commands, label: 'Def'));
+    final group = doc.handleSeed.next();
+    doc.commands.execute(AddNodeCommand(GroupNode(
+        handle: group,
+        parent: doc.rootHandle,
+        transform: Transform2.translation(3100.5, -1700.25)
+            .multiply(Transform2.rotation(0.4)),
+        children: const [])));
+    Handle plant(Handle parent, double x) {
+      final h = doc.handleSeed.next();
+      doc.commands.execute(AddNodeCommand(InstanceNode(
+          handle: h,
+          parent: parent,
+          definition: def.definition,
+          layer: ReservedHandles.layerZero,
+          transform: placementAt(x, 300, 0.5, baseX: 250, baseY: 250))));
+      return h;
+    }
+
+    final nested = plant(group, 700);
+    final atRoot = plant(doc.rootHandle, 1500);
+    final refs = _rig(doc).cache.current;
+    expect(refs.handles, [atRoot]);
+    expect(refs.handles, isNot(contains(nested)));
+  });
+
   /// A root group (the test kit's slab, turned and off the origin) holding
   /// one stool; [hidden] hides the group.
   ({
