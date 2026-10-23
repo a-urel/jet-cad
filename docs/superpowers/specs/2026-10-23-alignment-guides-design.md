@@ -1,6 +1,6 @@
 # Alignment guides (smart guides) in both modes
 
-**Date:** 2026-10-23. **Status:** revision 3, for the human's approval.
+**Date:** 2026-10-23. **Status:** revision 3, approved by the human ("onaylıyorum", 2026-10-23).
 Revision 1 was reviewed through the OpenCode CLI (`github-copilot/gpt-6.1-sol`)
 and revision 2 through the Copilot CLI, both at the human's request; their
 findings are folded in (O-1 to O-12, C-1 to C-19, marked below; record in
