@@ -17,6 +17,7 @@ import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../file/manifest.dart';
 import '../guides/guide_settings.dart';
+import '../guides/plan_move_guides.dart';
 import '../file/plan_file.dart';
 import '../file/plan_format_exception.dart';
 import '../kits/guard.dart';
@@ -609,6 +610,10 @@ class PlanController extends ChangeNotifier {
   /// else 1), written by the views so the tools' paint can read it.
   @internal
   double guideStrokePixels = 1.0;
+
+  /// The design move's alignment guides (tests read its last solution).
+  @visibleForTesting
+  PlanMoveGuides get debugMoveGuides => _session.moveGuides;
 
   final _AdoptingLocale _locale = _AdoptingLocale(const Locale('en'));
   final DiagnosticsLog _diagnostics = DiagnosticsLog();
@@ -1939,6 +1944,8 @@ class PlanController extends ChangeNotifier {
         permissions: () => _permissions,
         fill: _fill,
         guard: _guardTool,
+        guideSettings: _alignmentGuides,
+        guideStrokePixels: () => guideStrokePixels,
         moveResolver: _moveResolver);
     _session = session;
     // The attachment providers, once per document, before the kits' tools
