@@ -5,7 +5,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
-import 'package:jet_cad_2d_plan/src/chrome/icon_button.dart' show PlanIconButton;
+import 'package:jet_cad_2d_plan/src/chrome/icon_button.dart'
+    show PlanIconButton;
 
 import '../support/editor_host.dart';
 import '../support/mark_kit.dart';
