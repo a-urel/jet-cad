@@ -373,7 +373,7 @@ void main() {
       }
     });
     await look();
-    await tester.enterText(find.byType(TextField).first, 'zzz');
+    await tester.enterText(find.byKey(const Key('symbol-search')), 'zzz');
     await look();
     // The service bar (2b Task 16). M-LK1s: its Print in English.
     c.setMode(PlanMode.service);

@@ -19,9 +19,11 @@ import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
-    show InteractionLayer, SelectTool, SelectionKey, SymbolGallery;
+    show InteractionLayer, SelectTool, SelectionKey;
 import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+import 'package:jet_cad_2d_plan/src/panels/gallery_grid.dart'
+    show PlanGalleryGrid;
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../support/canvas_rig.dart';
@@ -95,7 +97,8 @@ Future<String> editedIn(
   await tester.scrollUntilVisible(cell, 200,
       scrollable: find
           .descendant(
-              of: find.byType(SymbolGallery), matching: find.byType(Scrollable))
+              of: find.byType(PlanGalleryGrid),
+              matching: find.byType(Scrollable))
           .first);
   await tester.ensureVisible(cell);
   await tester.pump();
