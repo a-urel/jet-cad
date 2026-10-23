@@ -2181,7 +2181,9 @@ class PlanController extends ChangeNotifier {
           damage: _damageCopy,
           referencesOf: _referencesOf,
           groups: unitGroups,
-          moves: () => permissions.serviceMove);
+          moves: () => permissions.serviceMove,
+          guideSettings: _alignmentGuides,
+          guideStroke: () => guideStrokePixels);
     } catch (_) {
       // The decoded copy is let go as the decode failure's measurer is.
       unawaited(copy.dispose());
