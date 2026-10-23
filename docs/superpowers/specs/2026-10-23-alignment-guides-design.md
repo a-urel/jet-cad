@@ -107,9 +107,11 @@ before 1.0, so its API is part of what 1.0 freezes.
     non-finite, or its box is empty or non-finite.
 - **A reference's box**: the definition's box, through the instance's
   transform, as a world axis-aligned bounding box (H3).
-  - The definition's box is that of its entities, attributes excluded, so a
-    table's number label does not stretch it. This is `UnitIndex`'s rule, and
-    nested instances are included.
+  - The definition's box is that of its own entities (direct leaves),
+    attributes excluded, so a table's number label does not stretch it. This
+    is `UnitIndex`'s rule and `boxOfEntry`'s, so a moved object and its ghost
+    get the same box. Nested-instance geometry is not in a box (amended at
+    plan review, P-2).
   - The builder picks the existing helper that gives exactly this, or adds
     one beside `definitionBounds`.
   - Mirrored and rotated instances take the AABB of the four transformed
@@ -279,9 +281,11 @@ bar's button and turns guides off in that view.
 - **Allowance has one owner per mounted view.** Each of `PlanCanvas` and
   `PlanServiceView` writes the controller's allowance:
   - when it mounts, and when its widget's value changes;
-  - and on dispose resets it to true, as `PlanCanvas` does for
-    `snappingAllowed` today (`PlanServiceView` has no `snapping` option, so
-    this is new for it).
+  - and, on a controller swap, resets the old controller's to true, as
+    `PlanCanvas` does for `snappingAllowed` today. `PlanServiceView` has no
+    `snapping` option, so this is new for it. A dispose does not reset
+    (amended at plan review, P-1): a view replaced by another in one frame,
+    as `PlanEditor`'s mode switch does, must not undo the new view's value.
 - `PlanEditor` hands its one value to whichever of the two it mounts, so
   they never disagree. A host mounting both standalone views over one
   controller with different values gets last-mounted-wins (documented).

@@ -14,6 +14,8 @@
 
 **Spec:** [docs/superpowers/specs/2026-10-23-alignment-guides-design.md](../specs/2026-10-23-alignment-guides-design.md) (revision 3, approved). Read it with this plan; the spec is the authority on behaviour.
 
+**Plan review:** reviewed by the Copilot CLI at the human's request; findings P-1 to P-14 are folded in below and recorded in `docs/superpowers/notes/2026-10-23-alignment-guides-spec-review.md`.
+
 **Ledger:** `.superpowers/sdd/2026-10-23-alignment-guides/` (git-ignored) while in flight; archived to `docs/superpowers/ledgers/` before the merge.
 
 ## Global Constraints
@@ -118,20 +120,25 @@ abstract interface class MoveAdjuster {
 
   /// The drag ended: committed, cancelled or abandoned.
   void end();
+
+  /// Notifies when the adjustment would change for the same input (its
+  /// setting toggled): the tool re-targets from the last screen point.
+  Listenable get changes;
 }
 ```
 
 - `SelectTool({this.moveResolver, this.gates, this.moveAdjuster})`, with `final MoveAdjuster? moveAdjuster`.
 
 **Wiring in `SelectTool`:**
-- `_enter`: for `DragKind.move`, call `moveAdjuster?.begin(ctx, drag.handles)`.
-- `_follow`: also store `_lastTouch = e.isTouch` and `_lastAlt = e.alt`.
+- `_enter`: for `DragKind.move`, call `moveAdjuster?.begin(ctx, drag.handles)` **before** `_follow`, and add `_onCamera` as a listener of `moveAdjuster.changes` (P-6).
+- `_follow`: also store `_lastTouch = e.isTouch` and `_lastAlt = e.alt`. `_retarget` keeps its signature and reads these two fields (P-12).
+- `drag.handles` may hold leaf handles; the adjuster decides eligibility.
 - `_retarget`, for a non-rotate drag:
   1. `_resolve`;
   2. if an adjuster is set and the drag is a move, copy `_dragPoint.point` into a reused `_adjusted` field, call `adjust(...)` with `orthoBase: shift ? drag.base : null`, then `drag.moveTo(_adjusted)`; else `drag.moveTo(_dragPoint.point)` as today;
   3. the attachment runs as today; when `_attached` becomes true, call `moveAdjuster?.suppress()`.
 - `onKey`: Alt-left or Alt-right down or up (not a repeat) during a drag sets `_lastAlt` and calls `_onCamera()`, exactly as Shift does today.
-- `_endDrag`: call `moveAdjuster?.end()` before clearing `_drag`.
+- `_endDrag`: for a move drag only, remove the `changes` listener and call `moveAdjuster?.end()` before clearing `_drag` (P-12: `_endDrag` also ends rotate and reshape drags).
 - `paintOverlay`, while dragging: call `moveAdjuster?.paint(...)` after `_paintGuide`. Exception: when `_attached`, do not call it.
 - `_onCamera` passes the stored kind and Alt through `_retarget`; it gains no new parameters on the public surface.
 - With `moveAdjuster == null`, behaviour and allocations equal today's. The existing `select_tool` suites must stay green untouched.
@@ -144,6 +151,7 @@ abstract interface class MoveAdjuster {
   - pressing Alt with no pointer move calls `adjust` again with `alt: true` (one more call, the same `raw`);
   - a camera pan mid-drag calls `adjust` with the stored `touch` and `alt`;
   - with a `MoveResolver` that attaches, `suppress` is called and `paint` is not;
+  - the fake's `changes` notifying mid-drag calls `adjust` once more; after release it does nothing;
   - with `moveAdjuster` null, the committed transform equals today's for the same pointer path (a differential test against a second `SelectTool()` run).
 - [ ] **Step 2:** The tests fail to compile (no `moveAdjuster`).
 - [ ] **Step 3:** Implement the wiring above.
@@ -181,6 +189,9 @@ final class GuideSolution {
   double dx = 0, dy = 0;
   bool capturedX = false, capturedY = false;
   GuideKind? kindX, kindY;
+  /// The winning candidate's reference (the lower of a pair); null when
+  /// the axis did not capture (P-8).
+  Handle? refX, refY;
   /// Lines: [axis (0: x, a vertical line; 1: y), coord, from, to] each.
   final Float64List lines = Float64List(4 * kGuideCapacity);
   int lineCount = 0;
@@ -217,17 +228,17 @@ Lines and marks are written for the **final** box:
 - a line spans, on its perpendicular axis, from the moving box to the farthest aligned reference (world units). Overhang is the painter's job;
 - a mark's `at` is the middle of the perpendicular overlap of the two boxes beside the gap.
 
-Past `kGuideCapacity`, further lines and marks are dropped silently. The solve allocates nothing; scratch state is fields of `GuideSolution` or locals of primitive type.
+Lines on the same axis at the same coordinate (within `ε`) merge into one, with the union of their extents, so stacked duplicates use one slot (P-8). Past `kGuideCapacity`, further lines and marks are dropped silently. The solve allocates nothing; scratch state is fields of `GuideSolution` or locals of primitive type.
 
 - [ ] **Step 1: Write failing tests**
-  - All fixtures are off the origin (around `(5000, −3200)`), with aperture 3.0 for scale 2 at 6 px.
+  - Every coordinate below is written relative to an offset `(5000, −3200)` that the test adds to each box (x to x, y to y), so the fixtures sit off the origin; the aperture is 3.0 (scale 2, 6 px).
   - **Edges, x.** One reference `[100..200]`, moving `[202.5..302.5]`: captured, `dx == −2.5`, `kindX == edge`; one vertical line at `x = 200`. Moving at `[203.5..303.5]`: not captured, `dx == fallbackDx`.
   - **Centre, y.** A reference centred at `y = 50` and a moving box centred at `51`: `dy == −1`, `kindY == centre`.
-  - **Between.** `L = [0..100]`, `R = [300..400]` and a moving box 100 wide at `[101..201]`: `dx == 49`, `kindX == between`; two marks with gaps 100 and 100.
+  - **Between.** `L = [0..100]`, `R = [300..400]` and a moving box 100 wide at `[149..249]`: `dx == 1`, `kindX == between`; two marks of length 50 each (P-8: no edge lies within 3).
   - **Between refused.** The same, but the box is 250 wide: no `between` candidate.
   - **Continuing.** `A = [0..100]`, `L = [150..250]` (gap 50), moving at `[302..402]`: `dx == −2`, `kindX == continuing`; two marks of length 50.
   - **Touching.** `A = [0..100]` and `L = [100..200]`, moving at `[200.5..]`: the capture is an edge, never `continuing`; no mark.
-  - **Ties.** An edge offset and a centre offset of equal size: the edge wins. Two references at the same position: the lower handle's is `kindX`, and both get lines.
+  - **Ties.** An edge offset and a centre offset of equal size: the edge wins. Two references at the same position: `refX` is the lower handle, and they share one merged line (`lineCount == 1`).
   - **Shift.** `freeX: false` gives `dx == fallbackDx` and no x-line, even inside the aperture.
   - **Recheck.** A spacing capture on x whose row is lost after y snaps (y's fallback moves the box off the row) falls back to x's best edge candidate in the same pass. The case is constructed so x has an edge candidate at a larger offset.
   - **Capacity.** 40 references on one line at scale 0.05: `lineCount == 16`, no throw.
@@ -249,9 +260,13 @@ Past `kGuideCapacity`, further lines and marks are dropped silently. The solve a
 
 ```dart
 final class GuideReferenceCache {
-  GuideReferenceCache(DraftDocument document);
-  /// Rebuilt lazily when the document's state or revision changed since the
-  /// last read (as UnitIndexCache keys itself).
+  /// [units] is read lazily: the session creates its `UnitIndexCache` after
+  /// the tools (P-2).
+  GuideReferenceCache(DraftDocument document,
+      {required UnitIndexCache Function() units});
+  /// Rebuilt lazily when `units().current` is a new object, or the
+  /// document's `commands.stateId` or table revision changed, since the last
+  /// read. `UnitIndexCache` already folds in the locks and the catalog.
   GuideReferences get current;
   /// Writes the union of [handles]' boxes into [out] (minX, minY, maxX, maxY);
   /// false when none of them has a box. May allocate (drag start only).
@@ -263,13 +278,10 @@ void worldBoxOf(SymbolBox box, Transform2 t, Float64List out);
 ```
 
 **Build rules** (spec *The boxes*):
-- One bucketing pass over `entities.liveSlots`: leaves by owner, ATTRIBs skipped. Then `boxOfLeaves` per definition, memoised per build.
-- References:
-  - root-level `InstanceNode`s;
-  - an `InstanceNode` one level inside a root `GroupNode` that `UnitIndex` would count as a generated unit. Reuse `UnitIndex`'s test: a catalog type, or a locked object. Its `toWorld` is `parent.transform · node.transform`.
+- **Units** come from `units().current.units` (`UnitInfo`): its `box`, its `toWorld` (generated units already carry the group's transform) and its `kind`. Seats (`kind == UnitKinds.seat`) are skipped.
+- **Other root instances** (a bar counter, furniture with no `UnitComponent`) come from one pass over `tree.nodes`. Their boxes come from one bucketing pass over `entities.liveSlots` (leaves by owner, ATTRIBs skipped), then `boxOfLeaves` per definition, memoised per build.
 - Skip:
-  - seats (`UnitComponent.kind == UnitKinds.seat`);
-  - a hidden layer, or `visible == false`;
+  - an instance whose layer is off (`UnitInfo.visible` false, or the layer lookup `UnitIndex` uses), whose own node `visible` is false, or whose root group's `visible` is false (P-2);
   - a singular or non-finite transform;
   - an empty or non-finite box.
 - World AABB = the four transformed corners' min and max.
@@ -281,7 +293,8 @@ void worldBoxOf(SymbolBox box, Transform2 t, Float64List out);
   - a mirrored instance (scale `(−1, 1)`) at a 90° turn: min is less than max on both axes;
   - a table whose `UNIT` label text sits outside its outline: the box equals the outline's, not the label's;
   - a seat is not in `current`, a table on a hidden layer is not, and a bar counter (a symbol with no `UnitComponent`) is;
-  - a generated unit inside a root group gets the group's transform applied;
+  - a generated unit inside a root group gets the group's transform applied; one whose group is hidden is skipped;
+  - locking an object (the `locked` listenable) gives a new `current` when `UnitIndexCache` rebuilds;
   - `current` is identical (`identical`) across two reads without a change. After placing a new instance through a command it is a new object with `length + 1`; after undo, `length` again;
   - `unionOf` of two rotated tables equals the union of their boxes; of a hidden-only set it returns false.
 - [ ] **Step 2:** Fail.
@@ -353,7 +366,8 @@ PlanGuideSettings get alignmentGuides;
 ```dart
 /// Paints [s]'s lines and marks in screen space: lines extended
 /// kGuideOverhangPixels past each end, marks with kGuideTickPixels ticks.
-/// Reuses one Paint; allocates nothing per call.
+/// Reuses one Paint and one Float32List (drawRawPoints, PointMode.lines);
+/// allocates nothing per call (P-13).
 final class GuidePainter {
   void paint(Canvas canvas, Transform2 worldToScreen, GuideSolution s,
       {required Color color, required double strokePixels});
@@ -381,13 +395,13 @@ Otherwise:
 1. `dRaw = raw − base`, and `fallback = target − raw`, per axis.
 2. The free axes are both axes, unless `orthoBase` is set; then the minor axis is pinned, by `resolveDragPoint`'s rule, `|raw.x − base.x| ≥ |raw.y − base.y|` pins y.
 3. Solve with the moving box shifted by `dRaw` and the aperture `(touch ? 10 : 6) / camera.scale`.
-4. Write `target = raw + (dx, dy)`.
+4. Write only the captured axes: `target.x = raw.x + dx` when `capturedX`, likewise y; an uncaptured axis keeps the chain's value bit for bit (P-7).
 
 `objectSnapped` does not stop the solve (C-8).
 
 **`suppress`** clears the solution. **`paint`** draws the solution through `GuidePainter`, with `paper.guideColor` and `strokePixels()`. **`end`** clears it.
 
-The settings' listener requests a repaint when guides turn off mid-drag. The tool notifies, so the overlay repaints.
+`changes` is the `PlanGuideSettings` itself. When guides turn off mid-drag, `SelectTool` re-targets through it (Task 2), `adjust` returns at once, and the solution is cleared, so the repaint shows none.
 
 - [ ] **Step 1: Write failing tests** through a real `PlanController` with the restaurant kit, driving pointer events through the canvas (follow the existing design-move tests' rig). Camera at scale 1.5, rotated 0°; tables rotated 30° and 90°, one mirrored, all around `(6000, 4000)`.
   - Dragging table B to within 4 px of table A's left edge snaps B's box min-x to A's exactly. The committed translation equals the preview's. One undo step restores B's original transform exactly (`==`), and redo restores the guided one.
@@ -401,6 +415,8 @@ The settings' listener requests a repaint when guides turn off mid-drag. The too
   - **Alt.** With Alt held, the move equals guides-off.
   - **Seats only.** A plan where the only other objects are seats and walls: the move equals guides-off (Review Focus 5).
   - **Setting off.** `alignmentGuidesAllowed = false`: no capture.
+  - **Toggled mid-drag.** `toggle()` while a capture is shown, with no pointer move: the preview falls back to the chain's point at once (P-6).
+  - **Non-node handles.** A drag whose handles include a leaf entity is not eligible.
 - [ ] **Step 2:** Fail.
 - [ ] **Step 3:** Implement.
 - [ ] **Step 4:** Pass. Named mutations:
@@ -423,25 +439,33 @@ The settings' listener requests a repaint when guides turn off mid-drag. The too
 - `PlanSymbolTool` gains optional constructor parameters `GuideReferenceCache? guides`, `PlanGuideSettings? guideSettings` and `double Function()? guideStroke`. With null, behaviour equals today's.
 
 **Behaviour** (spec *The delta: Place*, *Modes*):
-- `_free({bool guided = true})`. The attachment query's `current:` uses `_free(guided: false)`; `_syncPlacement` uses the guided one.
-- A new `_solveGuides(ctx)` runs after `_resolve` in `_update`, and in the R and M key branch before `_syncPlacement`.
-  - It computes the ghost box at the raw pointer: `worldBoxOf(boxOfEntry(entry), placementTransform(at: raw, ...))`, recomputed only when the turns, the mirror, the armed symbol or the raw point changed. The transform allocation is baseline, `_free()`'s own.
-  - It solves with both axes free and `fallback = at − raw`, and stores the guided anchor in a reused `Vector2`.
+- **The guided anchor.** A reused `Vector2 _guidedAt`. `_free({bool guided = true})` uses `_guidedAt` when guided, `_at.point` when not.
+  - The attachment query's `current:` uses `_free(guided: false)`.
+  - **`_place` commits the guided placement** (P-3): `transform: _attached?.transform ?? _free()`, and the `at:` it passes is `_guidedAt` when not attached. `ghostAt` and the snap marker read the guided anchor too.
+- **One solve site** (P-5): `_syncPlacement` runs the solve before it computes `_placement`, so every path that already calls it re-solves: `_update`, R and M, `_onArmed` and `gatesChanged`.
+- **The box, allocation-free** (P-4):
+  - Cache the ghost's box anchored at the origin, `worldBoxOf(boxOfEntry(entry), placementTransform(at: origin, ...))`, keyed on the armed symbol, the turns and the mirror. The transform is computed only on a key change.
+  - Per event, translate the cached box by the raw pointer into reused fields.
+  - Solve with both axes free, the fallback `at − raw`, and `moving` the const empty set.
+  - Write `_guidedAt` per captured axis only; an uncaptured axis copies `_at.point`'s bit for bit.
 - `_track` stores `e.isTouch` and `e.alt`.
-- An Alt key down or up re-runs `_update` from the last screen point, as `_onCamera` does.
+- **Alt key** (P-5): in `onKey`, before the `armed == null` and `KeyUpEvent` early returns, an Alt-left or Alt-right down or up (not a repeat) stores the state, re-runs `_update` from the last screen point when a ghost is visible, and returns `ignored`. R and M stay ignored while Alt is held, as `_hasModifier()` already does.
 - `paintOverlay` paints the solution when no attachment is captured.
-- `moving` is the empty set (const).
+- Guides off or Alt held: `_guidedAt` equals `_at.point`.
 
 - [ ] **Step 1: Write failing tests** (90°-turned armed table, scale 2, references off the origin):
-  - hovering 4 px off a placed table's top edge snaps the ghost's box max-y to that edge; the placed instance (pointer up) has exactly that transform;
+  - hovering 4 px off a placed table's top edge snaps the ghost's box max-y to that edge; the placed instance (pointer up) has exactly the ghost's transform (P-3);
   - pressing R with no pointer move re-solves: the ghost's new box captures a different edge and the solution changes;
   - pressing M behaves the same;
   - with Alt held, placement equals guides-off;
   - a wall-attaching symbol over a wall takes the attachment, and no guide is painted;
+  - with Alt held, R does nothing (as today) and the ghost stays unguided;
   - placing two tables in a row: the second sees the first as a reference, because the cache rebuilt after the placement command.
 - [ ] **Step 2:** Fail.
 - [ ] **Step 3:** Implement.
-- [ ] **Step 4:** Pass. Named mutations: the attachment's `current` guided; the R branch not re-solving; the box not recomputed on a turn.
+  - re-arming another symbol re-solves without a pointer move;
+  - `toggle()` mid-hover with no pointer move re-solves (the tool listens to the settings while armed) (P-6).
+- [ ] **Step 4:** Pass. Named mutations: the attachment's `current` guided; `_place` committing `_at.point`; the box not recomputed on a turn; the solve moved out of `_syncPlacement`.
 - [ ] **Step 5:** Plan gate. Commit `feat(plan): alignment guides while placing a symbol`.
 
 ### Task 8: Service: `ServiceTool`
@@ -456,14 +480,15 @@ The settings' listener requests a repaint when guides turn off mid-drag. The too
 - `ServiceTool` gains optional `GuideReferenceCache? guides`, `PlanGuideSettings? guideSettings` and `double Function()? guideStroke`.
 
 **Behaviour:**
-- `_startDrag`, after `_moving` is set: `unionOf(_moving)` into a reused box. False means the drag is not eligible.
-- `_drag`, for a dragging gesture:
+- `_startDrag`, after `_moving` is set: `unionOf(_moving)` into a reused box; false means the drag is not eligible. The cache already excludes seats and hidden units, so a group of hidden members gives false (P-11). Build the `moving` `Set<Handle>` once here, and store `_dragCtx = ctx`.
+- `_drag`, **only for `_Gesture.dragging`** (panning is untouched):
   - `dRaw = e.world − _pressWorld`;
-  - solve with fallback `(0, 0)`, both axes free, the aperture by `e.isTouch`, and `moving` = a `Set<Handle>` built once in `_startDrag` from `_moving`;
-  - `_dx/_dy = dRaw + (dx, dy)`.
-- Store `_lastWorld` (the last raw world point), `_lastTouch` and `_lastAlt`.
-- **Camera.** On entering `_Gesture.dragging`, add a camera listener that recomputes the world point from `_lastScreen` (`camera.value.screenToWorld`), re-solves and notifies. Remove it in `_reset`, which every release, cancel and dispose path reaches. Also call `_reset` from `dispose` if it is not already called there.
-- **Alt key.** `onKey`: Alt down or up while dragging re-solves from the last world point.
+  - when eligible, `guideSettings.on` and not Alt: solve with fallback `(0, 0)`, both axes free, and the aperture by `e.isTouch`;
+  - `_dx/_dy` = `dRaw` plus the offset on captured axes only.
+- Store `_lastTouch` and `_lastAlt`. The screen point is the existing `_lastScreen`; no `_lastWorld` (P-11).
+- **Camera** (P-11): only while an eligible drag lives and guides are on, a camera listener recomputes the world point from `_lastScreen` (`camera.value.screenToWorld`), re-solves and notifies. With guides off or the drag not eligible, nothing listens, so `_dx/_dy` stay today's. Add the listener on entering an eligible drag; remove it through `_dragCtx` in `_reset` (release, cancel, a failed `_startDrag`) and in `dispose`, which does not call `_reset`.
+- **Settings** (P-6): the same lifetime listens to `guideSettings`. A toggle re-solves from `_lastScreen` (off gives `dRaw`) and notifies.
+- **Alt key**: `onKey`, Alt down or up while dragging re-solves from `_lastScreen`.
 - `paintOverlay` paints the solution while `_gesture == _Gesture.dragging`, beside the band branch.
 
 - [ ] **Step 1: Write failing tests**, using `test/support/service_rig.dart` (`hallController`): tables rotated 30° off the origin, camera scale 1.5.
@@ -476,47 +501,72 @@ The settings' listener requests a repaint when guides turn off mid-drag. The too
   - Seats of the dragged table stay put, and are not references.
 - [ ] **Step 2:** Fail.
 - [ ] **Step 3:** Implement.
-- [ ] **Step 4:** Pass. Named mutations: the camera listener not removed in `_reset`; `_dx` computed without the offset on release; the `moving` set not excluded (a table snapping to itself, `dx == 0` always).
+  - with guides off, a camera zoom mid-drag leaves `_dx/_dy` exactly as today (no listener) (P-11);
+  - a pan (floor drag) never solves.
+- [ ] **Step 4:** Pass. Named mutations: the camera listener not removed in `_reset`; the listener added with guides off; `_dx` computed without the offset on release; the `moving` set not excluded (a table snapping to itself, `dx == 0` always).
 - [ ] **Step 5:** Plan gate. Commit `feat(plan): alignment guides in service drags`.
 
-### Task 9: Views and bars
+### Task 9: View options, allowance and stroke
 
 **Files:**
 - Modify: `packages/jet_cad_2d_plan/lib/src/canvas/plan_canvas.dart`
 - Modify: `packages/jet_cad_2d_plan/lib/src/service/view/plan_service_view.dart`
-- Modify: `packages/jet_cad_2d_plan/lib/src/service/view/plan_service_bar.dart`
-- Modify: `packages/jet_cad_2d_plan/lib/src/editor/plan_editor.dart`
-- Modify: `packages/jet_cad_2d_plan/lib/src/editor/plan_editor_bar.dart`
-- Modify: `packages/jet_cad_2d_plan/lib/src/l10n/strings.dart`, `strings_en.dart`, `strings_de.dart`, `strings_tr.dart`
+- Modify: `packages/jet_cad_2d_plan/lib/src/editor/plan_editor.dart` (the option and its hand-down only)
 - Test: `packages/jet_cad_2d_plan/test/guides/guide_views_test.dart`
 
 **Interfaces:**
 - Consumes: `PlanController.alignmentGuides`, `alignmentGuidesAllowed` and `guideStrokePixels` (Task 5).
+- Produces: `PlanCanvas({..., this.alignmentGuides = true})`, `PlanServiceView({..., this.alignmentGuides = true})` and `PlanEditor({..., this.alignmentGuides = true})`, each with `final bool alignmentGuides`.
+
+**Behaviour:**
+- **Allowance** (P-1). `PlanCanvas` and `PlanServiceView` write `controller.alignmentGuidesAllowed = widget.alignmentGuides` in `initState` and in `didUpdateWidget`. On a controller swap they set the **old** controller's back to true, beside `if (!old.isDisposed) old.snappingAllowed = true` (`plan_canvas.dart:198`). Dispose does **not** reset.
+- `PlanEditor` passes its value to the canvas and to the `PlanServiceView` it builds.
+- **Stroke.** Both views write `controller.guideStrokePixels = theme?.guideWidth ?? 1.0` where they resolve the theme today, beside the `selectionWidth` use (`plan_canvas.dart:391`, `plan_service_view.dart:764`).
+
+- [ ] **Step 1: Write failing tests**
+  - `PlanEditor(alignmentGuides: false)`: `controller.alignmentGuides.on` is false after a pump, in design and after switching to service.
+  - Swapping a `PlanCanvas(alignmentGuides: false)` to another controller restores the old one's `allowed == true`. Disposing it leaves `allowed` false (P-1).
+  - Switching `PlanEditor` from design to service keeps a `userOn == false` and keeps `allowed` false under `alignmentGuides: false`.
+  - `PlanTheme(guideWidth: 3)` under `PlanEditor` sets `controller.guideStrokePixels == 3`, in both modes.
+- [ ] **Step 2:** Fail.
+- [ ] **Step 3:** Implement.
+- [ ] **Step 4:** Pass. Named mutations: a dispose reset added (the mode-switch test goes red); `PlanEditor` not passing its value to the service view; the stroke written from `selectionWidth`.
+- [ ] **Step 5:** Plan gate. Commit `feat(plan): alignment guide options on the views`.
+
+### Task 9b: The bar toggles and their strings
+
+**Files:**
+- Modify: `packages/jet_cad_2d_plan/lib/src/editor/plan_editor.dart`, `packages/jet_cad_2d_plan/lib/src/editor/plan_editor_bar.dart`
+- Modify: `packages/jet_cad_2d_plan/lib/src/service/view/plan_service_view.dart`, `packages/jet_cad_2d_plan/lib/src/service/view/plan_service_bar.dart`
+- Modify: `packages/jet_cad_2d_plan/lib/src/l10n/strings.dart`, `strings_en.dart`, `strings_de.dart`, `strings_tr.dart`
+- Modify (same commit, P-9): `packages/jet_cad_2d_plan/test/editor/editor_bar_test.dart:174-175` and `packages/jet_cad_2d_plan/test/service/view/service_bar_test.dart:226-227` (the pinned `values` name lists; find them with `grep -rn "'redo'" test`). Also any test that counts the default bar's buttons, and `apps/restaurant_demo`/`apps/architecture_demo` tests that do. Run both demos' tests in this task.
+- Test: `packages/jet_cad_2d_plan/test/guides/guide_bar_test.dart`
+
+**Interfaces:**
 - Produces:
-  - `PlanCanvas({..., this.alignmentGuides = true})`, `PlanServiceView({..., this.alignmentGuides = true})` and `PlanEditor({..., this.alignmentGuides = true})`, each with `final bool alignmentGuides`;
   - `enum PlanEditorAction { export, print, undo, redo, guides, snap, zoom }` and `enum PlanServiceAction { undo, redo, guides, merge, split, export, print }`, so the declaration order is the default order;
   - `PlanStrings.alignmentGuides` (tooltip and semantics): en "Alignment guides", de "Ausrichtungshilfen", tr "Hizalama kılavuzları".
 
 **Behaviour:**
-- **Allowance.** `PlanCanvas` and `PlanServiceView` write `controller.alignmentGuidesAllowed = widget.alignmentGuides` in `initState` and in `didUpdateWidget`. On dispose, and on a controller swap for the old controller, they set it back to true, exactly as `PlanCanvas` does for `snappingAllowed` (`plan_canvas.dart:165,198,210`).
-- `PlanEditor` passes its value to the canvas and to the `PlanServiceView` it builds.
-- **Stroke.** Both views write `controller.guideStrokePixels = theme?.guideWidth ?? 1.0` where they resolve the theme today, beside the `selectionWidth` use.
-- **Editor bar.** `_editCommands` gains a `_BarCommand(id: 'guides', icon: Icons.straighten, ...)` after redo. It is a toggle: `_BarCommand` gains `final bool? selected`, and the toolbar renders a selected command as an `IconButton` with `isSelected` and a `selectedIcon`. It is listenable through `controller.alignmentGuides`, and is left out when `!widget.alignmentGuides`. `_toolbarFor` maps `PlanEditorAction.guides` to `(_byId(edit, 'guides'), false)`. The readouts switch lists `PlanEditorAction.guides => null` explicitly; no `_ =>` path is relied on.
-- **Service bar.** The `_actions` button switch has `PlanServiceAction.guides =>` a toggle button keyed `service-guides`, null when `!widget.alignmentGuides`. The group switch puts `guides` in group 0.
+- **Editor bar** (P-10):
+  - `_BarCommand` gains `final ValueListenable<bool>? selected`. The toolbar renders a command with `selected` as an `IconButton` with `isSelected` and `selectedIcon`, rebuilt on `Listenable.merge([enabled, selected])`.
+  - The guides command (`id: 'guides'`, `Icons.straighten`) comes **after** the undo-gated list, whatever `permissions.undo` says: `[..._editCommands(s), if (widget.alignmentGuides) _guidesCommand(s)]` at both call sites (`plan_editor.dart:1062,1204`).
+  - Its `selected` is a `ValueListenable<bool>` the editor keeps in sync with `controller.alignmentGuides.userOn`.
+  - `_toolbarFor` maps `PlanEditorAction.guides` to `(_byId(edit, 'guides'), false)`. The readouts switch lists `PlanEditorAction.guides => null` explicitly.
+- **Service bar** (P-10):
+  - `_button` gains an optional `ValueListenable<bool>? selected` with the same rendering.
+  - The `_actions` button switch has `PlanServiceAction.guides =>` a toggle keyed `service-guides`, null when `!widget.alignmentGuides`. The group switch puts `guides` in group 0.
 - Keys: `toolbar-guides` and `service-guides`.
 
 - [ ] **Step 1: Write failing tests**
-  - `PlanEditor` with default `bar` shows `toolbar-guides`; tapping it flips `controller.alignmentGuides.userOn` and the button's selected state.
-  - `PlanEditorBar(actions: [PlanEditorAction.undo, PlanEditorAction.guides])` shows it after Undo. `PlanEditor(alignmentGuides: false)` shows none, and `controller.alignmentGuides.on` is false after a pump.
-  - `PlanServiceView` with default bar shows `service-guides` after `service-redo`; with `alignmentGuides: false`, none.
-  - Disposing a `PlanCanvas(alignmentGuides: false)` restores `allowed == true`.
-  - Switching `PlanEditor` from design to service keeps the user's `userOn == false`.
-  - `PlanTheme(guideWidth: 3)` under `PlanEditor` sets `controller.guideStrokePixels == 3`.
+  - `PlanEditor` with the default `bar` shows `toolbar-guides`, also under `PlanPermissions` with `undo: false`. Tapping it flips `controller.alignmentGuides.userOn` and the button's `isSelected`.
+  - `PlanEditorBar(actions: [PlanEditorAction.undo, PlanEditorAction.guides])` shows it after Undo. `PlanEditor(alignmentGuides: false)` shows none.
+  - `PlanServiceView` with the default bar shows `service-guides` right after `service-redo`; with `alignmentGuides: false`, none.
   - The tooltip reads "Hizalama kılavuzları" under `Locale('tr')`.
 - [ ] **Step 2:** Fail.
-- [ ] **Step 3:** Implement.
-- [ ] **Step 4:** Pass. Named mutations: the editor's default path not including the command; dispose not resetting the allowance; `PlanEditor` not passing its value to the service view.
-- [ ] **Step 5:** Plan gate. Commit `feat(plan): alignment guide options and bar toggles`.
+- [ ] **Step 3:** Implement, and update the two pinned enum-name tests to the new orders.
+- [ ] **Step 4:** Pass, including `apps/restaurant_demo` and `apps/architecture_demo` `flutter test`. Named mutations: the guides command inside the undo gate; `selected` read once instead of listened; the service group switch putting `guides` in group 1.
+- [ ] **Step 5:** Plan gate. Commit `feat(plan): alignment guide toggles in both bars`.
 
 ### Task 10: The allocation invariant
 
@@ -526,17 +576,18 @@ The settings' listener requests a repaint when guides turn off mid-drag. The too
 **Interfaces:**
 - Consumes: `vm_allocation_meter.dart` (`AllocationMeter`), the rigs of Tasks 6–8.
 
-**Method** (follow `pick_allocation_test.dart`, including its `--enable-vmservice` skip reason):
+**Method** (follow `pick_allocation_test.dart`, including its `--enable-vmservice` skip reason; P-13):
 - For each tool (design move, placement, service), warm 50 events, then meter 200 pointer-driven re-targets and 50 camera-driven ones.
-- Do this with guides on and with guides off (`toggle()`), at 10 and at 200 references, and for service with one and with three moved tables.
-- **Assert:** for each class in `{_Double, Aabb2, Transform2, Vector2, _GrowableList, _List, _Map, _Set, _Closure, _Record}`, the count with guides on minus the count with guides off is `≤ 0` per event. The on-minus-off difference does not grow from 10 to 200 references.
-- `GuidePainter.paint` over a full solution (16 lines, 16 marks), 100 calls: zero instances of any class.
+- Run guides on and guides off in **separate meter epochs** (`reset` before each), at 10 and at 200 references, and for service with one and with three moved tables.
+- **Watched classes**: `Vector2`, `Transform2`, `Aabb2`, `GuideSolution`, `GuideReferences`, `Float64List` (`_Float64List`). The noisy core classes (`_List`, `_Map`, `_Closure`, `_Double`, `_GrowableList`) are not watched, as the meter's own doc advises.
+- **Assert** per watched class: (on − off) per event `≤ 0.05`, the budget style of `pick_allocation_test`, after subtracting a control loop that runs the same events with no tool. The on-minus-off difference at 200 references does not exceed the one at 10.
+- **`GuidePainter`** draws through `canvas.drawRawPoints(PointMode.lines, …)` from one preallocated `Float32List` (unused segments degenerate, which a butt cap draws as nothing). Over 100 calls on a full solution: zero `Offset`, `Paint`, `Path` and `_Float32List`.
 - The capacity of `GuideSolution.lines` and `GuideSolution.marks` is unchanged (`identical` buffers).
 
 - [ ] **Step 1:** Write the test.
 - [ ] **Step 2:** Run `flutter test --enable-vmservice test/invariants/guide_allocation_test.dart`. Expected: pass. If it fails, fix the allocating code in Tasks 3–8's files. Never raise a budget.
 - [ ] **Step 3:** Named mutations, each shown red:
-  - `GuidePainter` creating a `Paint` per call;
+  - `GuidePainter` creating a `Paint` per call, or using `drawLine` with `Offset`s;
   - `solveGuides` building a `List` of candidates;
   - `PlanMoveGuides.adjust` cloning `raw`;
   - the service re-solve allocating a `Set` per event.
@@ -565,7 +616,7 @@ Snippets: one `PlanEditor(alignmentGuides: false, …)`, one `controller.alignme
 
 **CHANGELOG (plan)** bullets: the feature in both modes; the options; `PlanGuideSettings`; the enum values with the migration note; the theme fields; `C-8`'s rule (a guide beats a pointer object-snap hit in a guide-eligible drag).
 
-- [ ] **Step 1:** Write the guide section and the probe additions. Run `cd tool/ci && dart test` and `dart run check_guide.dart` (or the probe check CI runs; see `.github/workflows/ci.yml`). Expected: pass.
+- [ ] **Step 1:** Write the guide section and the probe additions. Every fenced ```dart or ```yaml block in the guide must also appear, whitespace collapsed, in `tool/ci/host_probe/lib/main.dart` or `tool/ci/host_probe/pubspec.yaml.in`, or `check_guide` fails (P-14). The probe must also compile: build it as CI does (`.github/workflows/ci.yml`). Gate: `cd tool/ci && dart test`. Expected: pass.
 - [ ] **Step 2:** Demo change and its test. Run `cd apps/restaurant_demo && flutter test && flutter analyze`. Expected: pass.
 - [ ] **Step 3:** Run the full exit gate (Global Constraints, the final-task list), every command, and paste each one's real last lines into the task report.
 - [ ] **Step 4:** Results note at `docs/superpowers/notes/2026-10-23-alignment-guides-results.md`. It holds:

@@ -121,3 +121,88 @@ Reviewer: GitHub Copilot CLI (default model), `--allow-all-tools --deny-tool wri
 
 
 
+
+## The plan: Copilot CLI review
+
+Reviewer: GitHub Copilot CLI (default model), `--allow-all-tools --deny-tool write`, requested by the human, 2026-10-23, over `b7b8d559`. Findings verbatim; all fourteen folded into the plan as P-1 to P-14, and P-1 and P-2 also amend the spec (dispose does not reset the allowance; boxes are direct leaves only).
+
+1. **Critical – Task 9 (allowance reset on dispose).**
+   - The plan cites `plan_canvas.dart:165,198,210` for a dispose reset. Those lines are initState, the controller swap (`old.snappingAllowed = true`) and didUpdateWidget. `dispose()` (214-226) has no reset, and the comment at 195-197 says a replaced canvas is "not undone by its dispose".
+   - The spec makes the same false claim. A design→service switch in `PlanEditor` (`_serviceView()`, lines 819 and 1025) mounts the new view first, so a dispose reset from the old view would overwrite its `false`. That clobbers the host's `alignmentGuides: false`.
+   - Fix: reset only on a controller swap, as `snappingAllowed` does. Otherwise use an owner token (reset only if this view still owns it). Change the Task 9 test "Disposing PlanCanvas(alignmentGuides:false) restores true" to match, and correct the spec.
+
+2. **Critical – Task 4 (`GuideReferenceCache`).**
+   - The plan builds it from `(DraftDocument)` but says to follow the "UnitIndex generated-unit rule". That rule needs `catalog.typeIdOf` and `locks` (`unit_index.dart` ~140-170). `UnitIndexCache` also invalidates on stateId, `tables.mutationRevision` and the `locked` listenable. The cache described would miss these.
+   - `units` is a `late final` created last in `DocumentSession` (`session.dart`), after `buildGenericTools` (`generic_tools.dart:126`, called at `session.dart:80`). `ServiceSession` has its own at `service_session.dart:111`.
+   - `UnitInfo.visible` covers the layer only, not `node.visible` or a parent group's `visible`.
+   - Fix: take a `UnitIndexCache` (or a lazy `() => units`) and reuse `UnitInfo` box, transform and owner. Scan non-unit root instances separately. State the node/group visibility rule and that all three dependencies feed invalidation.
+   - The Task 4 deviation (direct owner leaves only) is sound. It matches `boxOfLeaves`/`shapeOf`, which skip ATTRIB. The spec line "nested instances included, as UnitIndex does" is false and should be corrected.
+
+3. **Critical – Task 7 (committed placement).**
+   - `_place` commits `placeSymbol(at: _at.point, …, transform: _attached?.transform)` (`plan_symbol_tool.dart` ~480). The plan only changes the ghost, so release places the unguided point.
+   - `ghostAt` and the snap marker also read `_at.point`.
+   - Fix: commit `_attached?.transform ?? placement(guided)`. Add a test that the committed transform equals the ghost's.
+
+4. **Important – Task 7 (per-event allocation).**
+   - The ghost box is computed at the raw pointer via `worldBoxOf(boxOfEntry, placementTransform(…))`, which the plan says is recomputed only when the raw point changed. The raw point changes every event. The plan calls this "`_free()`'s baseline", but it is an extra `placementTransform` plus `Transform2`. That breaks "guides add zero allocations".
+   - Fix: cache the origin-anchored box, keyed on symbol, turns and mirror. Translate it by the raw point per event into preallocated fields.
+
+5. **Important – Task 7 (re-solve sites and keys).**
+   - `_syncPlacement` is also called from `_onArmed` and `gatesChanged`. The plan hooks neither.
+   - `onKey` returns early for `KeyUpEvent` and when `armed == null`. The Alt handling must come before those branches, which the plan does not say. `_hasModifier()` already includes Alt, so R/M are ignored while Alt is held.
+   - Fix: put the solve inside `_syncPlacement`, and specify the ordering in `onKey`.
+
+6. **Important – Tasks 2/6/7/8 (settings wiring).**
+   - `MoveAdjuster` has no notification path. Nothing wires `PlanGuideSettings` to `SelectTool`, `PlanSymbolTool` or `ServiceTool`. The spec requires re-target and repaint when guides are toggled mid-drag, and no test covers it.
+   - Fix: make `PlanGuideSettings` a `Listenable`. Each tool adds a listener on drag start and removes it in `_endDrag`/`_reset`/`dispose`, then re-targets. Add one test per tool.
+
+7. **Important – Task 6 (float exactness).**
+   - `target = raw + (dx,dy)` with an uncaptured-axis fallback of `target − raw` can drift by an ulp. Tests for Shift ("y equals base y exactly") and for guides-off equality would be flaky.
+   - Fix: write `target` only on captured axes and leave the other axis untouched.
+
+8. **Important – Task 3 (fixtures).**
+   - The between-capture test uses L=[0..100], R=[300..400], moving [101..201] and expects dx=49. With aperture 3 that is out of range, and an edge candidate (−1) wins. Use moving [149..249] (o=1).
+   - The fixtures say "off the origin (5000, −3200)" but use 0-based numbers. State the translation.
+   - The "lower handle wins ties" test cannot be observed because `GuideSolution` has no winning-reference field. Add `refX`/`refY`, or drop the test.
+   - Stacked duplicate references yield duplicate lines that eat the 16-line capacity. Dedupe them.
+
+9. **Important – Task 9 (existing tests pin enum order).**
+   - `editor_bar_test.dart:174-175` expects `PlanEditorAction.values` names `['export','print','undo','redo','snap','zoom']`. `service_bar_test.dart:226-227` expects `['undo','redo','merge','split','export','print']`.
+   - The plan inserts `guides` after redo in both and never lists these tests for update. That contradicts "existing suites untouched".
+   - Fix: either append `guides` last in each enum (so default order puts it at the end) or update both tests explicitly in Task 9. Also check tests that count toolbar buttons on the default bar.
+   - The demo profile's explicit `actions` lists are unaffected. `restaurant_demo/main.dart` uses `const PlanServiceBar(...)` with defaults and would gain the button, so check that its tests do not count buttons.
+
+10. **Important – Task 9 (editor toggle button).**
+    - `_editCommands` (`plan_editor.dart:539`) returns `const []` when `!permissions.undo`. The plan does not say where guides sits relative to that. It must not depend on the undo permission.
+    - `_BarCommand` (1263) takes `enabled: ValueListenable<bool>`, and `_Toolbar` rebuilds only on `enabled`. A plain `bool? selected` is a snapshot and won't update on toggle. Use a `ValueListenable<bool> selected`.
+    - The service bar `_button` (`plan_service_view.dart` ~930) has no selected-state support, and both `_actions` switches (880-911) need a `guides` case.
+    - Task 9 is too large for one implementer (views, two bars, three l10n files, enums, tests, allowance). Split it into allowance/canvas wiring, then bars and l10n.
+
+11. **Important – Task 8 (`ServiceTool`).**
+    - The plan adds a camera listener unconditionally. Today the tool does not re-target on camera changes, so this changes `_dx/_dy` even with guides off. Gate it on guides being eligible and on.
+    - `ServiceTool` stores no `ToolContext`, and `_reset` (up, cancel, `_startDrag` failure) needs one to remove the listener. Say to store a `_dragCtx`. `dispose()` does not call `_reset`, so it must remove the listener itself.
+    - The tool already has `_lastScreen`. Do not add `_lastWorld`; recompute from it.
+    - `_drag` serves both panning and dragging, so the solve must be limited to dragging.
+    - `_moving` may include seats and group `selectableMembers`. State that the reference cache excludes seats and hidden units, which gives "all-hidden group draws no guide".
+
+12. **Minor – Task 2 (ambiguities).**
+    - Call `begin` before `_follow` in `_enter`.
+    - `end()` must be guarded to move drags, since `_endDrag` also serves rotate and reshape.
+    - The signature of `_retarget(ctx, world, shift)` is unspecified for the stored touch/Alt state.
+    - `drag.handles` can include leaf entity handles, so `movable(Handle)` must return false for non-node handles.
+    - `Handle` is an extension type over `int` (`handle.dart:27`), so `Set<Handle>` has no boxing concern.
+
+13. **Important – Task 10 (allocation meter).**
+    - `accumulatedInstances` may be called once per `reset` epoch, so the on and off runs need separate epochs.
+    - The meter doc calls `_List`, `_Map`, `_Closure`, `_Double` and `_GrowableList` noisy. `pick_allocation_test` watches only `_Double`, `Vector2` and `Transform2`, with a fractional-per-event budget. An exact "on − off ≤ 0" over `_Set`/`_Map`/`_Record` will be flaky.
+    - "Zero instances of any class" in `GuidePainter.paint` cannot be measured, because the meter counts named classes only.
+    - Fix: watch `Vector2`, `Transform2`, `Aabb2` and the guide classes. Allow a tolerance against a control loop, and subtract the baseline.
+    - `flutter test --enable-vmservice` is fine (CI `ci.yml:49,59`). A skip counts as red in CI.
+
+14. **Minor – Task 11 / ordering.**
+    - Task 11 adds code to `docs/host-guide.md`. `check_guide.dart` fails unless every fenced dart/yaml block also appears in `tool/ci/host_probe/lib/main.dart` or the pubspec template. Say so explicitly, and run `cd tool/ci && dart test` as the gate.
+    - The Flutter CHANGELOG starts at 0.7.3, so it needs a new `## Unreleased` section. The plan CHANGELOG already has one.
+    - Task 4 needs Task 3's `GuideReferences`. Tasks 6-9 need Task 5. Task 9's enum and test edits must land in the same commit, or its gate is red.
+
+
+
