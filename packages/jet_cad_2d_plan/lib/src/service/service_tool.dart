@@ -534,9 +534,14 @@ class ServiceTool extends Tool {
   void _reaim() {
     final ctx = _dragCtx;
     if (ctx == null) return;
-    final w =
-        ctx.camera.value.screenToWorld(Vector2(_lastScreen.dx, _lastScreen.dy));
-    _aim(ctx, w.x, w.y);
+    // The screen point back to the world by the camera's own coefficients:
+    // `screenToWorld` would build a `Vector2` for its argument and one for
+    // its result on every camera change (spec Constraints: guides add no
+    // allocation per event).
+    final m = ctx.camera.value.worldToScreenMatrix;
+    final det = m.a * m.d - m.b * m.c;
+    final sx = _lastScreen.dx - m.e, sy = _lastScreen.dy - m.f;
+    _aim(ctx, (m.d * sx - m.c * sy) / det, (m.a * sy - m.b * sx) / det);
     notifyListeners();
   }
 
