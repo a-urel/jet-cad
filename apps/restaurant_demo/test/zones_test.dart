@@ -6,6 +6,7 @@
 // `worldToGlobal`, the canvas from `canvasRect`.
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shadcn_ui/shadcn_ui.dart' show ShadSwitch, ShadTabs;
 import 'package:jet_cad_2d/jet_cad_2d.dart' show Transform2;
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
     show ViewportTransform;
@@ -83,10 +84,8 @@ void main() {
     await tester.pump();
     await tester.pump();
     await reveal(tester, 'fade-others');
-    expect(
-        tester.widget<SegmentedButton<String>>(byKey('zone-toggle')).selected,
-        {'B'});
-    expect(tester.widget<SwitchListTile>(byKey('fade-others')).value, isTrue);
+    expect(tester.widget<ShadTabs<String>>(byKey('zone-toggle')).value, 'B');
+    expect(tester.widget<ShadSwitch>(byKey('fade-others')).value, isTrue);
     expect(c.unitFocus.value, {'6', '7'});
 
     await tester.tap(byKey('zone-all'));

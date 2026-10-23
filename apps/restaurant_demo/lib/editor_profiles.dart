@@ -2,8 +2,9 @@
 // editor's options, and the inspector that links a table, a bar counter or a
 // room to a record of the demo's database through the host data
 // (`setObjectData`).
-import 'package:flutter/material.dart';
+import 'package:flutter/widgets.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+import 'package:shadcn_ui/shadcn_ui.dart';
 
 import 'demo_strings.dart';
 import 'fake_records.dart';
@@ -68,36 +69,44 @@ class RecordPicker extends StatelessWidget {
   Widget build(BuildContext context) {
     final words = DemoStrings.of(context);
     // An id the list does not hold (written by "Link tables", say) is shown
-    // as it is: a dropdown asserts on a value it has no item for.
+    // as it is: a select shows only what it has an option for.
     final known = recordOf(records, id) != null;
+    final shownId = id ?? '';
+    final options = <String, String>{
+      '': words.none,
+      if (id != null && !known) id!: id!,
+      for (final r in records) r.id: '${r.id}  ${r.name}',
+    };
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-      child: InputDecorator(
-        decoration: InputDecoration(labelText: words.posId, isDense: true),
-        child: DropdownButtonHideUnderline(
-          child: DropdownButton<String>(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(words.posId, style: ShadTheme.of(context).textTheme.muted),
+          const SizedBox(height: 4),
+          ShadSelect<String>(
             key: const Key('pos-id'),
-            isExpanded: true,
-            isDense: true,
-            value: id ?? '',
-            items: [
-              DropdownMenuItem(
-                  value: '',
+            initialValue: shownId,
+            selectedOptionBuilder: (_, v) => Text(options[v] ?? v),
+            options: [
+              ShadOption(
                   key: const Key('pos-id-none'),
+                  value: '',
                   child: Text(words.none)),
               if (id != null && !known)
-                DropdownMenuItem(value: id, child: Text(id!)),
+                ShadOption(value: id!, child: Text(id!)),
               for (final r in records)
-                DropdownMenuItem(
-                    value: r.id,
+                ShadOption(
                     key: Key('pos-id-${r.id}'),
+                    value: r.id,
                     child: Text('${r.id}  ${r.name}')),
             ],
             onChanged: (v) {
               if (v != null) onChanged(v);
             },
           ),
-        ),
+        ],
       ),
     );
   }

@@ -15,7 +15,8 @@ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show kUnitLabelTag;
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 import 'package:restaurant_demo/main.dart';
 import 'package:restaurant_demo/samples/place_tables.dart';
-import 'package:shadcn_ui/shadcn_ui.dart' show GlobalShadLocalizations;
+import 'package:shadcn_ui/shadcn_ui.dart'
+    show GlobalShadLocalizations, ShadSelectState;
 
 /// The tick that lets a non-English shadcn locale arrive: `ShadApp` loads
 /// German and Turkish words through a deferred import, which completes on a
@@ -270,13 +271,18 @@ Map<String, Map<String, String>> dataByLabel(PlanController c) => {
 Future<void> pickRecord(WidgetTester tester, String id) async {
   await tester.tap(byKey('pos-id'));
   await tester.pumpAndSettle();
-  await tester.tap(byKey(id.isEmpty ? 'pos-id-none' : 'pos-id-$id').last);
+  final option = byKey(id.isEmpty ? 'pos-id-none' : 'pos-id-$id').last;
+  // A long list scrolls to the shown record, and the select's chevron then
+  // covers the entries at its edge: scroll the entry into view first.
+  await tester.ensureVisible(option);
+  await tester.pumpAndSettle();
+  await tester.tap(option);
   await tester.pumpAndSettle();
 }
 
 /// The id the inspector's combo shows: the text of its selected entry's
 /// first word, empty for none.
 String pickedId(WidgetTester tester) {
-  final d = tester.widget<DropdownButton<String>>(byKey('pos-id'));
-  return d.value ?? '';
+  final select = tester.state<ShadSelectState<String>>(byKey('pos-id'));
+  return select.controller.value.single;
 }

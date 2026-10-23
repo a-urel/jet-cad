@@ -886,10 +886,7 @@ class DemoHomeState extends State<DemoHome> {
     );
   }
 
-  /// The side panel, on a transparent `Material`: its Material controls
-  /// (Task 3 moves them to shadcn) need an ancestor to paint on.
-  Widget _panel() => Material(
-      type: MaterialType.transparency, child: DemoSidePanel(home: this));
+  Widget _panel() => DemoSidePanel(home: this);
 
   /// The side panel as a sheet from the right edge: below the docking width.
   void _openSidePanel() => showShadSheet<void>(

@@ -4,8 +4,9 @@
 // zones, the badges, the host's choices (the editor's profile, the own bar,
 // the own export dialog, who owns the keys) and the log. A view over
 // `DemoHomeState`; the state is the demo's, the actions are its methods.
-import 'package:flutter/material.dart';
+import 'package:flutter/widgets.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+import 'package:shadcn_ui/shadcn_ui.dart';
 
 import 'demo_strings.dart';
 import 'editor_profiles.dart';
@@ -25,34 +26,35 @@ class DemoSidePanel extends StatelessWidget {
     final a = home.area;
     final c = a.controller;
     final service = c.mode.value == PlanMode.service;
-    final title = Theme.of(context).textTheme.titleSmall;
+    final shad = ShadTheme.of(context);
+    final title = shad.textTheme.small.copyWith(fontWeight: FontWeight.w600);
     return ListView(
       key: const Key('side-panel'),
       padding: const EdgeInsets.all(12),
       children: [
-        Text(a.name, style: title),
+        Text(a.name, style: shad.textTheme.large),
         const SizedBox(height: 8),
         Wrap(spacing: 8, children: [
           ValueListenableBuilder<bool>(
             valueListenable: c.dirty,
-            builder: (_, dirty, __) => FilledButton(
+            builder: (_, dirty, __) => ShadButton(
                 key: const Key('save'),
                 onPressed: dirty ? home.save : null,
-                child: Text(words.save)),
+                child: _label(words.save)),
           ),
-          OutlinedButton(
+          ShadButton.outline(
               key: const Key('revert'),
               onPressed: home.revert,
-              child: Text(words.revert)),
+              child: _label(words.revert)),
           if (service)
-            OutlinedButton(
+            ShadButton.outline(
                 key: const Key('reset-layout'),
                 onPressed: home.resetLayout,
-                child: Text(words.resetLayout)),
-          OutlinedButton(
+                child: _label(words.resetLayout)),
+          ShadButton.outline(
               key: const Key('fit'),
               onPressed: c.fitToView,
-              child: Text(words.fit)),
+              child: _label(words.fit)),
         ]),
         // The POS's ids written into the design.
         if (!service) ...[
@@ -61,10 +63,10 @@ class DemoSidePanel extends StatelessWidget {
               spacing: 8,
               crossAxisAlignment: WrapCrossAlignment.center,
               children: [
-                OutlinedButton(
+                ShadButton.outline(
                     key: const Key('link-tables'),
                     onPressed: () => home.link(a),
-                    child: Text(words.linkTables)),
+                    child: _label(words.linkTables)),
                 Text(words.unlinked(home.unlinkedTables(a).length),
                     key: const Key('unlinked')),
               ]),
@@ -83,50 +85,40 @@ class DemoSidePanel extends StatelessWidget {
                   (table: null, floor: null) => words.overNoTable,
                 }),
           ),
-          SwitchListTile(
-              key: const Key('moves'),
-              contentPadding: EdgeInsets.zero,
-              title: Text(words.moves),
-              value: home.moves,
-              onChanged: home.setMoves),
-          SwitchListTile(
-              key: const Key('long-press-menu'),
-              contentPadding: EdgeInsets.zero,
-              title: Text(words.longPressMenu),
-              value: home.longPressMenu,
-              onChanged: home.setLongPressMenu),
-          SwitchListTile(
-              key: const Key('floor-band'),
-              contentPadding: EdgeInsets.zero,
-              title: Text(words.floorBand),
-              value: home.floorBand,
-              onChanged: home.setFloorBand),
+          _toggle(const Key('moves'), Text(words.moves),
+              value: home.moves, onChanged: home.setMoves),
+          _toggle(const Key('long-press-menu'), Text(words.longPressMenu),
+              value: home.longPressMenu, onChanged: home.setLongPressMenu),
+          _toggle(const Key('floor-band'), Text(words.floorBand),
+              value: home.floorBand, onChanged: home.setFloorBand),
         ],
         const SizedBox(height: 16),
-        TextField(
+        Text(words.tableNumbersField, style: shad.textTheme.muted),
+        const SizedBox(height: 4),
+        ShadInput(
           key: const Key('select-number'),
           controller: home.numberField,
-          decoration: InputDecoration(labelText: words.tableNumbersField),
+          onPressedOutside: (_) {},
           onSubmitted: (_) => home.selectTyped(),
         ),
         const SizedBox(height: 8),
-        FilledButton.tonal(
+        ShadButton.secondary(
             key: const Key('select'),
             onPressed: home.selectTyped,
-            child: Text(words.select)),
+            child: _label(words.select)),
         const SizedBox(height: 16),
         Text(words.statusOfSelected, style: title),
         const SizedBox(height: 4),
         Wrap(spacing: 6, runSpacing: 6, children: [
           for (final name in kStatuses.keys)
-            OutlinedButton(
+            ShadButton.outline(
                 key: Key('status-${name.toLowerCase()}'),
                 onPressed: () => home.setStatus(name),
-                child: Text(words.statusName(name))),
-          OutlinedButton(
+                child: _label(words.statusName(name))),
+          ShadButton.outline(
               key: const Key('status-random'),
               onPressed: home.randomStatuses,
-              child: Text(words.randomStatuses)),
+              child: _label(words.randomStatuses)),
         ]),
         const SizedBox(height: 16),
         Text(words.tables, style: title),
@@ -142,7 +134,8 @@ class DemoSidePanel extends StatelessWidget {
         for (final (i, w) in c.labelWarnings.indexed)
           Text(PlanStrings.of(context).labelWarning(w),
               key: Key('numbering-warning-$i'),
-              style: TextStyle(color: Theme.of(context).colorScheme.error)),
+              style: shad.textTheme.small
+                  .copyWith(color: shad.colorScheme.destructive)),
         const SizedBox(height: 16),
         Text(words.sections, style: title),
         // Each table's section, read from the details: the record the room
@@ -154,99 +147,86 @@ class DemoSidePanel extends StatelessWidget {
                 '$label: ${section ?? words.none}'
             ].join(', ')),
         if (!service)
-          OutlinedButton(
+          ShadButton.outline(
               key: const Key('link-sections'),
               onPressed: () => home.linkAreaSections(a),
-              child: Text(words.linkSections)),
+              child: _label(words.linkSections)),
         // Only an area with zones; below the lines the tests read, above the
         // host's choices.
         if (a.zones.isNotEmpty) ...[
           const SizedBox(height: 16),
           Text(words.zones, style: title),
           const SizedBox(height: 4),
-          SegmentedButton<String>(
+          ShadTabs<String>(
             key: const Key('zone-toggle'),
-            showSelectedIcon: false,
-            segments: [
-              // '' is All: a zone name is never empty.
-              ButtonSegment(
+            scrollable: true,
+            // '' is All: a zone name is never empty.
+            value: a.zone ?? '',
+            onChanged: (z) => home.setZone(a, z.isEmpty ? null : z),
+            tabs: [
+              ShadTab(
+                  flex: 0,
                   value: '',
-                  label: Text(words.allZones, key: const Key('zone-all'))),
+                  child: Text(words.allZones, key: const Key('zone-all'))),
               for (final zone in a.zones.keys)
-                ButtonSegment(
-                    value: zone, label: Text(zone, key: Key('zone-$zone'))),
+                ShadTab(
+                    flex: 0,
+                    value: zone,
+                    child: Text(zone, key: Key('zone-$zone'))),
             ],
-            selected: {a.zone ?? ''},
-            onSelectionChanged: (s) =>
-                home.setZone(a, s.single.isEmpty ? null : s.single),
           ),
-          SwitchListTile(
-              key: const Key('fade-others'),
-              contentPadding: EdgeInsets.zero,
-              title: Text(words.fadeOthers),
-              value: a.fadeOthers,
-              onChanged: (v) => home.setFadeOthers(a, v)),
+          const SizedBox(height: 8),
+          _toggle(const Key('fade-others'), Text(words.fadeOthers),
+              value: a.fadeOthers, onChanged: (v) => home.setFadeOthers(a, v)),
         ],
         // The Salon's badges and its table 7, in the service; below the
         // zones, above the host's choices.
         if (a.offersBadges && service) ...[
           const SizedBox(height: 16),
-          SwitchListTile(
-              key: const Key('badges'),
-              contentPadding: EdgeInsets.zero,
-              title: Text(words.badges),
-              value: a.badges,
-              onChanged: (v) => home.setBadges(a, v)),
-          OutlinedButton(
+          _toggle(const Key('badges'), Text(words.badges),
+              value: a.badges, onChanged: (v) => home.setBadges(a, v)),
+          ShadButton.outline(
               key: const Key('center-7'),
               onPressed: () => home.centerOnSeven(a),
-              child: Text(words.centerOnTable('7'))),
+              child: _label(words.centerOnTable('7'))),
         ],
         const SizedBox(height: 16),
         Text(words.hostChoices, style: title),
         if (!service) ...[
           const SizedBox(height: 4),
-          Text(words.editor),
+          Text(words.editor, style: shad.textTheme.muted),
           const SizedBox(height: 4),
-          SegmentedButton<DemoEditor>(
+          ShadTabs<DemoEditor>(
             key: const Key('editor-profile'),
-            showSelectedIcon: false,
-            segments: [
-              ButtonSegment(
+            scrollable: true,
+            value: home.editor,
+            onChanged: home.setEditor,
+            tabs: [
+              ShadTab(
+                  flex: 0,
                   value: DemoEditor.full,
-                  label: Text(words.editorFull, key: const Key('editor-full'))),
-              ButtonSegment(
+                  child: Text(words.editorFull, key: const Key('editor-full'))),
+              ShadTab(
+                  flex: 0,
                   value: DemoEditor.tables,
-                  label: Text(words.editorTables,
+                  child: Text(words.editorTables,
                       key: const Key('editor-tables'))),
-              ButtonSegment(
+              ShadTab(
+                  flex: 0,
                   value: DemoEditor.readOnly,
-                  label: Text(words.editorReadOnly,
+                  child: Text(words.editorReadOnly,
                       key: const Key('editor-read-only'))),
             ],
-            selected: {home.editor},
-            onSelectionChanged: (s) => home.setEditor(s.single),
           ),
+          const SizedBox(height: 8),
         ],
         if (service)
-          SwitchListTile(
-              key: const Key('own-bar'),
-              contentPadding: EdgeInsets.zero,
-              title: Text(words.ownBar),
-              value: home.ownBar,
-              onChanged: home.setOwnBar),
-        SwitchListTile(
-            key: const Key('own-export-dialog'),
-            contentPadding: EdgeInsets.zero,
-            title: Text(words.ownExportDialog),
-            value: home.ownExportDialog,
-            onChanged: home.setOwnExportDialog),
-        SwitchListTile(
-            key: const Key('plan-keys'),
-            contentPadding: EdgeInsets.zero,
-            title: Text(words.planKeys),
-            value: home.planKeys,
-            onChanged: home.setPlanKeys),
+          _toggle(const Key('own-bar'), Text(words.ownBar),
+              value: home.ownBar, onChanged: home.setOwnBar),
+        _toggle(const Key('own-export-dialog'), Text(words.ownExportDialog),
+            value: home.ownExportDialog, onChanged: home.setOwnExportDialog),
+        _toggle(const Key('plan-keys'), Text(words.planKeys),
+            value: home.planKeys, onChanged: home.setPlanKeys),
         const SizedBox(height: 16),
         Text(words.log, style: title),
         for (final (i, line) in home.log.indexed)
@@ -255,3 +235,18 @@ class DemoSidePanel extends StatelessWidget {
     );
   }
 }
+
+/// A switch with its label, as wide as its content: the switch is the whole
+/// of what a click lands on, not the row it sits in.
+Widget _toggle(Key key, Widget label,
+        {required bool value, required ValueChanged<bool>? onChanged}) =>
+    Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Align(
+            alignment: AlignmentDirectional.centerStart,
+            child: ShadSwitch(
+                key: key, label: label, value: value, onChanged: onChanged)));
+
+/// A button's label: it wraps within the button instead of overflowing it
+/// (a `ShadButton` lays its child out in a row, unbounded).
+Widget _label(String text) => Flexible(child: Text(text));

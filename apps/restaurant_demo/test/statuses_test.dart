@@ -8,9 +8,11 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 import 'package:restaurant_demo/main.dart';
+import 'package:shadcn_ui/shadcn_ui.dart' show ShadContextMenuItem;
 
 import 'support/demo_rig.dart';
 
@@ -108,12 +110,47 @@ void main() {
     expect(find.text('Table 2'), findsOneWidget);
     expect(c.selectedUnits.value, {'1'},
         reason: 'premise: a locked table leaves the selection alone');
-    expect(tester.widget<PopupMenuItem<String>>(byKey('menu-select')).enabled,
+    expect(tester.widget<ShadContextMenuItem>(byKey('menu-select')).enabled,
         isFalse,
         reason: 'a locked table cannot be selected');
     await tester.tap(byKey('menu-status-bill'));
     await tester.pumpAndSettle();
     expect(c.unitStatuses.value.keys, ['2']);
+  });
+
+  testWidgets(
+      'D20b a dismissed table menu answers nothing: a tap outside is '
+      'swallowed, Escape closes it, a choice still acts', (tester) async {
+    final demo = await pumpDemo(tester);
+    final c = demo.area.controller;
+    await enterService(tester);
+    c.select({'1'});
+    await tester.pump();
+    await rightClick(tester, unitScreen(c, '2'));
+    expect(byKey('menu-select'), findsOneWidget, reason: 'premise: open');
+    final before = {...c.selectedUnits.value};
+
+    // A tap on another table: the menu closes, the tap goes no further.
+    await tester.tapAt(unitScreen(c, '3'));
+    await tester.pumpAndSettle();
+    expect(byKey('menu-select'), findsNothing);
+    expect(c.selectedUnits.value, before, reason: 'the barrier took the tap');
+    expect(c.unitStatuses.value, isEmpty);
+
+    await rightClick(tester, unitScreen(c, '2'));
+    expect(byKey('menu-select'), findsOneWidget, reason: 'premise: reopened');
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(byKey('menu-select'), findsNothing);
+    expect(c.selectedUnits.value, before);
+    expect(c.unitStatuses.value, isEmpty);
+
+    await rightClick(tester, unitScreen(c, '2'));
+    await tester.tap(byKey('menu-status-bill'));
+    await tester.pumpAndSettle();
+    expect(byKey('menu-select'), findsNothing);
+    expect(c.unitStatuses.value.keys, ['2'],
+        reason: 'the control: a choice acts');
   });
 
   testWidgets('D21 a status caption is worded again when the language changes',

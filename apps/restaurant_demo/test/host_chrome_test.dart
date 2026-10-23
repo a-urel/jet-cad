@@ -24,6 +24,7 @@ import 'package:jet_cad_2d_plan/src/chrome/text_field.dart' show PlanTextField;
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 
 import 'package:restaurant_demo/editor_profiles.dart' show DemoEditor;
+import 'package:shadcn_ui/shadcn_ui.dart' show LucideIcons, ShadButton;
 
 import 'support/demo_rig.dart';
 
@@ -204,7 +205,7 @@ void main() {
     expect(byKey('own-bar-row'), findsOneWidget);
     expect(tester.getRect(byKey('own-bar-row')).bottom, c.canvasRect.value!.top,
         reason: 'the canvas starts under the own bar');
-    TextButton button(String key) => tester.widget<TextButton>(byKey(key));
+    ShadButton button(String key) => tester.widget<ShadButton>(byKey(key));
     c.select({'1'});
     await settle(tester);
     expect(button('own-merge').onPressed, isNull, reason: 'one table');
@@ -253,8 +254,8 @@ void main() {
     await press(tester, 'toolbar-export');
     expect(byKey('export-dialog'), findsNothing);
     expect(byKey('demo-export-dialog'), findsOneWidget);
-    Finder checkIn(String key) =>
-        find.descendant(of: byKey(key), matching: find.byIcon(Icons.check));
+    Finder checkIn(String key) => find.descendant(
+        of: byKey(key), matching: find.byIcon(LucideIcons.check));
     expect(checkIn('demo-export-pdf'), findsOneWidget, reason: 'PDF, 150');
     await press(tester, 'demo-export-png-300');
     await waitFor(tester, () => demo.lastExport != null);
@@ -320,7 +321,7 @@ void main() {
     await press(tester, 'mode-service');
     await pressInPanel(tester, 'own-bar');
     bool enabled(String key) =>
-        tester.widget<TextButton>(byKey(key)).onPressed != null;
+        tester.widget<ShadButton>(byKey(key)).onPressed != null;
     expect(enabled('own-export') && enabled('own-print'), isTrue,
         reason: 'premise: idle');
     expect(c.pageFlowBusy.value, isFalse);

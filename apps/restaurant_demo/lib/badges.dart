@@ -7,8 +7,9 @@
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart' show ValueListenable;
-import 'package:flutter/material.dart';
+import 'package:flutter/widgets.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+import 'package:shadcn_ui/shadcn_ui.dart';
 
 import 'demo_strings.dart';
 import 'statuses.dart';
@@ -58,8 +59,8 @@ Widget tableBadge(
   final status = unit.status;
   final figures =
       badgeFigures(number, seats, status == null ? null : statusNameOf(status));
-  final scheme = Theme.of(context).colorScheme;
-  final tone = status?.color.withAlpha(255) ?? scheme.outline;
+  final scheme = ShadTheme.of(context).colorScheme;
+  final tone = status?.color.withAlpha(255) ?? scheme.border;
   final words = DemoStrings.of(context);
   final Widget badge;
   if (unit.detailLevel == 0) {
@@ -68,23 +69,26 @@ Widget tableBadge(
       width: 12,
       height: 12,
       decoration: BoxDecoration(
-          color: figures == null ? scheme.surface : tone,
+          color: figures == null ? scheme.card : tone,
           shape: BoxShape.circle,
           border: Border.all(color: tone, width: 2)),
     );
   } else {
-    final style = Theme.of(context).textTheme.labelSmall;
+    final style = ShadTheme.of(context)
+        .textTheme
+        .small
+        .copyWith(fontSize: 11, color: scheme.cardForeground);
     badge = Container(
       key: Key('badge-$number'),
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-          color: scheme.surface,
+          color: scheme.card,
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
               color: unit.selected ? scheme.primary : tone,
               width: unit.selected ? 2 : 1)),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
-        Icon(Icons.person, size: 12, color: tone),
+        Icon(LucideIcons.user, size: 12, color: tone),
         Text('${figures?.guests ?? 0}/$seats',
             key: Key('badge-guests-$number'), style: style),
         if (figures != null) ...[
