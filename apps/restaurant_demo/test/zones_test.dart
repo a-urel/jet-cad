@@ -6,6 +6,7 @@
 // `worldToGlobal`, the canvas from `canvasRect`.
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shadcn_ui/shadcn_ui.dart' show ShadSwitch, ShadTabs;
 import 'package:jet_cad_2d/jet_cad_2d.dart' show Transform2;
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
     show ViewportTransform;
@@ -83,10 +84,8 @@ void main() {
     await tester.pump();
     await tester.pump();
     await reveal(tester, 'fade-others');
-    expect(
-        tester.widget<SegmentedButton<String>>(byKey('zone-toggle')).selected,
-        {'B'});
-    expect(tester.widget<SwitchListTile>(byKey('fade-others')).value, isTrue);
+    expect(tester.widget<ShadTabs<String>>(byKey('zone-toggle')).value, 'B');
+    expect(tester.widget<ShadSwitch>(byKey('fade-others')).value, isTrue);
     expect(c.unitFocus.value, {'6', '7'});
 
     await tester.tap(byKey('zone-all'));
@@ -117,20 +116,17 @@ void main() {
   testWidgets('DZ2 the zones\' three strings in German and Turkish (Z22)',
       (tester) async {
     await pumpDemo(tester);
-    await tester.drag(byKey('side-panel'), const Offset(0, -400));
-    await tester.pump();
+    await reveal(tester, 'fade-others');
     expect(find.text('Zones'), findsOneWidget);
     expect(find.text('All'), findsOneWidget);
     expect(find.text('Fade the others'), findsOneWidget);
-    await tester.tap(byKey('lang-de'));
-    await tester.pump();
-    await tester.pump();
+    await switchLanguage(tester, 'de');
+    await reveal(tester, 'fade-others');
     expect(find.text('Bereiche'), findsOneWidget);
     expect(find.text('Alle'), findsOneWidget);
     expect(find.text('Andere abblenden'), findsOneWidget);
-    await tester.tap(byKey('lang-tr'));
-    await tester.pump();
-    await tester.pump();
+    await switchLanguage(tester, 'tr');
+    await reveal(tester, 'fade-others');
     expect(find.text('Bölgeler'), findsOneWidget);
     expect(find.text('Tümü'), findsOneWidget);
     expect(find.text('Diğerlerini soldur'), findsOneWidget);

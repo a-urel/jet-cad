@@ -17,6 +17,7 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
     show ViewportTransform;
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 import 'package:restaurant_demo/main.dart';
+import 'package:shadcn_ui/shadcn_ui.dart' show ShadButton;
 
 import 'support/demo_rig.dart';
 
@@ -94,14 +95,14 @@ void main() {
       'Save is disabled while clean', (tester) async {
     final demo = await pumpDemo(tester);
     final c = demo.area.controller;
-    expect(tester.widget<FilledButton>(byKey('save')).onPressed, isNull);
+    expect(tester.widget<ShadButton>(byKey('save')).onPressed, isNull);
     expect(c.setUnitLabel('2', '12'), isTrue);
     await settle(tester);
     expect(tablesText(tester), salonTables.replaceFirst('2 (4)', '12 (4)'));
     expect(c.setUnitLabel('12', '13'), isTrue);
     await settle(tester);
     expect(tablesText(tester), salonTables.replaceFirst('2 (4)', '13 (4)'));
-    expect(tester.widget<FilledButton>(byKey('save')).onPressed, isNotNull);
+    expect(tester.widget<ShadButton>(byKey('save')).onPressed, isNotNull);
     expect(demo.log, contains('Salon: edited'));
   });
 
@@ -229,8 +230,7 @@ void main() {
   testWidgets('D19b the German "Reset layout" button (D19 ported without it)',
       (tester) async {
     await pumpDemo(tester);
-    await tester.tap(byKey('lang-de'));
-    await settle(tester);
+    await switchLanguage(tester, 'de');
     await enterService(tester);
     expect(find.text('Anordnung zurücksetzen'), findsOneWidget);
   });
@@ -249,7 +249,7 @@ void main() {
     expect(c.document.commands.undoDepth, 0);
     expect(demo.log.where((l) => l.startsWith('Salon:')), isEmpty,
         reason: 'no dirty line, no layout line');
-    expect(tester.widget<FilledButton>(byKey('save')).onPressed, isNull,
+    expect(tester.widget<ShadButton>(byKey('save')).onPressed, isNull,
         reason: 'nothing to save');
 
     await press(tester, 'area-1');
@@ -269,8 +269,7 @@ void main() {
     // The Teras, saved before it is shown: a point plan stored.
     final teras = demo.areas[1];
     teras.stored = teras.controller.save();
-    await tester.tap(byKey('lang-de'));
-    await settle(tester);
+    await switchLanguage(tester, 'de');
     expect(find.text('Entwurf'), findsOneWidget, reason: 'premise: German');
     expect(separatorOf(demo.area.controller), DecimalSeparator.point,
         reason: 'a settled plan is not converted (N2)');

@@ -387,6 +387,19 @@ with 0.7.0 (below).
 
 ## In flight
 
+- **The example apps in shadcn** (the human, 2026-10-24: the demos show the
+  shadcn-first way to mount the planner; spec
+  [2026-10-24-demos-shadcn-design.md](docs/superpowers/specs/2026-10-24-demos-shadcn-design.md)
+  rev 2, plan [2026-10-24-demos-shadcn.md](docs/superpowers/plans/2026-10-24-demos-shadcn.md),
+  results [2026-10-24-demos-shadcn-results.md](docs/superpowers/notes/2026-10-24-demos-shadcn-results.md)):
+  branch `claude/shadcn-ui-75d8dc` (cut from `main`), tasks 1-6 done, **not
+  merged, not pushed**. Both demos root in a plain `ShadApp` (zinc); the
+  restaurant demo's look toggle changes only the canvas side; no Material and
+  no `Icons.` in either `lib/` (guarded); no change under `packages/`. Executed
+  with Sonnet implementers and no reviewer sessions; ledger in
+  [docs/superpowers/ledgers/2026-10-24-demos-shadcn/](docs/superpowers/ledgers/2026-10-24-demos-shadcn/).
+  Resume: the human's word to merge into `main`.
+
 - **The plan library's chrome in shadcn** (the human, 2026-10-23: monepro
   shows Material beside shadcn; spec
   [2026-10-23-plan-shadcn-chrome-design.md](docs/superpowers/specs/2026-10-23-plan-shadcn-chrome-design.md)

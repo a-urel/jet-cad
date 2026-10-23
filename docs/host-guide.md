@@ -20,7 +20,9 @@ a small host that CI builds from outside the repository on every push.
 `tool/ci/check_guide.dart` fails CI when a snippet here is no longer in that
 file, so the code in this guide compiles against the release.
 [`apps/restaurant_demo`](../apps/restaurant_demo) is a larger host built the
-same way, with every feature of this guide in use.
+same way, with every feature of this guide in use; both example apps, it and
+[`apps/architecture_demo`](../apps/architecture_demo), root in a plain
+`ShadApp` (zinc, Roboto).
 
 The sections run in the order a POS needs them: [1](#1-the-dependency)
 the dependency, [2](#2-fonts) fonts, [3](#3-languages) languages,
@@ -1278,7 +1280,10 @@ final ThemeData posLightTheme = ThemeData(
   theme.
 - A POS whose own design system is shadcn puts a `ShadTheme` with its tokens
   around the view; a Material scheme cannot reproduce another design
-  system's colours. The restaurant demo's POS look is a `ShadTheme` (zinc):
+  system's colours. The restaurant demo's app is a plain `ShadApp` (zinc,
+  Roboto) in both looks; its look toggle changes only the canvas side. The POS
+  look is a `PlanTheme` (3 px selection, a 52 px service bar) that
+  `ShadApp.materialThemeBuilder` puts on the Material theme the planner reads:
   `apps/restaurant_demo/lib/demo_theme.dart`.
 - `PlanTheme.unitColourOpacity` is the opacity of a unit's own colour
   (`setUnitColour`, `setUnitsColour`); the export draws it at the same

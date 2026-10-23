@@ -3,8 +3,9 @@
 // 2026-10-16-restaurant-kit-test-audit.md): the app bar's Standard / POS
 // look. The POS look is a `PlanTheme` in each of the app's themes
 // (lib/demo_theme.dart), a local `Theme` with a hand-built `ColorScheme`
-// around the view, and one field of the view's own (`selectionWidth: 3`),
-// merged over the extension. Read back on the Salon sample, whose fitted
+// of the app (the `ShadApp` root's derived Material theme), and one field of
+// the view's own (`selectionWidth: 3`), merged over the extension. The app's
+// zinc `ShadTheme` is above the view under both looks (spec D2). Read back on the Salon sample, whose fitted
 // camera is neither the identity nor at the origin, in both modes, under a
 // light and a dark platform, in pixels where the demo can see them (the bar,
 // the surround, the selection, the fill, the caption's size) and in the theme
@@ -15,6 +16,7 @@
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show RenderRepaintBoundary;
 import 'package:flutter_test/flutter_test.dart';
@@ -22,6 +24,7 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
     show PaperPalette, SelectionOverlayPainter;
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 import 'package:restaurant_demo/demo_theme.dart';
+import 'package:restaurant_demo/main.dart' show DemoHome;
 import 'package:restaurant_demo/statuses.dart' show kStatuses;
 import 'package:shadcn_ui/shadcn_ui.dart'
     show ShadThemeData, ShadTheme, ShadZincColorScheme;
@@ -33,6 +36,28 @@ Future<void> settleTheme(WidgetTester tester) async {
   await tester.pump();
   await tester.pump(const Duration(milliseconds: 300));
   await tester.pump(const Duration(milliseconds: 300));
+}
+
+/// A mouse in the test view, off every control.
+Future<TestGesture> mouseInView(WidgetTester tester) async {
+  final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+  await mouse.addPointer(location: Offset.zero);
+  addTearDown(mouse.removePointer);
+  return mouse;
+}
+
+/// Moves [mouse] over the widget keyed [key], past the tooltip's wait.
+Future<void> hover(WidgetTester tester, TestGesture mouse, String key) async {
+  await mouse.moveTo(tester.getCenter(byKey(key)));
+  await tester.pump();
+  await tester.pump(const Duration(seconds: 2));
+}
+
+/// Moves [mouse] off every control and lets the tooltip go.
+Future<void> unhover(WidgetTester tester, TestGesture mouse) async {
+  await mouse.moveTo(Offset.zero);
+  await tester.pump();
+  await tester.pump(const Duration(seconds: 2));
 }
 
 /// One captured frame of the whole window, at device pixel ratio 1.
@@ -79,7 +104,7 @@ const Size kWindow = Size(2300, 1450);
 Future<Shot> shoot(WidgetTester tester) async {
   final boundary = tester.renderObject<RenderRepaintBoundary>(find
       .ancestor(
-          of: find.byType(Scaffold), matching: find.byType(RepaintBoundary))
+          of: find.byType(DemoHome), matching: find.byType(RepaintBoundary))
       .first);
   expect(boundary.size, kWindow, reason: 'premise: the window');
   return (await tester.runAsync(() async {
@@ -181,9 +206,9 @@ void main() {
     final name = brightness.name;
     testWidgets(
         'DL${brightness == Brightness.light ? 1 : 2} the POS look under a '
-        '$name platform: the extension of the app\'s $name theme, a '
-        'ShadTheme of zinc above the view, zinc\'s background on the bar (DL-S1), under '
-        'Standard the derived one, the 52 px bar, the surround '
+        '$name platform: the extension of the app\'s $name theme, the app\'s '
+        'ShadTheme of zinc above the view under both looks, zinc\'s '
+        'background on the bar under both (DL-S1), the 52 px bar, the surround '
         'in the canvas colour in both modes, the selection 3 px in the '
         'theme\'s colour for the paper in both modes, the fill at 0.8, the '
         '12 px bold Roboto caption; Standard again is today\'s, byte for byte',
@@ -196,7 +221,7 @@ void main() {
       final c = demo.area.controller;
       final light = brightness == Brightness.light;
       final pos = posPlanTheme(brightness);
-      final posShad = posShadTheme(brightness);
+      final posShad = demoShadTheme(brightness);
       final zinc = light
           ? const ShadZincColorScheme.light()
           : const ShadZincColorScheme.dark();
@@ -219,13 +244,17 @@ void main() {
       final standardSeen = seen(tester);
       expect(standardSeen.ambient, isNull, reason: 'Standard: no extension');
       expect(standardSeen.view, isNull, reason: 'Standard: no view theme');
-      expect(standardSeen.shad, isNull,
-          reason: 'Standard: no ShadTheme above the view (the planner '
-              'derives its chrome from the Material theme)');
+      expect(standardSeen.shad, isNotNull,
+          reason: 'Standard: the app\'s ShadTheme is above the view');
+      expect(standardSeen.shad!.colorScheme, posShad.colorScheme,
+          reason: 'Standard: the app\'s zinc, as demoShadTheme builds it');
       final standardSurface = rgbOf(standardSeen.scheme.surface);
-      // The bar is the shadcn background derived from the seed scheme,
-      // which the mapping takes from `surface` (R-BarSurface).
-      final standardBar = rgbOf(standardSeen.scheme.surface);
+      expect(standardSurface, rgbOf(zinc.background),
+          reason: 'premise: the derived Material surface is zinc\'s '
+              'background');
+      // The bar is the shadcn background of the app's ShadTheme, under
+      // both looks (R-BarSurface).
+      final standardBar = rgbOf(zinc.background);
 
       /// The shown mode's look: the shot, the view's rect, and the pixels
       /// of [selection] within 3 per channel around table 7.
@@ -246,11 +275,10 @@ void main() {
           await check('Standard service', standardSet.selection);
       expect(hex(standardService.shot.rgbAtOffset(surround(c))),
           hex(standardSurface),
-          reason: 'premise: the surround is the seed scheme\'s surface');
+          reason: 'premise: the surround is the derived Material surface');
       expect(hex(standardService.shot.rgbAtOffset(barBackground(tester))),
           hex(standardBar),
-          reason: 'premise: the bar is the derived shadcn background of the '
-              'seed theme');
+          reason: 'Standard: the bar is zinc\'s background');
       expect(overlay(tester).selectionStrokePixels, 2);
       expect(overlay(tester).paper.selection, standardSet.selection);
       expect(standardService.selectionPixels, greaterThan(200),
@@ -290,7 +318,7 @@ void main() {
       expect(posSeen.shad!.brightness, brightness);
       expect(posSeen.shad!.colorScheme.background, zinc.background);
       expect(posSeen.shad!.colorScheme, posShad.colorScheme,
-          reason: 'zinc, as posShadTheme builds it');
+          reason: 'zinc, as demoShadTheme builds it');
       expect(posSeen.scheme, standardSeen.scheme,
           reason: 'the Material theme is the app\'s: no local Theme');
       expect(posSeen.ambient!.selectionWidth, isNull,
@@ -324,8 +352,9 @@ void main() {
       expect(hex(posService.shot.rgbAtOffset(barBackground(tester))),
           hex(rgbOf(zinc.background)),
           reason: 'DL-S1 the bar: zinc\'s background, not the derived one');
-      expect(rgbOf(zinc.background), isNot(standardBar),
-          reason: 'DL-S1 premise: the two looks\' bars differ');
+      expect(hex(standardBar), hex(rgbOf(zinc.background)),
+          reason: 'DL-S1: the bar is the same zinc background under both '
+              'looks');
       expect(hex(posService.shot.rgbAtOffset(surround(c))),
           hex(rgbOf(pos.canvasBackground!)),
           reason: 'service: the surround is the canvas colour');
@@ -406,17 +435,27 @@ void main() {
     await pumpDemo(tester);
     expect(find.text('Standard'), findsOneWidget);
     expect(find.text('POS'), findsOneWidget);
-    expect(find.byTooltip('Look'), findsOneWidget);
+    expect(find.text('Look'), findsNothing, reason: 'premise: not shown yet');
+    final mouse = await mouseInView(tester);
+    await hover(tester, mouse, 'look-toggle');
+    expect(find.text('Look'), findsOneWidget);
+    await unhover(tester, mouse);
     await tester.tap(byKey('lang-de'));
     await settleTheme(tester);
     expect(find.text('Standard'), findsOneWidget);
     expect(find.text('Kasse'), findsOneWidget);
-    expect(find.byTooltip('Aussehen'), findsOneWidget);
+    expect(find.text('Look'), findsNothing, reason: 'no stale English');
+    await hover(tester, mouse, 'look-toggle');
+    expect(find.text('Aussehen'), findsOneWidget);
+    await unhover(tester, mouse);
     await tester.tap(byKey('lang-tr'));
     await settleTheme(tester);
     expect(find.text('Standart'), findsOneWidget);
     expect(find.text('Kasa'), findsOneWidget);
-    expect(find.byTooltip('Görünüm'), findsOneWidget);
+    expect(find.text('Aussehen'), findsNothing, reason: 'no stale German');
+    await hover(tester, mouse, 'look-toggle');
+    expect(find.text('Görünüm'), findsOneWidget);
+    await unhover(tester, mouse);
     await tester.tap(byKey('look-pos'));
     await settleTheme(tester);
     expect(seen(tester).ambient, kPosPlanLight,

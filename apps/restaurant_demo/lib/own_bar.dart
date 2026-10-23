@@ -3,8 +3,9 @@
 // words, each enabled by the controller's own state as the planner's
 // buttons are. Export and Print are off while a page flow runs
 // (`pageFlowBusy`): the controller starts one at a time.
-import 'package:flutter/material.dart';
+import 'package:flutter/widgets.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+import 'package:shadcn_ui/shadcn_ui.dart';
 
 /// The demo's own bar for [controller], over the area named [name].
 class OwnServiceBar extends StatelessWidget {
@@ -34,10 +35,11 @@ class OwnServiceBar extends StatelessWidget {
     final c = controller;
     final words = PlanStrings.of(context);
     Widget button(String key, String label, VoidCallback? onPressed) =>
-        TextButton(key: Key(key), onPressed: onPressed, child: Text(label));
-    return Material(
+        ShadButton.ghost(
+            key: Key(key), onPressed: onPressed, child: Text(label));
+    return ColoredBox(
       key: const Key('own-bar-row'),
-      color: Theme.of(context).colorScheme.surfaceContainerHigh,
+      color: ShadTheme.of(context).colorScheme.muted,
       child: SizedBox(
         height: 44,
         child: Row(children: [

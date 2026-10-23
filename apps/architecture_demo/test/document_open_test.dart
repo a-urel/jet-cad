@@ -26,6 +26,7 @@ import 'package:architecture_demo/document_host.dart';
 import 'package:architecture_demo/document_session.dart';
 import 'package:flutter/gestures.dart' show kPrimaryButton;
 import 'package:flutter/material.dart';
+import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
@@ -368,7 +369,7 @@ void main() {
           name: 'late.jetplan', bytes: sampleBytes(), location: '/p/late');
     await tester.binding.setSurfaceSize(const Size(1440, 900));
     addTearDown(() => tester.binding.setSurfaceSize(null));
-    await tester.pumpWidget(MaterialApp(
+    await tester.pumpWidget(ShadApp(
         localizationsDelegates: planLocalizationsDelegates,
         supportedLocales: planSupportedLocales,
         home: DocumentHost(

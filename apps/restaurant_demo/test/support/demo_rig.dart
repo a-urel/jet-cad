@@ -15,6 +15,14 @@ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show kUnitLabelTag;
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 import 'package:restaurant_demo/main.dart';
 import 'package:restaurant_demo/samples/place_tables.dart';
+import 'package:shadcn_ui/shadcn_ui.dart'
+    show GlobalShadLocalizations, ShadSelectState;
+
+/// The tick that lets a non-English shadcn locale arrive: `ShadApp` loads
+/// German and Turkish words through a deferred import, which completes on a
+/// timer, not on a bare frame. [pumpDemo] first loads both on the real event
+/// loop (the deferred libraries then stay loaded for the file).
+const Duration kLocaleTick = Duration(milliseconds: 1);
 
 Finder byKey(String k) => find.byKey(Key(k));
 
@@ -26,10 +34,15 @@ Future<DemoHomeState> pumpDemo(WidgetTester tester,
     PagePrinter? printer}) async {
   await tester.binding.setSurfaceSize(size);
   addTearDown(() => tester.binding.setSurfaceSize(null));
+  await tester.runAsync(() async {
+    for (final language in const ['de', 'tr']) {
+      await GlobalShadLocalizations.delegate.load(Locale(language));
+    }
+  });
   await tester.pumpWidget(
       RestaurantDemo(locale: locale, random: random, printer: printer));
   await tester.pump();
-  await tester.pump();
+  await tester.pump(kLocaleTick);
   return tester.state<DemoHomeState>(find.byType(DemoHome));
 }
 
@@ -146,6 +159,10 @@ Future<void> reveal(WidgetTester tester, String key) async {
           .descendant(
               of: byKey('side-panel'), matching: find.byType(Scrollable))
           .first);
+  // The list is lazy and caches past its edge: a built entry may still lie
+  // outside the viewport, where a tap misses (a taller native window shows
+  // it). Bring it fully in.
+  await tester.ensureVisible(byKey(key));
   await tester.pump();
 }
 
@@ -161,6 +178,19 @@ Future<void> pressInPanel(WidgetTester tester, String key) async {
 Future<void> settle(WidgetTester tester) async {
   await tester.pump();
   await tester.pump();
+}
+
+/// [settle] for a language switch: the second frame carries
+/// [kLocaleTick].
+Future<void> settleLocale(WidgetTester tester) async {
+  await tester.pump();
+  await tester.pump(kLocaleTick);
+}
+
+/// Taps the language button [code] and settles past the new words' arrival.
+Future<void> switchLanguage(WidgetTester tester, String code) async {
+  await tester.tap(byKey('lang-$code'));
+  await settleLocale(tester);
 }
 
 /// Taps the widget keyed [key] and settles.
@@ -245,13 +275,18 @@ Map<String, Map<String, String>> dataByLabel(PlanController c) => {
 Future<void> pickRecord(WidgetTester tester, String id) async {
   await tester.tap(byKey('pos-id'));
   await tester.pumpAndSettle();
-  await tester.tap(byKey(id.isEmpty ? 'pos-id-none' : 'pos-id-$id').last);
+  final option = byKey(id.isEmpty ? 'pos-id-none' : 'pos-id-$id').last;
+  // A long list scrolls to the shown record, and the select's chevron then
+  // covers the entries at its edge: scroll the entry into view first.
+  await tester.ensureVisible(option);
+  await tester.pumpAndSettle();
+  await tester.tap(option);
   await tester.pumpAndSettle();
 }
 
 /// The id the inspector's combo shows: the text of its selected entry's
 /// first word, empty for none.
 String pickedId(WidgetTester tester) {
-  final d = tester.widget<DropdownButton<String>>(byKey('pos-id'));
-  return d.value ?? '';
+  final select = tester.state<ShadSelectState<String>>(byKey('pos-id'));
+  return select.controller.value.single;
 }

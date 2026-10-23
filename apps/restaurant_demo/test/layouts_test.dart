@@ -7,6 +7,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+import 'package:restaurant_demo/side_panel.dart' show DemoSidePanel;
 
 import 'support/demo_rig.dart';
 
@@ -56,7 +57,7 @@ void main() {
           await tester.tap(byKey('side-panel-button'));
           await tester.pumpAndSettle();
           expect(byKey('side-panel'), findsOneWidget);
-          expect(tester.getSize(byKey('side-panel-drawer')).width,
+          expect(tester.getSize(find.byType(DemoSidePanel)).width,
               lessThanOrEqualTo(size.width));
           await tester.tapAt(const Offset(4, 400));
           await tester.pumpAndSettle();

@@ -101,6 +101,26 @@ void main() {
   });
 
   testWidgets(
+      'LK2b the combo shows an id the records do not hold (written by "Link '
+      'tables") as it is, and still offers the records', (tester) async {
+    final demo = await pumpDemo(tester);
+    final c = demo.area.controller;
+    await pressInPanel(tester, 'link-tables');
+    await pressInPanel(tester, 'editor-tables');
+    await tester.tapAt(unitScreen(c, '7'), kind: PointerDeviceKind.mouse);
+    await settle(tester);
+    expect(c.selectedUnits.value, {'7'}, reason: 'premise');
+    expect(dataByLabel(c)['7'], {'id': 'salon-7'}, reason: 'premise');
+    expect(pickedId(tester), 'salon-7');
+    expect(find.descendant(of: byKey('pos-id'), matching: find.text('salon-7')),
+        findsOneWidget,
+        reason: 'the select shows the id itself');
+    await tester.tap(byKey('pos-id'));
+    await tester.pumpAndSettle();
+    expect(byKey('pos-id-T-07'), findsWidgets, reason: 'the records are there');
+  });
+
+  testWidgets(
       'LK2 (DL2) the inspector\'s combo links a table, a bar counter and the '
       'VIP room to fake records; the data round-trips through Save and '
       'Revert', (tester) async {

@@ -16,12 +16,13 @@ import 'dart:async' show StreamSubscription, Timer, unawaited;
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart' show kIsWeb;
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' show ThemeMode;
+import 'package:flutter/widgets.dart';
 import 'package:flutter/services.dart' show BrowserContextMenu;
 import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
 import 'package:jet_cad_2d_kit_restaurant/jet_cad_2d_kit_restaurant.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
-import 'package:shadcn_ui/shadcn_ui.dart' show ShadTheme;
+import 'package:shadcn_ui/shadcn_ui.dart';
 
 import 'area.dart';
 import 'badges.dart' as badge_lib;
@@ -70,9 +71,6 @@ Future<void> main() async {
 /// editor then has 1000 logical px, the plan's desktop breakpoint.
 const double kDockedSidePanel = 1300;
 
-/// The demo's theme seed, for the light and the dark theme alike.
-const Color _seed = Colors.teal;
-
 /// The demo. [locale] is the language to start in; the system's when null.
 /// [random] is the source of "Random statuses" (tests seed it); [printer]
 /// is where Print sends the page, the platform's print dialog when null
@@ -94,28 +92,35 @@ class _RestaurantDemoState extends State<RestaurantDemo> {
   /// The look the app bar switches: the standard one by default.
   DemoLook _look = DemoLook.standard;
 
-  /// The app's theme for [brightness]: the seed's; under the POS look it
-  /// carries the POS's `PlanTheme` for that brightness, one extension per
-  /// `ThemeData`.
-  ThemeData _theme(Brightness brightness) =>
-      ThemeData(colorSchemeSeed: _seed, brightness: brightness, extensions: [
-        if (_look == DemoLook.pos) posPlanTheme(brightness),
-      ]);
-
   @override
-  Widget build(BuildContext context) => MaterialApp(
+  Widget build(BuildContext context) => ShadApp(
         onGenerateTitle: (context) => DemoStrings.of(context).title,
         // The planner follows the host's theme, and the OS picks light or
         // dark.
-        theme: _theme(Brightness.light),
-        darkTheme: _theme(Brightness.dark),
+        theme: demoShadTheme(Brightness.light),
+        darkTheme: demoShadTheme(Brightness.dark),
         themeMode: ThemeMode.system,
+        // The Material theme the canvas reads is derived from the
+        // `ShadTheme`; the POS look adds its `PlanTheme` to it.
+        materialThemeBuilder: (context, theme) => _look == DemoLook.pos
+            ? theme.copyWith(extensions: [posPlanTheme(theme.brightness)])
+            : theme,
         // The three languages, switched in the app bar through
-        // `MaterialApp.locale`, so all three can be looked at without
+        // `ShadApp.locale`, so all three can be looked at without
         // changing the system's language.
         locale: _locale,
         supportedLocales: planSupportedLocales,
         localizationsDelegates: planLocalizationsDelegates,
+        // A plain `ShadApp` has no Scaffold to set the text style: every
+        // route (the side sheet is its own) gets the theme's, as the
+        // planner's own surfaces do.
+        builder: (context, child) {
+          final shad = ShadTheme.of(context);
+          return DefaultTextStyle(
+              style:
+                  shad.textTheme.p.copyWith(color: shad.colorScheme.foreground),
+              child: child!);
+        },
         home: DemoHome(
             random: widget.random,
             printer: widget.printer,
@@ -170,8 +175,6 @@ class DemoHomeState extends State<DemoHome> {
   ];
 
   int _area = 0;
-
-  final GlobalKey<ScaffoldState> _scaffold = GlobalKey<ScaffoldState>();
 
   late final math.Random _random = widget.random ?? math.Random();
   final TextEditingController _number = TextEditingController();
@@ -689,19 +692,6 @@ class DemoHomeState extends State<DemoHome> {
     }
   }
 
-  /// Keeps the editor mounted when the look adds or drops the `ShadTheme`
-  /// above it (a second canvas on one controller asserts).
-  final GlobalKey _viewKey = GlobalKey();
-
-  /// The `ShadTheme` around the editor under the POS look (zinc, in the
-  /// ambient theme's brightness); under the standard look the planner
-  /// derives its chrome from the app's Material theme.
-  Widget _viewTheme(BuildContext context, Widget child) =>
-      widget.look == DemoLook.pos
-          ? ShadTheme(
-              data: posShadTheme(Theme.of(context).brightness), child: child)
-          : child;
-
   /// A badge: counted, so a test sees pan and zoom build none.
   Widget _badge(BuildContext context, PlanUnitOverlay unit) {
     badgeBuilds++;
@@ -766,154 +756,192 @@ class DemoHomeState extends State<DemoHome> {
     final words = _words;
     final a = area;
     final c = a.controller;
+    final shad = ShadTheme.of(context);
     // The side panel docks beside an editor that keeps the desktop chrome
     // (1300 - 300 = 1000 logical px, the plan's own breakpoint); below it
-    // the panel is the end drawer and the bar's controls scroll under the
-    // title.
+    // the panel is a sheet from the side button and the controls scroll
+    // under the title.
     final controls = <Widget>[
       // A field of the host's beside the plan: Enter selects the table
       // and brings it to the middle of the view.
       SizedBox(
         width: 160,
-        child: TextField(
+        child: ShadInput(
           key: const Key('find-table'),
           controller: _search,
-          decoration: InputDecoration(
-              hintText: words.findTable,
-              isDense: true,
-              prefixIcon: const Icon(Icons.search, size: 18)),
-          onTapOutside: (_) {},
+          placeholder: Text(words.findTable),
+          leading: const Icon(LucideIcons.search, size: 16),
+          onPressedOutside: (_) {},
           onEditingComplete: () {},
           onSubmitted: _find,
         ),
       ),
       const SizedBox(width: 16),
-      SegmentedButton<String>(
+      ShadTabs<String>(
+        scrollable: true,
         key: const Key('language-toggle'),
-        showSelectedIcon: false,
-        segments: [
+        value: Localizations.localeOf(context).languageCode,
+        onChanged: (code) => widget.onLocale?.call(Locale(code)),
+        tabs: [
           for (final code in const ['en', 'de', 'tr'])
-            ButtonSegment(
+            ShadTab(
+                flex: 0,
                 value: code,
-                label: Text(code.toUpperCase(), key: Key('lang-$code'))),
+                child: Text(code.toUpperCase(), key: Key('lang-$code'))),
         ],
-        selected: {Localizations.localeOf(context).languageCode},
-        onSelectionChanged: (s) => widget.onLocale?.call(Locale(s.single)),
       ),
       const SizedBox(width: 16),
-      Tooltip(
-        message: words.look,
-        child: SegmentedButton<DemoLook>(
+      ShadTooltip(
+        builder: (_) => Text(words.look),
+        child: ShadTabs<DemoLook>(
+          scrollable: true,
           key: const Key('look-toggle'),
-          showSelectedIcon: false,
-          segments: [
-            ButtonSegment(
+          value: widget.look,
+          onChanged: (look) => widget.onLook?.call(look),
+          tabs: [
+            ShadTab(
+                flex: 0,
                 value: DemoLook.standard,
-                label:
+                child:
                     Text(words.lookStandard, key: const Key('look-standard'))),
-            ButtonSegment(
+            ShadTab(
+                flex: 0,
                 value: DemoLook.pos,
-                label: Text(words.lookPos, key: const Key('look-pos'))),
+                child: Text(words.lookPos, key: const Key('look-pos'))),
           ],
-          selected: {widget.look},
-          onSelectionChanged: (s) => widget.onLook?.call(s.single),
         ),
       ),
       const SizedBox(width: 16),
-      SegmentedButton<int>(
+      ShadTabs<int>(
+        scrollable: true,
         key: const Key('area-toggle'),
-        showSelectedIcon: false,
-        segments: [
+        value: _area,
+        onChanged: setArea,
+        tabs: [
           for (var i = 0; i < areas.length; i++)
-            ButtonSegment(
-                value: i, label: Text(areas[i].name, key: Key('area-$i'))),
+            ShadTab(
+                flex: 0,
+                value: i,
+                child: Text(areas[i].name, key: Key('area-$i'))),
         ],
-        selected: {_area},
-        onSelectionChanged: (s) => setArea(s.single),
       ),
       const SizedBox(width: 16),
       ValueListenableBuilder<PlanMode>(
         valueListenable: c.mode,
-        builder: (_, mode, __) => SegmentedButton<PlanMode>(
+        builder: (_, mode, __) => ShadTabs<PlanMode>(
+          scrollable: true,
           key: const Key('mode-toggle'),
-          showSelectedIcon: false,
-          segments: [
-            ButtonSegment(
+          value: mode,
+          onChanged: setMode,
+          tabs: [
+            ShadTab(
+                flex: 0,
                 value: PlanMode.design,
-                label: Text(words.design, key: const Key('mode-design'))),
-            ButtonSegment(
+                child: Text(words.design, key: const Key('mode-design'))),
+            ShadTab(
+                flex: 0,
                 value: PlanMode.service,
-                label: Text(words.service, key: const Key('mode-service'))),
+                child: Text(words.service, key: const Key('mode-service'))),
           ],
-          selected: {mode},
-          onSelectionChanged: (s) => setMode(s.single),
         ),
       ),
-      const SizedBox(width: 16),
     ];
-    return Scaffold(
-      key: _scaffold,
-      appBar: AppBar(
-        title: Text(words.title),
-        actions: docked
-            ? controls
-            : [
-                IconButton(
-                    key: const Key('side-panel-button'),
-                    tooltip: words.hostChoices,
-                    icon: const Icon(Icons.tune),
-                    onPressed: () => _scaffold.currentState?.openEndDrawer()),
-              ],
-        bottom: docked
-            ? null
-            : PreferredSize(
-                preferredSize: const Size.fromHeight(52),
-                child: SingleChildScrollView(
-                  key: const Key('app-controls'),
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  child: Row(children: controls),
-                ),
-              ),
-      ),
-      endDrawer: docked
-          ? null
-          : Drawer(
-              key: const Key('side-panel-drawer'),
-              width: 320,
-              child: SafeArea(child: DemoSidePanel(home: this)),
-            ),
-      body: Row(children: [
-        Expanded(
-          child: _viewTheme(
-            context,
-            Column(key: _viewKey, children: [
-              if (ownBar && c.mode.value == PlanMode.service)
-                OwnServiceBar(
-                    name: a.name,
-                    controller: c,
-                    onMerge: (numbers) => _merge(a, numbers),
-                    onSplit: (id) => _split(a, id),
-                    onExport: () => _ownExport(a),
-                    onPrint: () => _ownPrint(a)),
-              Expanded(
-                // Keyed: the editor is not remounted when the own bar comes
-                // and goes above it (a second canvas on one controller
-                // asserts).
-                key: const Key('editor-slot'),
-                // The demo's keys, while the plan's are off.
-                child: Focus(
-                  canRequestFocus: false,
-                  skipTraversal: true,
-                  onKeyEvent: (_, event) => _demoKey(a, event),
-                  child: _editor(a),
-                ),
-              ),
-            ]),
+    final title = Text(words.title, style: shad.textTheme.large);
+    return ColoredBox(
+      color: shad.colorScheme.background,
+      child: Column(children: [
+        SafeArea(
+          bottom: false,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: docked
+                ? Row(children: [
+                    title,
+                    const SizedBox(width: 24),
+                    // The controls scroll when the title and they do not
+                    // fit (a large text scale).
+                    Expanded(
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        reverse: true,
+                        child: Row(children: controls),
+                      ),
+                    ),
+                  ])
+                : Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                        Row(children: [
+                          Expanded(child: title),
+                          ShadTooltip(
+                            builder: (_) => Text(words.hostChoices),
+                            child: ShadIconButton.ghost(
+                              key: const Key('side-panel-button'),
+                              icon: const Icon(LucideIcons.panelRight),
+                              onPressed: _openSidePanel,
+                            ),
+                          ),
+                        ]),
+                        const SizedBox(height: 8),
+                        SingleChildScrollView(
+                          key: const Key('app-controls'),
+                          scrollDirection: Axis.horizontal,
+                          child: Row(children: controls),
+                        ),
+                      ]),
           ),
         ),
-        if (docked) SizedBox(width: 300, child: DemoSidePanel(home: this)),
+        const ShadSeparator.horizontal(margin: EdgeInsets.zero),
+        Expanded(child: _body(a, c, docked)),
       ]),
     );
+  }
+
+  Widget _panel() => DemoSidePanel(home: this);
+
+  /// The side panel as a sheet from the right edge: below the docking width.
+  void _openSidePanel() => showShadSheet<void>(
+        context: context,
+        side: ShadSheetSide.right,
+        builder: (_) => ShadSheet(
+          key: const Key('side-panel-drawer'),
+          constraints: const BoxConstraints.tightFor(width: 320),
+          // The panel is its own list: the sheet neither scrolls it nor
+          // pads it (the sheet keeps clear of the safe area itself).
+          scrollable: false,
+          padding: EdgeInsets.zero,
+          child: _panel(),
+        ),
+      );
+
+  Widget _body(Area a, PlanController c, bool docked) {
+    return Row(children: [
+      Expanded(
+        child: Column(children: [
+          if (ownBar && c.mode.value == PlanMode.service)
+            OwnServiceBar(
+                name: a.name,
+                controller: c,
+                onMerge: (numbers) => _merge(a, numbers),
+                onSplit: (id) => _split(a, id),
+                onExport: () => _ownExport(a),
+                onPrint: () => _ownPrint(a)),
+          Expanded(
+            // Keyed: the editor is not remounted when the own bar comes
+            // and goes above it (a second canvas on one controller
+            // asserts).
+            key: const Key('editor-slot'),
+            // The demo's keys, while the plan's are off.
+            child: Focus(
+              canRequestFocus: false,
+              skipTraversal: true,
+              onKeyEvent: (_, event) => _demoKey(a, event),
+              child: _editor(a),
+            ),
+          ),
+        ]),
+      ),
+      if (docked) SizedBox(width: 300, child: _panel()),
+    ]);
   }
 }

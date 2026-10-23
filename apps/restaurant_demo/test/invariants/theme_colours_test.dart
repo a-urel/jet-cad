@@ -31,8 +31,6 @@ const List<String> kAllowedFiles = ['lib/demo_theme.dart'];
 /// character is not followed by another (`Colors.teal` does not cover
 /// `Colors.tealAccent`). Task 8 adds the badge literals if it restores them.
 const List<(String, String)> kAllowedLiterals = [
-  // The demo's theme seed.
-  ('lib/main.dart', 'Colors.teal'),
   // The statuses a POS would set: Ordered, Eating, Bill.
   ('lib/statuses.dart', 'Color(0x99FFB300)'),
   ('lib/statuses.dart', 'Color(0x9943A047)'),

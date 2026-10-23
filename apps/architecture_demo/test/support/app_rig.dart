@@ -8,6 +8,7 @@ import 'package:architecture_demo/document_host.dart';
 import 'package:architecture_demo/document_session.dart';
 import 'package:architecture_demo/main.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
@@ -15,6 +16,8 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
     show InteractionLayer, Tool, ViewportTransform;
 import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+import 'package:shadcn_ui/shadcn_ui.dart'
+    show GlobalShadLocalizations, ShadTooltip;
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import 'app_fakes.dart';
@@ -59,6 +62,12 @@ class AppRig {
   }
 }
 
+/// The tick that lets a non-English shadcn locale arrive: `ShadApp` loads
+/// German and Turkish words through a deferred import, which completes on a
+/// timer, not on a bare frame. [pumpApp] first loads both on the real event
+/// loop (the deferred libraries then stay loaded for the file).
+const Duration kLocaleTick = Duration(milliseconds: 1);
+
 /// The app over [files] (and [guard], the platform's no-op when null) at a
 /// 1440 x 900 surface; the rig.
 Future<AppRig> pumpApp(WidgetTester tester,
@@ -70,16 +79,49 @@ Future<AppRig> pumpApp(WidgetTester tester,
   await tester.binding.setSurfaceSize(size);
   addTearDown(() => tester.binding.setSurfaceSize(null));
   final fakeFiles = files ?? FakeDocumentFiles();
+  await tester.runAsync(() async {
+    for (final language in const ['de', 'tr']) {
+      await GlobalShadLocalizations.delegate.load(Locale(language));
+    }
+  });
   await tester.pumpWidget(ArchitectureDemoApp(
       files: fakeFiles,
       exitGuard: guard,
       printer: printer ?? const PrintingPagePrinter(),
       layout: layout));
   await tester.pump();
+  await tester.pump(kLocaleTick);
   return AppRig._(tester, fakeFiles, guard);
 }
 
-/// The app's title, as `MaterialApp.onGenerateTitle` made it: the app's own
+/// The words of the `ShadTooltip` around [child], from its builder (a
+/// `ShadTooltip` is not a `Tooltip`: `find.byTooltip` never finds it and
+/// the words only exist while it is shown). Null when [child] has none.
+String? shadTooltipOf(WidgetTester tester, Finder child) {
+  final tips = find.ancestor(of: child, matching: find.byType(ShadTooltip));
+  if (tips.evaluate().isEmpty) return null;
+  final tip = tester.widget<ShadTooltip>(tips.first);
+  return (tip.builder(tester.element(child)) as Text).data;
+}
+
+/// Hovers [target] with a mouse, waits past the tooltip's delay, and
+/// returns whether [word] is on screen; the mouse then leaves.
+Future<bool> tooltipShows(
+    WidgetTester tester, Finder target, String word) async {
+  final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+  await mouse.addPointer(location: Offset.zero);
+  await mouse.moveTo(tester.getCenter(target));
+  await tester.pump();
+  await tester.pump(const Duration(seconds: 2));
+  final shown = find.text(word).evaluate().isNotEmpty;
+  await mouse.moveTo(Offset.zero);
+  await tester.pump();
+  await tester.pump(const Duration(seconds: 2));
+  await mouse.removePointer();
+  return shown;
+}
+
+/// The app's title, as `ShadApp.onGenerateTitle` made it: the app's own
 /// `Title`, the first under the `WidgetsApp`.
 String titleOf(WidgetTester tester) => tester
     .widget<Title>(find

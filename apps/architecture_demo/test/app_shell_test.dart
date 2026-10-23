@@ -2,6 +2,7 @@
 // consumed above the Navigator.
 import 'package:architecture_demo/main.dart';
 import 'package:flutter/material.dart';
+import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
@@ -25,10 +26,10 @@ void main() {
         (tester) async {
       final app = (await pumpApp(tester)).app;
       final navigator = tester.state<NavigatorState>(find.byType(Navigator));
-      showDialog<void>(
+      showShadDialog<void>(
           context: navigator.context,
           builder: (_) =>
-              const AlertDialog(content: TextField(key: Key('dialog-field'))));
+              const ShadDialog(child: ShadInput(key: Key('dialog-field'))));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('dialog-field')), findsOneWidget);
       await tester.tap(find.byKey(const Key('dialog-field')));

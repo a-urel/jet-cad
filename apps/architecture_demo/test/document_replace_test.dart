@@ -21,6 +21,7 @@
 // (`PlanController.settlePendingInput` is internal to the library, so the
 // host cannot), which is the path of every button and chord of the app.
 import 'package:flutter/material.dart';
+import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d_plan/src/chrome/icon_button.dart';
@@ -39,8 +40,8 @@ Finder get dialog => find.byKey(const Key('replace-dialog'));
 /// Whether the toolbar button [id] is enabled, as built.
 bool enabled(WidgetTester tester, String id) {
   final w = tester.widget(find.byKey(Key('toolbar-$id')));
-  // The app's own Open sample button is a Material one (a host slot).
-  if (w is IconButton) return w.onPressed != null;
+  // The app's own Open sample button is a shadcn one (a host slot).
+  if (w is ShadIconButton) return w.onPressed != null;
   return (w as PlanIconButton).onPressed != null;
 }
 

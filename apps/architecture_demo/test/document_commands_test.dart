@@ -36,6 +36,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
+import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:flutter/rendering.dart' show RenderParagraph;
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
@@ -82,15 +83,15 @@ Finder button(String id) => find.byKey(Key('toolbar-$id'));
 /// Whether the toolbar button [id] is enabled, as built.
 bool on(WidgetTester tester, String id) {
   final w = tester.widget(button(id));
-  // The app's own Open sample button is a Material one (a host slot).
-  if (w is IconButton) return w.onPressed != null;
+  // The app's own Open sample button is a shadcn one (a host slot).
+  if (w is ShadIconButton) return w.onPressed != null;
   return (w as PlanIconButton).onPressed != null;
 }
 
 /// The tooltip of toolbar button [id] (the library's, or the app's own).
 String? tooltipOfButton(WidgetTester tester, String id) {
   final w = tester.widget(button(id));
-  if (w is IconButton) return w.tooltip;
+  if (w is ShadIconButton) return shadTooltipOf(tester, button(id));
   return (w as PlanIconButton).tooltip ?? w.label;
 }
 
@@ -799,13 +800,19 @@ void main() {
 
     expect(titleOf(tester), 'Untitled — jet-cad');
     expect(shownName(tester), 'Untitled');
-    expect(find.byTooltip('Edited'), findsNothing);
+    expect(
+        await tooltipShows(
+            tester, find.byKey(const Key('document-name')), 'Edited'),
+        isFalse);
 
     await aimCamera(tester, c, far);
     await drawWall(tester, c, far, far + Vector2(-2100, 1300));
     expect(titleOf(tester), '• Untitled — jet-cad');
     expect(shownName(tester), '• Untitled');
-    expect(find.byTooltip('Edited'), findsOneWidget);
+    expect(
+        await tooltipShows(
+            tester, find.byKey(const Key('document-name')), 'Edited'),
+        isTrue);
 
     files.scriptSaveLocation(name: 'hall.jetplan', location: '/p/hall');
     await pressChord(tester, cmdS);
@@ -813,12 +820,18 @@ void main() {
     expect(files.writes, hasLength(1), reason: 'premise: saved');
     expect(titleOf(tester), 'hall — jet-cad');
     expect(shownName(tester), 'hall');
-    expect(find.byTooltip('Edited'), findsNothing);
+    expect(
+        await tooltipShows(
+            tester, find.byKey(const Key('document-name')), 'Edited'),
+        isFalse);
 
     await pressChord(tester, cmdZ);
     expect(titleOf(tester), '• hall — jet-cad');
     expect(shownName(tester), '• hall');
-    expect(find.byTooltip('Edited'), findsOneWidget);
+    expect(
+        await tooltipShows(
+            tester, find.byKey(const Key('document-name')), 'Edited'),
+        isTrue);
   });
 
   testWidgets(
