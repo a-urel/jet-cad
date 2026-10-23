@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- `PaperPalette.guide` (and `withGuide`, `guideColor`): the alignment
+  guides' colour; the built-in sets carry a magenta.
+
 ## 0.7.3
 
 - `SelectTool` passes the dragged selection as `resolveDragPoint`'s new
