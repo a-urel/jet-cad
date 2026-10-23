@@ -125,8 +125,12 @@ const List<String> _materialNames = [
   'showTimePicker',
 ];
 
-final _construct =
-    RegExp(r'\b(' '${_materialNames.join('|')}' r')(<[^>()]*>)?(\.\w+)?\(');
+/// A name, its generic arguments and one named constructor or `.of`, then a
+/// call `(` or, for an `.of` or a `show...` function, a tear-off (`final f = Theme.of;`). The leading
+/// `\b` keeps `PlanTheme.of`, `ShadTheme.of` and `ShadThemeData(` out.
+final _construct = RegExp(r'\b('
+    '${_materialNames.join('|')}'
+    r')(<[^>()]*>)?(\.\w+)?(?:\(|(?<=\.of|\bshow[A-Za-z]+)(?!\w))');
 
 final _materialImport =
     RegExp(r'''import\s+['"]package:flutter/material\.dart['"]([^;]*);''');
