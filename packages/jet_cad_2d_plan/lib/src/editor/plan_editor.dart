@@ -1156,11 +1156,11 @@ class _PlanEditorState extends State<PlanEditor> {
                                   : const SizedBox.shrink()),
                           if (_gallery)
                             ExcludeFocus(
-                              child: IconButton(
+                              child: _barButton(
                                 key: const Key('chrome-symbols-button'),
-                                tooltip: strings.tabSymbols,
-                                icon: const Icon(Icons.category_outlined),
-                                isSelected: _drawer == PlanDrawerSide.left,
+                                label: strings.tabSymbols,
+                                icon: LucideIcons.shapes,
+                                selected: _drawer == PlanDrawerSide.left,
                                 onPressed: () =>
                                     _toggleDrawer(PlanDrawerSide.left),
                               ),

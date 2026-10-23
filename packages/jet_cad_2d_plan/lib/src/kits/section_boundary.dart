@@ -3,9 +3,10 @@
 // it returned that fails while building shows Flutter's ErrorWidget in its
 // place only, and the plan stays usable. The diagnostic is published after
 // the frame (a build must not notify).
-import 'package:flutter/material.dart';
+import 'package:flutter/widgets.dart';
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
 
+import '../chrome/shad_scope.dart';
 import '../l10n/strings.dart';
 import 'guard.dart';
 
@@ -38,16 +39,16 @@ class KitSectionBoundary extends StatelessWidget {
           code: KitDiagnosticCode.hookFailed,
           message: 'section: $error',
           error: error));
-      final scheme = Theme.of(context).colorScheme;
+      final red = planShadThemeOf(context).colorScheme.destructive;
       return Container(
         key: const Key('kit-section-failed'),
         padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
-          border: Border.all(color: scheme.error),
+          border: Border.all(color: red),
           borderRadius: BorderRadius.circular(4),
         ),
         child: Text(PlanStrings.of(context).sectionFailed,
-            style: TextStyle(color: scheme.error)),
+            style: TextStyle(color: red)),
       );
     }
     return section ?? const SizedBox.shrink();

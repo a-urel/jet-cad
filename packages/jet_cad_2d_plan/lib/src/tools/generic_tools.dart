@@ -2,9 +2,10 @@
 // library's own tools. plan.symbol is reserved here and built by Task 14;
 // a kit's tools follow in the palette (Task 16).
 import 'package:flutter/foundation.dart' show ValueListenable, immutable;
-import 'package:flutter/material.dart' show IconData, Icons;
+import 'package:flutter/widgets.dart' show IconData;
 import 'package:jet_cad_2d/jet_cad_2d.dart' show Capability;
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart' show LucideIcons;
 
 /// The plan library's reserved tool ids (spec P1).
 abstract final class PlanToolIds {
@@ -67,40 +68,40 @@ final class GenericTool {
 const List<GenericTool> genericTools = [
   GenericTool(
       id: PlanToolIds.select,
-      icon: Icons.north_west,
+      icon: LucideIcons.mousePointer2,
       letter: 'V',
       needs: <Capability>{}),
   GenericTool(
       id: PlanToolIds.line,
-      icon: Icons.horizontal_rule,
+      icon: LucideIcons.minus,
       letter: 'L',
       needs: {Capability.geometry}),
   GenericTool(
       id: PlanToolIds.polyline,
-      icon: Icons.polyline,
+      icon: LucideIcons.route,
       letter: 'P',
       needs: {Capability.geometry},
       fills: true),
   GenericTool(
       id: PlanToolIds.rectangle,
-      icon: Icons.crop_square,
+      icon: LucideIcons.square,
       letter: 'R',
       needs: {Capability.geometry},
       fills: true),
   GenericTool(
       id: PlanToolIds.circle,
-      icon: Icons.circle_outlined,
+      icon: LucideIcons.circle,
       letter: 'C',
       needs: {Capability.geometry},
       fills: true),
   GenericTool(
       id: PlanToolIds.arc,
-      icon: Icons.looks,
+      icon: LucideIcons.spline,
       letter: 'A',
       needs: {Capability.geometry}),
   GenericTool(
       id: PlanToolIds.text,
-      icon: Icons.title,
+      icon: LucideIcons.type,
       letter: 'T',
       needs: {Capability.geometry}),
 ];
