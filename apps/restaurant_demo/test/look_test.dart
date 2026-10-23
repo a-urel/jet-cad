@@ -16,6 +16,7 @@
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show RenderRepaintBoundary;
 import 'package:flutter_test/flutter_test.dart';
@@ -23,6 +24,7 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
     show PaperPalette, SelectionOverlayPainter;
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 import 'package:restaurant_demo/demo_theme.dart';
+import 'package:restaurant_demo/main.dart' show DemoHome;
 import 'package:restaurant_demo/statuses.dart' show kStatuses;
 import 'package:shadcn_ui/shadcn_ui.dart'
     show ShadThemeData, ShadTheme, ShadZincColorScheme;
@@ -34,6 +36,28 @@ Future<void> settleTheme(WidgetTester tester) async {
   await tester.pump();
   await tester.pump(const Duration(milliseconds: 300));
   await tester.pump(const Duration(milliseconds: 300));
+}
+
+/// A mouse in the test view, off every control.
+Future<TestGesture> mouseInView(WidgetTester tester) async {
+  final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+  await mouse.addPointer(location: Offset.zero);
+  addTearDown(mouse.removePointer);
+  return mouse;
+}
+
+/// Moves [mouse] over the widget keyed [key], past the tooltip's wait.
+Future<void> hover(WidgetTester tester, TestGesture mouse, String key) async {
+  await mouse.moveTo(tester.getCenter(byKey(key)));
+  await tester.pump();
+  await tester.pump(const Duration(seconds: 2));
+}
+
+/// Moves [mouse] off every control and lets the tooltip go.
+Future<void> unhover(WidgetTester tester, TestGesture mouse) async {
+  await mouse.moveTo(Offset.zero);
+  await tester.pump();
+  await tester.pump(const Duration(seconds: 2));
 }
 
 /// One captured frame of the whole window, at device pixel ratio 1.
@@ -80,7 +104,7 @@ const Size kWindow = Size(2300, 1450);
 Future<Shot> shoot(WidgetTester tester) async {
   final boundary = tester.renderObject<RenderRepaintBoundary>(find
       .ancestor(
-          of: find.byType(Scaffold), matching: find.byType(RepaintBoundary))
+          of: find.byType(DemoHome), matching: find.byType(RepaintBoundary))
       .first);
   expect(boundary.size, kWindow, reason: 'premise: the window');
   return (await tester.runAsync(() async {
@@ -411,17 +435,27 @@ void main() {
     await pumpDemo(tester);
     expect(find.text('Standard'), findsOneWidget);
     expect(find.text('POS'), findsOneWidget);
-    expect(find.byTooltip('Look'), findsOneWidget);
+    expect(find.text('Look'), findsNothing, reason: 'premise: not shown yet');
+    final mouse = await mouseInView(tester);
+    await hover(tester, mouse, 'look-toggle');
+    expect(find.text('Look'), findsOneWidget);
+    await unhover(tester, mouse);
     await tester.tap(byKey('lang-de'));
     await settleTheme(tester);
     expect(find.text('Standard'), findsOneWidget);
     expect(find.text('Kasse'), findsOneWidget);
-    expect(find.byTooltip('Aussehen'), findsOneWidget);
+    expect(find.text('Look'), findsNothing, reason: 'no stale English');
+    await hover(tester, mouse, 'look-toggle');
+    expect(find.text('Aussehen'), findsOneWidget);
+    await unhover(tester, mouse);
     await tester.tap(byKey('lang-tr'));
     await settleTheme(tester);
     expect(find.text('Standart'), findsOneWidget);
     expect(find.text('Kasa'), findsOneWidget);
-    expect(find.byTooltip('Görünüm'), findsOneWidget);
+    expect(find.text('Aussehen'), findsNothing, reason: 'no stale German');
+    await hover(tester, mouse, 'look-toggle');
+    expect(find.text('Görünüm'), findsOneWidget);
+    await unhover(tester, mouse);
     await tester.tap(byKey('look-pos'));
     await settleTheme(tester);
     expect(seen(tester).ambient, kPosPlanLight,
