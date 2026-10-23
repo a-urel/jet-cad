@@ -14,7 +14,7 @@
 // POS's real ones: a host takes its own design system's values. The
 // `PlanTheme`s below hold literal colours by nature, so the colour scan
 // (theme_colours_test) allows this file whole.
-import 'package:flutter/material.dart';
+import 'package:flutter/widgets.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 

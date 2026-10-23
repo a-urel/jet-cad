@@ -16,7 +16,8 @@ import 'dart:async' show StreamSubscription, Timer, unawaited;
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart' show kIsWeb;
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' show ThemeMode;
+import 'package:flutter/widgets.dart';
 import 'package:flutter/services.dart' show BrowserContextMenu;
 import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
 import 'package:jet_cad_2d_kit_restaurant/jet_cad_2d_kit_restaurant.dart';
