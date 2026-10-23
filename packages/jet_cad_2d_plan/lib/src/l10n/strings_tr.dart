@@ -95,6 +95,9 @@ class PlanStringsTr extends PlanStrings {
   String get redo => 'Yinele';
 
   @override
+  String get alignmentGuides => 'Hizalama kılavuzları';
+
+  @override
   String get newDocument => 'Yeni';
 
   @override

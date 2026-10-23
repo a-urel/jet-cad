@@ -372,6 +372,7 @@ class _PlanServiceViewState extends State<PlanServiceView> {
                   events: _serviceEvents,
                   overlays: overlays,
                   bar: widget.bar,
+                  alignmentGuides: widget.alignmentGuides,
                   shortcuts: widget.shortcuts,
                   autofocus: widget.autofocus,
                   layout: layout,
@@ -411,6 +412,7 @@ class _ServiceCanvas extends StatefulWidget {
     required this.events,
     required this.overlays,
     required this.bar,
+    required this.alignmentGuides,
     required this.shortcuts,
     required this.autofocus,
     required this.layout,
@@ -431,6 +433,7 @@ class _ServiceCanvas extends StatefulWidget {
   final ServiceEvents<PlanUnitDetail> Function() events;
   final Widget? overlays;
   final PlanServiceBar bar;
+  final bool alignmentGuides;
   final bool shortcuts;
   final bool autofocus;
   final PlanEditorLayout layout;
@@ -689,6 +692,7 @@ class _ServiceCanvasState extends State<_ServiceCanvas> {
     _pageReady.dispose();
     _canMerge.dispose();
     _canSplit.dispose();
+    _guidesFlag?.dispose();
     super.dispose();
   }
 
@@ -897,6 +901,11 @@ class _ServiceCanvasState extends State<_ServiceCanvas> {
             'service-undo', strings.undo, Icons.undo, _c.canUndo, _c.undo),
         PlanServiceAction.redo => _button(
             'service-redo', strings.redo, Icons.redo, _c.canRedo, _c.redo),
+        PlanServiceAction.guides => !widget.alignmentGuides
+            ? null
+            : _button('service-guides', strings.alignmentGuides,
+                Icons.straighten, _alwaysEnabled, _c.alignmentGuides.toggle,
+                selected: _guidesSelected),
         PlanServiceAction.merge => !merges || callbacks.onMergeRequested == null
             ? null
             : _button('service-merge', strings.merge, Icons.merge_type,
@@ -922,7 +931,10 @@ class _ServiceCanvasState extends State<_ServiceCanvas> {
       };
       if (button == null) continue;
       final group = switch (action) {
-        PlanServiceAction.undo || PlanServiceAction.redo => 0,
+        PlanServiceAction.undo ||
+        PlanServiceAction.redo ||
+        PlanServiceAction.guides =>
+          0,
         PlanServiceAction.merge || PlanServiceAction.split => 1,
         PlanServiceAction.export || PlanServiceAction.print => 2,
       };
@@ -945,15 +957,26 @@ class _ServiceCanvasState extends State<_ServiceCanvas> {
     if (id != null) widget.callbacks().onSplitRequested?.call(id);
   }
 
+  static final ValueListenable<bool> _alwaysEnabled = ValueNotifier<bool>(true);
+
+  /// The guides toggle's pressed state: the user's choice, read at each
+  /// notification of the controller's settings.
+  _Flag? _guidesFlag;
+  _Flag get _guidesSelected => _guidesFlag ??=
+      _Flag(_c.alignmentGuides, () => _c.alignmentGuides.userOn);
+
   Widget _button(String key, String tooltip, IconData icon,
-          ValueListenable<bool> enabled, VoidCallback onPressed) =>
-      ValueListenableBuilder<bool>(
-        valueListenable: enabled,
-        builder: (_, on, __) => IconButton(
+          ValueListenable<bool> enabled, VoidCallback onPressed,
+          {ValueListenable<bool>? selected}) =>
+      ListenableBuilder(
+        listenable:
+            selected == null ? enabled : Listenable.merge([enabled, selected]),
+        builder: (_, __) => IconButton(
           key: Key(key),
           tooltip: tooltip,
           icon: Icon(icon),
-          onPressed: on ? onPressed : null,
+          isSelected: selected?.value,
+          onPressed: enabled.value ? onPressed : null,
         ),
       );
 }

@@ -812,19 +812,20 @@ void main() {
   });
 
   testWidgets(
-      'DC12 at 800 px a long file name, dirty, and then a long status '
+      'DC12 at 840 px a long file name, dirty, and then a long status '
       'line do not overflow the top bar: each is cut with an ellipsis, and '
       'OSNAP and the zoom stay on screen (spec 12a D7, S-27, T-13)',
       (tester) async {
     // Intent half: COVERED, checked: packages/jet_cad_2d_plan/test/editor/
     // editor_words_test.dart:190 (the OV-$code cases: "no overflow from 704 px
     // down to 656 px", the library bar without host widgets).
-    // The width is the old 800 px: the name is bounded at 144 px.
+    // The width is 840 px: the old 800 px plus the alignment guides' toggle
+    // (40 px, plan Task 9b); the name is bounded at 144 px.
     // Decided: this test pins the desktop top bar below 1000 px (an editor
     // narrower than 1000 px has the tablet layout by default now, ruling
     // R6), so it forces the desktop layout.
     final rig = await pumpApp(tester,
-        size: const Size(800, 600), layout: PlanEditorLayout.desktop);
+        size: const Size(840, 600), layout: PlanEditorLayout.desktop);
     final c = rig.controller;
     const long = 'the ground floor of the house by the lake, third revision, '
         'with the new kitchen and the long hallway to the garden';
@@ -875,7 +876,7 @@ void main() {
   });
 
   testWidgets(
-      'DC12c from 1000 px down to 800 px wide a titled long name and a '
+      'DC12c from 1000 px down to 840 px wide a titled long name and a '
       'long status line do not overflow the top bar, and OSNAP and the zoom '
       'stay on screen (spec 12a D7, S-27)', (tester) async {
     // Decided: premise impossible (the range). The floor is 800 px, measured
@@ -904,7 +905,9 @@ void main() {
     expect(tester.takeException(), isNull);
     final name = find.byKey(const Key('document-name'));
     final status = find.byKey(const Key('status-text'));
-    for (var width = 1000; width >= 800; width--) {
+    // The floor is 840 px since the alignment guides' toggle (40 px, plan
+    // Task 9b) joined the bar.
+    for (var width = 1000; width >= 840; width--) {
       await tester.binding.setSurfaceSize(Size(width.toDouble(), 600));
       await tester.pump();
       expect(tester.takeException(), isNull, reason: '$width px');

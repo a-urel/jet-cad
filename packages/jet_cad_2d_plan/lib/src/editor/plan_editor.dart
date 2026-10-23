@@ -333,6 +333,7 @@ class _PlanEditorState extends State<PlanEditor> {
   _Flag? _printFlag;
   _Flag? _undoFlag;
   _Flag? _redoFlag;
+  _Flag? _guidesFlag;
 
   EditorPageFlows _flowsFor(PlanController c) => EditorPageFlows(
         controller: c,
@@ -454,6 +455,9 @@ class _PlanEditorState extends State<PlanEditor> {
     // `canRedo` are only what tells it to look again.
     _undoFlag = _Flag(sources, () => _idle && c.document.commands.canUndo);
     _redoFlag = _Flag(sources, () => _idle && c.document.commands.canRedo);
+    // The toggle's pressed state follows the user's choice (spec, Turning
+    // them off); the settings notify on it, so the flag listens to them.
+    _guidesFlag = _Flag(c.alignmentGuides, () => c.alignmentGuides.userOn);
   }
 
   void _unbind() {
@@ -462,13 +466,15 @@ class _PlanEditorState extends State<PlanEditor> {
       _exportFlag,
       _printFlag,
       _undoFlag,
-      _redoFlag
+      _redoFlag,
+      _guidesFlag
     ]) {
       f?.dispose();
     }
     _status?.dispose();
     _commandSources?.dispose();
-    _idleFlag = _exportFlag = _printFlag = _undoFlag = _redoFlag = null;
+    _idleFlag =
+        _exportFlag = _printFlag = _undoFlag = _redoFlag = _guidesFlag = null;
     _status = _commandSources = null;
   }
 
@@ -561,6 +567,22 @@ class _PlanEditorState extends State<PlanEditor> {
             ]
           : const [];
 
+  /// The alignment guides' toggle: after the undo-gated list, whatever
+  /// `permissions.undo` says, and only with `PlanEditor.alignmentGuides`.
+  List<_BarCommand> _guidesCommands(PlanStrings s) => widget.alignmentGuides
+      ? [
+          _BarCommand(
+              id: 'guides',
+              label: s.alignmentGuides,
+              icon: Icons.straighten,
+              enabled: _alwaysEnabled,
+              selected: _guidesFlag,
+              run: () async => widget.controller.alignmentGuides.toggle()),
+        ]
+      : const [];
+
+  static final ValueListenable<bool> _alwaysEnabled = ValueNotifier<bool>(true);
+
   static _BarCommand? _byId(List<_BarCommand> commands, String id) =>
       commands.where((c) => c.id == id).firstOrNull;
 
@@ -589,6 +611,7 @@ class _PlanEditorState extends State<PlanEditor> {
         PlanEditorAction.print => (_byId(file, 'print'), true),
         PlanEditorAction.undo => (_byId(edit, 'undo'), false),
         PlanEditorAction.redo => (_byId(edit, 'redo'), false),
+        PlanEditorAction.guides => (_byId(edit, 'guides'), false),
         _ => (null, false),
       };
       if (command == null) continue;
@@ -656,7 +679,12 @@ class _PlanEditorState extends State<PlanEditor> {
             builder: (_, __) =>
                 Text(_zoomLine(strings), key: const Key('zoom-text')),
           ),
-        _ => null,
+        PlanEditorAction.export ||
+        PlanEditorAction.print ||
+        PlanEditorAction.undo ||
+        PlanEditorAction.redo ||
+        PlanEditorAction.guides =>
+          null,
       };
       if (readOut == null) continue;
       if (readOuts.isNotEmpty) readOuts.add(const SizedBox(width: 16));
@@ -1065,7 +1093,7 @@ class _PlanEditorState extends State<PlanEditor> {
     final scheme = Theme.of(context).colorScheme;
     final strings = PlanStrings.of(context);
     final file = _fileCommands(strings);
-    final edit = _editCommands(strings);
+    final edit = [..._editCommands(strings), ..._guidesCommands(strings)];
     final phone = layout == PlanEditorLayout.phone;
     Widget button(String key, IconData icon, String tip, PlanDrawerSide side) =>
         ExcludeFocus(
@@ -1208,7 +1236,7 @@ class _PlanEditorState extends State<PlanEditor> {
     final scheme = Theme.of(context).colorScheme;
     final strings = PlanStrings.of(context);
     final file = _fileCommands(strings);
-    final edit = _editCommands(strings);
+    final edit = [..._editCommands(strings), ..._guidesCommands(strings)];
     return PlanShortcuts(
       controller: c,
       shortcuts: widget.shortcuts,
@@ -1276,6 +1304,7 @@ final class _BarCommand {
     this.shortcuts = const <SingleActivator>[],
     required this.enabled,
     required this.run,
+    this.selected,
   });
 
   /// The button's key is `toolbar-<id>`.
@@ -1285,6 +1314,9 @@ final class _BarCommand {
   final List<SingleActivator> shortcuts;
   final ValueListenable<bool> enabled;
   final Future<void> Function() run;
+
+  /// A toggle's pressed state; null for a plain command.
+  final ValueListenable<bool>? selected;
 
   /// The label and the first chord's glyph on [platform] (`⌘S` on macOS,
   /// `Ctrl+S` elsewhere, the modifiers in the UI's language).
@@ -1324,16 +1356,20 @@ class _Toolbar extends StatelessWidget {
       if (group.isEmpty) continue;
       if (children.isNotEmpty) children.add(const SizedBox(width: groupGap));
       for (final c in group) {
-        children.add(ValueListenableBuilder<bool>(
-          valueListenable: c.enabled,
-          builder: (context, enabled, _) => IconButton(
+        final selected = c.selected;
+        children.add(ListenableBuilder(
+          listenable: selected == null
+              ? c.enabled
+              : Listenable.merge([c.enabled, selected]),
+          builder: (context, _) => IconButton(
             key: Key('toolbar-${c.id}'),
             tooltip: c.tooltipFor(defaultTargetPlatform,
                 control: strings.controlKey, shift: strings.shiftKey),
             icon: Icon(c.icon),
+            isSelected: selected?.value,
             iconSize: 20,
             visualDensity: VisualDensity.compact,
-            onPressed: enabled ? c.invoke : null,
+            onPressed: c.enabled.value ? c.invoke : null,
           ),
         ));
       }

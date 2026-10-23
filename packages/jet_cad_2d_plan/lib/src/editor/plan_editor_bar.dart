@@ -6,10 +6,11 @@ import 'package:flutter/foundation.dart' show immutable, listEquals;
 import 'package:flutter/widgets.dart' show Widget;
 
 /// The editor's top bar items, in today's left-to-right order: the buttons
-/// Export, Print, Undo and Redo at the left; the read-outs at the right,
+/// Export, Print, Undo and Redo and the alignment guides' toggle (`guides`,
+/// shown with `PlanEditor.alignmentGuides`) at the left; the read-outs at the right,
 /// the object snap's (`snap`, which F3 toggles) and the zoom's (`zoom`).
 /// The status line keeps the flexible middle.
-enum PlanEditorAction { export, print, undo, redo, snap, zoom }
+enum PlanEditorAction { export, print, undo, redo, guides, snap, zoom }
 
 /// The editor's top bar.
 ///
