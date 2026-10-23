@@ -205,6 +205,8 @@ The file runs in 1:31 under the VM service (5:05 before fix round 1).
 - Ruling: Task 11 `jet_cad_2d_integration`: the package's own `recording_plan_strings.dart` copy lacked the new `alignmentGuides` string (analyze error, two suites failed to load), and four tests that pin exact landings (`against_wall_rotate_test.dart` three tests, `wall_attach_tool_test.dart`'s rig) landed aligned because guides are on by default. The copy gained the getter; `mountEditor` gained `alignmentGuides` (default true) and those tests pass `false` (the rig toggles it off); no assertion changed - cost if wrong: those suites no longer exercise the default (guides on) path.
 - Ruling: Task 11 `apps/restaurant_demo`: the guide width sits in `kPosPlanLight`/`kPosPlanDark` (the ambient extension), not in `kPosViewOverride`, because `look_test` pins the view's `theme:` as `PlanTheme(selectionWidth: 3)` under the POS look and null under Standard; so the Standard look draws guides at the default 1 px - cost if wrong: the Standard look shows 1 px guides.
 
+- Ruling: the growth check compares guides-on at 200 refs with the baseline envelope (max of on@10, off@10, off@200 + budget) — JIT elision of the baseline's own Vector2/_Float64List varies by round, so on@10 alone is a flaky bound; a per-reference allocation still fails by orders of magnitude — cost if wrong: a growth below ~100 objects per 250 events hidden.
+
 ## Deferred minors
 
 - Task 5: minor (deferred): guide_settings.dart header cites a spec section "The setting" that does not exist ("Turning them off"); the controller's guides import sits out of alphabetical order.
@@ -251,6 +253,20 @@ host probe:               tool/ci/host_probe.sh "file://$PWD" "$(git rev-parse H
                           host probe: no GPU renderer, no build hook; build/web is  42M
 dart pub publish --dry-run: jet_cad_2d_plan: Package has 0 warnings.   jet_cad_2d_flutter: Package has 0 warnings.
 ```
+
+### Controller re-run after Task 10's fix round 2 (`8fa0db2e`)
+
+The controller's own exit-gate run first failed GA1 once in a full plan run
+(the growth check against guides-on at 10 references, a JIT-elision artefact);
+fix round 2 compares against the baseline envelope. Then:
+
+- implementer, three full plan runs: `03:33 +1754: All tests passed!`,
+  `03:48 +1754: All tests passed!`, `04:13 +1754: All tests passed!`
+- controller, full plan run: `02:44 +1754: All tests passed!`; analyze `No issues found!`
+- controller: integration `01:20 +240: All tests passed!`; restaurant_demo
+  `00:27 +114: All tests passed!`; architecture_demo `01:40 +176: All tests
+  passed!`; tool/ci `01:03 +114: All tests passed!`; jet_cad_2d_flutter only
+  the standing text-ladder rungs.
 
 ## Release note
 
