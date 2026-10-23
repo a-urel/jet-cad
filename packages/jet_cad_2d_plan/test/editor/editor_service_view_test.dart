@@ -552,6 +552,7 @@ void main() {
             body: PlanEditor(
                 controller: c, printer: printer, onExport: (_) {}))));
     printer.pending.single.complete();
+    await tester.idle();
     await tester.pump();
     expect(tester.takeException(), isNull);
     expect(byKey('toolbar-print'), findsOneWidget);

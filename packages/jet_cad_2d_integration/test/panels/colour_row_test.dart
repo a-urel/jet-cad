@@ -268,6 +268,7 @@ void main() {
     await tester.pump();
     expect(marked(tester), 'teal', reason: 'both teal');
     paint(doc, r.b, 'purple');
+    await tester.idle();
     await tester.pump();
     expect(marked(tester), isNull, reason: 'teal and purple: mixed');
 
@@ -381,6 +382,7 @@ void main() {
     // A teal, B purple: a tap on teal changes B only.
     paint(doc, r.a, 'teal');
     paint(doc, r.b, 'purple');
+    await tester.idle();
     await tester.pump();
     await rig.select([r.a, r.b]);
     // Not ported (ruling IP-R7): today's recolorCommand(doc, keys,
