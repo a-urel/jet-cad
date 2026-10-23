@@ -480,6 +480,7 @@ void main() {
       // One control per tool: the meter's own floor, no tool in the loop.
       final control = await epoch(m, _Control(10));
       final onRanges = <int, _Range>{};
+      final offRanges = <int, _Range>{};
       for (final count in [10, 200]) {
         final offScene = await make(count, false);
         final off = await epoch(m, offScene);
@@ -489,6 +490,7 @@ void main() {
         final captured = onScene.captured;
         onScene.finish();
         onRanges[count] = on;
+        offRanges[count] = off;
         // ignore: avoid_print
         print('$name, $count references, per $events events:\n'
             '  control $control\n  off $off\n  on $on\n'
@@ -507,14 +509,23 @@ void main() {
                   '${control.most[k]} over $events events');
         }
       }
+      // Growth: guides on at 200 references never read more than the most
+      // the baseline envelope showed (guides on at 10, guides off at either
+      // count) plus the budget. The JIT's elision of the baseline's own
+      // objects varies between rounds, so the 10-reference rounds alone can
+      // all read low; a per-reference allocation is thousands over it.
       for (final k in _watched) {
-        expect(
-            onRanges[200]!.least[k]!,
-            lessThanOrEqualTo(
-                onRanges[10]!.most[k]! + _perEventBudget * events),
+        final envelope = [
+          onRanges[10]!.most[k]!,
+          offRanges[10]!.most[k]!,
+          offRanges[200]!.most[k]!,
+        ].reduce(math.max);
+        expect(onRanges[200]!.least[k]!,
+            lessThanOrEqualTo(envelope + _perEventBudget * events),
             reason: '$name $k: guides on read more at 200 references '
                 '(${onRanges[200]!.least[k]}..${onRanges[200]!.most[k]}) than '
-                'at 10 (${onRanges[10]!.least[k]}..${onRanges[10]!.most[k]})');
+                'the baseline envelope $envelope (on at 10: '
+                '${onRanges[10]!.least[k]}..${onRanges[10]!.most[k]})');
       }
     });
   }
