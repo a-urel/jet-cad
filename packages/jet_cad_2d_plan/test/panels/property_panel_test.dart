@@ -12,6 +12,8 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+import 'package:jet_cad_2d_plan/src/chrome/select.dart';
+import 'package:jet_cad_2d_plan/src/chrome/text_field.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../support/panel_kits.dart';
@@ -23,10 +25,10 @@ import '../support/throwing_kit.dart';
 Finder byKey(String k) => find.byKey(Key(k));
 
 String textOf(WidgetTester tester, String key) =>
-    tester.widget<TextField>(byKey(key)).controller!.text;
+    tester.widget<PlanTextField>(byKey(key)).controller.text;
 
 bool readOnly(WidgetTester tester, String key) =>
-    tester.widget<TextField>(byKey(key)).readOnly;
+    tester.widget<PlanTextField>(byKey(key)).readOnly;
 
 Future<void> select(
     WidgetTester tester, PlanController c, List<Handle> hs) async {
@@ -138,8 +140,7 @@ void main() {
     // the focus stays on the row (the menu's route returns it there), and
     // the Esc reaches neither the document nor the canvas's tool.
     // M-P-choice-esc: the row hands back whenever it gains the focus.
-    final row =
-        tester.widget<DropdownButton<Object?>>(byKey('property-finish'));
+    final row = tester.widget<PlanSelect<Object?>>(byKey('property-finish'));
     final before = c.document.commands.undoDepth;
     await tapKey(tester, 'property-finish');
     expect(FocusManager.instance.primaryFocus, isNot(same(canvas)),

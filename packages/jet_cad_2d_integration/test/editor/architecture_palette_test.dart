@@ -16,6 +16,7 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
 import 'package:jet_cad_2d_integration/jet_cad_2d_integration.dart';
 import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+import 'package:jet_cad_2d_plan/src/chrome/text_field.dart';
 import 'package:jet_cad_2d_plan/src/chrome/rows.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
@@ -170,7 +171,7 @@ void main() {
     await tester.pump();
     await tester.tap(field('name'));
     await tester.pump();
-    final node = tester.widget<TextField>(field('name')).focusNode!;
+    final node = tester.widget<PlanTextField>(field('name')).focusNode!;
     expect(node.hasFocus, isTrue, reason: 'premise: the field focused');
     for (final (id, key, _) in kArchitectureTools) {
       await tester.sendKeyEvent(key);

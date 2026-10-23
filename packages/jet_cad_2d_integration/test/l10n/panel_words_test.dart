@@ -14,6 +14,7 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
 import 'package:jet_cad_2d_integration/jet_cad_2d_integration.dart';
 import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+import 'package:jet_cad_2d_plan/src/chrome/text_field.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../support/canvas_rig.dart' show byKey, field;
@@ -36,8 +37,13 @@ import '../support/plans.dart' show addWall, planWith;
 /// The editor over [c] in [locale]: the integration package's app.
 Widget app(PlanController c, Locale locale) => planEditorApp(c, locale: locale);
 
-String fieldText(WidgetTester tester, Finder f) =>
-    tester.widget<TextField>(f).controller!.text;
+String fieldText(WidgetTester tester, Finder f) {
+  final field = tester.widget(f);
+  // The wall's fields are PlanTextFields, the page panel's scale a TextField.
+  return field is PlanTextField
+      ? field.controller.text
+      : (field as TextField).controller!.text;
+}
 
 WallParams wallOf(PlanController c, Handle h) =>
     c.document.components.get<WallParams>(h)!;

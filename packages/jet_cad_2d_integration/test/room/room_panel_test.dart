@@ -29,6 +29,7 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
 import 'package:jet_cad_2d_integration/jet_cad_2d_integration.dart';
 import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart' show PlanLocked;
+import 'package:jet_cad_2d_plan/src/chrome/text_field.dart';
 
 import '../support/room_plans.dart';
 
@@ -37,7 +38,7 @@ Finder get name => find.byKey(const Key('property-name'));
 Finder get area => find.byKey(const Key('property-area'));
 
 String fieldText(WidgetTester tester) =>
-    tester.widget<TextField>(name).controller!.text;
+    tester.widget<PlanTextField>(name).controller.text;
 
 String areaText(WidgetTester tester) => tester.widget<Text>(area).data!;
 
@@ -125,9 +126,9 @@ void main() {
     expect(fieldText(tester), 'Kitchen');
     expect(areaText(tester), '10.83 m²');
     // A free-text field (Task 16's review M3): a text keyboard and no unit.
-    final field = tester.widget<TextField>(name);
+    final field = tester.widget<PlanTextField>(name);
     expect(field.keyboardType, TextInputType.text);
-    expect(field.decoration!.suffixText, isNull);
+    expect(field.suffix, isNull);
     await select(tester, r.p.c, [r.b]);
     expect(fieldText(tester), 'Room 2');
     expect(areaText(tester), '12.16 m²');
@@ -169,7 +170,7 @@ void main() {
     expect(nameOf(doc, r.b), 'Room 2');
     expect(driftOf(doc), isEmpty);
     // The focus is back on the canvas: not on the field.
-    expect(tester.widget<TextField>(name).focusNode!.hasFocus, isFalse);
+    expect(tester.widget<PlanTextField>(name).focusNode!.hasFocus, isFalse);
 
     // An unchanged name issues no command: as it is, and once trimmed.
     for (final same in ['Pantry', '  Pantry ']) {
@@ -357,12 +358,12 @@ void main() {
       doc.commands.permissions = perms;
       await select(tester, r.p.c, [r.b]);
       await select(tester, r.p.c, [r.a]);
-      expect(tester.widget<TextField>(name).readOnly, isTrue, reason: why);
+      expect(tester.widget<PlanTextField>(name).readOnly, isTrue, reason: why);
     }
     doc.commands.permissions = DraftPermissions.all;
     await select(tester, r.p.c, [r.b]);
     await select(tester, r.p.c, [r.a]);
-    expect(tester.widget<TextField>(name).readOnly, isFalse);
+    expect(tester.widget<PlanTextField>(name).readOnly, isFalse);
     // Typed while allowed, committed after the permissions changed: the
     // commit checks them too.
     await typeName(tester, 'Den');
@@ -478,7 +479,7 @@ void main() {
     expect(doc.commands.undoDepth, 0);
 
     // Still A's field, and editable: a sound name lands on A, once.
-    expect(tester.widget<TextField>(name).readOnly, isFalse);
+    expect(tester.widget<PlanTextField>(name).readOnly, isFalse);
     await enterAndSubmit(tester, 'Study');
     expect(nameOf(doc, r.a), 'Study');
     expect(labelStrings(doc, r.a), ['Study', '10.83 m²']);

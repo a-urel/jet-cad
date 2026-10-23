@@ -177,6 +177,29 @@ void main() {
       expect(find.text('Beta'), findsNothing);
     });
 
+    testWidgets(
+        'a PlanSelect closed by Escape gives the focus to its focusNode; '
+        'expanded, it fills the width it is given', (tester) async {
+      final node = FocusNode();
+      addTearDown(node.dispose);
+      await tester.pumpWidget(_host(_box(PlanSelect<String>(
+          value: 'a',
+          options: options(),
+          expanded: true,
+          focusNode: node,
+          onChanged: (_) {}))));
+      final trigger = find.byType(ShadSelect<String>);
+      expect(tester.getSize(trigger).width, 280);
+      await tester.tap(find.text('Alpha'));
+      await tester.pumpAndSettle();
+      expect(find.text('Beta'), findsOneWidget);
+      expect(node.hasFocus, isFalse, reason: 'premise: the popover has it');
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(find.text('Beta'), findsNothing);
+      expect(node.hasFocus, isTrue);
+    });
+
     testWidgets('CP5 a PlanSelect rebuilt with a new value shows it',
         (tester) async {
       Widget select(String v) => _host(_box(

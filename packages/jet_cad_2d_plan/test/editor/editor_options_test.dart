@@ -33,6 +33,7 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
         ViewportTransform,
         kRulerThickness;
 import 'package:jet_cad_2d_plan/src/chrome/icon_button.dart';
+import 'package:jet_cad_2d_plan/src/chrome/text_field.dart';
 import 'package:jet_cad_2d_plan/src/controller/permissions.dart';
 import 'package:jet_cad_2d_plan/src/controller/plan_controller.dart';
 import 'package:jet_cad_2d_plan/src/editor/plan_editor.dart';
@@ -280,6 +281,10 @@ Vector2 onMark(PlanController c, Handle h, double x, double y) =>
 double sizeOf(PlanController c, Handle h) =>
     c.document.components.get<MarkCross>(h)!.size;
 
+/// The property panel's field [key]'s widget.
+PlanTextField propertyFieldOf(WidgetTester tester, String key) =>
+    tester.widget<PlanTextField>(byKey(key));
+
 /// The panel field [key]'s widget.
 TextField fieldOf(WidgetTester tester, String key) =>
     tester.widget<TextField>(byKey(key));
@@ -391,8 +396,8 @@ void main() {
           permissions: PlanPermissions.readOnly);
       await click(tester, u.screenOf(tester, c, s.edgeOf(c, '1')));
       expect(byKey('unit-section'), findsOneWidget);
-      expect(fieldOf(tester, 'unit-label').readOnly, isTrue);
-      expect(fieldOf(tester, 'symbol-rotation').readOnly, isTrue);
+      expect(propertyFieldOf(tester, 'unit-label').readOnly, isTrue);
+      expect(propertyFieldOf(tester, 'symbol-rotation').readOnly, isTrue);
       for (final k in [
         'unit-rotate-left',
         'unit-rotate-right',

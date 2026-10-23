@@ -15,6 +15,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
     show GripCache, InteractionLayer;
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+import 'package:jet_cad_2d_plan/src/chrome/select.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import 'editor_rig.dart' show centreCamera, press, pumpEditor;
@@ -148,5 +149,5 @@ Future<void> choose(WidgetTester tester, String id, String segment) async {
 }
 
 /// The choice [id]'s dropdown.
-DropdownButton<Object?> menuOf(WidgetTester tester, String id) =>
-    tester.widget<DropdownButton<Object?>>(field(id));
+PlanSelect<Object?> menuOf(WidgetTester tester, String id) =>
+    tester.widget<PlanSelect<Object?>>(field(id));

@@ -25,6 +25,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_integration/jet_cad_2d_integration.dart';
 import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart' show PlanLocked;
+import 'package:jet_cad_2d_plan/src/chrome/select.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import 'dimension_plans.dart';
@@ -41,14 +42,14 @@ String textAt(WidgetTester tester, String key) =>
 
 String valueText(WidgetTester tester) => textAt(tester, 'property-value');
 
-DropdownButton<Object?> menuOf(WidgetTester tester) =>
-    tester.widget<DropdownButton<Object?>>(kindMenu);
+PlanSelect<Object?> menuOf(WidgetTester tester) =>
+    tester.widget<PlanSelect<Object?>>(kindMenu);
 
 /// A choice of [kind] in the kind menu (DM-R3): open it, tap the item
 /// (the menu's copy, the last). A read-only menu does not open: the
 /// click lands on nothing, as a disabled segment's did.
 Future<void> tapKind(WidgetTester tester, DimKind kind) async {
-  final enabled = menuOf(tester).onChanged != null;
+  final enabled = menuOf(tester).enabled;
   await tester.ensureVisible(kindMenu); // the plan panel's own tapKey
   await tester.tap(kindMenu);
   await tester.pumpAndSettle();
@@ -216,7 +217,7 @@ void main() {
       // that lands before a rebuild).
       await tapKind(tester, DimKind.aligned);
       expect(doc.commands.undoDepth, 2, reason: 'a click on Aligned');
-      menuOf(tester).onChanged!(DimKind.aligned);
+      menuOf(tester).onChanged(DimKind.aligned);
       await tester.pump();
       await tester.pump();
       expect(doc.commands.undoDepth, 2, reason: 'the callback on Aligned');
@@ -388,7 +389,7 @@ void main() {
         doc.commands.permissions = perms;
         await select(tester, c, [e]);
         await select(tester, c, [d]);
-        expect(menuOf(tester).onChanged, isNull, reason: why);
+        expect(menuOf(tester).enabled, isFalse, reason: why);
         await tapKind(tester, DimKind.horizontal);
         expect(paramsOf(doc, d), p0, reason: why);
         expect(doc.commands.undoDepth, 0, reason: why);
@@ -397,7 +398,7 @@ void main() {
       doc.commands.permissions = DraftPermissions.all;
       await select(tester, c, [e]);
       await select(tester, c, [d]);
-      expect(menuOf(tester).onChanged, isNotNull,
+      expect(menuOf(tester).enabled, isTrue,
           reason: 'the control: editable with every permission');
 
       // Runtime set with no rebuild: the switch still holds the callback it
@@ -405,7 +406,7 @@ void main() {
       // The edit is checked again when it runs: nothing is issued and
       // nothing throws (the document would refuse it with a
       // PermissionDeniedError, which the switch does not catch).
-      final stale = menuOf(tester).onChanged!;
+      final stale = menuOf(tester).onChanged;
       doc.commands.permissions = DraftPermissions.runtime;
       stale(DimKind.horizontal);
       expect(paramsOf(doc, d), p0, reason: 'stale callback under runtime');
@@ -416,8 +417,7 @@ void main() {
       // A permission change alone rebuilds nothing; a reselection does.
       await select(tester, c, [e]);
       await select(tester, c, [d]);
-      expect(menuOf(tester).onChanged, isNull,
-          reason: 'read-only once rebuilt');
+      expect(menuOf(tester).enabled, isFalse, reason: 'read-only once rebuilt');
       doc.commands.permissions = DraftPermissions.all;
       await select(tester, c, [e]);
       await select(tester, c, [d]);
@@ -425,7 +425,7 @@ void main() {
       // The group removed under the panel, the click landing before the
       // panel rebuilds: nothing is issued -- no component on the dead
       // handle -- and nothing escapes.
-      final click = menuOf(tester).onChanged!;
+      final click = menuOf(tester).onChanged;
       doc.commands.execute(deleteObject(doc, d));
       expect(doc.tree[d], isNull);
       click(DimKind.horizontal);

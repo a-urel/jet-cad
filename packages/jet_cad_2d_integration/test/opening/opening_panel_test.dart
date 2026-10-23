@@ -9,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_kit_architecture/jet_cad_2d_kit_architecture.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+import 'package:jet_cad_2d_plan/src/chrome/text_field.dart';
 
 import '../support/opening_support.dart';
 
@@ -213,10 +214,10 @@ void main() {
     final d0 = paramsOf(doc, p.door);
     doc.commands.permissions = DraftPermissions.runtime;
     await select(tester, c, [p.door]);
-    expect(tester.widget<TextField>(width).readOnly, isTrue);
-    expect(tester.widget<TextField>(position).readOnly, isTrue);
-    expect(tester.widget<OutlinedButton>(flipHinge).onPressed, isNull);
-    expect(tester.widget<OutlinedButton>(flipSwing).onPressed, isNull);
+    expect(tester.widget<PlanTextField>(width).readOnly, isTrue);
+    expect(tester.widget<PlanTextField>(position).readOnly, isTrue);
+    expect(pressable(tester, flipHinge), isFalse);
+    expect(pressable(tester, flipSwing), isFalse);
     await tester.tap(flipHinge);
     await tester.pump();
     expect(paramsOf(doc, p.door), d0);
@@ -226,13 +227,13 @@ void main() {
         transform: true, components: false, geometry: true, structure: true);
     await select(tester, c, [p.e]);
     await select(tester, c, [p.door]);
-    expect(tester.widget<TextField>(width).readOnly, isTrue);
-    expect(tester.widget<OutlinedButton>(flipSwing).onPressed, isNull);
+    expect(tester.widget<PlanTextField>(width).readOnly, isTrue);
+    expect(pressable(tester, flipSwing), isFalse);
     doc.commands.permissions = DraftPermissions.all;
     await select(tester, c, [p.e]);
     await select(tester, c, [p.door]);
-    expect(tester.widget<TextField>(width).readOnly, isFalse);
-    expect(tester.widget<OutlinedButton>(flipSwing).onPressed, isNotNull);
+    expect(tester.widget<PlanTextField>(width).readOnly, isFalse);
+    expect(pressable(tester, flipSwing), isTrue);
 
     // D, N and G in a field: no tool switch.
     for (final f in [width, position]) {

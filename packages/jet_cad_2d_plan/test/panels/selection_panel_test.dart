@@ -11,6 +11,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 import 'package:jet_cad_2d_plan/src/l10n/panel_number.dart';
+import 'package:jet_cad_2d_plan/src/chrome/text_field.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../support/panel_kits.dart';
@@ -21,7 +22,7 @@ Finder get width => find.byKey(const Key('property-width'));
 Finder get height => find.byKey(const Key('property-height'));
 
 String textOf(WidgetTester tester, Finder f) =>
-    tester.widget<TextField>(f).controller!.text;
+    tester.widget<PlanTextField>(f).controller.text;
 
 Future<void> select(
     WidgetTester tester, PlanController c, List<Handle> hs) async {
@@ -94,7 +95,7 @@ void main() {
     c.selection.replace([SelectionKey.root(bs.first)]);
     await tester.pump();
     expect(width, findsOneWidget);
-    expect(tester.widget<TextField>(width).controller!.text, '120');
+    expect(tester.widget<PlanTextField>(width).controller.text, '120');
   });
 
   testWidgets('SE2 hidden for none, two, and a non-box', (tester) async {
@@ -140,7 +141,7 @@ void main() {
       await tester.enterText(height, bad);
       await tester.testTextInput.receiveAction(TextInputAction.done);
       await tester.pump();
-      expect(tester.widget<TextField>(height).controller!.text, '70');
+      expect(tester.widget<PlanTextField>(height).controller.text, '70');
     }
     expect(c.document.commands.undoDepth, depth);
   });
@@ -151,7 +152,7 @@ void main() {
     c.document.commands.permissions = DraftPermissions.runtime;
     c.selection.replace([SelectionKey.root(boxes(c).first)]);
     await tester.pump();
-    expect(tester.widget<TextField>(width).readOnly, isTrue);
+    expect(tester.widget<PlanTextField>(width).readOnly, isTrue);
   });
 
   testWidgets(
@@ -167,7 +168,7 @@ void main() {
     await tester.pump();
     c.document.commands.undo();
     await tester.pump();
-    expect(tester.widget<TextField>(width).controller!.text, '120');
+    expect(tester.widget<PlanTextField>(width).controller.text, '120');
   });
 
   testWidgets('SE7 typing B in the width field does not switch tools',
@@ -226,7 +227,7 @@ void main() {
     // listeners exactly like a selection change would.
     c.selection.setHover(SelectionKey.root(bs[1]));
     await tester.pump();
-    expect(tester.widget<TextField>(width).controller!.text, '150');
+    expect(tester.widget<PlanTextField>(width).controller.text, '150');
     // Clears the hover again, in the test, rather than leaving that to
     // `InteractionLayer._release`'s own teardown-time clear: a real
     // (non-idempotent) hover change happening as an unmanaged side effect
@@ -242,7 +243,7 @@ void main() {
         layer: ReservedHandles.layerZero);
     c.document.commands.execute(line);
     await tester.pump();
-    expect(tester.widget<TextField>(width).controller!.text, '150');
+    expect(tester.widget<PlanTextField>(width).controller.text, '150');
     await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pump();
     expect(c.document.components.get<BoxParams>(b)!.width, 150);

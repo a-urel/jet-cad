@@ -22,6 +22,7 @@ const List<String> kAllowedShad = [
   'ShadMouseAreaSurface',
   'ShadMouseCursorProvider',
   'ShadOption',
+  'ShadPopoverController',
   'ShadSelect',
   'ShadSelectController',
   'ShadSeparator',
