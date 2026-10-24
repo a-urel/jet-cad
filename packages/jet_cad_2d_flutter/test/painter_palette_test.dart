@@ -111,6 +111,7 @@ PaperPalette paperCopy(PaperPalette p) => PaperPalette(
       gripHot: Color(p.gripHot.toARGB32()),
       preview: Color(p.preview.toARGB32()),
       snap: Color(p.snap.toARGB32()),
+      guide: p.guide == null ? null : Color(p.guide!.toARGB32()),
     );
 
 PageChromePainter chromePainter(
@@ -351,6 +352,12 @@ void main() {
       expect(make(ChromePalette.dark, PaperPalette.light).shouldRepaint(base),
           isTrue,
           reason: 'the paper alone flipped');
+      expect(
+          make(ChromePalette.dark,
+                  PaperPalette.dark.withGuide(const Color(0xFF00FF00)))
+              .shouldRepaint(base),
+          isTrue,
+          reason: 'the paper differs in its guide colour alone');
     });
   });
 
@@ -629,6 +636,11 @@ void main() {
           isFalse,
           reason: 'an equal, non-identical palette');
       expect(overlay(rig, PaperPalette.light).shouldRepaint(base), isTrue);
+      expect(
+          overlay(rig, PaperPalette.dark.withGuide(const Color(0xFF00FF00)))
+              .shouldRepaint(base),
+          isTrue,
+          reason: 'the paper set differs in its guide colour alone');
     });
   });
 }
