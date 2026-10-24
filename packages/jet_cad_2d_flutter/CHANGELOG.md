@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `ViewportTransform.screenToWorldInto(sx, sy, out)`: `screenToWorld` into a
+  caller's point, allocating nothing. `SelectTool` re-targets on a camera
+  change through it.
 - `SelectTool.moveAdjuster` (`MoveAdjuster`, null by default): a generic seam
   for a body move drag. It is told when a drag of a set begins (`begin`) and
   ends (`end`); on every retarget, after the snap chain and before the move,
