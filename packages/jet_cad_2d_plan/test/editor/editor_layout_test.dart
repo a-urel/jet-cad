@@ -357,4 +357,26 @@ void main() {
     await tester.pump();
     expect(shown('chrome-right-drawer'), isTrue);
   });
+
+  testWidgets(
+      'EL-TOP the docked columns run the canvas height; a right column '
+      'shorter than it starts at the top', (tester) async {
+    await pump(tester, 1440, 900);
+    final canvas = tester.getRect(k('chrome-canvas'));
+    final right = tester.getRect(k('chrome-right'));
+    final left = tester.getRect(k('chrome-left'));
+    final content = tester.getRect(find.byType(PlanLayerPanel));
+    expect(right.top, canvas.top);
+    expect(right.height, canvas.height);
+    expect(left.top, canvas.top);
+    expect(left.height, canvas.height);
+    expect(content.top, right.top,
+        reason: 'the first panel sits at the column top');
+    // Premise: the column's content is shorter than the canvas, else the
+    // check above cannot tell top from centre.
+    final scroll = tester.getRect(find
+        .descendant(of: k('chrome-right-scroll'), matching: find.byType(Column))
+        .first);
+    expect(scroll.height, lessThan(canvas.height));
+  });
 }

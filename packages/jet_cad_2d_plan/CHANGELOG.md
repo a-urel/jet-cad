@@ -1,5 +1,9 @@
 ## Unreleased
 
+- **The right column starts at the top.** A docked editor's right column
+  (properties, layers, page) runs the canvas's full height with its panels
+  from the top; a short column was centred beside the canvas. Tab walks the
+  left column, the canvas, then the right column.
 - **The chrome is shadcn.** Bars, panels, buttons, fields, selects, menus,
   tooltips and the export dialog are `shadcn_ui` (`^0.57.1`) widgets, and the
   icons are Lucide. A host's `ShadTheme` above the view is used as is; a

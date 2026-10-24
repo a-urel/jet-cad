@@ -840,6 +840,12 @@ class _PlanEditorState extends State<PlanEditor> {
 
   /// A right-column panel: shown while [shown]; otherwise kept offstage,
   /// its state kept, and out of the focus order.
+  /// [child] as the [order]th stop of the docked row's Tab order, its own
+  /// focus nodes in reading order within it.
+  static Widget _inOrder(double order, Widget child) => FocusTraversalOrder(
+      order: NumericFocusOrder(order),
+      child: FocusTraversalGroup(child: child));
+
   static Widget _kept(bool shown, Widget panel) =>
       Visibility(visible: shown, maintainState: true, child: panel);
 
@@ -1259,38 +1265,56 @@ class _PlanEditorState extends State<PlanEditor> {
           children: [
             if (widget.bar.visible) _topBar(shad, strings, file, edit),
             Expanded(
-              child: Row(
-                children: [
-                  if (_leftShown)
-                    Container(
-                      key: const Key('chrome-left'),
-                      width: 240,
-                      decoration: _column(shad, right: true),
-                      child: _leftPanel(strings),
+              // Tab walks the left column, the canvas, then the right
+              // column, whatever their heights: the right column's panels
+              // start at its top, level with the left column's.
+              child: FocusTraversalGroup(
+                policy: OrderedTraversalPolicy(),
+                child: Row(
+                  children: [
+                    if (_leftShown)
+                      _inOrder(
+                        1,
+                        Container(
+                          key: const Key('chrome-left'),
+                          width: 240,
+                          decoration: _column(shad, right: true),
+                          child: _leftPanel(strings),
+                        ),
+                      ),
+                    // Keyed: when the columns on both sides come or go at
+                    // once, the row still matches the canvas, so the
+                    // camera and the user's zoom stay.
+                    Expanded(
+                      key: const Key('chrome-canvas'),
+                      child: _inOrder(
+                        2,
+                        PlanCanvas(
+                          controller: c,
+                          rulers: widget.rulers,
+                          grid: widget.grid,
+                          snapping: widget.snapping,
+                          alignmentGuides: widget.alignmentGuides,
+                          autofocus: widget.autofocus,
+                          unitOverlays: _designOverlays(),
+                        ),
+                      ),
                     ),
-                  // Keyed: when the columns on both sides come or go at
-                  // once, the row still matches the canvas, so the
-                  // camera and the user's zoom stay.
-                  Expanded(
-                    key: const Key('chrome-canvas'),
-                    child: PlanCanvas(
-                      controller: c,
-                      rulers: widget.rulers,
-                      grid: widget.grid,
-                      snapping: widget.snapping,
-                      alignmentGuides: widget.alignmentGuides,
-                      autofocus: widget.autofocus,
-                      unitOverlays: _designOverlays(),
-                    ),
-                  ),
-                  if (_rightShown)
-                    Container(
-                      key: const Key('chrome-right'),
-                      width: 280,
-                      decoration: _column(shad, right: false),
-                      child: _rightColumn(c),
-                    ),
-                ],
+                    if (_rightShown)
+                      _inOrder(
+                        3,
+                        Container(
+                          key: const Key('chrome-right'),
+                          width: 280,
+                          // The full height, its panels from the top: a
+                          // short column is not centred beside the canvas.
+                          alignment: Alignment.topCenter,
+                          decoration: _column(shad, right: false),
+                          child: _rightColumn(c),
+                        ),
+                      ),
+                  ],
+                ),
               ),
             ),
           ],
