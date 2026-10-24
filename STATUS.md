@@ -1,6 +1,6 @@
 # jet-cad — project status
 
-**Last updated:** 2026-10-24 (alignment guides at `c5da0931`, the shadcn chrome at `f8d56f3f` and the example apps in shadcn at `1f8b6586` merged into `main` and pushed; two look fixes after the human's manual test, `af17e06d` and `0e9e9935`, pushed). **`main` carries release 0.7.0** (tag
+**Last updated:** 2026-10-24 (the DXF writer spec approved, not planned; alignment guides at `c5da0931`, the shadcn chrome at `f8d56f3f` and the example apps in shadcn at `1f8b6586` merged into `main` and pushed; two look fixes after the human's manual test, `af17e06d` and `0e9e9935`, pushed). **`main` carries release 0.7.0** (tag
 `v0.7.0` → `0fa649e`, after `v0.6.0` →
 `3bf64a7`, `v0.5.1` → `3f8f7ad`, `v0.5.0` → `2fbb9c0`, `v0.4.0` → `8367010`, `v0.3.0` → `1b0c37a`, `v0.2.0` → `7355c00` and `v0.1.0` → `22206f5`) and everything since; the three old packages are on pub.dev at 0.7.2 (published 2026-10-13); the kit architecture is done: its six packages are on pub.dev (published 2026-10-19 from `6fc25f3c`) and `jet_cad_floor_plan` is discontinued, replaced by `jet_cad_2d_plan` (below). The history of every plan
 before this point — its records, reviews and resume points — is in
@@ -680,6 +680,26 @@ with 0.7.0 (below).
   are `main` on GitHub still carrying the old repository URL. Record:
   [2026-10-13-publish-jet-cad-2d.md](docs/superpowers/notes/2026-10-13-publish-jet-cad-2d.md).
   Run natively in one session: no SDD ledger.
+
+## Specified, not planned
+
+Approved specs with no plan yet. A plan is written only when the human asks.
+
+- **The DXF writer** (kit-architecture A17's first step; the human,
+  2026-10-24: *"planlama için soruyorum. aciliyeti yok"*, *"Spec'i
+  onaylıyorum"*): spec
+  [2026-10-24-dxf-writer-design.md](docs/superpowers/specs/2026-10-24-dxf-writer-design.md)
+  rev 1. A new pure-Dart package `jet_cad_2d_dxf` writes a `DraftDocument`
+  as DXF R2013, with jet-cad's semantics in `JETCAD` XRECORDs. An opt-in
+  `PlanDxfExporter` (`plan.dxf`) in `jet_cad_2d_plan` draws the units'
+  colours on their own layer. The human's decisions:
+  - H2: "not exported" holds in every format, pinned by one test over every
+    built-in exporter.
+  - H3: everything deferred will be added, so the spec has a "Later, with
+    the door kept open" table instead of non-goals.
+
+  Estimated 3-4 plans. Reading DXF and DWG are later specs.
+  Resume: `superpowers:writing-plans` from the spec when the human asks.
 
 ## Owed to the human
 
