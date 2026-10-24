@@ -19,7 +19,7 @@ import 'words/words.dart';
 /// `PlanController(kits: [architectureKit])`.
 final PlanKit architectureKit = PlanKit(
   id: 'architecture',
-  version: '0.1.1',
+  version: '0.1.2',
   types: [
     boxPlanType,
     wallPlanType,

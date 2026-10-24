@@ -1,4 +1,7 @@
-## Unreleased
+## 1.0.0
+
+- Depends on `jet_cad_2d_flutter: ^0.7.4`. The public API is stable from
+  this release: a breaking change needs a new major version.
 
 - **The right column starts at the top.** A docked editor's right column
   (properties, layers, page) runs the canvas's full height with its panels

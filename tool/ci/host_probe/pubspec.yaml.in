@@ -15,9 +15,9 @@ dependencies:
   flutter:
     sdk: flutter
   jet_cad_2d_kit: ^0.1.1
-  jet_cad_2d_kit_architecture: ^0.1.1
-  jet_cad_2d_kit_restaurant: ^0.1.0
-  jet_cad_2d_plan: ^0.9.0
+  jet_cad_2d_kit_architecture: ^0.1.2
+  jet_cad_2d_kit_restaurant: ^0.1.1
+  jet_cad_2d_plan: ^1.0.0
 
 flutter:
   uses-material-design: true

@@ -3,9 +3,10 @@
 This guide is for a Flutter point-of-sale application (a **host**) that
 embeds the plan library: staff design the restaurant's floors in the
 **design** mode, and during **service** they see the tables, colour them by
-status, group them and pick them. It covers `jet_cad_2d_plan` **0.9.0**
+status, group them and pick them. It covers `jet_cad_2d_plan` **1.0.0**
 ([CHANGELOG](../packages/jet_cad_2d_plan/CHANGELOG.md)), with the kits
-`jet_cad_2d_kit_restaurant` and `jet_cad_2d_kit_architecture` **0.1.0**.
+`jet_cad_2d_kit_restaurant` **0.1.1** and `jet_cad_2d_kit_architecture`
+**0.1.2**.
 
 The plan library is the editor and the views. What a plan can hold (walls,
 doors, tables, chairs) comes from **kits** the host lists when it makes a
@@ -49,9 +50,9 @@ dependencies:
   flutter:
     sdk: flutter
   jet_cad_2d_kit: ^0.1.1
-  jet_cad_2d_kit_architecture: ^0.1.1
-  jet_cad_2d_kit_restaurant: ^0.1.0
-  jet_cad_2d_plan: ^0.9.0
+  jet_cad_2d_kit_architecture: ^0.1.2
+  jet_cad_2d_kit_restaurant: ^0.1.1
+  jet_cad_2d_plan: ^1.0.0
 ```
 
 - `jet_cad_2d_plan` is the controller, the views and the editor.
@@ -72,7 +73,7 @@ Import only the packages' barrels, `package:jet_cad_2d_plan/jet_cad_2d_plan.dart
 and the kits' own. Anything under `src/` is not API.
 
 The packages need Flutter 3.44 or later (the Dart that comes with it);
-0.9.0 is built and tested with Flutter 3.47.6. The planner's chrome is
+1.0.0 is built and tested with Flutter 3.47.6. The planner's chrome is
 `shadcn_ui` (`^0.57.1`), and that package needs Dart 3.11: the plan library's
 own SDK floor is unchanged, but a host that depends on it needs Dart 3.11
 through `shadcn_ui`. A host that already uses `shadcn_ui` moves to `^0.57.1`

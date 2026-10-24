@@ -8,6 +8,9 @@ import 'package:test/test.dart';
 /// The packages published on pub.dev.
 const published = ['jet_cad_2d', 'jet_cad_2d_flutter'];
 
+/// Each published package's caret, its released version.
+const carets = {'jet_cad_2d': '^0.7.3', 'jet_cad_2d_flutter': '^0.7.4'};
+
 /// The live line's pubspecs, relative to tool/ci.
 const pubspecs = [
   '../../packages/jet_cad_2d/pubspec.yaml',
@@ -57,13 +60,13 @@ void main() {
     }
   });
 
-  test('DL2 every such dependency is the caret of D1', () {
+  test('DL2 every such dependency is the caret of its package\'s release', () {
     var seen = 0;
     for (final path in pubspecs) {
       final constraints = hosted(File(path).readAsStringSync());
       seen += constraints.length;
-      for (final c in constraints.values) {
-        expect(c, '^0.7.3', reason: path);
+      for (final MapEntry(key: name, value: c) in constraints.entries) {
+        expect(c, carets[name], reason: '$path: $name');
       }
     }
     expect(

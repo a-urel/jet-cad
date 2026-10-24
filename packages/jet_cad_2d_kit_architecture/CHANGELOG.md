@@ -1,4 +1,4 @@
-## Unreleased
+## 0.1.2
 
 - The tool icons are Lucide icons (`lucide_icons_flutter`), no longer
   Material `Icons`.

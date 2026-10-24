@@ -13,7 +13,7 @@ void main() {
       'words and its prepare; its type and tool ids are the spec\'s (C2)', () {
     expect(architectureKit.id, 'architecture');
     // M-SC-ver: the kit's version moved without the pubspec's.
-    expect(architectureKit.version, '0.1.1');
+    expect(architectureKit.version, '0.1.2');
     expect(File('pubspec.yaml').readAsStringSync(),
         contains('\nversion: ${architectureKit.version}\n'));
     expect(identical(architectureKit.names, architectureNames), isTrue);

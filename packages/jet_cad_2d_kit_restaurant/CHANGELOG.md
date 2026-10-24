@@ -1,3 +1,7 @@
+## 0.1.1
+
+- The README screenshots show the plan library 1.0.0's chrome.
+
 ## 0.1.0
 
 The restaurant kit for the jet_cad_2d plan library (sub-project 4a): the

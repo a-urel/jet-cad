@@ -19,8 +19,8 @@ dependencies:
   file_selector: ^1.1.0
   flutter:
     sdk: flutter
-  jet_cad_2d_kit_architecture: ^0.1.1
-  jet_cad_2d_plan: ^0.9.0
+  jet_cad_2d_kit_architecture: ^0.1.2
+  jet_cad_2d_plan: ^1.0.0
   lucide_icons_flutter: ^3.1.25
   # The print wrapper names PdfPageFormat (PagePrinter's signature).
   pdf: ^3.13.1
@@ -38,7 +38,7 @@ dev_dependencies:
   # InteractionLayer, Transform2), the kit's diagnostics and world points
   # (Vector2).
   jet_cad_2d: ^0.7.3
-  jet_cad_2d_flutter: ^0.7.3
+  jet_cad_2d_flutter: ^0.7.4
   jet_cad_2d_kit: ^0.1.1
   vector_math: ^2.2.0
 

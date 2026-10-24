@@ -6,7 +6,7 @@ Flutter rendering and interaction for the pure-Dart
 and writes a page of it out as a vector PDF or a PNG. The engine stays free
 of `dart:ui`; everything that needs Flutter is here.
 
-![A drawing on its sheet with rulers, drawn by DraftCanvas on the light canvas](https://raw.githubusercontent.com/a-urel/jet-cad/jet_cad_2d_flutter-v0.7.3/packages/jet_cad_2d_flutter/doc/screenshots/canvas_light.png)
+![A drawing on its sheet with rulers, drawn by DraftCanvas on the light canvas](https://raw.githubusercontent.com/a-urel/jet-cad/jet_cad_2d_flutter-v0.7.4/packages/jet_cad_2d_flutter/doc/screenshots/canvas_light.png)
 
 
 ## What it holds
@@ -47,19 +47,19 @@ Run it from the package directory with `flutter run -t example/lib/main.dart`.
 
 ## Screenshots
 
-![The same drawing on the dark canvas](https://raw.githubusercontent.com/a-urel/jet-cad/jet_cad_2d_flutter-v0.7.3/packages/jet_cad_2d_flutter/doc/screenshots/canvas_dark.png)
+![The same drawing on the dark canvas](https://raw.githubusercontent.com/a-urel/jet-cad/jet_cad_2d_flutter-v0.7.4/packages/jet_cad_2d_flutter/doc/screenshots/canvas_dark.png)
 
 The same drawing on the dark canvas: `canvasResolverFor` and `ChromePalette.dark` re-tone the colours for a dark theme.
 
-![A selection with its grips, and one entity highlighted under the pointer](https://raw.githubusercontent.com/a-urel/jet-cad/jet_cad_2d_flutter-v0.7.3/packages/jet_cad_2d_flutter/doc/screenshots/selection_grips.png)
+![A selection with its grips, and one entity highlighted under the pointer](https://raw.githubusercontent.com/a-urel/jet-cad/jet_cad_2d_flutter-v0.7.4/packages/jet_cad_2d_flutter/doc/screenshots/selection_grips.png)
 
 A few entities selected, each with its grips, and one entity highlighted under the pointer.
 
-![A crossing selection band, dragged right to left](https://raw.githubusercontent.com/a-urel/jet-cad/jet_cad_2d_flutter-v0.7.3/packages/jet_cad_2d_flutter/doc/screenshots/selection_band.png)
+![A crossing selection band, dragged right to left](https://raw.githubusercontent.com/a-urel/jet-cad/jet_cad_2d_flutter-v0.7.4/packages/jet_cad_2d_flutter/doc/screenshots/selection_band.png)
 
 A crossing band, dragged right to left, mid-drag: it selects what it touches, not only what it encloses.
 
-![SymbolGallery, a library of thumbnails in collapsible categories](https://raw.githubusercontent.com/a-urel/jet-cad/jet_cad_2d_flutter-v0.7.3/packages/jet_cad_2d_flutter/doc/screenshots/symbol_gallery.png)
+![SymbolGallery, a library of thumbnails in collapsible categories](https://raw.githubusercontent.com/a-urel/jet-cad/jet_cad_2d_flutter-v0.7.4/packages/jet_cad_2d_flutter/doc/screenshots/symbol_gallery.png)
 
 `SymbolGallery`: a library of thumbnail cells in the collapsible categories
 its caller hands it, each category's count beside its header. The cells'
