@@ -22,7 +22,7 @@ names a kit the host did not load opens, draws and saves its objects
 unchanged, and locks them; a kit whose code fails is contained to the
 objects it broke.
 
-![The plan editor over a sample flat: walls, rooms, doors, windows and furniture](https://raw.githubusercontent.com/a-urel/jet-cad/jet_cad_2d_plan-v0.9.0/packages/jet_cad_2d_plan/doc/screenshots/plan_editor.png)
+![The plan editor over a sample flat: walls, rooms, doors, windows and furniture](https://raw.githubusercontent.com/a-urel/jet-cad/jet_cad_2d_plan-v1.0.0/packages/jet_cad_2d_plan/doc/screenshots/plan_editor.png)
 
 ## Use
 
@@ -93,7 +93,7 @@ class PlanExampleAppState extends State<PlanExampleApp> {
 
 ## Screenshots
 
-![PlanSymbolGallery, the plan library's symbol library, over the architecture kit's furniture](https://raw.githubusercontent.com/a-urel/jet-cad/jet_cad_2d_plan-v0.9.0/packages/jet_cad_2d_plan/doc/screenshots/plan_gallery.png)
+![PlanSymbolGallery, the plan library's symbol library, over the architecture kit's furniture](https://raw.githubusercontent.com/a-urel/jet-cad/jet_cad_2d_plan-v1.0.0/packages/jet_cad_2d_plan/doc/screenshots/plan_gallery.png)
 
 `PlanSymbolGallery`: the plan library's symbol library, the loaded kits'
 symbols in collapsible categories of thumbnail cells, browsable with a search

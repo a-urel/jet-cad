@@ -34,7 +34,7 @@ void main() {
 
   test('GD3 a pubspec line the probe does not have is named', () {
     final moved = guide.replaceFirst(
-      'jet_cad_2d_plan: ^0.9.0',
+      'jet_cad_2d_plan: ^1.0.0',
       'jet_cad_2d_plan: ^0.9.1',
     );
     expect(moved, isNot(guide), reason: 'premise');

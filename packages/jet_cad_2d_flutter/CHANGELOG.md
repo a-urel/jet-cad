@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.7.4
 
 - `ViewportTransform.screenToWorldInto(sx, sy, out)`: `screenToWorld` into a
   caller's point, allocating nothing. `SelectTool` re-targets on a camera
@@ -23,9 +23,8 @@
   copies carry the field, so existing callers compile unchanged. It is the
   alignment guides' colour, distinct from `preview` (the move's base-to-target
   line).
-- Release note: `jet_cad_2d_plan` depends on `jet_cad_2d_flutter: ^0.7.3` and
-  its alignment guides use this seam and the palette colour, so publish this
-  package before the plan library's floor is raised to it.
+- `jet_cad_2d_plan` 1.0.0's alignment guides use this seam and the palette
+  colour; it depends on `^0.7.4`.
 
 ## 0.7.3
 

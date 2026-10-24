@@ -2,7 +2,7 @@ name: jet_cad_2d_flutter
 description: >-
   Flutter rendering and interaction for the jet_cad_2d engine: a CAD canvas
   with camera, rulers, selection and snapping, and PDF and PNG export.
-version: 0.7.3
+version: 0.7.4
 repository: https://github.com/a-urel/jet-cad
 issue_tracker: https://github.com/a-urel/jet-cad/issues
 funding:

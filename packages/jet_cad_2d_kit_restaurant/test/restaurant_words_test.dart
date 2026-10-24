@@ -35,7 +35,7 @@ List<KitProblem> problems() => conformance(
 void main() {
   test('the kit is the contract\'s: id, version, one source, no code side', () {
     expect(restaurantKit.id, 'restaurant');
-    expect(restaurantKit.version, '0.1.0');
+    expect(restaurantKit.version, '0.1.1');
     expect(restaurantKit.validate(), isEmpty);
     expect(restaurantKit.symbols, [same(restaurantSymbolSource)]);
     expect(restaurantKit.names, same(restaurantNames));
