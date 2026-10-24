@@ -434,8 +434,12 @@ class PlanSymbolTool extends Tool {
     _alt = e.alt;
   }
 
-  Vector2 _worldUnderPointer(ToolContext ctx) =>
-      ctx.camera.value.screenToWorld(Vector2(_lastScreen.dx, _lastScreen.dy));
+  /// The last screen point in the world, into a reused point (`_update`
+  /// copies it): a camera change or a key allocates nothing here.
+  Vector2 _worldUnderPointer(ToolContext ctx) => ctx.camera.value
+      .screenToWorldInto(_lastScreen.dx, _lastScreen.dy, _pointerWorld);
+
+  final Vector2 _pointerWorld = Vector2.zero();
 
   /// Spec 09c D12: listens to the camera exactly while [ghostVisible].
   void _syncCamera() {

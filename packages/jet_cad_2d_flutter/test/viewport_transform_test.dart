@@ -39,6 +39,25 @@ void main() {
     }
   });
 
+  test('screenToWorldInto writes screenToWorld\'s point into its out point',
+      () {
+    // Rotated, mirrored in y, scaled unevenly and off the origin: every
+    // coefficient of the inverse differs, so a swapped one shows.
+    final vt = ViewportTransform(
+      worldToScreenMatrix: Transform2.translation(-3200, 1750)
+          .multiply(Transform2.rotation(0.6))
+          .multiply(Transform2.scale(1.5, -2.5)),
+    );
+    final out = Vector2.zero();
+    for (final (sx, sy) in [(0.0, 0.0), (812.5, 43.25), (-120.0, 600.0)]) {
+      final expected = vt.screenToWorld(Vector2(sx, sy));
+      final got = vt.screenToWorldInto(sx, sy, out);
+      expect(identical(got, out), isTrue);
+      expect(got.x, closeTo(expected.x, 1e-9));
+      expect(got.y, closeTo(expected.y, 1e-9));
+    }
+  });
+
   test('scale is the geometric mean of the axis scales', () {
     final vt =
         ViewportTransform(worldToScreenMatrix: Transform2.scale(2.0, 8.0));

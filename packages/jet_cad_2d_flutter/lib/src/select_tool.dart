@@ -159,6 +159,10 @@ class SelectTool extends Tool {
   /// nothing per event (alignment guides spec, C-8).
   final Vector2 _adjusted = Vector2.zero();
 
+  /// The last screen point in the world, for a camera-driven re-target;
+  /// reused (nothing keeps it past the re-target).
+  final Vector2 _cameraWorld = Vector2.zero();
+
   /// Whether this drag added [_onCamera] to the adjuster's `changes`.
   bool _adjusting = false;
   final DragPoint _dragPoint = DragPoint();
@@ -572,8 +576,11 @@ class SelectTool extends Tool {
   void _onCamera() {
     final ctx = _dragCtx;
     if (ctx == null || _drag == null) return;
-    final world =
-        ctx.camera.value.screenToWorld(Vector2(_lastScreen.dx, _lastScreen.dy));
+    // Into a reused point: a camera change allocates nothing here, so the
+    // alignment guides' allocation invariant reads the same baseline with
+    // and without an adjuster.
+    final world = ctx.camera.value
+        .screenToWorldInto(_lastScreen.dx, _lastScreen.dy, _cameraWorld);
     _retarget(ctx, world, _lastShift);
     notifyListeners();
   }
