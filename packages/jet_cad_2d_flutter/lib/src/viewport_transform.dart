@@ -58,6 +58,13 @@ class ViewportTransform {
 
   Vector2 screenToWorld(Vector2 screen) => _inverse.transformPoint(screen);
 
+  /// [screenToWorld] of the screen point (`sx`, `sy`), written into [out]
+  /// and returned: no allocation, for a re-target on every camera change.
+  Vector2 screenToWorldInto(double sx, double sy, Vector2 out) {
+    final m = _inverse;
+    return out..setValues(m.a * sx + m.c * sy + m.e, m.b * sx + m.d * sy + m.f);
+  }
+
   /// The world-space AABB of the viewport rectangle.
   ///
   /// All four corners are transformed, not two: under rotation the axis-aligned
