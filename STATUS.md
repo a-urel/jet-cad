@@ -1,6 +1,6 @@
 # jet-cad — project status
 
-**Last updated:** 2026-10-24 (alignment guides at `c5da0931` and the shadcn chrome at `f8d56f3f` merged and pushed, `origin/main` at `8f9a444b`; the example apps in shadcn merged into `main` at `1f8b6586`, not pushed). **`main` carries release 0.7.0** (tag
+**Last updated:** 2026-10-24 (alignment guides at `c5da0931`, the shadcn chrome at `f8d56f3f` and the example apps in shadcn at `1f8b6586` merged into `main` and pushed). **`main` carries release 0.7.0** (tag
 `v0.7.0` → `0fa649e`, after `v0.6.0` →
 `3bf64a7`, `v0.5.1` → `3f8f7ad`, `v0.5.0` → `2fbb9c0`, `v0.4.0` → `8367010`, `v0.3.0` → `1b0c37a`, `v0.2.0` → `7355c00` and `v0.1.0` → `22206f5`) and everything since; the three old packages are on pub.dev at 0.7.2 (published 2026-10-13); the kit architecture is done: its six packages are on pub.dev (published 2026-10-19 from `6fc25f3c`) and `jet_cad_floor_plan` is discontinued, replaced by `jet_cad_2d_plan` (below). The history of every plan
 before this point — its records, reviews and resume points — is in
@@ -393,12 +393,13 @@ with 0.7.0 (below).
   rev 2, plan [2026-10-24-demos-shadcn.md](docs/superpowers/plans/2026-10-24-demos-shadcn.md),
   results [2026-10-24-demos-shadcn-results.md](docs/superpowers/notes/2026-10-24-demos-shadcn-results.md)):
   branch `claude/shadcn-ui-75d8dc` (cut from `main`), tasks 1-6 done, **merged into
-  `main` at `1f8b6586`** (not pushed) on the human's *"evet, main'e merge et"*. Both demos root in a plain `ShadApp` (zinc); the
+  `main` at `1f8b6586`** on the human's *"evet, main'e merge et"* and pushed
+  (`origin/main` `b9a9a469`, *"push et"*). Both demos root in a plain `ShadApp` (zinc); the
   restaurant demo's look toggle changes only the canvas side; no Material and
   no `Icons.` in either `lib/` (guarded); no change under `packages/`. Executed
   with Sonnet implementers and no reviewer sessions; ledger in
   [docs/superpowers/ledgers/2026-10-24-demos-shadcn/](docs/superpowers/ledgers/2026-10-24-demos-shadcn/).
-  Resume: push on the human's word.
+  Resume: nothing owed; monepro can copy the demos' `ShadApp` root.
 
 - **The plan library's chrome in shadcn** (the human, 2026-10-23: monepro
   shows Material beside shadcn; spec
