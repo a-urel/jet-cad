@@ -1,6 +1,6 @@
 # jet-cad — project status
 
-**Last updated:** 2026-10-24 (alignment guides at `c5da0931`, the shadcn chrome at `f8d56f3f` and the example apps in shadcn at `1f8b6586` merged into `main` and pushed). **`main` carries release 0.7.0** (tag
+**Last updated:** 2026-10-24 (alignment guides at `c5da0931`, the shadcn chrome at `f8d56f3f` and the example apps in shadcn at `1f8b6586` merged into `main` and pushed; two look fixes after the human's manual test, `af17e06d` and `0e9e9935`, pushed). **`main` carries release 0.7.0** (tag
 `v0.7.0` → `0fa649e`, after `v0.6.0` →
 `3bf64a7`, `v0.5.1` → `3f8f7ad`, `v0.5.0` → `2fbb9c0`, `v0.4.0` → `8367010`, `v0.3.0` → `1b0c37a`, `v0.2.0` → `7355c00` and `v0.1.0` → `22206f5`) and everything since; the three old packages are on pub.dev at 0.7.2 (published 2026-10-13); the kit architecture is done: its six packages are on pub.dev (published 2026-10-19 from `6fc25f3c`) and `jet_cad_floor_plan` is discontinued, replaced by `jet_cad_2d_plan` (below). The history of every plan
 before this point — its records, reviews and resume points — is in
@@ -399,6 +399,13 @@ with 0.7.0 (below).
   no `Icons.` in either `lib/` (guarded); no change under `packages/`. Executed
   with Sonnet implementers and no reviewer sessions; ledger in
   [docs/superpowers/ledgers/2026-10-24-demos-shadcn/](docs/superpowers/ledgers/2026-10-24-demos-shadcn/).
+  After the human's manual test, two fixes, each merged and pushed on the
+  human's word: `af17e06d` (fix/demo-sheet-chrome: the restaurant demo's
+  side sheet has no close button and no border; RT5) and `0e9e9935`
+  (fix/plan-panel-top, a `jet_cad_2d_plan` change under "Unreleased": the
+  docked right column fills the canvas height with its panels from the top,
+  EL-TOP; the docked row is an ordered Tab group, left, canvas, right, which
+  architecture LG4 pins). The human: "lgtm".
   Resume: nothing owed; monepro can copy the demos' `ShadApp` root.
 
 - **The plan library's chrome in shadcn** (the human, 2026-10-23: monepro
