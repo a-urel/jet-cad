@@ -910,6 +910,10 @@ class DemoHomeState extends State<DemoHome> {
           // pads it (the sheet keeps clear of the safe area itself).
           scrollable: false,
           padding: EdgeInsets.zero,
+          // A side panel, not a dialog: the barrier closes it, so no close
+          // button, and no border on its edge.
+          closeIcon: const SizedBox.shrink(),
+          border: const Border(),
           child: _panel(),
         ),
       );

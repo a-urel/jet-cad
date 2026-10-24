@@ -159,4 +159,44 @@ void main() {
     expect(
         tester.widget<ShadTabs<String>>(byKey('language-toggle')).value, 'tr');
   });
+
+  testWidgets(
+      'RT5 the side sheet has no close button and no border: the barrier '
+      'closes it', (tester) async {
+    await pumpDemo(tester, size: const Size(375, 812));
+    await tester.tap(byKey('side-panel-button'));
+    await tester.pumpAndSettle();
+    final sheet = byKey('side-panel-drawer');
+    expect(sheet, findsOneWidget, reason: 'premise: the sheet is open');
+    expect(find.descendant(of: sheet, matching: find.byIcon(LucideIcons.x)),
+        findsNothing);
+    bool bordered(Widget w) {
+      if (w is! DecoratedBox || w.decoration is! BoxDecoration) return false;
+      final b = (w.decoration as BoxDecoration).border;
+      return b != null &&
+          [
+            if (b is Border) ...[b.top, b.right, b.bottom, b.left]
+          ].any((s) => s.style == BorderStyle.solid && s.width > 0);
+    }
+
+    // The sheet's own box: bordered boxes in the sheet but outside the
+    // panel it holds (the panel's outline buttons have borders of their
+    // own).
+    final inSheet = find
+        .descendant(of: sheet, matching: find.byWidgetPredicate(bordered))
+        .evaluate()
+        .length;
+    final inPanel = find
+        .descendant(
+            of: find.byType(DemoSidePanel),
+            matching: find.byWidgetPredicate(bordered))
+        .evaluate()
+        .length;
+    expect(inPanel, greaterThan(0),
+        reason: 'premise: the predicate sees borders');
+    expect(inSheet - inPanel, 0);
+    await tester.tapAt(const Offset(4, 400));
+    await tester.pumpAndSettle();
+    expect(sheet, findsNothing);
+  });
 }
