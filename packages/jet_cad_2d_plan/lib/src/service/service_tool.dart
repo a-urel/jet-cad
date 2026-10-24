@@ -529,6 +529,11 @@ class ServiceTool extends Tool {
     if (_solution.capturedY) _dy = rawY + _solution.dy;
   }
 
+  /// [_aim] on its own, for the guide allocation test's isolated window: the
+  /// guide code with no pointer plumbing around it.
+  @visibleForTesting
+  void debugAim(ToolContext ctx, double wx, double wy) => _aim(ctx, wx, wy);
+
   /// Aims again at the pointer's last screen point under the current
   /// camera and tells the listeners.
   void _reaim() {

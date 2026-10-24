@@ -20,6 +20,11 @@
 // only if it were stored in one, which is what a regression to a per-event
 // candidate or box does.
 //
+// Two kinds of window. GA1-GA5 meter the end-to-end re-targets, guides on
+// minus guides off, for the classes the baseline does not allocate
+// nondeterministically. GI1-GI3 loop the guide code alone (no tool, no
+// baseline) and assert exactly zero, `Transform2` included.
+//
 // **The fixtures are not degenerate:** tables 40 m off the origin in a grid,
 // every third turned 30 degrees, every fifth turned 90, every fourth
 // mirrored; the camera at scale 0.5, panned; the pointers' paths aligned to
@@ -49,17 +54,35 @@ import '../support/symbol_fixtures.dart' show settle;
 import '../support/unit_fixtures.dart';
 import 'vm_allocation_meter.dart';
 
-/// What a guide regression would build per event: a point, a transform, a
-/// box, a solution or a reference set (a fresh typed list per event shows as
+/// What a guide regression would build per event, as the end-to-end windows
+/// (GA1-GA5) compare it, guides on over guides off: a point, a box, a
+/// solution or a reference set (a fresh typed list per event shows as
 /// `_Float64List`, a set built per event as `_Set`).
+///
+/// `Transform2` is deliberately not here (the human's ruling of 2026-10-24):
+/// the baseline allocates one per event that is immutable and unavoidable
+/// (`GripDrag.moveTo`'s translation, the placement's `_free()`), and whether
+/// the JIT elides it differs between runs and between the guides-on and the
+/// guides-off code shapes (readings of 250 off against 64..250 on per 250
+/// events), so on minus off could fail with no guide allocating. The isolated
+/// windows (GI1-GI3) pin the `Transform2`s the guide code adds at zero.
 const _watched = {
   'Vector2',
-  'Transform2',
   'Aabb2',
   'GuideSolution',
   'GuideReferences',
   '_Float64List',
   '_Set',
+};
+
+/// What the isolated windows (GI1-GI3) watch: the end-to-end set and the
+/// `Transform2`. `_GrowableList` and `_List` are not: measured here, they read
+/// negative against the epoch's floor by thousands (the meter's failure mode
+/// 2: the RPC's own lists dominate the floor read), so they cannot resolve
+/// zero.
+const _isolated = {
+  ..._watched,
+  'Transform2',
 };
 
 /// Instances per event admitted over the guides-off epoch: the meter's own
@@ -369,6 +392,25 @@ final class _ServiceScene extends _Scene {
 }
 
 // ---------------------------------------------------------------------------
+// The isolated windows: the guide code alone, in a loop.
+
+const int _isoWarm = 4000;
+const int _isoEvents = 1000;
+
+/// One loop over the guide code of a tool: [step] runs the guide call for
+/// event `i`, [hit] says whether the last call captured an axis.
+typedef _Iso = ({void Function(int i) step, bool Function() hit});
+
+List<Handle> _tablesOf(DraftDocument doc, int count) {
+  final tables = [
+    for (final n in doc.tree.nodes)
+      if (n is InstanceNode && n.parent == doc.rootHandle) n.handle,
+  ]..sort((a, b) => a.value.compareTo(b.value));
+  expect(tables, hasLength(count), reason: 'premise: every table');
+  return tables;
+}
+
+// ---------------------------------------------------------------------------
 // The readings.
 
 /// Per class, the least and the most instances one window read over the
@@ -535,6 +577,150 @@ void main() {
   tool('GA3 placement', place);
   tool('GA4 service drag of one table', (n, g) => service(n, 1, g));
   tool('GA5 service drag of three tables', (n, g) => service(n, 3, g));
+
+  /// [make]'s loop warmed, then [_isoEvents] calls metered once: no tool,
+  /// no baseline around the guide code, so every watched class must read
+  /// exactly zero over the epoch's own floor (an epoch with no call).
+  void isolated(String name, List<(String, Future<_Iso> Function())> configs) {
+    test('$name: the guide code allocates nothing, at 10 and 200 references',
+        timeout: const Timeout(Duration(minutes: 5)), () async {
+      final m = meter;
+      if (m == null) {
+        markTestSkipped(vmServiceUnavailableReason);
+        return;
+      }
+      for (final (label, make) in configs) {
+        final iso = await make();
+        for (var i = 0; i < _isoWarm; i++) {
+          iso.step(i);
+        }
+        await m.reset();
+        final floor = await m.accumulatedInstances(_isolated);
+        await m.reset();
+        var hits = 0;
+        for (var i = 0; i < _isoEvents; i++) {
+          iso.step(i);
+          if (iso.hit()) hits++;
+        }
+        final read = await m.accumulatedInstances(_isolated);
+        final net = {for (final k in _isolated) k: read[k]! - floor[k]!};
+        // ignore: avoid_print
+        print('$name, $label, per $_isoEvents events: $net '
+            '(floor $floor), captured $hits');
+        expect(hits, greaterThan(_isoEvents ~/ 4),
+            reason: 'premise: the guides captured on many of the events');
+        for (final k in _isolated) {
+          expect(net[k], 0, reason: '$name $label: $k over $_isoEvents events');
+        }
+      }
+    });
+  }
+
+  // One controller per count for the design windows: `begin` re-targets it
+  // to the next moved set (the plan is loaded once, not per window).
+  final designRigs = <int, PlanController>{};
+  Future<_Iso> isoDesign(int count, int moved) async {
+    var c = designRigs[count];
+    if (c == null) {
+      c = controllerFor(kits: [_kit()], json: plan(count));
+      designRigs[count] = c;
+      await settle();
+    }
+    final ctx = c.toolController.context;
+    ctx.camera.value = _camera0;
+    if (c.snap.objectSnap) c.snap.toggleObjectSnap();
+    final doc = c.document;
+    final tables = _tablesOf(doc, count);
+    final guides = c.debugMoveGuides;
+    final t0 = (doc.tree[tables.first]! as InstanceNode).transform;
+    final grab = t0.transformPoint(Vector2(1400, 1100));
+    guides.begin(ctx, {...tables.take(moved)});
+    final targets = _targets(grab, count);
+    final raw = Vector2.zero(), target = Vector2.zero();
+    return (
+      step: (int i) {
+        raw.setFrom(targets[i % _ring]);
+        target.setFrom(raw);
+        guides.adjust(ctx,
+            raw: raw,
+            base: grab,
+            orthoBase: null,
+            objectSnapped: false,
+            touch: false,
+            alt: false,
+            target: target);
+      },
+      hit: () =>
+          guides.debugSolution.capturedX || guides.debugSolution.capturedY,
+    );
+  }
+
+  Future<_Iso> isoPlace(int count) async {
+    final c = controllerFor(kits: [_kit()], json: plan(count));
+    await settle();
+    final references = (c.toolFor('plan.symbol')! as PlanSymbolTool).guides!;
+    final targets = _targets(Vector2(_originX, _originY), count);
+    final solution = GuideSolution();
+    // The ghost's box anchored at the origin, what `_originBox` holds.
+    const w = 1200.0, h = 800.0;
+    return (
+      step: (int i) {
+        final p = targets[i % _ring];
+        solveGuides(references.current,
+            minX: -w + p.x,
+            minY: -h + p.y,
+            maxX: w + p.x,
+            maxY: h + p.y,
+            aperture: kGuideAperturePixels / _camera0.scale,
+            freeX: true,
+            freeY: true,
+            fallbackDx: 0,
+            fallbackDy: 0,
+            moving: const <Handle>{},
+            out: solution);
+      },
+      hit: () => solution.capturedX || solution.capturedY,
+    );
+  }
+
+  Future<_Iso> isoService(int count, int moved) async {
+    final r = ServiceRig(plan(count), kits: [_kit()]);
+    addTearDown(r.dispose);
+    await settle();
+    r.c.camera.value = _camera0;
+    final tables = _tablesOf(r.doc, count);
+    r.ctx.selection.replace({for (final h in tables.take(moved)) r.key(h)});
+    final grab =
+        r.node(tables.first).transform.transformPoint(Vector2(900, 700));
+    final targets = _targets(grab, count);
+    r.tool.onPointerDown(
+        _event(_camera0, grab, buttons: kPrimaryButton, pointer: 1), r.ctx);
+    r.tool.onPointerMove(
+        _event(_camera0, targets.first, buttons: kPrimaryButton, pointer: 1),
+        r.ctx);
+    return (
+      step: (int i) {
+        final p = targets[i % _ring];
+        r.tool.debugAim(r.ctx, p.x, p.y);
+      },
+      hit: () =>
+          r.tool.debugSolution.capturedX || r.tool.debugSolution.capturedY,
+    );
+  }
+
+  isolated('GI1 design move: PlanMoveGuides.adjust', [
+    for (final n in [10, 200])
+      for (final k in [1, 3])
+        ('$n references, $k moved', () => isoDesign(n, k)),
+  ]);
+  isolated('GI2 placement: solveGuides as the symbol tool calls it', [
+    for (final n in [10, 200]) ('$n references', () => isoPlace(n)),
+  ]);
+  isolated('GI3 service drag: ServiceTool aim', [
+    for (final n in [10, 200])
+      for (final k in [1, 3])
+        ('$n references, $k moved', () => isoService(n, k)),
+  ]);
 
   test(
       'GA6 the painter draws a full solution through one list: no Offset, '
