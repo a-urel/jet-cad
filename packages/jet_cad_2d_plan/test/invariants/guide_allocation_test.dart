@@ -23,7 +23,7 @@
 // Two kinds of window. GA1-GA5 meter the end-to-end re-targets, guides on
 // minus guides off, for the classes the baseline does not allocate
 // nondeterministically. GI1-GI3 loop the guide code alone (no tool, no
-// baseline) and assert exactly zero, `Transform2` included.
+// baseline) and assert at most the per-event budget, `Transform2` included.
 //
 // **The fixtures are not degenerate:** tables 40 m off the origin in a grid,
 // every third turned 30 degrees, every fifth turned 90, every fourth
@@ -579,8 +579,9 @@ void main() {
   tool('GA5 service drag of three tables', (n, g) => service(n, 3, g));
 
   /// [make]'s loop warmed, then [_isoEvents] calls metered once: no tool,
-  /// no baseline around the guide code, so every watched class must read
-  /// exactly zero over the epoch's own floor (an epoch with no call).
+  /// no baseline around the guide code, so every watched class must read at
+  /// most the per-event budget over the epoch's own floor (an epoch with no
+  /// call).
   void isolated(String name, List<(String, Future<_Iso> Function())> configs) {
     test('$name: the guide code allocates nothing, at 10 and 200 references',
         timeout: const Timeout(Duration(minutes: 5)), () async {
@@ -609,8 +610,15 @@ void main() {
             '(floor $floor), captured $hits');
         expect(hits, greaterThan(_isoEvents ~/ 4),
             reason: 'premise: the guides captured on many of the events');
+        // At most the budget, never "exactly zero": `net` is the window's
+        // count less a floor read in an earlier epoch, and work outside the
+        // loop (the test framework, the VM service) lands in either, so a
+        // clean window reads a little either side of zero (CI read -64
+        // Vector2 over 1000 events at f2c14f15). One allocation per event
+        // from the guide code reads 1000 and still fails it.
         for (final k in _isolated) {
-          expect(net[k], 0, reason: '$name $label: $k over $_isoEvents events');
+          expect(net[k], lessThanOrEqualTo(_perEventBudget * _isoEvents),
+              reason: '$name $label: $k over $_isoEvents events');
         }
       }
     });
