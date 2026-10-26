@@ -1,5 +1,9 @@
-## Unreleased
+## 1.0.2
 
+- A chrome tooltip on a touch screen shows while a long press holds, as a
+  Material tooltip does, and hides when the finger lifts. A tap on an icon
+  button (a phone's Properties button, say) no longer leaves its tooltip
+  over the drawer it opened. A mouse still shows it on hover.
 - The property panel reads better: a section's title (Symbol, Table, a kit
   type's name) is set larger and bolder than its fields' labels, a section's
   rows have 8 logical pixels between them and sections 16, and a table's
