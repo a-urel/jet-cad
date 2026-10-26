@@ -795,6 +795,27 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 
 ## Resume here
 
+**1.0.1 and 1.0.2 released 2026-10-26/27** (patches, published and tagged by
+the human):
+- `jet_cad_2d_plan` 1.0.1 and `jet_cad_2d_kit_restaurant` 0.1.2, tagged at
+  `d71a07fc`: the README pictures regenerated with `tool/screenshots` (the
+  1.0.0 ones were taken before the right column started at the top). No code
+  change.
+- `jet_cad_2d_plan` 1.0.2, tagged at `331cb65f`: the property panel's section
+  titles in the theme's `large` style, 8 px between a section's rows and 16
+  between sections, the Rotate 90° buttons one above the other (their words
+  were cut, PL1-PL3 with the real fonts); a chrome tooltip on a touch screen
+  waits for a long press (shadcn's default showed it on a tap's down and left
+  "Properties" over a phone's drawer, TT1-TT4).
+
+Still open, not scheduled: the POS-host results note's minor questions (a
+double tap then a drag ends a chain, a quick short wall reads as a double
+tap, a room is picked by its label only, frozen walls still bound an area,
+re-picking the active tool leaves the drawer open, no restaurant kit
+example); a group's label drew as empty boxes in a `tool/screenshots`
+capture (likely the test's fonts, not checked in an app); the "Owed to the
+human" list below predates the shadcn chrome and needs a pass.
+
 **1.0 released 2026-10-26** from `29bfc00f` (CI 20/20 green at `5ee57476`;
 `29bfc00f` adds only the plan README's 1.0 sections): `jet_cad_2d_flutter`
 0.7.4, `jet_cad_2d_kit_architecture` 0.1.2, `jet_cad_2d_kit_restaurant` 0.1.1
