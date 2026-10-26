@@ -44,9 +44,28 @@ class PlanTooltip extends StatelessWidget implements PlanWordsCarrier {
   Widget build(BuildContext context) => Semantics(
         container: true,
         label: message,
-        child: ShadTooltip(builder: (_) => Text(message), child: child),
+        child: ShadTooltip(
+            hoverStrategies: kPlanTooltipTouch,
+            builder: (_) => Text(message),
+            child: child),
       );
 }
+
+/// A tooltip on a touch screen shows while a long press holds, as a
+/// Material tooltip does. shadcn's default shows it on a tap's down, so a tap
+/// on a button left its tooltip over what the button opened (a phone's
+/// drawer). A mouse is unaffected: it hovers.
+const ShadHoverStrategies kPlanTooltipTouch = ShadHoverStrategies(
+  hover: {ShadHoverStrategy.onLongPressStart},
+  unhover: {
+    ShadHoverStrategy.onLongPressUp,
+    ShadHoverStrategy.onLongPressEnd,
+    ShadHoverStrategy.onLongPressCancel,
+    ShadHoverStrategy.onTapUp,
+    ShadHoverStrategy.onTapCancel,
+    ShadHoverStrategy.onTapOutside,
+  },
+);
 
 /// A ghost icon button; the secondary variant when [selected] is true.
 ///
@@ -89,6 +108,11 @@ class _PlanIconButtonState extends State<PlanIconButton> {
   /// it comes and goes.
   final GlobalKey _button = GlobalKey();
 
+  /// A long press does nothing but is recognized, so the tooltip's touch
+  /// strategy ([kPlanTooltipTouch]) hears it: shadcn's detector has no
+  /// long-press recognizer without a long-press callback.
+  static void _holdForTooltip() {}
+
   @override
   Widget build(BuildContext context) {
     final glyph = Icon(widget.icon);
@@ -103,13 +127,15 @@ class _PlanIconButtonState extends State<PlanIconButton> {
               width: size,
               height: size,
               padding: padding,
-              onPressed: onPressed)
+              onPressed: onPressed,
+              onLongPress: _holdForTooltip)
           : ShadIconButton.ghost(
               icon: glyph,
               width: size,
               height: size,
               padding: padding,
-              onPressed: onPressed),
+              onPressed: onPressed,
+              onLongPress: _holdForTooltip),
     );
     return Semantics(
       button: true,

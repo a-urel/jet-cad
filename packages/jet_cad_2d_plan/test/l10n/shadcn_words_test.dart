@@ -20,6 +20,9 @@ const List<String> kAllowedShad = [
   'ShadContextMenuItem',
   'ShadDialog',
   'ShadDialogRoute',
+  // A tooltip's touch strategy (1.0.2): no words.
+  'ShadHoverStrategies',
+  'ShadHoverStrategy',
   'ShadIconButton',
   'ShadInput',
   'ShadMouseAreaSurface',
