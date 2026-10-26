@@ -91,6 +91,39 @@ class PlanExampleAppState extends State<PlanExampleApp> {
 - `PlanPermissions` decide what the editor lets a user change.
 - The kit author's contract is `docs/kits.md` in the repository.
 
+## What the editor offers
+
+- **Every device.** `PlanEditor` lays itself out by its own width: docked
+  side columns on a desktop, a docked tool strip and a right drawer on a
+  tablet, two drawers on a phone. `breakpoints` moves the widths and
+  `layout` forces one.
+- **Alignment guides**, in design and in service. While an object is dragged
+  or placed, lines show where its edges or centre line up with a neighbour,
+  or where its gap equals another gap, and it snaps there. Alt (Option)
+  suspends them for a drag; `alignmentGuides: false` turns them off.
+- **The host's own widgets.** `objectInspectorBuilder` puts the host's
+  widget (a combo over its records, say) in the property panel for the one
+  selected object, and `setObjectData` keeps the host's ids on any object,
+  saved with the plan. `unitOverlayBuilder` draws the host's badges on the
+  tables; taps and the service events (moves, merges, splits) reach the host
+  as callbacks.
+- **Sections.** A unit's section is the smallest kit area (a room) its
+  centre stands in, read from `unitDetails` and announced on
+  `sectionChanges`.
+- **The right column follows the selection**: an object's own properties
+  while something is selected, the layers and the page while nothing is.
+
+## Requirements and theming
+
+- Flutter 3.44 or later. The editor's chrome is built on `shadcn_ui`
+  (`^0.57.1`), which needs Dart 3.11, so a host needs Dart 3.11 too. A host
+  that already uses `shadcn_ui` moves to `^0.57.1`; the planner and the host
+  share one copy.
+- A host's `ShadTheme` above the editor is used as it is. A Material host
+  needs nothing: the chrome takes its colours, brightness and font family
+  from the app's `ThemeData`. `PlanTheme` styles the canvas.
+- No `shadcn_ui` type is part of this package's API.
+
 ## Screenshots
 
 ![PlanSymbolGallery, the plan library's symbol library, over the architecture kit's furniture](https://raw.githubusercontent.com/a-urel/jet-cad/jet_cad_2d_plan-v1.0.0/packages/jet_cad_2d_plan/doc/screenshots/plan_gallery.png)
@@ -106,6 +139,10 @@ plan's own theme.
 
 `package:jet_cad_2d_plan/jet_cad_2d_plan.dart` is the API. Nothing under
 `src/` is.
+
+From 1.0.0 the package follows semantic versioning: a minor release adds,
+a patch release fixes, and only a major release breaks the API. The
+[CHANGELOG](CHANGELOG.md) lists every change.
 
 ## The jet-cad packages
 
