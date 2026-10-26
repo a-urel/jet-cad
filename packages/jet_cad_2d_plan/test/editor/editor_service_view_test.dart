@@ -532,6 +532,9 @@ void main() {
     expect(printer.names, ['teras'], reason: 'busy: the chord is ignored');
     printer.pending.single.complete();
     await tester.pump();
+    // The flow's end re-enables the button on the next frame (before 1.0.2
+    // a tooltip's animation on the earlier tap happened to supply one).
+    await tester.pump();
     await tester.tap(byKey('service-print'));
     await tester.pump();
     await letRun(tester, () => printer.names.length > 1);
