@@ -9,7 +9,7 @@ import 'restaurant_source.dart';
 /// `PlanController(kits: [restaurantKit])`.
 final PlanKit restaurantKit = PlanKit(
   id: 'restaurant',
-  version: '0.1.1',
+  version: '0.1.2',
   symbols: [restaurantSymbolSource],
   names: restaurantNames,
 );

@@ -1,3 +1,8 @@
+## 0.1.2
+
+- The README's Salon picture shows the plan library's right column from the
+  top. No code change.
+
 ## 0.1.1
 
 - The README screenshots show the plan library 1.0.0's chrome.
