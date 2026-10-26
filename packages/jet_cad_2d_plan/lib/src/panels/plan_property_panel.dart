@@ -951,8 +951,7 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
           _fieldFor(_Scope.symbol, 'rotation'), _editable(t, 'rotation'),
           suffix: '°', signed: true),
       // A button the permissions refuse is not shown (S-11).
-      if (p.mirror) ...[
-        const SizedBox(height: 8),
+      if (p.mirror)
         ShadButton.outline(
           key: const Key('symbol-mirror'),
           width: double.infinity,
@@ -966,9 +965,7 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
           child: Flexible(
               child: Text(_strings.mirror, overflow: TextOverflow.ellipsis)),
         ),
-      ],
-      if (members.isNotEmpty && p.reshape) ...[
-        const SizedBox(height: 8),
+      if (members.isNotEmpty && p.reshape)
         PlanSelect<SymbolEntry>(
           key: const Key('symbol-size-menu'),
           expanded: true,
@@ -988,7 +985,6 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
             if (mounted) setState(() {});
           },
         ),
-      ],
     ];
   }
 
@@ -1037,34 +1033,28 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
         child: Text('${u.capacity}', key: const Key('unit-capacity')),
       ),
       // A button the permissions refuse is not shown (S-11).
-      if (turnable && c.permissions.rotate)
-        Row(
-          children: [
-            Expanded(
-              child: ShadButton.outline(
-                key: const Key('unit-rotate-left'),
-                width: double.infinity,
-                onPressed: () => _rotateUnit(t, 1),
-                leading: const Icon(LucideIcons.rotateCcw),
-                child: Flexible(
-                    child: Text(_strings.rotateLeft,
-                        overflow: TextOverflow.ellipsis)),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: ShadButton.outline(
-                key: const Key('unit-rotate-right'),
-                width: double.infinity,
-                onPressed: () => _rotateUnit(t, -1),
-                leading: const Icon(LucideIcons.rotateCw),
-                child: Flexible(
-                    child: Text(_strings.rotateRight,
-                        overflow: TextOverflow.ellipsis)),
-              ),
-            ),
-          ],
+      // One above the other, each the column's width: side by side, a
+      // docked column or a phone's drawer cut their words.
+      if (turnable && c.permissions.rotate) ...[
+        ShadButton.outline(
+          key: const Key('unit-rotate-left'),
+          width: double.infinity,
+          onPressed: () => _rotateUnit(t, 1),
+          leading: const Icon(LucideIcons.rotateCcw),
+          child: Flexible(
+              child:
+                  Text(_strings.rotateLeft, overflow: TextOverflow.ellipsis)),
         ),
+        ShadButton.outline(
+          key: const Key('unit-rotate-right'),
+          width: double.infinity,
+          onPressed: () => _rotateUnit(t, -1),
+          leading: const Icon(LucideIcons.rotateCw),
+          child: Flexible(
+              child:
+                  Text(_strings.rotateRight, overflow: TextOverflow.ellipsis)),
+        ),
+      ],
     ];
   }
 
@@ -1087,7 +1077,8 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
       _forgetTargets();
       _bindDocument();
     }
-    final title = planShadThemeOf(context).textTheme.small;
+    // A section's title stands above its fields' labels (`small`).
+    final title = planShadThemeOf(context).textTheme.large;
     final tool = _toolTarget;
     final object = _objectTarget;
     final symbol = object == null ? _symbolTarget : null;
@@ -1131,9 +1122,13 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             mainAxisSize: MainAxisSize.min,
             children: [
+              // Room between a section's rows, and more between sections.
               for (final (i, section) in sections.indexed) ...[
-                if (i > 0) const SizedBox(height: 12),
-                ...section,
+                if (i > 0) const SizedBox(height: 16),
+                for (final (j, row) in section.indexed) ...[
+                  if (j > 0) const SizedBox(height: 8),
+                  row,
+                ],
               ],
             ],
           ),

@@ -1,3 +1,11 @@
+## Unreleased
+
+- The property panel reads better: a section's title (Symbol, Table, a kit
+  type's name) is set larger and bolder than its fields' labels, a section's
+  rows have 8 logical pixels between them and sections 16, and a table's
+  Rotate 90° left and right buttons stand one above the other at the column's
+  width, so their words are not cut in a docked column or a phone's drawer.
+
 ## 1.0.1
 
 - The README's editor picture shows the right column from the top, as 1.0.0
