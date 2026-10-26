@@ -422,7 +422,7 @@ with 0.7.0 (below).
   host probe allows `objective_c`'s build hook. Executed with Sonnet
   implementers and no reviewer sessions; ledger in
   [docs/superpowers/ledgers/2026-10-23-plan-shadcn-chrome/](docs/superpowers/ledgers/2026-10-23-plan-shadcn-chrome/).
-  Resume: the 1.0 release on the human's word; monepro moves to
+  Released in 1.0.0 (2026-10-26). Resume: monepro moves to
   `shadcn_ui ^0.57.1`.
 
 - **Alignment guides (smart guides)** in design and service mode (edges,
@@ -465,10 +465,8 @@ with 0.7.0 (below).
     controller's mutation (`ServiceTool._aim` keeping a `Transform2` per
     event) reads 749 against 50.
   CI green at `74063208`, at `2c358ff7` and at `b877dcc1` (20/20). Shipped in the 1.0.0 release
-  (`jet_cad_2d_flutter` 0.7.4 carries the seam and `screenToWorldInto`), which
-  is merged and pushed but not yet on pub.dev (pub.dev: plan 0.9.0, flutter
-  0.7.3) and not tagged. Resume: the human publishes 1.0.0 in the order
-  `jet_cad_2d_flutter`, the two kits, the plan library, and tags it.
+  (`jet_cad_2d_flutter` 0.7.4 carries the seam and `screenToWorldInto`),
+  **published 2026-10-26** (see Resume here). Resume: nothing owed.
 
 - **The POS-host sub-project** (host data on any object, the inspector for
   any object, sections, phone and tablet layout; spec
@@ -796,6 +794,18 @@ values), and the render package's paint micro-benchmark rig (skipped,
 run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 
 ## Resume here
+
+**1.0 released 2026-10-26** from `29bfc00f` (CI 20/20 green at `5ee57476`;
+`29bfc00f` adds only the plan README's 1.0 sections): `jet_cad_2d_flutter`
+0.7.4, `jet_cad_2d_kit_architecture` 0.1.2, `jet_cad_2d_kit_restaurant` 0.1.1
+and `jet_cad_2d_plan` **1.0.0** on pub.dev, published by the human in that
+order and tagged `<package>-v<version>` at `29bfc00f`. It ships the shadcn
+chrome, the alignment guides and the right column that follows the selection;
+every dependency on `jet_cad_2d_flutter` is `^0.7.4` (DL2 checks each
+published package's own caret). From 1.0.0 the plan library follows semver.
+Next: monepro's integration (it moves to `shadcn_ui ^0.57.1` and
+`jet_cad_2d_plan: ^1.0.0`), from a brainstorm; the DXF writer is specified,
+not planned.
 
 **POS-host sub-project (2026-10-20): merged at `4aabcb48`, released 2026-10-22** (`jet_cad_2d_kit` 0.1.1, `jet_cad_2d_kit_architecture` 0.1.1, `jet_cad_2d_plan` 0.9.0, from `9c015005`; [results note](docs/superpowers/notes/2026-10-20-plan-host-objects-results.md)). Next: monepro's integration, from a brainstorm.
 
