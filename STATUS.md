@@ -1,6 +1,6 @@
 # jet-cad — project status
 
-**Last updated:** 2026-10-26 (release 1.0.0 merged into `main` at `2c358ff7` and pushed, CI green, not yet published or tagged; three CI follow-ups to the alignment guides pushed, `47323e10`, `32f573db`, `74063208`; the DXF writer spec approved, not planned; alignment guides at `c5da0931`, the shadcn chrome at `f8d56f3f` and the example apps in shadcn at `1f8b6586` merged into `main` and pushed; two look fixes after the human's manual test, `af17e06d` and `0e9e9935`, pushed). **`main` carries release 0.7.0** (tag
+**Last updated:** 2026-10-26 (release 1.0.0 merged into `main` at `2c358ff7` and pushed, CI green, not yet published or tagged; four CI follow-ups to the alignment guides pushed, `47323e10`, `32f573db`, `74063208`, `b877dcc1`; the DXF writer spec approved, not planned; alignment guides at `c5da0931`, the shadcn chrome at `f8d56f3f` and the example apps in shadcn at `1f8b6586` merged into `main` and pushed; two look fixes after the human's manual test, `af17e06d` and `0e9e9935`, pushed). **`main` carries release 0.7.0** (tag
 `v0.7.0` → `0fa649e`, after `v0.6.0` →
 `3bf64a7`, `v0.5.1` → `3f8f7ad`, `v0.5.0` → `2fbb9c0`, `v0.4.0` → `8367010`, `v0.3.0` → `1b0c37a`, `v0.2.0` → `7355c00` and `v0.1.0` → `22206f5`) and everything since; the three old packages are on pub.dev at 0.7.2 (published 2026-10-13); the kit architecture is done: its six packages are on pub.dev (published 2026-10-19 from `6fc25f3c`) and `jet_cad_floor_plan` is discontinued, replaced by `jet_cad_2d_plan` (below). The history of every plan
 before this point — its records, reviews and resume points — is in
@@ -458,7 +458,13 @@ with 0.7.0 (below).
     `GripDrag.moveTo` baseline the JIT elides unpredictably (the human's
     ruling: isolate the test, no API change). Report:
     [2026-10-24-guide-allocation-isolated-report.md](docs/superpowers/notes/2026-10-24-guide-allocation-isolated-report.md).
-  CI green at `74063208` and at `2c358ff7`. Shipped in the 1.0.0 release
+  - `b877dcc1` (fix `885f6046`): GI1-GI3 allow the per-event budget instead
+    of exactly zero. CI 40369709556 on `f2c14f15` read GI3's `Vector2` at -64
+    over 1000 events: a window's count less a floor read in an earlier epoch
+    reads a little either side of zero. Test-only, no package change; the
+    controller's mutation (`ServiceTool._aim` keeping a `Transform2` per
+    event) reads 749 against 50.
+  CI green at `74063208`, at `2c358ff7` and at `b877dcc1` (20/20). Shipped in the 1.0.0 release
   (`jet_cad_2d_flutter` 0.7.4 carries the seam and `screenToWorldInto`), which
   is merged and pushed but not yet on pub.dev (pub.dev: plan 0.9.0, flutter
   0.7.3) and not tagged. Resume: the human publishes 1.0.0 in the order
