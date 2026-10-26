@@ -5,7 +5,7 @@ The restaurant kit of jet_cad_2d plans: a library of 69 restaurant symbols
 decor) on the kit contract (`jet_cad_2d_kit`), 25 of them numbered table
 units. It depends on the contract only, never on the plan library.
 
-![The demo's Salon: the kit's tables, booths, bar and host stand](https://raw.githubusercontent.com/a-urel/jet-cad/jet_cad_2d_kit_restaurant-v0.1.1/packages/jet_cad_2d_kit_restaurant/doc/screenshots/restaurant_salon.png)
+![The demo's Salon: the kit's tables, booths, bar and host stand](https://raw.githubusercontent.com/a-urel/jet-cad/jet_cad_2d_kit_restaurant-v0.1.2/packages/jet_cad_2d_kit_restaurant/doc/screenshots/restaurant_salon.png)
 
 ## What it holds
 
@@ -29,7 +29,7 @@ the plan draws walls, floors and doors: `kits: [architectureKit, restaurantKit]`
 
 ## Screenshots
 
-![PlanSymbolGallery over the kit's symbols, its sections listed and one open](https://raw.githubusercontent.com/a-urel/jet-cad/jet_cad_2d_kit_restaurant-v0.1.1/packages/jet_cad_2d_kit_restaurant/doc/screenshots/restaurant_gallery.png)
+![PlanSymbolGallery over the kit's symbols, its sections listed and one open](https://raw.githubusercontent.com/a-urel/jet-cad/jet_cad_2d_kit_restaurant-v0.1.2/packages/jet_cad_2d_kit_restaurant/doc/screenshots/restaurant_gallery.png)
 
 The plan library's symbol gallery over the kit's library: the six restaurant
 sections, one of them open, its symbols as thumbnail cells.

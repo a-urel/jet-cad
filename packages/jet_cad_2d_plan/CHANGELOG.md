@@ -1,3 +1,8 @@
+## 1.0.1
+
+- The README's editor picture shows the right column from the top, as 1.0.0
+  lays it out (the picture was taken before that fix). No code change.
+
 ## 1.0.0
 
 - Depends on `jet_cad_2d_flutter: ^0.7.4`. The public API is stable from
