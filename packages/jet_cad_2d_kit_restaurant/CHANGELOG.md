@@ -1,3 +1,8 @@
+## 0.1.3
+
+- An example, `example/main.dart`: the kit's descriptor, its library and its
+  table units. The package description is shorter. No change to the library.
+
 ## 0.1.2
 
 - The README's Salon picture shows the plan library's right column from the
