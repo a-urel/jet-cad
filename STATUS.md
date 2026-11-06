@@ -795,6 +795,14 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 
 ## Resume here
 
+**`jet_cad_2d_kit_restaurant` 0.1.3 released 2026-11-06** (published by the
+human, tagged at `931625a1`): an `example/main.dart` and a description under
+pub.dev's 180 characters, the two findings that held the package at 140 of
+160 points. No change to the library. The score was not yet re-read when this
+was written. CI did not run at `931625a1`: run `42269492268` failed at once,
+no job started, because the GitHub account is locked over billing; rerun it
+once the lock is lifted (the package's own gates passed locally).
+
 **1.0.1 and 1.0.2 released 2026-10-26/27** (patches, published and tagged by
 the human):
 - `jet_cad_2d_plan` 1.0.1 and `jet_cad_2d_kit_restaurant` 0.1.2, tagged at
@@ -811,8 +819,7 @@ the human):
 Still open, not scheduled: the POS-host results note's minor questions (a
 double tap then a drag ends a chain, a quick short wall reads as a double
 tap, a room is picked by its label only, frozen walls still bound an area,
-re-picking the active tool leaves the drawer open, no restaurant kit
-example); a group's label drew as empty boxes in a `tool/screenshots`
+re-picking the active tool leaves the drawer open); a group's label drew as empty boxes in a `tool/screenshots`
 capture (likely the test's fonts, not checked in an app); the "Owed to the
 human" list below predates the shadcn chrome and needs a pass.
 
