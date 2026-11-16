@@ -1,0 +1,9 @@
+document: docs/superpowers/specs/2026-10-24-dxf-writer-design.md
+date: 2026-11-16
+archive: docs/superpowers/reviews/2026-11-16-specs-2026-10-24-dxf-writer-design-r3
+models: copilot=gpt-6.1-sol claude=fable
+timeout-per-call: 600s
+copilot  skipped:auth           0 findings  -
+claude   ok                     12 findings  VERDICT: revise — group records, H2 byte-equality, transparency sentinels and origin-id handles need decisions before planning.
+findings: 12 total
+hint: copilot: not signed in, or Copilot CLI access is off for the account; run 'copilot' and use /login, or check the policies at https://github.com/settings/copilot, then rerun with --only copilot

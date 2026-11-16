@@ -1,0 +1,10 @@
+document: docs/superpowers/specs/2026-10-24-dxf-writer-design.md
+document-blob: d2eca50b22c867dfa3284cb64f22dd64487b2463
+commit: 892aad2d72e72ced720642f6ce7b26fa3c99b7c5
+date: 2026-11-17
+archive: docs/superpowers/reviews/2026-11-17-specs-2026-10-24-dxf-writer-design
+models: codex=gpt-6.1-sol claude=fable
+timeout-per-call: 600s
+codex    ok                     10 findings  VERDICT: revise — Tree restoration, exploded instances, omission, manifests, and attribute ordering need explicit decisions before implementation.
+claude   ok                     9 findings  VERDICT: revise — two unresolved conflicts with the architecture spec and the tree record; the rest are small decisions.
+findings: 19 total
