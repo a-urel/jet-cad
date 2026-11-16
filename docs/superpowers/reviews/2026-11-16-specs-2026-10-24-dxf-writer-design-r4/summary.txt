@@ -1,0 +1,16 @@
+document: docs/superpowers/specs/2026-10-24-dxf-writer-design.md
+document-blob: d2eca50b22c867dfa3284cb64f22dd64487b2463
+commit: 892aad2d72e72ced720642f6ce7b26fa3c99b7c5
+date: 2026-11-16
+archive: docs/superpowers/reviews/2026-11-16-specs-2026-10-24-dxf-writer-design-r4
+models: codex=gpt-5.5 copilot=gpt-6.1-sol claude=fable
+timeout-per-call: 600s
+codex    failed:provider        0 findings  -
+copilot  skipped:auth           0 findings  -
+claude   ok                     10 findings  VERDICT: revise — root-as-GROUP and the omit-vs-delete byte test are contradictions; the rest are gaps a plan would hit.
+findings: 10 total
+hint: codex: the CLI exited with an error; its error lines (masked) follow; the rest of its stderr is not archived
+error: codex: ERROR: The 'gpt-5.5' model is not supported when using Codex with a ChatGPT account.
+error: codex: ERROR: The 'gpt-5.5' model is not supported when using Codex with a ChatGPT account.
+hint: copilot: not signed in, or Copilot CLI access is off for the account; run 'copilot' and use /login, or check the policies at https://github.com/settings/copilot, then rerun with --only copilot
+error: copilot: Error: Access denied by policy settings (request-id <masked>)

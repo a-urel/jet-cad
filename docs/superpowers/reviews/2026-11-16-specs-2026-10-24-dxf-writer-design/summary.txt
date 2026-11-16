@@ -1,0 +1,9 @@
+document: docs/superpowers/specs/2026-10-24-dxf-writer-design.md
+date: 2026-11-16
+archive: docs/superpowers/reviews/2026-11-16-specs-2026-10-24-dxf-writer-design
+models: codex=gpt-5.5 copilot=gpt-6.1-sol claude=fable
+timeout-per-call: 600s
+copilot  failed:provider        0 findings  -
+claude   ok                     11 findings  VERDICT: revise — the H2 byte-equality test, the root group and the handle space need decisions before a plan can be cut.
+findings: 11 total
+hint: copilot: the CLI exited with an error; its stderr is in the run directory printed below

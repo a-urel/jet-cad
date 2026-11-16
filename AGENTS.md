@@ -49,6 +49,16 @@ fixture** — a test that passes because every fixture sits at the identity
 transform, the origin, or a default attribute. A new test is only worth landing
 if a named mutation makes it go red.
 
+## Outside review of a document
+
+`/spec-review <doc>` (`.claude/skills/spec-review/SKILL.md`) runs an independent,
+read-only review of a spec, plan or doc page by up to three CLIs (Codex, Copilot,
+Claude) through `scripts/ai_review.sh`, then merges, re-verifies and folds the
+findings back into the document. Each run is archived, never overwritten, in
+`docs/superpowers/reviews/<date>-<slug>/`; git-ignored documents are refused. The
+repository-specific settings are the config block at the top of the script. The
+script's self-test needs no network and no real CLI: `scripts/ai_review/selftest.sh`.
+
 ## Rules for every agent session
 
 These bind every coding agent (OpenCode, Copilot, Claude and others), whatever
